@@ -2,6 +2,8 @@
 
 [[https://github.com/laurynas-biveinis/org-mcp/actions/workflows/elisp-test.yml][https://github.com/laurynas-biveinis/org-mcp/actions/workflows/elisp-test.yml/badge.svg]]
 [[https://github.com/laurynas-biveinis/org-mcp/actions/workflows/super-linter.yml][https://github.com/laurynas-biveinis/org-mcp/actions/workflows/super-linter.yml/badge.svg]]
+[[https://melpa.org/#/org-mcp][https://melpa.org/packages/org-mcp-badge.svg]]
+[[https://stable.melpa.org/#/org-mcp][file:https://stable.melpa.org/packages/org-mcp-badge.svg]]
 
 * Overview
 
@@ -9,13 +11,9 @@ org-mcp is an Emacs package that implements a Model Context Protocol (MCP) serve
 
 * Installation
 
-On Emacs 29.1 or later:
+From [[https://melpa.org/#/org-mcp][MELPA]] or [[https://stable.melpa.org/#/org-mcp][MELPA Stable]]:
 
-#+begin_src emacs-lisp
-(package-vc-install "https://github.com/laurynas-biveinis/org-mcp.git")
-#+end_src
-
-Eventually I plan to publish this package on MELPA.
+=M-x package-install RET org-mcp RET=
 
 * Usage
 
