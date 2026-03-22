@@ -3050,5 +3050,248 @@ PARAMS is the alist of parameters to pass."
                "org-headline://"
                (alist-get 'uri (aref matches 2))))))))
 
+;;; Stored org-ql queries tests
+
+(defmacro org-mcp-test--with-stored-queries (&rest body)
+  "Run BODY with a temporary stored queries file, then clean up."
+  (declare (indent 0) (debug t))
+  `(let* ((temp-file (make-temp-file "org-mcp-stored-queries" nil ".el"))
+          (org-mcp-stored-queries-file temp-file)
+          (org-mcp--stored-queries 'unloaded))
+     (unwind-protect
+         (org-mcp-test--with-enabled
+           ,@body)
+       (setq org-mcp--stored-queries 'unloaded)
+       (when (file-exists-p temp-file)
+         (delete-file temp-file)))))
+
+(defun org-mcp-test--call-stored-query-tool-expecting-error (tool-id params)
+  "Call stored query TOOL-ID via JSON-RPC with PARAMS expecting an error."
+  (let* ((request
+          (mcp-server-lib-create-tools-call-request
+           tool-id nil params))
+         (response
+          (mcp-server-lib-process-jsonrpc-parsed
+           request mcp-server-lib-ert-server-id))
+         (result
+          (mcp-server-lib-ert-process-tool-response
+           response)))
+    (error "Expected error but got success: %s" result)))
+
+(defconst org-mcp-test--stored-query-key-active "active-todos"
+  "Test key for stored query.")
+
+(defconst org-mcp-test--stored-query-query-active "(todo \"TODO\")"
+  "Test query string for stored query.")
+
+(defconst org-mcp-test--stored-query-desc-active "All active TODO items"
+  "Test description for stored query.")
+
+(defconst org-mcp-test--stored-query-key-urgent "urgent-work"
+  "Second test key for stored query.")
+
+(defconst org-mcp-test--stored-query-query-urgent
+  "(and (todo \"TODO\") (priority \"A\"))"
+  "Second test query string for stored query.")
+
+(defconst org-mcp-test--stored-query-desc-urgent "Urgent work tasks"
+  "Second test description for stored query.")
+
+(ert-deftest org-mcp-test-ql-list-stored-queries-empty ()
+  "Test listing stored queries when none are saved."
+  (org-mcp-test--with-stored-queries
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-list-stored-queries" nil))
+           (result (json-read-from-string result-text)))
+      (should (= (alist-get 'total result) 0))
+      (should (= (length (alist-get 'queries result)) 0)))))
+
+(ert-deftest org-mcp-test-ql-save-stored-query-new ()
+  "Test saving a new stored query."
+  (org-mcp-test--with-stored-queries
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-save-stored-query"
+             `((key . ,org-mcp-test--stored-query-key-active)
+               (query . ,org-mcp-test--stored-query-query-active)
+               (description . ,org-mcp-test--stored-query-desc-active))))
+           (result (json-read-from-string result-text)))
+      (should (eq (alist-get 'success result) t))
+      (should (equal (alist-get 'action result) "created"))
+      (should (equal (alist-get 'key result)
+                     org-mcp-test--stored-query-key-active)))))
+
+(ert-deftest org-mcp-test-ql-save-stored-query-update ()
+  "Test updating an existing stored query."
+  (org-mcp-test--with-stored-queries
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-active)
+       (query . ,org-mcp-test--stored-query-query-active)
+       (description . ,org-mcp-test--stored-query-desc-active)))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-save-stored-query"
+             `((key . ,org-mcp-test--stored-query-key-active)
+               (query . "(todo \"DONE\")")
+               (description . "Updated description"))))
+           (result (json-read-from-string result-text)))
+      (should (eq (alist-get 'success result) t))
+      (should (equal (alist-get 'action result) "updated")))))
+
+(ert-deftest org-mcp-test-ql-list-stored-queries-after-save ()
+  "Test listing stored queries after saving two."
+  (org-mcp-test--with-stored-queries
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-active)
+       (query . ,org-mcp-test--stored-query-query-active)
+       (description . ,org-mcp-test--stored-query-desc-active)))
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-urgent)
+       (query . ,org-mcp-test--stored-query-query-urgent)
+       (description . ,org-mcp-test--stored-query-desc-urgent)))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-list-stored-queries" nil))
+           (result (json-read-from-string result-text))
+           (queries (alist-get 'queries result)))
+      (should (= (alist-get 'total result) 2))
+      (should (= (length queries) 2))
+      (should (equal (alist-get 'key (aref queries 0))
+                     org-mcp-test--stored-query-key-active))
+      (should (equal (alist-get 'query (aref queries 0))
+                     org-mcp-test--stored-query-query-active))
+      (should (equal (alist-get 'description (aref queries 0))
+                     org-mcp-test--stored-query-desc-active))
+      (should (equal (alist-get 'key (aref queries 1))
+                     org-mcp-test--stored-query-key-urgent)))))
+
+(ert-deftest org-mcp-test-ql-delete-stored-query ()
+  "Test deleting a stored query."
+  (org-mcp-test--with-stored-queries
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-active)
+       (query . ,org-mcp-test--stored-query-query-active)
+       (description . ,org-mcp-test--stored-query-desc-active)))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-delete-stored-query"
+             `((key . ,org-mcp-test--stored-query-key-active))))
+           (result (json-read-from-string result-text)))
+      (should (eq (alist-get 'success result) t))
+      (should (equal (alist-get 'key result)
+                     org-mcp-test--stored-query-key-active)))
+    (let* ((list-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-list-stored-queries" nil))
+           (list-result (json-read-from-string list-text)))
+      (should (= (alist-get 'total list-result) 0)))))
+
+(ert-deftest org-mcp-test-ql-delete-stored-query-not-found ()
+  "Test deleting a nonexistent stored query."
+  (org-mcp-test--with-stored-queries
+    (should-error
+     (org-mcp-test--call-stored-query-tool-expecting-error
+      "org-ql-delete-stored-query"
+      '((key . "nonexistent")))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-save-stored-query-invalid-key-empty ()
+  "Test saving a stored query with empty key."
+  (org-mcp-test--with-stored-queries
+    (should-error
+     (org-mcp-test--call-stored-query-tool-expecting-error
+      "org-ql-save-stored-query"
+      `((key . "")
+        (query . ,org-mcp-test--stored-query-query-active)))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-save-stored-query-invalid-key-spaces ()
+  "Test saving a stored query with spaces in key."
+  (org-mcp-test--with-stored-queries
+    (should-error
+     (org-mcp-test--call-stored-query-tool-expecting-error
+      "org-ql-save-stored-query"
+      `((key . "has spaces")
+        (query . ,org-mcp-test--stored-query-query-active)))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-save-stored-query-invalid-query ()
+  "Test saving a stored query with unparseable query."
+  (org-mcp-test--with-stored-queries
+    (should-error
+     (org-mcp-test--call-stored-query-tool-expecting-error
+      "org-ql-save-stored-query"
+      '((key . "test-key")
+        (query . "(unclosed paren")))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-run-stored-query ()
+  "Test running a stored query against test org files."
+  (org-mcp-test--with-stored-queries
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-active)
+       (query . ,org-mcp-test--stored-query-query-active)
+       (description . ,org-mcp-test--stored-query-desc-active)))
+    (let* ((temp-org (make-temp-file "org-mcp-test" nil ".org"))
+           (org-mcp-allowed-files (list temp-org)))
+      (unwind-protect
+          (progn
+            (with-temp-file temp-org
+              (insert org-mcp-test--content-ql-todos))
+            (let* ((result-text
+                    (mcp-server-lib-ert-call-tool
+                     "org-ql-run-stored-query"
+                     `((key . ,org-mcp-test--stored-query-key-active))))
+                   (result (json-read-from-string result-text)))
+              (should (= (alist-get 'total result) 3))
+              (should (= (alist-get 'files_searched result) 1))))
+        (delete-file temp-org)))))
+
+(ert-deftest org-mcp-test-ql-run-stored-query-not-found ()
+  "Test running a nonexistent stored query."
+  (org-mcp-test--with-stored-queries
+    (should-error
+     (org-mcp-test--call-stored-query-tool-expecting-error
+      "org-ql-run-stored-query"
+      '((key . "nonexistent")))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-stored-queries-file-persistence ()
+  "Test that queries persist across in-memory resets."
+  (org-mcp-test--with-stored-queries
+    (mcp-server-lib-ert-call-tool
+     "org-ql-save-stored-query"
+     `((key . ,org-mcp-test--stored-query-key-active)
+       (query . ,org-mcp-test--stored-query-query-active)
+       (description . ,org-mcp-test--stored-query-desc-active)))
+    ;; Reset in-memory state to force reload from disk
+    (setq org-mcp--stored-queries 'unloaded)
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-list-stored-queries" nil))
+           (result (json-read-from-string result-text))
+           (queries (alist-get 'queries result)))
+      (should (= (alist-get 'total result) 1))
+      (should (equal (alist-get 'key (aref queries 0))
+                     org-mcp-test--stored-query-key-active))
+      (should (equal (alist-get 'query (aref queries 0))
+                     org-mcp-test--stored-query-query-active)))))
+
+(ert-deftest org-mcp-test-ql-stored-queries-file-not-configured ()
+  "Test error when org-mcp-stored-queries-file is nil."
+  (let ((org-mcp-stored-queries-file nil)
+        (org-mcp--stored-queries 'unloaded))
+    (org-mcp-test--with-enabled
+      (should-error
+       (org-mcp-test--call-stored-query-tool-expecting-error
+        "org-ql-list-stored-queries" nil)
+       :type 'mcp-server-lib-tool-error))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
