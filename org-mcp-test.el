@@ -2868,5 +2868,187 @@ Some quote
        (format "'%s': the referenced file not in allowed list"
                org-mcp-test--content-id-resource-id))))))
 
+;;; org-ql-query tests
+
+(defconst org-mcp-test--content-ql-todos
+  "* TODO Buy groceries :personal:
+* DONE Write report :work:
+* TODO Review PR :work:code:
+:PROPERTIES:
+:ID:       ql-test-id-001
+:END:
+* TODO Plan vacation :personal:
+:PROPERTIES:
+:CUSTOM_PROP: some-value
+:END:"
+  "Org content with TODO/DONE items, tags, and IDs for org-ql tests.")
+
+(defconst org-mcp-test--content-ql-priorities
+  "* TODO [#A] Urgent task
+* TODO [#B] Normal task :work:
+* TODO [#C] Low priority task"
+  "Org content with priorities for org-ql tests.")
+
+(ert-deftest org-mcp-test-ql-query-basic-todo ()
+  "Test basic org-ql query matching TODO items."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query" '((query . "(todo \"TODO\")"))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 3))
+     (should (= (alist-get 'files_searched result) 1))
+     (should (= (length (alist-get 'matches result)) 3))
+     (let ((first-match (aref (alist-get 'matches result) 0)))
+       (should (equal (alist-get 'title first-match) "Buy groceries"))
+       (should (equal (alist-get 'todo first-match) "TODO"))
+       (should (= (alist-get 'level first-match) 1))))))
+
+(ert-deftest org-mcp-test-ql-query-tags ()
+  "Test org-ql query matching by tags."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query" '((query . "(tags \"work\")"))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 2)))))
+
+(ert-deftest org-mcp-test-ql-query-compound ()
+  "Test org-ql compound query with AND."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(and (todo \"TODO\") (tags \"personal\"))"))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 2)))))
+
+(ert-deftest org-mcp-test-ql-query-empty-result ()
+  "Test org-ql query with no matches."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(todo \"WAITING\")"))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 0))
+     (should (= (length (alist-get 'matches result)) 0)))))
+
+(ert-deftest org-mcp-test-ql-query-multiple-files ()
+  "Test org-ql query across multiple files."
+
+  (org-mcp-test--with-temp-org-files
+   ((file1 org-mcp-test--content-ql-todos)
+    (file2 org-mcp-test--content-ql-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query" '((query . "(todo \"TODO\")"))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 6))
+     (should (= (alist-get 'files_searched result) 2)))))
+
+(ert-deftest org-mcp-test-ql-query-files-parameter ()
+  "Test org-ql query with explicit files parameter."
+
+  (org-mcp-test--with-temp-org-files
+   ((file1 org-mcp-test--content-ql-todos)
+    (file2 org-mcp-test--content-ql-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            `((query . "(todo \"TODO\")")
+              (files . ,(vector file2)))))
+          (result (json-read-from-string result-text)))
+     (should (= (alist-get 'total result) 3))
+     (should (= (alist-get 'files_searched result) 1)))))
+
+(defun org-mcp-test--call-ql-query-expecting-error (params)
+  "Call org-ql-query tool via JSON-RPC expecting an error.
+PARAMS is the alist of parameters to pass."
+  (let* ((request
+          (mcp-server-lib-create-tools-call-request
+           "org-ql-query" nil params))
+         (response
+          (mcp-server-lib-process-jsonrpc-parsed
+           request mcp-server-lib-ert-server-id))
+         (result
+          (mcp-server-lib-ert-process-tool-response
+           response)))
+    (error "Expected error but got success: %s" result)))
+
+(ert-deftest org-mcp-test-ql-query-file-not-allowed ()
+  "Test org-ql query rejects files not in allowed list."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (should-error
+    (org-mcp-test--call-ql-query-expecting-error
+     '((query . "(todo \"TODO\")")
+       (files . ["/not/allowed/file.org"])))
+    :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-query-invalid-parse ()
+  "Test org-ql query with unparseable query string."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (should-error
+    (org-mcp-test--call-ql-query-expecting-error
+     '((query . "(unclosed paren")))
+    :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-query-atom-not-list ()
+  "Test org-ql query rejects atom (non-list) queries."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (should-error
+    (org-mcp-test--call-ql-query-expecting-error
+     '((query . "just-a-symbol")))
+    :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-query-empty-string ()
+  "Test org-ql query rejects empty query string."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (should-error
+    (org-mcp-test--call-ql-query-expecting-error
+     '((query . "")))
+    :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-ql-query-uri-correctness ()
+  "Test that entries with ID get org-id:// URI, others get org-headline://."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-todos))
+   (org-mcp-test--with-id-tracking
+    (list test-file) `(("ql-test-id-001" . ,test-file))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-ql-query" '((query . "(todo \"TODO\")"))))
+           (result (json-read-from-string result-text))
+           (matches (alist-get 'matches result)))
+      ;; First match (Buy groceries) has no ID -> org-headline://
+      (should (string-prefix-p
+               "org-headline://"
+               (alist-get 'uri (aref matches 0))))
+      ;; Second match (Review PR) has ID -> org-id://
+      (should (equal
+               (alist-get 'uri (aref matches 1))
+               "org-id://ql-test-id-001"))
+      ;; Third match (Plan vacation) has no ID -> org-headline://
+      (should (string-prefix-p
+               "org-headline://"
+               (alist-get 'uri (aref matches 2))))))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

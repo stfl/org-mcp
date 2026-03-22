@@ -11,6 +11,7 @@
 
 (depends-on "emacs" "27.1")
 (depends-on "mcp-server-lib" "0.2.0")
+(depends-on "org-ql" "0.9")
 
 (setq network-security-level 'low)
 

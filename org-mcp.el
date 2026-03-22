@@ -5,7 +5,7 @@
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
 ;; Keywords: convenience, files, matching, outlines
 ;; Version: 0.9.0
-;; Package-Requires: ((emacs "27.1") (mcp-server-lib "0.2.0"))
+;; Package-Requires: ((emacs "27.1") (mcp-server-lib "0.2.0") (org-ql "0.9"))
 ;; Homepage: https://github.com/laurynas-biveinis/org-mcp
 
 ;; This file is NOT part of GNU Emacs.
@@ -35,6 +35,7 @@
 (require 'mcp-server-lib)
 (require 'org)
 (require 'org-id)
+(require 'org-ql)
 (require 'url-util)
 
 (defcustom org-mcp-allowed-files nil
@@ -321,6 +322,18 @@ Returns the full path if allowed, signals an error otherwise."
   "Decode special characters from ENCODED-PATH.
 Specifically decodes %23 back to #."
   (replace-regexp-in-string "%23" "#" encoded-path))
+
+(defun org-mcp--build-headline-path ()
+  "Build URL-encoded slash-separated headline path from point.
+Returns a string suitable for use in org-headline:// URIs."
+  (let ((components '()))
+    (save-excursion
+      (push (url-hexify-string (org-get-heading t t t t))
+            components)
+      (while (org-up-heading-safe)
+        (push (url-hexify-string (org-get-heading t t t t))
+              components)))
+    (mapconcat #'identity components "/")))
 
 (defun org-mcp--split-headline-uri (path-after-protocol)
   "Split PATH-AFTER-PROTOCOL into (file-path . headline-path).
@@ -1187,6 +1200,94 @@ MCP Parameters:
            body-begin
            body-end))))))
 
+;; org-ql integration
+
+(defun org-mcp--ql-extract-match ()
+  "Extract match data at point for `org-ql-select' :action.
+Returns an alist with headline metadata suitable for JSON encoding."
+  (let* ((title (org-get-heading t t t t))
+         (level (org-current-level))
+         (file (buffer-file-name))
+         (todo (org-get-todo-state))
+         (priority (org-element-property
+                    :priority (org-element-at-point)))
+         (tags (org-get-tags nil t))
+         (id (org-entry-get nil "ID"))
+         (uri (if id
+                  (concat org-mcp--uri-id-prefix id)
+                (concat org-mcp--uri-headline-prefix
+                        (url-hexify-string file)
+                        "#"
+                        (org-mcp--build-headline-path))))
+         (props (cl-remove-if
+                 (lambda (pair)
+                   (member (car pair)
+                           '("ALLTAGS" "BLOCKED" "CATEGORY" "CLOCKSUM"
+                             "CLOCKSUM_T" "CLOSED" "DEADLINE" "FILE"
+                             "ITEM" "PRIORITY" "SCHEDULED" "TAGS"
+                             "TIMESTAMP" "TIMESTAMP_IA" "TODO")))
+                 (org-entry-properties nil 'standard)))
+         (result `((title . ,title)
+                   (level . ,level)
+                   (file . ,file))))
+    (when todo
+      (push `(todo . ,todo) result))
+    (when priority
+      (push `(priority . ,(char-to-string priority)) result))
+    (when tags
+      (push `(tags . ,(vconcat tags)) result))
+    (when id
+      (push `(id . ,id) result))
+    (push `(uri . ,uri) result)
+    (when props
+      (let ((props-alist
+             (mapcar (lambda (p) (cons (car p) (cdr p))) props)))
+        (push `(properties . ,props-alist) result)))
+    (nreverse result)))
+
+(defun org-mcp--tool-ql-query (query &optional files)
+  "Search Org files using an org-ql QUERY expression.
+QUERY is a string containing an org-ql query sexp.
+FILES is an optional list of file paths to search (must be in
+`org-mcp-allowed-files'); defaults to all allowed files.
+
+MCP Parameters:
+  query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
+  files - Array of file paths to search (optional)"
+  (when (or (not (stringp query)) (string-empty-p query))
+    (org-mcp--tool-validation-error
+     "Query must be a non-empty string"))
+  (let ((query-sexp (condition-case nil
+                        (read query)
+                      (error
+                       (org-mcp--tool-validation-error
+                        "Failed to parse query: %s" query)))))
+    (unless (consp query-sexp)
+      (org-mcp--tool-validation-error
+       "Query must be a list, got: %s" (type-of query-sexp)))
+    (let ((target-files
+           (if files
+               (mapcar
+                (lambda (f)
+                  (or (org-mcp--find-allowed-file f)
+                      (org-mcp--tool-file-access-error f)))
+                (append files nil))
+             (cl-remove-if-not #'file-exists-p
+                               org-mcp-allowed-files))))
+      (let* ((action #'org-mcp--ql-extract-match)
+             (matches
+              (condition-case err
+                  (org-ql-select target-files
+                    query-sexp :action action)
+                (error
+                 (org-mcp--tool-validation-error
+                  "Org-ql query error: %s"
+                  (error-message-string err))))))
+        (json-encode
+         `((matches . ,(vconcat matches))
+           (total . ,(length matches))
+           (files_searched . ,(length target-files))))))))
+
 ;; Tools duplicating resource templates
 
 (defun org-mcp--tool-read-file (file)
@@ -1546,6 +1647,40 @@ Returns: Plain text content of the headline and its subtree"
    :read-only t
    :server-id org-mcp--server-id)
 
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-ql-query
+   :id "org-ql-query"
+   :description
+   "Search Org files using org-ql query expressions.  Supports
+querying by TODO state, tags, priority, deadlines, properties, and
+more.  Returns matched entries as JSON with URIs for follow-up access.
+
+Parameters:
+  query - org-ql query sexp as string (string, required)
+          Examples:
+            (todo \"TODO\")
+            (tags \"work\")
+            (and (todo \"TODO\") (priority \"A\"))
+            (deadline :to today)
+  files - Subset of allowed files to search (array of strings, optional)
+          Defaults to all org-mcp-allowed-files
+
+Returns JSON object:
+  matches - Array of matched entries, each with:
+    title - Headline text (string)
+    level - Headline level (number)
+    file - Absolute file path (string)
+    todo - TODO state (string, omitted if none)
+    priority - Priority letter (string, omitted if none)
+    tags - Local tags (array, omitted if none)
+    id - Org ID (string, omitted if none)
+    uri - org-id:// or org-headline:// URI (string)
+    properties - Standard properties (object, omitted if none)
+  total - Number of matches (number)
+  files_searched - Number of files searched (number)"
+   :read-only t
+   :server-id org-mcp--server-id)
+
   ;; Register template resources for org files
   (mcp-server-lib-register-resource
    "org://{filename}" #'org-mcp--handle-file-resource
@@ -1729,6 +1864,8 @@ Use this resource to:
   (mcp-server-lib-unregister-tool
    "org-read-headline" org-mcp--server-id)
   (mcp-server-lib-unregister-tool "org-read-by-id" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-ql-query" org-mcp--server-id)
   ;; Unregister template resources
   (mcp-server-lib-unregister-resource
    "org://{filename}" org-mcp--server-id)
