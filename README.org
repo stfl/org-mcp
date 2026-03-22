@@ -15,6 +15,24 @@ From [[https://melpa.org/#/org-mcp][MELPA]] or [[https://stable.melpa.org/#/org-
 
 =M-x package-install RET org-mcp RET=
 
+** Doom Emacs
+
+To install this fork in Doom Emacs, add to =packages.el=:
+
+#+begin_src emacs-lisp
+(package! org-mcp :recipe (:host github :repo "stfl/org-mcp"))
+#+end_src
+
+Then configure in =config.el=:
+
+#+begin_src emacs-lisp
+(use-package org-mcp
+  :after org
+  :custom
+  (org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
+  (org-mcp-stored-queries-file "~/org/org-mcp-stored-queries.el"))
+#+end_src
+
 * Usage
 
 **WARNING:** some of the tools in this package give LLMs WRITE access to your Org
