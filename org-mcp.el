@@ -1,8 +1,9 @@
 ;;; org-mcp.el --- MCP server for Org-mode -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025 Laurynas Biveinis
+;; Copyright (C) 2025 Laurynas Biveinis, Stefan Lendl
 
 ;; Author: Laurynas Biveinis <laurynas.biveinis@gmail.com>
+;;         Stefan Lendl <git@stfl.dev>
 ;; Keywords: convenience, files, matching, outlines
 ;; Version: 0.9.0
 ;; Package-Requires: ((emacs "27.1") (mcp-server-lib "0.2.0") (org-ql "0.9"))
