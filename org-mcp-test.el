@@ -2156,8 +2156,9 @@ This tests the bug where the second child was created at level 4 instead of leve
 
 (ert-deftest org-mcp-test-add-todo-with-after-uri ()
   "Test adding TODO after a sibling using after_uri.
-Tests that adding after a level 3 sibling correctly creates level 3 (not level 1).
-Reproduces the emacs.org scenario: level 2 parent (via path), level 3 sibling (via ID)."
+Tests that adding after a level 3 sibling correctly creates level 3.
+Reproduces the emacs.org scenario: level 2 parent (via path),
+level 3 sibling (via ID)."
   (let ((initial-content org-mcp-test--content-level2-parent-level3-children))
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
           (org-tag-alist '("internet")))
