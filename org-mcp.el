@@ -6,7 +6,7 @@
 ;;         Stefan Lendl <git@stfl.dev>
 ;; Keywords: convenience, files, matching, outlines
 ;; Version: 0.9.0
-;; Package-Requires: ((emacs "27.1") (mcp-server-lib "0.2.0") (org-ql "0.9"))
+;; Package-Requires: ((emacs "30.1") (mcp-server-lib "0.2.0") (org-ql "0.9"))
 ;; Homepage: https://github.com/laurynas-biveinis/org-mcp
 
 ;; This file is NOT part of GNU Emacs.
