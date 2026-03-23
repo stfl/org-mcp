@@ -37,6 +37,7 @@
 (require 'org)
 (require 'org-id)
 (require 'org-ql)
+(require 'org-clock)
 (require 'url-util)
 
 (defcustom org-mcp-allowed-files nil
@@ -49,6 +50,14 @@
 When nil, stored query functionality is disabled."
   :type '(choice (const :tag "Disabled" nil)
                  (file :tag "File path"))
+  :group 'org-mcp)
+
+(defcustom org-mcp-clock-continuous-threshold 30
+  "Max minutes since last clock-out for continuous clocking.
+When `org-clock-continuously' is non-nil and a new clock-in occurs
+within this many minutes of the last clock-out, the new clock starts
+at the previous clock's end time."
+  :type 'integer
   :group 'org-mcp)
 
 (defvar org-mcp--stored-queries 'unloaded
@@ -457,6 +466,136 @@ Returns the content string or nil if not found."
     (when-let* ((pos (org-find-property "ID" id)))
       (goto-char pos)
       (org-mcp--extract-headline-content))))
+
+;; Clock helpers
+
+(defun org-mcp--clock-round-time (time)
+  "Round TIME per `org-clock-rounding-minutes'.
+TIME is an Emacs time value.  Returns rounded time."
+  (if (and (boundp 'org-clock-rounding-minutes)
+           (numberp org-clock-rounding-minutes)
+           (> org-clock-rounding-minutes 1))
+      (let* ((r org-clock-rounding-minutes)
+             (decoded (decode-time time))
+             (minutes (nth 1 decoded))
+             (rounded (* r (round minutes r))))
+        (apply #'encode-time
+               (append (list 0 rounded) (nthcdr 2 decoded))))
+    time))
+
+(defun org-mcp--clock-format-timestamp (time)
+  "Format TIME as Org clock timestamp `[YYYY-MM-DD Day HH:MM]'."
+  (format-time-string "[%Y-%m-%d %a %H:%M]" time))
+
+(defun org-mcp--clock-parse-timestamp (str)
+  "Parse ISO timestamp STR to Emacs time.
+STR should be in ISO 8601 format like 2026-03-23T14:30:00."
+  (let ((parsed (parse-time-string str)))
+    (unless (and (nth 0 parsed) (nth 1 parsed) (nth 2 parsed)
+                 (nth 3 parsed) (nth 4 parsed) (nth 5 parsed))
+      (org-mcp--tool-validation-error
+       "Cannot parse timestamp: '%s'" str))
+    (encode-time parsed)))
+
+(defun org-mcp--clock-duration-string (seconds)
+  "Format SECONDS as clock duration string `H:MM'."
+  (let* ((minutes (round seconds 60))
+         (hours (/ minutes 60))
+         (mins (% minutes 60)))
+    (format "%d:%02d" hours mins)))
+
+(defun org-mcp--clock-find-active ()
+  "Search allowed files for unclosed CLOCK line.
+Returns alist with file, heading, start keys, or nil."
+  (catch 'found
+    (dolist (file org-mcp-allowed-files)
+      (when (file-exists-p file)
+        (org-mcp--with-org-file file
+          (while (re-search-forward
+                  "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
+                  nil t)
+            (let ((start-str (match-string 1)))
+              (save-excursion
+                (org-back-to-heading t)
+                (throw 'found
+                       (list
+                        (cons 'file (expand-file-name file))
+                        (cons 'heading
+                              (org-get-heading t t t t))
+                        (cons 'start start-str)))))))))
+    nil))
+
+(defun org-mcp--clock-find-last-closed ()
+  "Find most recent closed clock end time across allowed files.
+Returns Emacs time of the most recent clock end, or nil."
+  (let ((latest nil))
+    (dolist (file org-mcp-allowed-files)
+      (when (file-exists-p file)
+        (org-mcp--with-org-file file
+          (while (re-search-forward
+                  "^[ \t]*CLOCK: \\[[^]]+\\]--\\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} \\([0-9]\\{2\\}:[0-9]\\{2\\}\\)\\)\\]"
+                  nil t)
+            (let* ((end-str (match-string 1))
+                   (end-time (org-parse-time-string end-str)))
+              (when (or (not latest)
+                        (time-less-p (car latest) (apply #'encode-time end-time)))
+                (setq latest (cons (apply #'encode-time end-time)
+                                   end-str))))))))
+    (when latest (car latest))))
+
+(defun org-mcp--clock-ensure-logbook ()
+  "Create or find LOGBOOK drawer at current heading.
+Point must be at a heading.  Inserts LOGBOOK after PROPERTIES
+drawer and planning lines if it doesn't exist.
+Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
+  (org-back-to-heading t)
+  (let ((end (save-excursion (org-end-of-subtree t t) (point)))
+        (logbook-start nil))
+    ;; Look for existing LOGBOOK drawer
+    (save-excursion
+      (forward-line 1)
+      (while (and (< (point) end)
+                  (not logbook-start)
+                  (looking-at "^[ \t]*\\(:\\|#\\+\\|SCHEDULED\\|DEADLINE\\|CLOSED\\)"))
+        (if (looking-at "^[ \t]*:LOGBOOK:[ \t]*$")
+            (progn
+              (forward-line 1)
+              (setq logbook-start (point)))
+          (forward-line 1))))
+    (if logbook-start
+        (goto-char logbook-start)
+      ;; Create LOGBOOK drawer
+      (forward-line 1)
+      ;; Skip past PROPERTIES drawer
+      (when (looking-at "^[ \t]*:PROPERTIES:")
+        (re-search-forward "^[ \t]*:END:" end t)
+        (forward-line 1))
+      ;; Skip past planning lines
+      (while (and (< (point) end)
+                  (looking-at "^[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
+        (forward-line 1))
+      (insert ":LOGBOOK:\n:END:\n")
+      (forward-line -2)
+      (forward-line 1)
+      (point))))
+
+(defun org-mcp--clock-insert-entry (start &optional end)
+  "Insert CLOCK line in LOGBOOK at current heading.
+START is the clock start time.  END is optional clock end time.
+If END is provided, inserts a closed clock entry with duration.
+New entries are inserted at the top of the LOGBOOK drawer."
+  (let ((logbook-pos (org-mcp--clock-ensure-logbook)))
+    (goto-char logbook-pos)
+    (if end
+        (let* ((duration (float-time (time-subtract end start)))
+               (dur-str (org-mcp--clock-duration-string duration)))
+          (insert (format "CLOCK: %s--%s => %s\n"
+                          (org-mcp--clock-format-timestamp start)
+                          (org-mcp--clock-format-timestamp end)
+                          dur-str)))
+      (insert (format "CLOCK: %s\n"
+                      (org-mcp--clock-format-timestamp start))))))
+
 
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword."
@@ -1505,6 +1644,194 @@ MCP Parameters:
   uuid - UUID from headline's ID property"
   (org-mcp--handle-id-resource `(("uuid" . ,uuid))))
 
+;; Clock tools
+
+(defun org-mcp--tool-get-clock-config ()
+  "Return the clock configuration.
+
+MCP Parameters: None"
+  (json-encode
+   `((org_clock_into_drawer
+      . ,(prin1-to-string org-clock-into-drawer))
+     (org_clock_rounding_minutes . ,org-clock-rounding-minutes)
+     (org_clock_continuously
+      . ,(if org-clock-continuously t :json-false))
+     (org_mcp_clock_continuous_threshold
+      . ,org-mcp-clock-continuous-threshold))))
+
+(defun org-mcp--tool-clock-get-active ()
+  "Return the currently active clock entry, if any.
+
+MCP Parameters: None"
+  (let ((active (org-mcp--clock-find-active)))
+    (if active
+        (json-encode
+         `((active . t)
+           (file . ,(alist-get 'file active))
+           (heading . ,(alist-get 'heading active))
+           (start . ,(alist-get 'start active))))
+      (json-encode '((active . :json-false))))))
+
+(defun org-mcp--tool-clock-in (uri &optional start_time)
+  "Clock in to the heading at URI.
+If another clock is active, it is closed first.
+When `org-clock-continuously' is non-nil and no explicit START_TIME
+is given, the new clock may start at the previous clock's end time
+if it is within `org-mcp-clock-continuous-threshold' minutes.
+
+MCP Parameters:
+  uri - URI of the headline to clock in
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
+         (now (current-time))
+         (explicit-start (when start_time
+                           (org-mcp--clock-parse-timestamp start_time)))
+         ;; Check for active clock and close it if needed
+         (active (org-mcp--clock-find-active))
+         (close-time nil))
+    ;; Close active clock if exists
+    (when active
+      (let* ((active-file (alist-get 'file active))
+             (close-at (org-mcp--clock-round-time
+                        (if explicit-start explicit-start now)))
+             (start-str (alist-get 'start active))
+             (start-parsed (org-parse-time-string start-str))
+             (start-time (apply #'encode-time start-parsed))
+             (duration (float-time (time-subtract close-at start-time)))
+             (close-text
+              (format "--%s => %s"
+                      (org-mcp--clock-format-timestamp close-at)
+                      (org-mcp--clock-duration-string duration))))
+        (setq close-time close-at)
+        (org-mcp--fail-if-modified active-file "clock-in")
+        (with-temp-buffer
+          (insert-file-contents active-file)
+          (goto-char (point-min))
+          ;; Find and close the active clock line via text replacement
+          (when (re-search-forward
+                 (concat "^\\([ \t]*CLOCK: \\["
+                         (regexp-quote start-str)
+                         "\\]\\)[ \t]*$")
+                 nil t)
+            (goto-char (match-end 1))
+            (insert close-text))
+          (write-region (point-min) (point-max) active-file)
+          (org-mcp--refresh-file-buffers active-file))))
+    ;; Determine start time
+    (let* ((continuous-start
+            (when (and org-clock-continuously
+                       (not explicit-start))
+              (let ((last-end (org-mcp--clock-find-last-closed)))
+                (when last-end
+                  (let ((elapsed (float-time (time-subtract now last-end))))
+                    (when (<= elapsed
+                              (* 60 org-mcp-clock-continuous-threshold))
+                      last-end))))))
+           (clock-start (org-mcp--clock-round-time
+                         (or explicit-start continuous-start now))))
+      (org-mcp--modify-and-save file-path "clock-in"
+          `((clocked_in . t)
+            (start . ,(org-mcp--clock-format-timestamp clock-start))
+            (heading . ,(org-get-heading t t t t)))
+        (org-mcp--goto-headline-from-uri headline-path is-id)
+        (org-mcp--clock-insert-entry clock-start)))))
+
+(defun org-mcp--tool-clock-out (&optional uri end_time)
+  "Clock out the currently active clock.
+If URI is provided, validates it matches the active clock's heading.
+
+MCP Parameters:
+  uri - Optional URI to validate against active clock
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
+  (let ((active (org-mcp--clock-find-active)))
+    (unless active
+      (org-mcp--tool-validation-error "No active clock to stop"))
+    (let* ((active-file (alist-get 'file active))
+           (now (current-time))
+           (end (if end_time
+                    (org-mcp--clock-round-time
+                     (org-mcp--clock-parse-timestamp end_time))
+                  (org-mcp--clock-round-time now)))
+           (start-str (alist-get 'start active))
+           (start-parsed (org-parse-time-string start-str))
+           (start-time (apply #'encode-time start-parsed)))
+      ;; Validate end is after start
+      (when (time-less-p end start-time)
+        (org-mcp--tool-validation-error
+         "End time %s is before start time %s"
+         (org-mcp--clock-format-timestamp end)
+         (format "[%s]" start-str)))
+      ;; If URI provided, validate it matches
+      (when uri
+        (let* ((parsed (org-mcp--parse-resource-uri uri))
+               (uri-file (car parsed)))
+          (unless (org-mcp--paths-equal-p uri-file active-file)
+            (org-mcp--tool-validation-error
+             "URI file does not match active clock file"))))
+      (let* ((duration (float-time (time-subtract end start-time)))
+             (close-text
+              (format "--%s => %s"
+                      (org-mcp--clock-format-timestamp end)
+                      (org-mcp--clock-duration-string duration))))
+        (org-mcp--modify-and-save active-file "clock-out"
+            `((clocked_out . t)
+              (heading . ,(alist-get 'heading active))
+              (start . ,start-str)
+              (end . ,(org-mcp--clock-format-timestamp end))
+              (duration . ,(org-mcp--clock-duration-string duration)))
+          ;; Find the active clock line by its exact start timestamp
+          (when (re-search-forward
+                 (concat "^\\([ \t]*CLOCK: \\["
+                         (regexp-quote start-str)
+                         "\\]\\)[ \t]*$")
+                 nil t)
+            (goto-char (match-end 1))
+            (insert close-text)
+            ;; Navigate to heading for complete-and-save
+            (org-back-to-heading t)))))))
+
+(defun org-mcp--tool-clock-add (uri start end)
+  "Add a completed clock entry to the heading at URI.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  start - ISO 8601 start time (e.g. 2026-03-23T14:30:00)
+  end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
+         (start-time (org-mcp--clock-round-time
+                      (org-mcp--clock-parse-timestamp start)))
+         (end-time (org-mcp--clock-round-time
+                    (org-mcp--clock-parse-timestamp end))))
+    (when (time-less-p end-time start-time)
+      (org-mcp--tool-validation-error
+       "End time %s is before start time %s"
+       (org-mcp--clock-format-timestamp end-time)
+       (org-mcp--clock-format-timestamp start-time)))
+    (org-mcp--modify-and-save file-path "clock-add"
+        `((added . t)
+          (start . ,(org-mcp--clock-format-timestamp start-time))
+          (end . ,(org-mcp--clock-format-timestamp end-time))
+          (duration . ,(org-mcp--clock-duration-string
+                        (float-time
+                         (time-subtract end-time start-time)))))
+      (org-mcp--goto-headline-from-uri headline-path is-id)
+      (org-mcp--clock-insert-entry start-time end-time))))
+
 (defun org-mcp-enable ()
   "Enable the org-mcp server."
   (mcp-server-lib-register-tool
@@ -1937,6 +2264,136 @@ Returns: Same as org-ql-query tool"
    :read-only t
    :server-id org-mcp--server-id)
 
+  ;; Clock tools
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-get-clock-config
+   :id "org-get-clock-config"
+   :description
+   "Get the clock configuration from the current Emacs Org-mode
+settings.  Returns clock-related settings.
+
+Parameters: None
+
+Returns JSON object with:
+  org_clock_into_drawer - Where to put clock entries (literal Elisp)
+  org_clock_rounding_minutes - Rounding interval in minutes (number)
+  org_clock_continuously - Whether continuous clocking is enabled
+  org_mcp_clock_continuous_threshold - Max minutes for continuous
+    clocking gap
+
+Use this tool to understand clock settings before clocking
+in or out."
+   :read-only t
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-get-active
+   :id "org-clock-get-active"
+   :description
+   "Get the currently active clock, if any.  Searches all allowed
+files for an unclosed CLOCK entry.
+
+Parameters: None
+
+Returns JSON object:
+  active - Whether a clock is active (boolean)
+  file - File path of active clock (string, only if active)
+  heading - Heading title with active clock (string, only if active)
+  start - Start timestamp string (string, only if active)"
+   :read-only t
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-in
+   :id "org-clock-in"
+   :description
+   "Clock in to the specified heading.  If another clock is active,
+it is automatically closed first.
+
+When org-clock-continuously is enabled and no explicit start_time
+is given, the new clock may start at the previous clock's end time
+if it is within the continuous threshold.
+
+Rounding is applied per org-clock-rounding-minutes.
+
+Parameters:
+  uri - URI of the headline to clock in (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{uuid}
+  start_time - ISO 8601 start time (string, optional)
+               Example: 2026-03-23T14:30:00
+               If omitted, uses current time (or continuous time)
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  clocked_in - Always true (boolean)
+  start - Formatted start timestamp (string)
+  heading - The heading title (string)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-out
+   :id "org-clock-out"
+   :description
+   "Clock out the currently active clock.
+
+Rounding is applied per org-clock-rounding-minutes.
+
+Parameters:
+  uri - Optional URI to validate against active clock (string)
+        If provided, must match the file of the active clock
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{uuid}
+  end_time - ISO 8601 end time (string, optional)
+             Example: 2026-03-23T16:45:00
+             If omitted, uses current time
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  clocked_out - Always true (boolean)
+  heading - The heading title (string)
+  start - Start timestamp (string)
+  end - End timestamp (string)
+  duration - Duration as H:MM (string)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-add
+   :id "org-clock-add"
+   :description
+   "Add a completed clock entry to a heading.  Creates a LOGBOOK
+drawer if one doesn't exist.  New entries are inserted at the top
+of the LOGBOOK.
+
+Rounding is applied per org-clock-rounding-minutes.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{uuid}
+  start - ISO 8601 start time (string, required)
+          Example: 2026-03-23T14:30:00
+  end - ISO 8601 end time (string, required)
+        Example: 2026-03-23T16:45:00
+        Must be after start time
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  added - Always true (boolean)
+  start - Formatted start timestamp (string)
+  end - Formatted end timestamp (string)
+  duration - Duration as H:MM (string)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
   ;; Register template resources for org files
   (mcp-server-lib-register-resource
    "org://{filename}" #'org-mcp--handle-file-resource
@@ -2132,6 +2589,17 @@ Use this resource to:
    "org-ql-delete-stored-query" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-ql-run-stored-query" org-mcp--server-id)
+  ;; Clock tools
+  (mcp-server-lib-unregister-tool
+   "org-get-clock-config" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-get-active" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-in" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-out" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-add" org-mcp--server-id)
   (setq org-mcp--stored-queries 'unloaded)
   ;; Unregister template resources
   (mcp-server-lib-unregister-resource

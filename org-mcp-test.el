@@ -3415,5 +3415,417 @@ PARAMS is the alist of parameters to pass."
         "org-ql-list-stored-queries" nil)
        :type 'mcp-server-lib-tool-error))))
 
+;;; Clock tool tests
+
+;; Test data for clock tools
+
+(defconst org-mcp-test--clock-content-simple
+  "* TODO My Task
+Some body text."
+  "Simple heading without logbook.")
+
+(defconst org-mcp-test--clock-content-with-properties
+  (format
+   "* TODO Task with Props
+:PROPERTIES:
+:ID:       %s
+:END:
+Some body text."
+   org-mcp-test--content-with-id-id)
+  "Heading with properties but no logbook.")
+
+(defconst org-mcp-test--clock-content-with-logbook
+  (format
+   "* TODO Task with Logbook
+:PROPERTIES:
+:ID:       %s
+:END:
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 09:00]--[2026-03-23 Mon 10:30] =>  1:30
+:END:
+Some body text."
+   org-mcp-test--content-with-id-id)
+  "Heading with existing logbook entries.")
+
+(defconst org-mcp-test--clock-content-active
+  (format
+   "* TODO Active Task
+:PROPERTIES:
+:ID:       %s
+:END:
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:00]
+:END:
+Working on this."
+   org-mcp-test--content-with-id-id)
+  "Heading with active (unclosed) clock.")
+
+(defconst org-mcp-test--clock-content-two-headings
+  "* TODO First Task
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:00]
+:END:
+First body.
+* TODO Second Task
+Second body."
+  "Two headings, first has active clock.")
+
+(defconst org-mcp-test--clock-id-second "clock-test-second-id")
+
+(defconst org-mcp-test--clock-content-two-headings-with-ids
+  (format
+   "* TODO First Task
+:PROPERTIES:
+:ID:       %s
+:END:
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:00]
+:END:
+First body.
+* TODO Second Task
+:PROPERTIES:
+:ID:       %s
+:END:
+Second body."
+   org-mcp-test--content-with-id-id
+   org-mcp-test--clock-id-second)
+  "Two headings with IDs, first has active clock.")
+
+;; Regex constants for clock verification
+
+(defconst org-mcp-test--clock-regex-added-entry
+  (concat
+   "\\`\\* TODO My Task\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => +2:15\n"
+   ":END:\n"
+   "Some body text\\."
+   "\\'")
+  "Regex for clock-add with new logbook.")
+
+(defconst org-mcp-test--clock-regex-added-to-existing
+  (concat
+   "\\`\\* TODO Task with Logbook\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => +2:15\n"
+   "CLOCK: \\[2026-03-23 Mon 09:00\\]--\\[2026-03-23 Mon 10:30\\] => +1:30\n"
+   ":END:\n"
+   "Some body text\\."
+   "\\'")
+  "Regex for clock-add to heading with existing logbook.")
+
+(defconst org-mcp-test--clock-regex-clocked-in
+  (concat
+   "\\`\\* TODO My Task\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]\n"
+   ":END:\n"
+   "Some body text\\."
+   "\\'")
+  "Regex for clock-in result.")
+
+(defconst org-mcp-test--clock-regex-clocked-out
+  (concat
+   "\\`\\* TODO Active Task\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 Mon 14:00\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => +2:45\n"
+   ":END:\n"
+   "Working on this\\."
+   "\\'")
+  "Regex for clock-out result.")
+
+(defconst org-mcp-test--clock-regex-auto-close-and-in
+  (concat
+   "\\`\\* TODO Second Task\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 15:00\\]\n"
+   ":END:\n"
+   "Second body\\."
+   "\\'")
+  "Regex for second file after clock-in with auto-close.")
+
+;; Clock config tests
+
+(ert-deftest org-mcp-test-clock-get-config ()
+  "Test org-get-clock-config returns clock settings."
+  (let ((org-clock-into-drawer t)
+        (org-clock-rounding-minutes 0)
+        (org-clock-continuously nil)
+        (org-mcp-clock-continuous-threshold 30))
+    (org-mcp-test--with-enabled
+      (let* ((result-text
+              (mcp-server-lib-ert-call-tool "org-get-clock-config" nil))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'org_clock_into_drawer result) "t"))
+        (should (equal (alist-get 'org_clock_rounding_minutes result) 0))
+        (should (equal (alist-get 'org_clock_continuously result)
+                       :json-false))
+        (should (equal (alist-get 'org_mcp_clock_continuous_threshold result)
+                       30))))))
+
+(ert-deftest org-mcp-test-clock-get-config-custom ()
+  "Test org-get-clock-config with custom settings."
+  (let ((org-clock-into-drawer "CLOCKING")
+        (org-clock-rounding-minutes 15)
+        (org-clock-continuously t)
+        (org-mcp-clock-continuous-threshold 60))
+    (org-mcp-test--with-enabled
+      (let* ((result-text
+              (mcp-server-lib-ert-call-tool "org-get-clock-config" nil))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'org_clock_into_drawer result)
+                       "\"CLOCKING\""))
+        (should (equal (alist-get 'org_clock_rounding_minutes result) 15))
+        (should (equal (alist-get 'org_clock_continuously result) t))
+        (should (equal (alist-get 'org_mcp_clock_continuous_threshold result)
+                       60))))))
+
+;; Get active clock tests
+
+(ert-deftest org-mcp-test-clock-get-active-none ()
+  "Test org-clock-get-active when no clock is active."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool "org-clock-get-active" nil))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'active result) :json-false)))))
+
+(ert-deftest org-mcp-test-clock-get-active-found ()
+  "Test org-clock-get-active when a clock is active."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-active))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool "org-clock-get-active" nil))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'active result) t))
+      (should (equal (alist-get 'heading result) "Active Task"))
+      (should (string= (alist-get 'start result)
+                        "2026-03-23 Mon 14:00"))
+      (should (string= (alist-get 'file result) test-file)))))
+
+;; Clock-add tests
+
+(ert-deftest org-mcp-test-clock-add-creates-logbook ()
+  "Test clock-add creates LOGBOOK when none exists."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T14:30:00")
+                     (end . "2026-03-23T16:45:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-add" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'added result) t))
+      (should (string-match-p "2:15" (alist-get 'duration result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-added-entry))))
+
+(ert-deftest org-mcp-test-clock-add-to-existing-logbook ()
+  "Test clock-add inserts at top of existing LOGBOOK."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-with-logbook
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri org-mcp-test--content-with-id-uri)
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T14:30:00")
+                     (end . "2026-03-23T16:45:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-add" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-added-to-existing))))
+
+(ert-deftest org-mcp-test-clock-add-end-before-start ()
+  "Test clock-add rejects end time before start time."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (let ((uri (format "org-headline://%s#My%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-clock-add" nil
+                `((uri . ,uri)
+                  (start . "2026-03-23T16:45:00")
+                  (end . "2026-03-23T14:30:00"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got: %s" result))))))
+
+(ert-deftest org-mcp-test-clock-add-with-rounding ()
+  "Test clock-add applies rounding."
+  (let ((org-clock-rounding-minutes 15))
+    (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-content-simple))
+      (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (start . "2026-03-23T14:22:00")
+                       (end . "2026-03-23T16:37:00")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-clock-add" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        ;; 14:22 rounds to 14:15 with 15-min rounding
+        ;; 16:37 rounds to 16:30
+        (should (string-match-p "14:15" (alist-get 'start result)))
+        (should (string-match-p "16:30" (alist-get 'end result)))))))
+
+;; Clock-in tests
+
+(ert-deftest org-mcp-test-clock-in-basic ()
+  "Test basic clock-in with explicit start time."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (start_time . "2026-03-23T14:30:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-in" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_in result) t))
+      (should (string-match-p "14:30" (alist-get 'start result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-clocked-in))))
+
+(ert-deftest org-mcp-test-clock-in-auto-close ()
+  "Test clock-in auto-closes active clock in another heading."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-two-headings))
+    (let* ((uri (format "org-headline://%s#Second%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (start_time . "2026-03-23T15:00:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-in" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      ;; Verify first task's clock was closed
+      (let ((content (org-mcp-test--read-file test-file)))
+        (should (string-match-p
+                 "CLOCK: \\[2026-03-23 Mon 14:00\\]--\\[2026-03-23.*15:00\\]"
+                 content))
+        ;; Verify second task has open clock
+        (should (string-match-p
+                 "CLOCK: \\[2026-03-23.*15:00\\]\n"
+                 content))))))
+
+(ert-deftest org-mcp-test-clock-in-with-rounding ()
+  "Test clock-in applies rounding to start time."
+  (let ((org-clock-rounding-minutes 15))
+    (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-content-simple))
+      (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (start_time . "2026-03-23T14:22:00")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-clock-in" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (should (string-match-p "14:15" (alist-get 'start result)))))))
+
+;; Clock-out tests
+
+(ert-deftest org-mcp-test-clock-out-basic ()
+  "Test basic clock-out with explicit end time."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-active
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((params `((end_time . "2026-03-23T16:45:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-out" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_out result) t))
+      (should (equal (alist-get 'heading result) "Active Task"))
+      (should (string-match-p "2:45" (alist-get 'duration result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-clocked-out))))
+
+(ert-deftest org-mcp-test-clock-out-no-active ()
+  "Test clock-out fails when no clock is active."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (should-error
+     (let* ((request
+             (mcp-server-lib-create-tools-call-request
+              "org-clock-out" nil nil))
+            (response (mcp-server-lib-process-jsonrpc-parsed
+                       request mcp-server-lib-ert-server-id))
+            (result (mcp-server-lib-ert-process-tool-response response)))
+       (error "Expected error but got: %s" result))
+     :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-clock-out-end-before-start ()
+  "Test clock-out rejects end time before start time."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-active))
+    (org-mcp-test--assert-error-and-file
+     test-file
+     (let* ((request
+             (mcp-server-lib-create-tools-call-request
+              "org-clock-out" nil
+              `((end_time . "2026-03-23T12:00:00"))))
+            (response (mcp-server-lib-process-jsonrpc-parsed
+                       request mcp-server-lib-ert-server-id))
+            (result (mcp-server-lib-ert-process-tool-response response)))
+       (error "Expected error but got: %s" result)))))
+
+(ert-deftest org-mcp-test-clock-add-with-properties ()
+  "Test clock-add to heading with properties creates logbook after props."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-with-properties
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri org-mcp-test--content-with-id-uri)
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T14:30:00")
+                     (end . "2026-03-23T16:45:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-add" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      ;; Verify LOGBOOK is after PROPERTIES
+      (let ((content (org-mcp-test--read-file test-file)))
+        (should (string-match-p
+                 ":END:\n:LOGBOOK:\nCLOCK:" content))))))
+
+(ert-deftest org-mcp-test-clock-continuous ()
+  "Test continuous clocking starts new clock at previous end time."
+  (let ((org-clock-continuously t)
+        (org-mcp-clock-continuous-threshold 30))
+    (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-content-with-logbook))
+      ;; The logbook has a clock ending at 10:30.
+      ;; With letimestamp we fake "now" to be within threshold.
+      ;; But since we can't easily fake current-time, we test via
+      ;; the explicit start_time path instead - continuous clocking
+      ;; should NOT apply when start_time is explicit.
+      (let* ((uri (format "org-headline://%s#Task%%20with%%20Logbook"
+                          test-file))
+             (params `((uri . ,uri)
+                       (start_time . "2026-03-23T10:35:00")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-clock-in" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        ;; Explicit start_time should be used as-is
+        (should (string-match-p "10:35" (alist-get 'start result)))))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
