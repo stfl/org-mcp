@@ -3827,5 +3827,33 @@ Second body."
         ;; Explicit start_time should be used as-is
         (should (string-match-p "10:35" (alist-get 'start result)))))))
 
+;; Find dangling clocks tests
+
+(ert-deftest org-mcp-test-clock-find-dangling-with-open ()
+  "Test clock-find-dangling finds unclosed clock."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-active))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-clock-find-dangling" nil))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'total result) 1))
+      (let ((clock (aref (alist-get 'open_clocks result) 0)))
+        (should (string= (alist-get 'file clock) test-file))
+        (should (string= (alist-get 'heading clock) "Active Task"))
+        (should (string-match-p "2026-03-23.*14:00"
+                                (alist-get 'start clock)))))))
+
+(ert-deftest org-mcp-test-clock-find-dangling-none ()
+  "Test clock-find-dangling returns empty when no open clocks."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-with-logbook))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool
+             "org-clock-find-dangling" nil))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'total result) 0))
+      (should (equal (alist-get 'open_clocks result) [])))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

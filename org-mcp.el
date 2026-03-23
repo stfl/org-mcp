@@ -1659,6 +1659,41 @@ MCP Parameters: None"
      (org_mcp_clock_continuous_threshold
       . ,org-mcp-clock-continuous-threshold))))
 
+(defun org-mcp--tool-clock-find-dangling ()
+  "Find all open (unclosed) clocks in allowed Org files.
+Uses `org-find-open-clocks' on each file in `org-mcp-allowed-files'.
+
+MCP Parameters: None"
+  (let ((all-clocks nil))
+    (dolist (file org-mcp-allowed-files)
+      (when (file-exists-p file)
+        (let ((open (org-find-open-clocks file)))
+          (dolist (clock open)
+            (let* ((marker (car clock))
+                   (clock-file (expand-file-name file))
+                   (start-str
+                    (with-current-buffer (marker-buffer marker)
+                      (save-excursion
+                        (goto-char marker)
+                        (forward-line 0)
+                        (when (looking-at
+                               "[ \t]*CLOCK: \\[\\([^]]+\\)\\]")
+                          (match-string 1)))))
+                   (heading
+                    (with-current-buffer (marker-buffer marker)
+                      (save-excursion
+                        (goto-char marker)
+                        (org-back-to-heading t)
+                        (org-get-heading t t t t)))))
+              (push
+               `((file . ,clock-file)
+                 (heading . ,heading)
+                 (start . ,start-str))
+               all-clocks))))))
+    (json-encode
+     `((open_clocks . ,(vconcat (nreverse all-clocks)))
+       (total . ,(length all-clocks))))))
+
 (defun org-mcp--tool-clock-get-active ()
   "Return the currently active clock entry, if any.
 
@@ -2394,6 +2429,25 @@ Returns JSON object:
    :read-only nil
    :server-id org-mcp--server-id)
 
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-find-dangling
+   :id "org-clock-find-dangling"
+   :description
+   "Find all open (unclosed) clocks in allowed Org files.
+Searches for dangling CLOCK entries that were never closed.
+Uses Emacs native `org-find-open-clocks' on each allowed file.
+
+Parameters: None
+
+Returns JSON object:
+  open_clocks - Array of open clocks, each with:
+    file - File path (string)
+    heading - Heading title (string)
+    start - Start timestamp (string)
+  total - Number of open clocks found (number)"
+   :read-only t
+   :server-id org-mcp--server-id)
+
   ;; Register template resources for org files
   (mcp-server-lib-register-resource
    "org://{filename}" #'org-mcp--handle-file-resource
@@ -2600,6 +2654,8 @@ Use this resource to:
    "org-clock-out" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-add" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-find-dangling" org-mcp--server-id)
   (setq org-mcp--stored-queries 'unloaded)
   ;; Unregister template resources
   (mcp-server-lib-unregister-resource
