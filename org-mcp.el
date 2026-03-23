@@ -858,6 +858,13 @@ BODY-END is the buffer position where body ends."
      (org-tag-persistent-alist
       . ,(prin1-to-string org-tag-persistent-alist)))))
 
+(defun org-mcp--tool-get-priority-config ()
+  "Return the priority configuration."
+  (json-encode
+   `((highest . ,(char-to-string org-priority-highest))
+     (lowest . ,(char-to-string org-priority-lowest))
+     (default . ,(char-to-string org-priority-default)))))
+
 (defun org-mcp--tool-get-allowed-files ()
   "Return the list of allowed Org files."
   (json-encode `((files . ,(vconcat org-mcp-allowed-files)))))
@@ -1552,6 +1559,26 @@ Use this tool to understand:
 
 This helps validate tag usage and understand tag semantics before
 adding or modifying tags on TODO items."
+   :read-only t
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-get-priority-config
+   :id "org-get-priority-config"
+   :description
+   "Get priority configuration from the current Emacs Org-mode
+settings.  Returns the priority range and default as single-character
+strings.
+
+Parameters: None
+
+Returns JSON object with:
+  highest - Highest priority character (e.g. \"A\")
+  lowest - Lowest priority character (e.g. \"C\")
+  default - Default priority character (e.g. \"B\")
+
+Use this tool to understand the valid priority range before setting
+or interpreting priorities on TODO items."
    :read-only t
    :server-id org-mcp--server-id)
 

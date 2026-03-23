@@ -1588,6 +1588,48 @@ EXTENSION can be a string like \".txt\" or nil for no extension."
      "(\"work\" \"personal\")" "nil" "(\"work\")"
      "nil")))
 
+;; Helpers for testing org-get-priority-config MCP tool
+
+(defmacro org-mcp-test--with-get-priority-config-result
+    (highest lowest default &rest body)
+  "Call get-priority-config with HIGHEST, LOWEST, DEFAULT and run BODY.
+Binds `result-highest', `result-lowest', and `result-default' from the
+result for use in BODY."
+  (declare (indent 3) (debug t))
+  `(let ((org-priority-highest ,highest)
+         (org-priority-lowest ,lowest)
+         (org-priority-default ,default))
+     (org-mcp-test--with-enabled
+       (let ((result (json-read-from-string
+                      (mcp-server-lib-ert-call-tool
+                       "org-get-priority-config" nil))))
+         (should (= (length result) 3))
+         (let ((result-highest (alist-get 'highest result))
+               (result-lowest (alist-get 'lowest result))
+               (result-default (alist-get 'default result)))
+           ,@body)))))
+
+(ert-deftest org-mcp-test-tool-get-priority-config-default ()
+  "Test org-get-priority-config with Org default priorities."
+  (org-mcp-test--with-get-priority-config-result ?A ?C ?B
+    (should (equal result-highest "A"))
+    (should (equal result-lowest "C"))
+    (should (equal result-default "B"))))
+
+(ert-deftest org-mcp-test-tool-get-priority-config-custom ()
+  "Test org-get-priority-config with custom numeric priorities."
+  (org-mcp-test--with-get-priority-config-result ?1 ?5 ?3
+    (should (equal result-highest "1"))
+    (should (equal result-lowest "5"))
+    (should (equal result-default "3"))))
+
+(ert-deftest org-mcp-test-tool-get-priority-config-same ()
+  "Test org-get-priority-config with all priorities set to the same value."
+  (org-mcp-test--with-get-priority-config-result ?A ?A ?A
+    (should (equal result-highest "A"))
+    (should (equal result-lowest "A"))
+    (should (equal result-default "A"))))
+
 ;; org-get-allowed-files tests
 
 (ert-deftest org-mcp-test-tool-get-allowed-files-empty ()
