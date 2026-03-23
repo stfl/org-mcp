@@ -1272,7 +1272,7 @@ The filename parameter includes both file and headline path."
                 allowed-file headline-path)))
           (unless content
             (org-mcp--resource-not-found-error
-             "headline" (mapconcat #'identity headline-path "/")))
+             "Headline" (mapconcat #'identity headline-path "/")))
           content)
       ;; No headline path means get entire file
       (org-mcp--read-file allowed-file))))
@@ -1896,6 +1896,8 @@ MCP Parameters:
 (defun org-mcp--tool-clock-out (&optional uri end_time)
   "Clock out the currently active clock.
 If URI is provided, validates it matches the active clock's heading.
+URI is an optional URI to validate against active clock.
+END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 
 MCP Parameters:
   uri - Optional URI to validate against active clock
@@ -1952,6 +1954,8 @@ MCP Parameters:
 
 (defun org-mcp--tool-clock-add (uri start end)
   "Add a completed clock entry to the heading at URI.
+START is ISO 8601 start time (e.g. 2026-03-23T14:30:00).
+END is ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 
 MCP Parameters:
   uri - URI of the headline
@@ -1985,6 +1989,8 @@ MCP Parameters:
 
 (defun org-mcp--tool-clock-delete (uri start)
   "Delete a clock entry from the heading at URI.
+START is the ISO 8601 start time of the clock entry to delete
+\\(e.g., 2026-03-23T14:30:00).
 
 MCP Parameters:
   uri - URI of the headline
