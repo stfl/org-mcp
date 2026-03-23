@@ -3827,7 +3827,91 @@ Second body."
         ;; Explicit start_time should be used as-is
         (should (string-match-p "10:35" (alist-get 'start result)))))))
 
-;; Find dangling clocks tests
+;; Non-allowed file clock constants
+
+(defconst org-mcp-test--clock-content-non-allowed-active
+  "* TODO External Task
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:00]
+:END:
+Working on this in a non-allowed file."
+  "Non-allowed file with active clock.")
+
+(defconst org-mcp-test--clock-regex-non-allowed-closed
+  (concat
+   "\\`\\* TODO External Task\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:00\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 15:00\\]"
+   " => +1:00\n"
+   ":END:\n"
+   "Working on this in a non-allowed file.\n?\\'")
+  "Regex for closed clock in non-allowed file.")
+
+(defmacro org-mcp-test--with-native-clock (file-var content &rest body)
+  "Create a non-allowed temp file with native Emacs clock markers.
+FILE-VAR is bound to the temp file path.
+CONTENT is the initial file content (should have an open CLOCK line).
+Sets `org-clock-marker' and `org-clock-hd-marker' in the file buffer.
+Cleans up temp file and buffer on exit."
+  (declare (indent 2) (debug t))
+  `(let ((,file-var (make-temp-file "org-mcp-test-non-allowed" nil ".org"
+                                    ,content)))
+     (unwind-protect
+         (let ((buf (find-file-noselect ,file-var)))
+           (unwind-protect
+               (with-current-buffer buf
+                 (goto-char (point-min))
+                 (re-search-forward "^[ \t]*CLOCK: \\[" nil t)
+                 (forward-line 0)
+                 (setq org-clock-marker (copy-marker (point)))
+                 (org-back-to-heading t)
+                 (setq org-clock-hd-marker (copy-marker (point)))
+                 ,@body)
+             (move-marker org-clock-marker nil)
+             (move-marker org-clock-hd-marker nil)
+             (kill-buffer buf)))
+       (delete-file ,file-var))))
+
+;; Part A tests: non-allowed file clock detection
+
+(ert-deftest org-mcp-test-clock-get-active-non-allowed ()
+  "Test org-clock-get-active detects clock in non-allowed file."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (org-mcp-test--with-native-clock non-allowed-file
+        org-mcp-test--clock-content-non-allowed-active
+      (let* ((result-text
+              (mcp-server-lib-ert-call-tool "org-clock-get-active" nil))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'active result) t))
+        (should (equal (alist-get 'in_allowed_file result) :json-false))
+        (should-not (alist-get 'file result))
+        (should-not (alist-get 'heading result))
+        (should-not (alist-get 'start result))))))
+
+(ert-deftest org-mcp-test-clock-in-auto-close-non-allowed ()
+  "Test clock-in auto-closes active clock in non-allowed file."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (org-mcp-test--with-native-clock non-allowed-file
+        org-mcp-test--clock-content-non-allowed-active
+      (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (start_time . "2026-03-23T15:00:00")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-clock-in" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        ;; Non-allowed file clock should be closed
+        (org-mcp-test--verify-file-matches
+         non-allowed-file org-mcp-test--clock-regex-non-allowed-closed)
+        ;; Native markers should be cleared
+        (should (null (marker-buffer org-clock-marker)))
+        (should (null (marker-buffer org-clock-hd-marker)))))))
+
+;; Part B tests: find dangling clocks
 
 (ert-deftest org-mcp-test-clock-find-dangling-with-open ()
   "Test clock-find-dangling finds unclosed clock."
@@ -3854,6 +3938,19 @@ Second body."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'total result) 0))
       (should (equal (alist-get 'open_clocks result) [])))))
+
+(ert-deftest org-mcp-test-clock-find-dangling-ignores-non-allowed ()
+  "Test clock-find-dangling ignores open clocks in non-allowed files."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (org-mcp-test--with-native-clock non-allowed-file
+        org-mcp-test--clock-content-non-allowed-active
+      (let* ((result-text
+              (mcp-server-lib-ert-call-tool
+               "org-clock-find-dangling" nil))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'total result) 0))
+        (should (equal (alist-get 'open_clocks result) []))))))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

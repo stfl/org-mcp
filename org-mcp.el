@@ -507,23 +507,41 @@ STR should be in ISO 8601 format like 2026-03-23T14:30:00."
 (defun org-mcp--clock-find-active ()
   "Search allowed files for unclosed CLOCK line.
 Returns alist with file, heading, start keys, or nil."
-  (catch 'found
-    (dolist (file org-mcp-allowed-files)
-      (when (file-exists-p file)
-        (org-mcp--with-org-file file
-          (while (re-search-forward
-                  "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
-                  nil t)
-            (let ((start-str (match-string 1)))
-              (save-excursion
-                (org-back-to-heading t)
-                (throw 'found
-                       (list
-                        (cons 'file (expand-file-name file))
-                        (cons 'heading
-                              (org-get-heading t t t t))
-                        (cons 'start start-str)))))))))
-    nil))
+  (or
+   (catch 'found
+     (dolist (file org-mcp-allowed-files)
+       (when (file-exists-p file)
+         (org-mcp--with-org-file file
+           (while (re-search-forward
+                   "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
+                   nil t)
+             (let ((start-str (match-string 1)))
+               (save-excursion
+                 (org-back-to-heading t)
+                 (throw 'found
+                        (list
+                         (cons 'file (expand-file-name file))
+                         (cons 'heading
+                               (org-get-heading t t t t))
+                         (cons 'start start-str)
+                         (cons 'allowed t)))))))))
+     nil)
+   ;; Fallback: check native Emacs clock marker in non-allowed file
+   (when (org-clock-is-active)
+     (let* ((buf (org-clock-is-active))
+            (file (buffer-file-name buf)))
+       (when (and file (not (org-mcp--find-allowed-file file)))
+         (with-current-buffer buf
+           (save-excursion
+             (goto-char org-clock-marker)
+             (forward-line 0)
+             (when (looking-at
+                    "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$")
+               (list
+                (cons 'file (expand-file-name file))
+                (cons 'heading nil)
+                (cons 'start (match-string 1))
+                (cons 'allowed nil))))))))))
 
 (defun org-mcp--clock-find-last-closed ()
   "Find most recent closed clock end time across allowed files.
@@ -1700,11 +1718,15 @@ MCP Parameters: None"
 MCP Parameters: None"
   (let ((active (org-mcp--clock-find-active)))
     (if active
-        (json-encode
-         `((active . t)
-           (file . ,(alist-get 'file active))
-           (heading . ,(alist-get 'heading active))
-           (start . ,(alist-get 'start active))))
+        (if (eq (alist-get 'allowed active) nil)
+            (json-encode
+             '((active . t)
+               (in_allowed_file . :json-false)))
+          (json-encode
+           `((active . t)
+             (file . ,(alist-get 'file active))
+             (heading . ,(alist-get 'heading active))
+             (start . ,(alist-get 'start active)))))
       (json-encode '((active . :json-false))))))
 
 (defun org-mcp--tool-clock-in (uri &optional start_time)
@@ -1744,20 +1766,36 @@ MCP Parameters:
                       (org-mcp--clock-format-timestamp close-at)
                       (org-mcp--clock-duration-string duration))))
         (setq close-time close-at)
-        (org-mcp--fail-if-modified active-file "clock-in")
-        (with-temp-buffer
-          (insert-file-contents active-file)
-          (goto-char (point-min))
-          ;; Find and close the active clock line via text replacement
-          (when (re-search-forward
-                 (concat "^\\([ \t]*CLOCK: \\["
-                         (regexp-quote start-str)
-                         "\\]\\)[ \t]*$")
-                 nil t)
-            (goto-char (match-end 1))
-            (insert close-text))
-          (write-region (point-min) (point-max) active-file)
-          (org-mcp--refresh-file-buffers active-file))))
+        (if (alist-get 'allowed active)
+            ;; Allowed file: close via text replacement
+            (progn
+              (org-mcp--fail-if-modified active-file "clock-in")
+              (with-temp-buffer
+                (insert-file-contents active-file)
+                (goto-char (point-min))
+                (when (re-search-forward
+                       (concat "^\\([ \t]*CLOCK: \\["
+                               (regexp-quote start-str)
+                               "\\]\\)[ \t]*$")
+                       nil t)
+                  (goto-char (match-end 1))
+                  (insert close-text))
+                (write-region (point-min) (point-max) active-file)
+                (org-mcp--refresh-file-buffers active-file)))
+          ;; Non-allowed file: close via buffer edit and clear markers
+          (let ((buf (marker-buffer org-clock-marker)))
+            (when buf
+              (with-current-buffer buf
+                (save-excursion
+                  (goto-char org-clock-marker)
+                  (forward-line 0)
+                  (when (looking-at
+                         "^\\([ \t]*CLOCK: \\[[^]]+\\]\\)[ \t]*$")
+                    (goto-char (match-end 1))
+                    (insert close-text)
+                    (save-buffer))))
+              (move-marker org-clock-marker nil)
+              (move-marker org-clock-hd-marker nil))))))
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously
@@ -2326,15 +2364,21 @@ in or out."
    :id "org-clock-get-active"
    :description
    "Get the currently active clock, if any.  Searches all allowed
-files for an unclosed CLOCK entry.
+files for an unclosed CLOCK entry.  Also detects native Emacs clocks
+running in non-allowed files via `org-clock-is-active'.
 
 Parameters: None
 
 Returns JSON object:
   active - Whether a clock is active (boolean)
-  file - File path of active clock (string, only if active)
-  heading - Heading title with active clock (string, only if active)
-  start - Start timestamp string (string, only if active)"
+  in_allowed_file - false when clock is in a non-allowed file
+    (only present in that case; file/heading/start are omitted)
+  file - File path of active clock (string, only if active
+    in allowed file)
+  heading - Heading title with active clock (string, only if active
+    in allowed file)
+  start - Start timestamp string (string, only if active
+    in allowed file)"
    :read-only t
    :server-id org-mcp--server-id)
 
