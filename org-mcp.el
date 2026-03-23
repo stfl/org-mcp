@@ -2106,6 +2106,8 @@ Use this resource to:
   (mcp-server-lib-unregister-tool
    "org-get-tag-config" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
+   "org-get-priority-config" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
    "org-get-allowed-files" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-update-todo-state" org-mcp--server-id)
