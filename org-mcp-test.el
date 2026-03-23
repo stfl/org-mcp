@@ -3470,6 +3470,20 @@ First body.
 Second body."
   "Two headings, first has active clock.")
 
+(defconst org-mcp-test--clock-content-with-two-entries
+  (format
+   "* TODO Task with Two Clocks
+:PROPERTIES:
+:ID:       %s
+:END:
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:30]--[2026-03-23 Mon 16:45] =>  2:15
+CLOCK: [2026-03-23 Mon 09:00]--[2026-03-23 Mon 10:30] =>  1:30
+:END:
+Some body text."
+   org-mcp-test--content-with-id-id)
+  "Heading with two closed clock entries.")
+
 (defconst org-mcp-test--clock-id-second "clock-test-second-id")
 
 (defconst org-mcp-test--clock-content-two-headings-with-ids
@@ -3568,6 +3582,39 @@ Second body."
    "Working on this\\."
    "\\'")
   "Regex for clock-in after resolving dangling clock.")
+
+(defconst org-mcp-test--clock-regex-deleted-single
+  (concat
+   "\\`\\* TODO Task with Logbook\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   "Some body text\\."
+   "\\'")
+  "Regex for heading after deleting its only clock entry.")
+
+(defconst org-mcp-test--clock-regex-deleted-first-of-two
+  (concat
+   "\\`\\* TODO Task with Two Clocks\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 Mon 09:00\\]--\\[2026-03-23 Mon 10:30\\] => +1:30\n"
+   ":END:\n"
+   "Some body text\\."
+   "\\'")
+  "Regex for heading after deleting first of two clock entries.")
+
+(defconst org-mcp-test--clock-regex-deleted-open
+  (concat
+   "\\`\\* TODO Active Task\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   "Working on this\\."
+   "\\'")
+  "Regex for heading after deleting its only open clock entry.")
 
 ;; Clock config tests
 
@@ -3876,6 +3923,99 @@ Second body."
         (should (equal (alist-get 'success result) t))
         ;; Explicit start_time should be used as-is
         (should (string-match-p "10:35" (alist-get 'start result)))))))
+
+;; Clock-delete tests
+
+(ert-deftest org-mcp-test-clock-delete-closed-entry ()
+  "Test clock-delete removes a closed clock entry and empty LOGBOOK."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-with-logbook
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri org-mcp-test--content-with-id-uri)
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T09:00:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-delete" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (should (string-match-p "09:00" (alist-get 'start result)))
+      (should (string-match-p "10:30" (alist-get 'end result)))
+      (should (string-match-p "1:30" (alist-get 'duration result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-deleted-single))))
+
+(ert-deftest org-mcp-test-clock-delete-open-entry ()
+  "Test clock-delete removes an open (dangling) clock entry."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-active
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri org-mcp-test--content-with-id-uri)
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T14:00:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-delete" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (should (string-match-p "14:00" (alist-get 'start result)))
+      (should-not (alist-get 'end result))
+      (should-not (alist-get 'duration result))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-deleted-open))))
+
+(ert-deftest org-mcp-test-clock-delete-first-of-two ()
+  "Test clock-delete removes only the matching entry from multiple."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-with-two-entries
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri org-mcp-test--content-with-id-uri)
+           (params `((uri . ,uri)
+                     (start . "2026-03-23T14:30:00")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-delete" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (should (string-match-p "2:15" (alist-get 'duration result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-deleted-first-of-two))))
+
+(ert-deftest org-mcp-test-clock-delete-not-found ()
+  "Test clock-delete fails when no matching clock entry exists."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-with-logbook
+      `(,org-mcp-test--content-with-id-id)
+    (let ((uri org-mcp-test--content-with-id-uri))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-clock-delete" nil
+                `((uri . ,uri)
+                  (start . "2026-03-23T20:00:00"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got: %s" result))))))
+
+(ert-deftest org-mcp-test-clock-delete-with-rounding ()
+  "Test clock-delete applies rounding before matching."
+  (let ((org-clock-rounding-minutes 15))
+    (org-mcp-test--with-id-setup test-file
+        org-mcp-test--clock-content-with-logbook
+        `(,org-mcp-test--content-with-id-id)
+      (let* ((uri org-mcp-test--content-with-id-uri)
+             ;; 09:07 rounds to 09:00 with 15-min rounding
+             (params `((uri . ,uri)
+                       (start . "2026-03-23T09:07:00")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-clock-delete" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'deleted result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-regex-deleted-single)))))
 
 ;; Non-allowed file clock constants
 

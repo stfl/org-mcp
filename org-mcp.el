@@ -631,6 +631,55 @@ Point must be at a heading.  Returns count of deleted lines."
           (cl-incf count))))
     count))
 
+(defun org-mcp--clock-remove-empty-logbook ()
+  "Remove LOGBOOK drawer at current heading if it is empty.
+Point must be at a heading."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end (save-excursion (org-end-of-subtree t t) (point))))
+      (forward-line 1)
+      (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
+        (forward-line 0)
+        (let ((drawer-start (point)))
+          (forward-line 1)
+          (when (looking-at "^[ \t]*:END:[ \t]*$")
+            (forward-line 1)
+            (delete-region drawer-start (point))))))))
+
+(defun org-mcp--clock-start-time-regex (start-time)
+  "Build regex matching an Org clock timestamp for START-TIME.
+Matches the date and time exactly but allows any day-of-week
+abbreviation, making the match locale-independent."
+  (format-time-string
+   "\\[%Y-%m-%d [A-Za-z]\\{2,3\\} %H:%M\\]" start-time))
+
+(defun org-mcp--clock-delete-entry (start-time)
+  "Delete CLOCK line matching START-TIME in LOGBOOK at current heading.
+Point must be at a heading.  START-TIME is an Emacs time value.
+Removes LOGBOOK drawer if it becomes empty.
+Returns an alist with deleted entry info, or nil if not found."
+  (let* ((start-regex (org-mcp--clock-start-time-regex start-time))
+         (end (save-excursion (org-end-of-subtree t t) (point)))
+         (clock-regex (concat "^[ \t]*CLOCK: " start-regex
+                              "\\(?:--\\(\\[[^]]+\\]\\)"
+                              " => +\\([0-9]+:[0-9]+\\)\\)?[ \t]*$"))
+         (found nil))
+    (save-excursion
+      (forward-line 1)
+      (when (re-search-forward clock-regex end t)
+        (let ((end-str (match-string 1))
+              (duration-str (match-string 2)))
+          (setq found `((start
+                         . ,(org-mcp--clock-format-timestamp start-time))
+                        ,@(when end-str `((end . ,end-str)))
+                        ,@(when duration-str
+                            `((duration . ,duration-str)))))
+          (forward-line 0)
+          (delete-region (point) (line-beginning-position 2)))))
+    (when found
+      (org-mcp--clock-remove-empty-logbook))
+    found))
+
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword."
   (let ((valid-states
@@ -1934,6 +1983,33 @@ MCP Parameters:
       (org-mcp--goto-headline-from-uri headline-path is-id)
       (org-mcp--clock-insert-entry start-time end-time))))
 
+(defun org-mcp--tool-clock-delete (uri start)
+  "Delete a clock entry from the heading at URI.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  start - ISO 8601 start time of the clock entry to delete
+          (e.g. 2026-03-23T14:30:00)"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
+         (start-time (org-mcp--clock-round-time
+                      (org-mcp--clock-parse-timestamp start)))
+         (deleted-info nil))
+    (org-mcp--modify-and-save file-path "clock-delete"
+        `((deleted . t)
+          ,@deleted-info)
+      (org-mcp--goto-headline-from-uri headline-path is-id)
+      (setq deleted-info (org-mcp--clock-delete-entry start-time))
+      (unless deleted-info
+        (org-mcp--tool-validation-error
+         "No clock entry starting at %s found"
+         (org-mcp--clock-format-timestamp start-time))))))
+
 (defun org-mcp-enable ()
   "Enable the org-mcp server."
   (mcp-server-lib-register-tool
@@ -2507,6 +2583,34 @@ Returns JSON object:
    :server-id org-mcp--server-id)
 
   (mcp-server-lib-register-tool
+   #'org-mcp--tool-clock-delete
+   :id "org-clock-delete"
+   :description
+   "Delete a clock entry from a heading.  Removes the LOGBOOK
+drawer if it becomes empty after deletion.
+
+Rounding is applied per org-clock-rounding-minutes.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{uuid}
+  start - ISO 8601 start time of the clock entry to delete
+          (string, required)
+          Example: 2026-03-23T14:30:00
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  deleted - Always true (boolean)
+  start - Start timestamp of deleted entry (string)
+  end - End timestamp of deleted entry (string, present if closed)
+  duration - Duration as H:MM (string, present if closed)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
    #'org-mcp--tool-clock-find-dangling
    :id "org-clock-find-dangling"
    :description
@@ -2731,6 +2835,8 @@ Use this resource to:
    "org-clock-out" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-add" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-clock-delete" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-find-dangling" org-mcp--server-id)
   (setq org-mcp--stored-queries 'unloaded)
