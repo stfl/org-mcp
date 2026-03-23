@@ -614,6 +614,22 @@ New entries are inserted at the top of the LOGBOOK drawer."
       (insert (format "CLOCK: %s\n"
                       (org-mcp--clock-format-timestamp start))))))
 
+(defun org-mcp--clock-resolve-dangling ()
+  "Delete unclosed CLOCK lines in LOGBOOK at current heading.
+Point must be at a heading.  Returns count of deleted lines."
+  (let ((count 0)
+        (end (save-excursion (org-end-of-subtree t t) (point))))
+    (save-excursion
+      (forward-line 1)
+      (while (re-search-forward
+              "^[ \t]*CLOCK: \\[[^]]+\\][ \t]*$"
+              end t)
+        (forward-line 0)
+        (let ((line-end (line-beginning-position 2)))
+          (delete-region (point) line-end)
+          (setq end (- end (- line-end (point))))
+          (cl-incf count))))
+    count))
 
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword."
@@ -1729,19 +1745,22 @@ MCP Parameters: None"
              (start . ,(alist-get 'start active)))))
       (json-encode '((active . :json-false))))))
 
-(defun org-mcp--tool-clock-in (uri &optional start_time)
+(defun org-mcp--tool-clock-in (uri &optional start_time resolve)
   "Clock in to the heading at URI.
 If another clock is active, it is closed first.
 When `org-clock-continuously' is non-nil and no explicit START_TIME
 is given, the new clock may start at the previous clock's end time
 if it is within `org-mcp-clock-continuous-threshold' minutes.
+When RESOLVE is \"true\", dangling (unclosed) CLOCK lines under
+the target heading are deleted before clocking in.
 
 MCP Parameters:
   uri - URI of the headline to clock in
         Formats:
           - org-headline://{absolute-path}#{headline-path}
           - org-id://{id}
-  start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)"
+  start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
+  resolve - When \"true\", delete dangling clocks before clocking in"
   (let* ((parsed (org-mcp--parse-resource-uri uri))
          (file-path (car parsed))
          (headline-path (cdr parsed))
@@ -1752,8 +1771,13 @@ MCP Parameters:
          ;; Check for active clock and close it if needed
          (active (org-mcp--clock-find-active))
          (close-time nil))
-    ;; Close active clock if exists
-    (when active
+    ;; Close active clock if exists.  When resolve is requested and the
+    ;; active clock is in the same file, skip auto-close — resolve will
+    ;; delete the dangling clock in the modify-and-save body instead.
+    (when (and active
+               (not (and (equal resolve "true")
+                         (org-mcp--paths-equal-p
+                          (alist-get 'file active) file-path))))
       (let* ((active-file (alist-get 'file active))
              (close-at (org-mcp--clock-round-time
                         (if explicit-start explicit-start now)))
@@ -1808,12 +1832,17 @@ MCP Parameters:
                       last-end))))))
            (clock-start (org-mcp--clock-round-time
                          (or explicit-start continuous-start now))))
-      (org-mcp--modify-and-save file-path "clock-in"
-          `((clocked_in . t)
-            (start . ,(org-mcp--clock-format-timestamp clock-start))
-            (heading . ,(org-get-heading t t t t)))
-        (org-mcp--goto-headline-from-uri headline-path is-id)
-        (org-mcp--clock-insert-entry clock-start)))))
+      (let ((resolved-count 0))
+        (org-mcp--modify-and-save file-path "clock-in"
+            `((clocked_in . t)
+              (start . ,(org-mcp--clock-format-timestamp clock-start))
+              (heading . ,(org-get-heading t t t t))
+              ,@(when (> resolved-count 0)
+                  `((resolved . ,resolved-count))))
+          (org-mcp--goto-headline-from-uri headline-path is-id)
+          (when (equal resolve "true")
+            (setq resolved-count (org-mcp--clock-resolve-dangling)))
+          (org-mcp--clock-insert-entry clock-start))))))
 
 (defun org-mcp--tool-clock-out (&optional uri end_time)
   "Clock out the currently active clock.
@@ -2403,13 +2432,17 @@ Parameters:
   start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
                If omitted, uses current time (or continuous time)
+  resolve - When 'true', delete dangling (unclosed) CLOCK lines
+            under the heading before clocking in (string, optional)
 
 Returns JSON object:
   success - Always true on success (boolean)
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
   heading - The heading title (string)
-  uri - ID-based URI (org-id://{uuid}) for the headline"
+  uri - ID-based URI (org-id://{uuid}) for the headline
+  resolved - Number of dangling clocks deleted (integer, only if
+             resolve was requested and dangling clocks were found)"
    :read-only nil
    :server-id org-mcp--server-id)
 

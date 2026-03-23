@@ -3556,6 +3556,19 @@ Second body."
    "\\'")
   "Regex for second file after clock-in with auto-close.")
 
+(defconst org-mcp-test--clock-regex-resolved-and-clocked-in
+  (concat
+   "\\`\\* TODO Active Task\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 15:00\\]\n"
+   ":END:\n"
+   "Working on this\\."
+   "\\'")
+  "Regex for clock-in after resolving dangling clock.")
+
 ;; Clock config tests
 
 (ert-deftest org-mcp-test-clock-get-config ()
@@ -3739,6 +3752,43 @@ Second body."
              (result (json-read-from-string result-text)))
         (should (equal (alist-get 'success result) t))
         (should (string-match-p "14:15" (alist-get 'start result)))))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-dangling ()
+  "Test clock-in with resolve deletes dangling clock."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--clock-content-active
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((uri (format "org-id://%s" org-mcp-test--content-with-id-id))
+           (params `((uri . ,uri)
+                     (start_time . "2026-03-23T15:00:00")
+                     (resolve . "true")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-in" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_in result) t))
+      (should (equal (alist-get 'resolved result) 1))
+      (let ((content (org-mcp-test--read-file test-file)))
+        (should-not (string-match-p "--" content)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-resolved-and-clocked-in))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-no-dangling ()
+  "Test clock-in with resolve is a no-op when no dangling clock."
+  (org-mcp-test--with-temp-org-files
+    ((test-file org-mcp-test--clock-content-simple))
+    (let* ((uri (format "org-headline://%s#My%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (start_time . "2026-03-23T14:30:00")
+                     (resolve . "true")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-clock-in" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_in result) t))
+      (should-not (alist-get 'resolved result))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-regex-clocked-in))))
 
 ;; Clock-out tests
 
