@@ -29,8 +29,11 @@ Then configure in =config.el=:
 (use-package org-mcp
   :after org
   :custom
-  (org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
-  (org-mcp-stored-queries-file "~/org/org-mcp-stored-queries.el"))
+  (org-mcp-allowed-files (mapcar (lambda (f) (expand-file-name f org-directory)) org-agenda-files))
+  (org-mcp-stored-queries-file (expand-file-name "org-mcp-stored-queries.el" doom-user-dir))
+  :config (if mcp-server-lib--running
+              (message "org-mcp: MCP server already running, skipping start")
+            (mcp-server-lib-start)))
 #+end_src
 
 * Usage
