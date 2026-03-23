@@ -1239,6 +1239,11 @@ Returns an alist with headline metadata suitable for JSON encoding."
                         (url-hexify-string file)
                         "#"
                         (org-mcp--build-headline-path))))
+         (parent-priority
+          (save-excursion
+            (when (org-up-heading-safe)
+              (org-element-property
+               :priority (org-element-at-point)))))
          (props (cl-remove-if
                  (lambda (pair)
                    (member (car pair)
@@ -1254,6 +1259,9 @@ Returns an alist with headline metadata suitable for JSON encoding."
       (push `(todo . ,todo) result))
     (when priority
       (push `(priority . ,(char-to-string priority)) result))
+    (when parent-priority
+      (push `(parent-priority . ,(char-to-string parent-priority))
+            result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
     (when id

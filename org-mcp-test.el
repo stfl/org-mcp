@@ -2931,6 +2931,16 @@ Some quote
 * TODO [#C] Low priority task"
   "Org content with priorities for org-ql tests.")
 
+(defconst org-mcp-test--content-ql-parent-priorities
+  "* TODO [#A] Parent with priority
+** TODO Child without priority
+** TODO [#C] Child with own priority
+* TODO Parent without priority
+** TODO [#B] Child under no-priority parent
+* [#B] Non-todo parent with priority
+** TODO Child under non-todo parent"
+  "Org content with nested headings for parent-priority tests.")
+
 (ert-deftest org-mcp-test-ql-query-basic-todo ()
   "Test basic org-ql query matching TODO items."
 
@@ -3011,6 +3021,76 @@ Some quote
           (result (json-read-from-string result-text)))
      (should (= (alist-get 'total result) 3))
      (should (= (alist-get 'files_searched result) 1)))))
+
+(ert-deftest org-mcp-test-ql-query-parent-priority-inherited ()
+  "Test that child headings include parent-priority from parent."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-parent-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(heading \"Child without priority\")"))))
+          (result (json-read-from-string result-text))
+          (match (aref (alist-get 'matches result) 0)))
+     (should (equal (alist-get 'title match) "Child without priority"))
+     (should (equal (alist-get 'parent-priority match) "A"))
+     (should-not (alist-get 'priority match)))))
+
+(ert-deftest org-mcp-test-ql-query-parent-priority-with-own ()
+  "Test parent-priority present even when child has own priority."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-parent-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(heading \"Child with own priority\")"))))
+          (result (json-read-from-string result-text))
+          (match (aref (alist-get 'matches result) 0)))
+     (should (equal (alist-get 'priority match) "C"))
+     (should (equal (alist-get 'parent-priority match) "A")))))
+
+(ert-deftest org-mcp-test-ql-query-parent-priority-absent ()
+  "Test parent-priority absent when parent has no priority."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-parent-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(heading \"Child under no-priority parent\")"))))
+          (result (json-read-from-string result-text))
+          (match (aref (alist-get 'matches result) 0)))
+     (should (equal (alist-get 'priority match) "B"))
+     (should-not (alist-get 'parent-priority match)))))
+
+(ert-deftest org-mcp-test-ql-query-parent-priority-top-level ()
+  "Test parent-priority absent for top-level headings."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-parent-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(heading \"Parent with priority\")"))))
+          (result (json-read-from-string result-text))
+          (match (aref (alist-get 'matches result) 0)))
+     (should (equal (alist-get 'priority match) "A"))
+     (should-not (alist-get 'parent-priority match)))))
+
+(ert-deftest org-mcp-test-ql-query-parent-priority-non-todo-parent ()
+  "Test parent-priority from non-TODO parent with priority."
+
+  (org-mcp-test--with-temp-org-files
+   ((test-file org-mcp-test--content-ql-parent-priorities))
+   (let* ((result-text
+           (mcp-server-lib-ert-call-tool
+            "org-ql-query"
+            '((query . "(heading \"Child under non-todo parent\")"))))
+          (result (json-read-from-string result-text))
+          (match (aref (alist-get 'matches result) 0)))
+     (should (equal (alist-get 'parent-priority match) "B")))))
 
 (defun org-mcp-test--call-ql-query-expecting-error (params)
   "Call org-ql-query tool via JSON-RPC expecting an error.
