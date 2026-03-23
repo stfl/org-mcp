@@ -18,3 +18,11 @@ images.
 
 To verify the changed Org content, use a single regular expression, matching
 the complete Org file.
+
+When adding, removing, or changing MCP tools, resource templates, or custom
+variables (`defcustom`) in `org-mcp.el`, update `README.org` accordingly:
+- New tools → add a `***` subsection under the appropriate `**` section in
+  "Available MCP Tools"
+- New `defcustom` → document it in a "Configuring …" section and mention it in
+  the Doom Emacs example if relevant
+- Removed or renamed tools/variables → remove or update their documentation

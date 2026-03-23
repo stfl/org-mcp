@@ -31,6 +31,8 @@ Then configure in =config.el=:
   :custom
   (org-mcp-allowed-files (mapcar (lambda (f) (expand-file-name f org-directory)) org-agenda-files))
   (org-mcp-stored-queries-file (expand-file-name "org-mcp-stored-queries.el" doom-user-dir))
+  ;; Optional: maximum minutes gap for continuous clocking (default 30)
+  ;; (org-mcp-clock-continuous-threshold 15)
   :config (if mcp-server-lib--running
               (message "org-mcp: MCP server already running, skipping start")
             (mcp-server-lib-start)))
@@ -194,6 +196,20 @@ Example return value:
   "org-tags-exclude-from-inheritance": "(\"urgent\")",
   "org-tag-alist": "((\"work\" . 119) (\"urgent\" . 117) (:startgroup) (\"@office\" . 111) (\"@home\" . 104) (\"@errand\" . 101) (:endgroup) (:startgrouptag) (\"project\") (:grouptags) (\"proj_a\") (\"proj_b\") (:endgrouptag))",
   "org-tag-persistent-alist": "nil"
+}
+#+end_src
+
+*** org-get-priority-config
+- *Description:* Get priority configuration for understanding the valid priority range
+- *Parameters:* None
+- *Returns:* JSON object with =highest=, =lowest=, and =default= priority characters
+
+Example response:
+#+begin_src json
+{
+  "highest": "A",
+  "lowest": "C",
+  "default": "B"
 }
 #+end_src
 
@@ -487,6 +503,190 @@ The file is auto-generated and should not be edited by hand. When =org-mcp-store
 - *Returns:* Plain text content of the headline and its subtree
 - *Configuration:* File containing the ID must be in =org-mcp-allowed-files=
 - *Note:* More stable than path-based access since IDs don't change when headlines are renamed or moved
+
+** Clock Tracking Tools
+
+*** org-get-clock-config
+- *Description:* Get clock-related configuration from the current Emacs Org-mode settings
+- *Parameters:* None
+- *Returns:* JSON object with clock settings
+
+Example response:
+#+begin_src json
+{
+  "org_clock_into_drawer": "\"LOGBOOK\"",
+  "org_clock_rounding_minutes": 5,
+  "org_clock_continuously": false,
+  "org_mcp_clock_continuous_threshold": 30
+}
+#+end_src
+
+Use this tool to understand clock settings before clocking in or out.
+
+*** org-clock-get-active
+- *Description:* Get the currently active clock, if any. Searches all allowed files for an unclosed CLOCK entry. Also detects native Emacs clocks running in non-allowed files
+- *Parameters:* None
+- *Returns:* JSON object describing the active clock
+
+Example responses:
+#+begin_src json
+# No active clock:
+{"active": false}
+
+# Active clock in an allowed file:
+{
+  "active": true,
+  "file": "/home/user/org/tasks.org",
+  "heading": "Implement feature X",
+  "start": "[2026-03-23 Mon 14:30]"
+}
+
+# Active clock in a non-allowed file:
+{
+  "active": true,
+  "in_allowed_file": false
+}
+#+end_src
+
+*** org-clock-in
+- *Description:* Clock in to the specified heading. If another clock is active, it is automatically closed first. Supports continuous clocking and time rounding
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
+  - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
+- *Returns:* JSON object with clock-in details
+
+Example:
+#+begin_src json
+# Request:
+{
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "start_time": "2026-03-23T14:30:00"
+}
+
+# Success response:
+{
+  "success": true,
+  "clocked_in": true,
+  "start": "[2026-03-23 Mon 14:30]",
+  "heading": "Implement feature X",
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+}
+
+# With dangling clocks resolved:
+{
+  "success": true,
+  "clocked_in": true,
+  "start": "[2026-03-23 Mon 14:30]",
+  "heading": "Implement feature X",
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "resolved": 1
+}
+#+end_src
+
+*** org-clock-out
+- *Description:* Clock out the currently active clock. Supports optional URI validation and custom end time
+- *Parameters:*
+  - =uri= (string, optional): URI to validate against the active clock. If provided, its file must match the active clock's file
+  - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
+- *Returns:* JSON object with clock-out details
+
+Example:
+#+begin_src json
+# Success response:
+{
+  "success": true,
+  "clocked_out": true,
+  "heading": "Implement feature X",
+  "start": "[2026-03-23 Mon 14:30]",
+  "end": "[2026-03-23 Mon 16:45]",
+  "duration": "2:15",
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+}
+#+end_src
+
+*** org-clock-add
+- *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
+  - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
+- *Returns:* JSON object with the added clock entry details
+
+Example:
+#+begin_src json
+# Request:
+{
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "start": "2026-03-23T14:30:00",
+  "end": "2026-03-23T16:45:00"
+}
+
+# Success response:
+{
+  "success": true,
+  "added": true,
+  "start": "[2026-03-23 Mon 14:30]",
+  "end": "[2026-03-23 Mon 16:45]",
+  "duration": "2:15",
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+}
+#+end_src
+
+*** org-clock-delete
+- *Description:* Delete a clock entry from a heading. Removes the LOGBOOK drawer if it becomes empty after deletion
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
+- *Returns:* JSON object with the deleted entry details
+
+Example:
+#+begin_src json
+# Request:
+{
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "start": "2026-03-23T14:30:00"
+}
+
+# Success response:
+{
+  "success": true,
+  "deleted": true,
+  "start": "[2026-03-23 Mon 14:30]",
+  "end": "[2026-03-23 Mon 16:45]",
+  "duration": "2:15",
+  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+}
+#+end_src
+
+*** org-clock-find-dangling
+- *Description:* Find all open (unclosed) clock entries in allowed Org files
+- *Parameters:* None
+- *Returns:* JSON object with array of open clock entries
+
+Example response:
+#+begin_src json
+{
+  "open_clocks": [
+    {
+      "file": "/home/user/org/tasks.org",
+      "heading": "Implement feature X",
+      "start": "[2026-03-23 Mon 14:30]"
+    }
+  ],
+  "total": 1
+}
+#+end_src
+
+** Configuring Clock Tracking
+
+*** =org-mcp-clock-continuous-threshold=
+
+When =org-clock-continuously= is non-nil, a new clock-in within this many minutes of the last clock-out will start at the previous clock's end time rather than the current time. Defaults to =30= minutes.
+
+#+begin_src emacs-lisp
+(setq org-mcp-clock-continuous-threshold 15)
+#+end_src
 
 * License
 
