@@ -309,7 +309,7 @@ Example:
 - *Parameters:*
   - =title= (string, required): The headline text
   - =todoState= (string, required): TODO state from =org-todo-keywords=
-  - =tags= (string or array, required): Tags to add (e.g., "urgent" or ["work", "urgent"])
+  - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =body= (string, optional): Body text content to add under the heading
   - =parentUri= (string, required): URI of parent item. Use =org-headline://filename.org/= for top-level items in a file
   - =afterUri= (string, optional): URI of sibling to insert after. If not given, append as last child of parent

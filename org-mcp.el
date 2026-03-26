@@ -1129,25 +1129,25 @@ MCP Parameters:
       (org-todo new_state))))
 
 (defun org-mcp--tool-add-todo
-    (title todo_state tags body parent_uri &optional after_uri)
+    (title todo_state body parent_uri &optional tags after_uri)
   "Add a new TODO item to an Org file.
 Creates an Org ID for the new headline and returns its ID-based URI.
 TITLE is the headline text.
 TODO_STATE is the TODO state from `org-todo-keywords'.
-TAGS is a single tag string or list of tag strings.
 BODY is optional body text.
 PARENT_URI is the URI of the parent item.
+TAGS is an optional single tag string or list of tag strings.
 AFTER_URI is optional URI of sibling to insert after.
 
 MCP Parameters:
   title - The headline text
   todo_state - TODO state from `org-todo-keywords'
-  tags - Tags to add (single string or array of strings)
   body - Optional body text content
   parent_uri - Parent item URI
                Formats:
                  - org-headline://{absolute-path}#{headline-path}
                  - org-id://{id}
+  tags - Tags to add (optional, single string or array of strings)
   after_uri - Sibling to insert after (optional)
               Formats:
                 - org-headline://{absolute-path}#{headline-path}
@@ -2170,7 +2170,7 @@ Returns JSON object:
    :id "org-add-todo"
    :description
    "Add a new TODO item to an Org file at a specified location.
-Creates the headline with TODO state, tags, and optional body content.
+Creates the headline with TODO state, optional tags, and optional body content.
 Automatically creates an Org ID property for the new headline.
 
 Parameters:
@@ -2178,7 +2178,7 @@ Parameters:
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo_state - TODO keyword from org-todo-keywords (string, required)
-  tags - Tags for the headline (string or array, required)
+  tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]
          Validated against org-tag-alist if configured
