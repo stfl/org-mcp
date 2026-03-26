@@ -1125,12 +1125,13 @@ BODY-END is the buffer position where body ends."
   (json-encode `((files . ,(vconcat org-mcp-allowed-files)))))
 
 (defun org-mcp--tool-update-todo-state
-    (uri new_state &optional current_state)
+    (uri new_state &optional current_state note)
   "Update the TODO state of a headline at URI.
 Creates an Org ID for the headline if one doesn't exist.
 Returns the ID-based URI for the updated headline.
 NEW_STATE is the new TODO state to set.
 CURRENT_STATE, when provided, is checked against the actual state.
+NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 
 MCP Parameters:
   uri - URI of the headline
@@ -1140,7 +1141,10 @@ MCP Parameters:
   new_state - New TODO state (must be in `org-todo-keywords')
   current_state - Expected current TODO state (string, optional)
                   When provided, must match actual state or tool will error
-                  Omit to skip the state check"
+                  Omit to skip the state check
+  note - Optional note to attach to this state transition (string, optional)
+         When provided, stored in LOGBOOK as part of the state change entry
+         Empty or whitespace-only values are ignored"
   (let* ((parsed (org-mcp--parse-resource-uri uri))
          (file-path (car parsed))
          (headline-path (cdr parsed))
@@ -1165,7 +1169,27 @@ MCP Parameters:
            "State")))
 
       ;; Update the state
-      (org-todo new_state))))
+      (org-todo new_state)
+
+      ;; Add note to state transition if provided
+      (when (and note (not (string-empty-p (string-trim note))))
+        ;; Discard any interactive log hook org-todo may have set up
+        (remove-hook 'post-command-hook 'org-add-log-note)
+        ;; Set up state-type note at current headline position
+        (org-add-log-setup 'state new_state actual-prev 'note)
+        ;; Remove hook again; we handle the note ourselves
+        (remove-hook 'post-command-hook 'org-add-log-note)
+        ;; Initialize the variables that org-add-log-note (the interactive
+        ;; hook we bypassed) would normally set before org-store-log-note
+        (move-marker org-log-note-return-to (point))
+        (setq org-log-note-window-configuration
+              (current-window-configuration))
+        ;; Store note text and insert into buffer via marker
+        (save-current-buffer
+          (set-buffer (get-buffer-create "*Org Note*"))
+          (erase-buffer)
+          (insert note)
+          (org-store-log-note))))))
 
 (defun org-mcp--tool-add-todo
     (title todo_state body parent_uri &optional tags after_uri)
@@ -2246,6 +2270,9 @@ Parameters:
                   Omit to skip the state check
   new_state - New TODO state to set (string, required)
               Must be valid keyword from org-todo-keywords
+  note - Optional note to attach to this state transition (string, optional)
+         When provided, stored in LOGBOOK as part of the state change entry
+         Empty or whitespace-only values are ignored
 
 Returns JSON object:
   success - Always true on success (boolean)

@@ -1043,14 +1043,16 @@ EXPECTED-PATTERN is a regexp that the file content should match."
 
 ;; Helper functions for testing org-update-todo-state MCP tool
 
-(defun org-mcp-test--call-update-todo-state (uri new-state &optional current-state)
+(defun org-mcp-test--call-update-todo-state (uri new-state &optional current-state note)
   "Call org-update-todo-state tool via JSON-RPC and return the result.
 URI is the headline URI, NEW-STATE is the new TODO state to set.
-CURRENT-STATE, when provided, is the expected current TODO state."
+CURRENT-STATE, when provided, is the expected current TODO state.
+NOTE, when provided, is a note to attach to the state transition."
   (let* ((params
           `((uri . ,uri)
             (new_state . ,new-state)
-            ,@(when current-state `((current_state . ,current-state)))))
+            ,@(when current-state `((current_state . ,current-state)))
+            ,@(when note `((note . ,note)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-update-todo-state" params)))
     (json-read-from-string result-text)))
@@ -2071,6 +2073,39 @@ Another task."))
             (should (equal (alist-get 'new_state result) "TODO"))
             (should (stringp (alist-get 'uri result)))
             (should (string-prefix-p "org-id://" (alist-get 'uri result)))))))))
+
+(defconst org-mcp-test--expected-task-one-done-with-note-regex
+  (concat
+   "\\`\\* DONE Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "- State \"DONE\"[ \t]+from \"TODO\"[ \t]+\\[.*\\] \\\\\\\\\n"
+   "  Test note\n"
+   ":END:\n"
+   "\\(?:.\\|\n\\)*\\'")
+  "Regex matching buffer after updating Task One to DONE with a note.")
+
+(ert-deftest org-mcp-test-update-todo-state-with-note ()
+  "Test TODO state update with an attached note."
+  (let ((test-content "* TODO Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-log-into-drawer t))
+        (let ((resource-uri
+               (format "org-headline://%s#Task%%20One" test-file)))
+          (let* ((params `((uri . ,resource-uri)
+                           (new_state . "DONE")
+                           (note . "Test note")))
+                 (result-text (mcp-server-lib-ert-call-tool
+                               "org-update-todo-state" params))
+                 (result (json-read-from-string result-text)))
+            (should (equal (alist-get 'success result) t))
+            (should (equal (alist-get 'previous_state result) "TODO"))
+            (should (equal (alist-get 'new_state result) "DONE"))
+            (org-mcp-test--verify-file-matches
+             test-file
+             org-mcp-test--expected-task-one-done-with-note-regex)))))))
 
 (ert-deftest org-mcp-test-add-todo-top-level ()
   "Test adding a top-level TODO item."

@@ -248,6 +248,7 @@ Empty configuration returns:
   - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
+  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
 - *Returns:* Success status with previous and new states, and ID-based URI of the updated headline
 
 Example:
