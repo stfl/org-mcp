@@ -1660,7 +1660,7 @@ Very deep content."))
       (let ((uri
              (format "org-headline://%s#Nonexistent" test-file)))
         (org-mcp-test--read-resource-expecting-error
-         uri "Cannot find headline: 'Nonexistent'")))))
+         uri "Cannot find Headline: 'Nonexistent'")))))
 
 (ert-deftest org-mcp-test-headline-resource-file-with-hash ()
   "Test headline resource with # in filename."
@@ -1752,7 +1752,7 @@ Very deep content."))
      ;; But the bug causes it to return the wrong headline
      (org-mcp-test--read-resource-expecting-error
       uri
-      "Cannot find headline: 'First Parent/Target Headline'"))))
+      "Cannot find Headline: 'First Parent/Target Headline'"))))
 
 (ert-deftest org-mcp-test-id-resource-returns-content ()
   "Test that ID resource returns content for valid ID."
