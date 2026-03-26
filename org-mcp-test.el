@@ -794,6 +794,10 @@ Content of subsection 2.1."
    "\\'")
   "Regex matching the complete file after org-clock-out closes the CLOCK entry.")
 
+(defconst org-mcp-test--before-save-hook-initial-content
+  "* Headline\n\nOriginal body\n"
+  "Initial org file content for before-save-hook tests.")
+
 ;; Test helpers
 
 (defun org-mcp-test--read-file (file)
@@ -3083,6 +3087,21 @@ Some quote
        (string-match-p
         org-mcp-test--pattern-tool-read-by-id
         result-text)))))
+
+(ert-deftest org-mcp-test-before-save-hook-runs ()
+  "Test that before-save-hook runs when org-mcp saves a file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--before-save-hook-initial-content))
+    (let ((hook-called nil)
+          (before-save-hook before-save-hook))
+      (add-hook 'before-save-hook (lambda () (setq hook-called t)))
+      (mcp-server-lib-ert-call-tool
+       "org-edit-body"
+       `((resource_uri . ,(format "org-headline://%s#Headline" test-file))
+         (old_body . "Original body")
+         (new_body . "Updated body")
+         (replace_all . nil)))
+      (should hook-called))))
 
 (ert-deftest org-mcp-test-clock-add-saves-file-to-disk ()
   "Test org-clock-add saves the completed CLOCK entry to disk."
