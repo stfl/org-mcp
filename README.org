@@ -367,6 +367,164 @@ Example:
 }
 #+end_src
 
+*** org-set-properties
+- *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+- *Returns:* Success status with arrays of =properties_set= and =properties_deleted=, plus ID-based URI
+
+Example:
+#+begin_src json
+# Set and delete properties:
+{
+  "uri": "org-id://abc-123",
+  "properties": {
+    "EFFORT": "2:00",
+    "CATEGORY": null
+  }
+}
+
+# Success response:
+{
+  "success": true,
+  "properties_set": ["EFFORT"],
+  "properties_deleted": ["CATEGORY"],
+  "uri": "org-id://abc-123"
+}
+#+end_src
+
+*** org-update-scheduled
+- *Description:* Update the SCHEDULED timestamp on an Org headline
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+- *Returns:* Success status with =previous_scheduled=, =new_scheduled=, and ID-based URI
+
+Example:
+#+begin_src json
+# Set scheduled:
+{
+  "uri": "org-id://abc-123",
+  "scheduled": "2026-03-27"
+}
+
+# Remove scheduled:
+{
+  "uri": "org-id://abc-123",
+  "scheduled": ""
+}
+#+end_src
+
+*** org-update-deadline
+- *Description:* Update the DEADLINE timestamp on an Org headline
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+- *Returns:* Success status with =previous_deadline=, =new_deadline=, and ID-based URI
+
+Example:
+#+begin_src json
+# Set deadline:
+{
+  "uri": "org-id://abc-123",
+  "deadline": "2026-04-15"
+}
+
+# Remove deadline:
+{
+  "uri": "org-id://abc-123",
+  "deadline": ""
+}
+#+end_src
+
+*** org-set-tags
+- *Description:* Set tags on an Org headline, replacing any existing tags
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+- *Returns:* Success status with =previous_tags= and =new_tags= arrays, plus ID-based URI
+
+Example:
+#+begin_src json
+# Set tags:
+{
+  "uri": "org-id://abc-123",
+  "tags": ["work", "urgent"]
+}
+
+# Clear all tags:
+{
+  "uri": "org-id://abc-123"
+}
+#+end_src
+
+*** org-set-priority
+- *Description:* Set or remove priority on an Org headline
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
+- *Returns:* Success status with =previous_priority=, =new_priority=, and ID-based URI
+
+Example:
+#+begin_src json
+# Set priority:
+{
+  "uri": "org-id://abc-123",
+  "priority": "A"
+}
+
+# Remove priority:
+{
+  "uri": "org-id://abc-123",
+  "priority": ""
+}
+#+end_src
+
+*** org-append-body
+- *Description:* Append content to the body of an Org headline, inserting after existing body content but before any child headlines
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =content= (string, required): Text to append. Cannot be empty, cannot introduce headlines at same or higher level, must maintain balanced =#+BEGIN/#+END= blocks
+- *Returns:* Success status with ID-based URI
+
+Example:
+#+begin_src json
+# Append to body:
+{
+  "uri": "org-id://abc-123",
+  "content": "Additional notes from meeting."
+}
+
+# Success response:
+{
+  "success": true,
+  "uri": "org-id://abc-123"
+}
+#+end_src
+
+*** org-add-logbook-note
+- *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
+- *Parameters:*
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
+- *Returns:* Success status with ID-based URI
+
+Example:
+#+begin_src json
+# Add a note:
+{
+  "uri": "org-id://abc-123",
+  "note": "Discussed with team - approved approach B."
+}
+
+# Success response:
+{
+  "success": true,
+  "uri": "org-id://abc-123"
+}
+#+end_src
+
 *** org-ql-query
 - *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
 - *Parameters:*

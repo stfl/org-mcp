@@ -2125,6 +2125,287 @@ Another task."))
    "\\(?:.\\|\n\\)*\\'")
   "Regex: Weekly Task after repeat with REPEAT_TO_STATE reverts to NEXT.")
 
+;;; Test data for CRUD entry tools
+
+(defconst org-mcp-test--content-bare-todo
+  "* TODO Simple Task\nTask body text."
+  "Bare TODO task without properties for CRUD tests.")
+
+(defconst org-mcp-test--content-todo-with-props
+  "* TODO Task with Properties
+:PROPERTIES:
+:EFFORT:   1:00
+:CATEGORY: work
+:END:
+Some body."
+  "TODO task with existing user properties.")
+
+(defconst org-mcp-test--content-todo-with-scheduled
+  "* TODO Scheduled Task
+SCHEDULED: <2026-03-01 Sun>
+Task body."
+  "TODO task with a SCHEDULED timestamp.")
+
+(defconst org-mcp-test--content-todo-with-deadline
+  "* TODO Deadline Task
+DEADLINE: <2026-03-15 Sun>
+Task body."
+  "TODO task with a DEADLINE timestamp.")
+
+(defconst org-mcp-test--content-todo-with-priority
+  "* TODO [#B] Priority Task\nTask body."
+  "TODO task with priority B.")
+
+(defconst org-mcp-test--content-todo-with-children
+  "* TODO Parent Task
+Parent body.
+** Child One
+Child body."
+  "TODO task with a child heading for append-body tests.")
+
+(defconst org-mcp-test--content-todo-empty-body
+  "* TODO Empty Body Task"
+  "TODO task with no body content.")
+
+(defconst org-mcp-test--content-todo-with-logbook
+  "* TODO Task with Logbook
+:LOGBOOK:
+CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00
+:END:
+Task body."
+  "TODO task with an existing LOGBOOK drawer.")
+
+;; Patterns for CRUD tool tests
+
+(defconst org-mcp-test--pattern-set-properties-new
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +2:00\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting EFFORT property on bare task.")
+
+(defconst org-mcp-test--pattern-set-properties-update
+  (concat
+   "\\`\\* TODO Task with Properties\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +2:30\n"
+   " *:CATEGORY: +work\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Some body\\.\n?\\'")
+  "Pattern after updating EFFORT property.")
+
+(defconst org-mcp-test--pattern-set-properties-delete
+  (concat
+   "\\`\\* TODO Task with Properties\n"
+   " *:PROPERTIES:\n"
+   " *:CATEGORY: +work\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Some body\\.\n?\\'")
+  "Pattern after deleting EFFORT property.")
+
+(defconst org-mcp-test--pattern-scheduled-set
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 .*>\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting SCHEDULED on bare task.")
+
+(defconst org-mcp-test--pattern-scheduled-update
+  (concat
+   "\\`\\* TODO Scheduled Task\n"
+   "SCHEDULED: <2026-04-15 .*>\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after updating existing SCHEDULED.")
+
+(defconst org-mcp-test--pattern-scheduled-remove
+  (concat
+   "\\`\\* TODO Scheduled Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after removing SCHEDULED.")
+
+(defconst org-mcp-test--pattern-deadline-set
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "DEADLINE: <2026-03-27 .*>\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting DEADLINE on bare task.")
+
+(defconst org-mcp-test--pattern-deadline-update
+  (concat
+   "\\`\\* TODO Deadline Task\n"
+   "DEADLINE: <2026-04-15 .*>\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after updating existing DEADLINE.")
+
+(defconst org-mcp-test--pattern-deadline-remove
+  (concat
+   "\\`\\* TODO Deadline Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after removing DEADLINE.")
+
+(defconst org-mcp-test--pattern-tags-set
+  (concat
+   "\\`\\* TODO Simple Task[ \t]+:work:urgent:\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting tags on bare task.")
+
+(defconst org-mcp-test--pattern-tags-replace
+  (concat
+   "\\`\\* TODO Task with Tags[ \t]+:personal:\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after replacing tags.")
+
+(defconst org-mcp-test--pattern-tags-clear
+  (concat
+   "\\`\\* TODO Task with Tags\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after clearing all tags.")
+
+(defconst org-mcp-test--pattern-priority-set
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting priority A on bare task.")
+
+(defconst org-mcp-test--pattern-priority-change
+  (concat
+   "\\`\\* TODO \\[#C\\] Priority Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after changing priority from B to C.")
+
+(defconst org-mcp-test--pattern-priority-remove
+  (concat
+   "\\`\\* TODO Priority Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after removing priority.")
+
+(defconst org-mcp-test--pattern-append-body
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Task body text\\.\n"
+   "Appended line\\.\n?\\'")
+  "Pattern after appending to body.")
+
+(defconst org-mcp-test--pattern-append-body-empty
+  (concat
+   "\\`\\* TODO Empty Body Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "New body content\\.\n?\\'")
+  "Pattern after appending to empty body.")
+
+(defconst org-mcp-test--pattern-append-body-with-children
+  (concat
+   "\\`\\* TODO Parent Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Parent body\\.\n"
+   "Appended text\\.\n"
+   "\\*\\* Child One\n"
+   "Child body\\.\n?\\'")
+  "Pattern after appending body before children.")
+
+(defconst org-mcp-test--pattern-logbook-note-new
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  This is my note\\.\n"
+   ":END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding logbook note to task without LOGBOOK.")
+
+(defconst org-mcp-test--pattern-logbook-note-existing
+  (concat
+   "\\`\\* TODO Task with Logbook\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Another note\\.\n"
+   "CLOCK: \\[2026-01-01 Thu 10:00\\]--\\[2026-01-01 Thu 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after adding logbook note to task with existing LOGBOOK.")
+
+(defconst org-mcp-test--pattern-logbook-note-multiline
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  First line\\.\n"
+   "  Second line\\.\n"
+   ":END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding multiline logbook note.")
+
+(defconst org-mcp-test--crud-test-id
+  "crud-test-id-001"
+  "ID for CRUD test entries.")
+
+(defconst org-mcp-test--content-todo-with-test-id
+  (format
+   "* TODO ID Task
+:PROPERTIES:
+:ID:       %s
+:END:
+Task body."
+   org-mcp-test--crud-test-id)
+  "TODO task with known ID for CRUD tests.")
+
 (ert-deftest org-mcp-test-update-todo-state-with-note ()
   "Test TODO state update with an attached note."
   (let ((test-content "* TODO Task One\nTask description."))
@@ -3294,6 +3575,638 @@ This exercises the write path in org-mcp--complete-and-save."
       (should (equal (alist-get 'clocked_out result) t)))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--clock-out-expected-regex)))
+
+;;; Tests for org-set-properties
+
+(ert-deftest org-mcp-test-set-properties-new ()
+  "Test setting a new property on a bare task."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (properties . ((EFFORT . "2:00")))))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-properties" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-new))))
+
+(ert-deftest org-mcp-test-set-properties-update ()
+  "Test updating an existing property."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let* ((uri (format "org-headline://%s#Task%%20with%%20Properties"
+                        test-file))
+           (params `((uri . ,uri)
+                     (properties . ((EFFORT . "2:30")))))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-properties" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-update))))
+
+(ert-deftest org-mcp-test-set-properties-delete ()
+  "Test deleting a property via null value."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let* ((uri (format "org-headline://%s#Task%%20with%%20Properties"
+                        test-file))
+           (params `((uri . ,uri)
+                     (properties . ((EFFORT)))))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-properties" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-delete))))
+
+(ert-deftest org-mcp-test-set-properties-forbid-special ()
+  "Test that special properties are rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-properties" 1
+                `((uri . ,uri)
+                  (properties . ((TODO . "DONE"))))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-properties-id-uri ()
+  "Test setting properties via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (properties . ((EFFORT . "1:00")))))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-set-properties" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-update-scheduled
+
+(ert-deftest org-mcp-test-update-scheduled-set ()
+  "Test setting SCHEDULED on entry without one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (scheduled . "2026-03-27")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'previous_scheduled result) ""))
+      (should (string-match-p "<2026-03-27"
+                              (alist-get 'new_scheduled result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-set))))
+
+(ert-deftest org-mcp-test-update-scheduled-update ()
+  "Test updating an existing SCHEDULED timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let* ((uri (format "org-headline://%s#Scheduled%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (scheduled . "2026-04-15")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (string-match-p "<2026-03-01"
+                              (alist-get 'previous_scheduled result)))
+      (should (string-match-p "<2026-04-15"
+                              (alist-get 'new_scheduled result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-update))))
+
+(ert-deftest org-mcp-test-update-scheduled-remove ()
+  "Test removing SCHEDULED timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let* ((uri (format "org-headline://%s#Scheduled%%20Task" test-file))
+           (params `((uri . ,uri)))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_scheduled result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-remove))))
+
+(ert-deftest org-mcp-test-update-scheduled-invalid-date ()
+  "Test that invalid date format triggers an error."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-update-scheduled" 1
+                `((uri . ,uri)
+                  (scheduled . "not-a-date"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-update-scheduled-id-uri ()
+  "Test setting SCHEDULED via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (scheduled . "2026-03-27")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-update-deadline
+
+(ert-deftest org-mcp-test-update-deadline-set ()
+  "Test setting DEADLINE on entry without one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (deadline . "2026-03-27")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-deadline" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'previous_deadline result) ""))
+      (should (string-match-p "<2026-03-27"
+                              (alist-get 'new_deadline result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-set))))
+
+(ert-deftest org-mcp-test-update-deadline-update ()
+  "Test updating an existing DEADLINE timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let* ((uri (format "org-headline://%s#Deadline%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (deadline . "2026-04-15")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-deadline" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (string-match-p "<2026-03-15"
+                              (alist-get 'previous_deadline result)))
+      (should (string-match-p "<2026-04-15"
+                              (alist-get 'new_deadline result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-update))))
+
+(ert-deftest org-mcp-test-update-deadline-remove ()
+  "Test removing DEADLINE timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let* ((uri (format "org-headline://%s#Deadline%%20Task" test-file))
+           (params `((uri . ,uri)))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-update-deadline" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_deadline result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-remove))))
+
+(ert-deftest org-mcp-test-update-deadline-invalid-date ()
+  "Test that invalid date format triggers an error."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-update-deadline" 1
+                `((uri . ,uri)
+                  (deadline . "not-a-date"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-update-deadline-id-uri ()
+  "Test setting DEADLINE via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (deadline . "2026-03-27")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-update-deadline" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-set-tags
+
+(ert-deftest org-mcp-test-set-tags-add ()
+  "Test adding tags to a bare task."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((org-tag-alist '("work" "personal" "urgent"))
+           (uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (tags . ["work" "urgent"])))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-tags" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'previous_tags result) []))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-set))))
+
+(ert-deftest org-mcp-test-set-tags-replace ()
+  "Test replacing existing tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let* ((org-tag-alist '("work" "personal" "urgent"))
+           (uri (format "org-headline://%s#Task%%20with%%20Tags"
+                        test-file))
+           (params `((uri . ,uri)
+                     (tags . "personal")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-tags" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-replace))))
+
+(ert-deftest org-mcp-test-set-tags-clear ()
+  "Test clearing all tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let* ((uri (format "org-headline://%s#Task%%20with%%20Tags"
+                        test-file))
+           (params `((uri . ,uri)))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-tags" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_tags result) []))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-clear))))
+
+(ert-deftest org-mcp-test-set-tags-invalid-name ()
+  "Test that invalid tag names are rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-tags" 1
+                `((uri . ,uri)
+                  (tags . "invalid tag!"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-tags-not-in-alist ()
+  "Test that tags not in org-tag-alist are rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-tag-alist '("work" "personal"))
+          (uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-tags" 1
+                `((uri . ,uri)
+                  (tags . "nonexistent"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-tags-mutex-violation ()
+  "Test that mutually exclusive tags are rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-tag-alist '(:startgroup "work" "personal" :endgroup "urgent"))
+          (uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-tags" 1
+                `((uri . ,uri)
+                  (tags . ["work" "personal"]))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-tags-id-uri ()
+  "Test setting tags via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (tags . "work")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-set-tags" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-set-priority
+
+(ert-deftest org-mcp-test-set-priority-set ()
+  "Test setting priority on a bare task."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (priority . "A")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-priority" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'previous_priority result) ""))
+      (should (equal (alist-get 'new_priority result) "A"))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-priority-set))))
+
+(ert-deftest org-mcp-test-set-priority-change ()
+  "Test changing existing priority."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let* ((uri (format "org-headline://%s#Priority%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (priority . "C")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-priority" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'previous_priority result) "B"))
+      (should (equal (alist-get 'new_priority result) "C"))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-priority-change))))
+
+(ert-deftest org-mcp-test-set-priority-remove ()
+  "Test removing priority."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let* ((uri (format "org-headline://%s#Priority%%20Task" test-file))
+           (params `((uri . ,uri)))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-priority" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_priority result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-priority-remove))))
+
+(ert-deftest org-mcp-test-set-priority-out-of-range ()
+  "Test that out-of-range priority is rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-priority" 1
+                `((uri . ,uri)
+                  (priority . "Z"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-priority-multi-char ()
+  "Test that multi-character priority is rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-set-priority" 1
+                `((uri . ,uri)
+                  (priority . "AB"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-set-priority-id-uri ()
+  "Test setting priority via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (priority . "A")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-set-priority" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-append-body
+
+(ert-deftest org-mcp-test-append-body ()
+  "Test appending to existing body."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (content . "Appended line.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-append-body" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-append-body))))
+
+(ert-deftest org-mcp-test-append-body-empty-entry ()
+  "Test appending to entry with no body."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-empty-body))
+    (let* ((uri (format "org-headline://%s#Empty%%20Body%%20Task"
+                        test-file))
+           (params `((uri . ,uri)
+                     (content . "New body content.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-append-body" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-append-body-empty))))
+
+(ert-deftest org-mcp-test-append-body-before-children ()
+  "Test that appended content goes before child headlines."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-children))
+    (let* ((uri (format "org-headline://%s#Parent%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (content . "Appended text.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-append-body" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-append-body-with-children))))
+
+(ert-deftest org-mcp-test-append-body-headline-error ()
+  "Test that content with headlines is rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-append-body" 1
+                `((uri . ,uri)
+                  (content . "* A headline"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-append-body-unbalanced-blocks-error ()
+  "Test that unbalanced blocks are rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-append-body" 1
+                `((uri . ,uri)
+                  (content . "#+BEGIN_SRC\ncode\n"))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-append-body-id-uri ()
+  "Test appending body via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (content . "Appended.")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-append-body" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
+
+;;; Tests for org-add-logbook-note
+
+(ert-deftest org-mcp-test-add-logbook-note-new ()
+  "Test adding logbook note to task without LOGBOOK."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (note . "This is my note.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-logbook-note-new))))
+
+(ert-deftest org-mcp-test-add-logbook-note-existing ()
+  "Test adding logbook note to task with existing LOGBOOK."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-logbook))
+    (let* ((uri (format "org-headline://%s#Task%%20with%%20Logbook"
+                        test-file))
+           (params `((uri . ,uri)
+                     (note . "Another note.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-logbook-note-existing))))
+
+(ert-deftest org-mcp-test-add-logbook-note-multiline ()
+  "Test adding multiline logbook note with proper indentation."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((uri (format "org-headline://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (note . "First line.\nSecond line.")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-logbook-note-multiline))))
+
+(ert-deftest org-mcp-test-add-logbook-note-whitespace-only-error ()
+  "Test that whitespace-only note is rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((uri (format "org-headline://%s#Simple%%20Task" test-file)))
+      (org-mcp-test--assert-error-and-file
+       test-file
+       (let* ((request
+               (mcp-server-lib-create-tools-call-request
+                "org-add-logbook-note" 1
+                `((uri . ,uri)
+                  (note . "   "))))
+              (response (mcp-server-lib-process-jsonrpc-parsed
+                         request mcp-server-lib-ert-server-id))
+              (result (mcp-server-lib-ert-process-tool-response response)))
+         (error "Expected error but got success: %s" result))))))
+
+(ert-deftest org-mcp-test-add-logbook-note-id-uri ()
+  "Test adding logbook note via ID-based URI."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+          (params `((uri . ,uri)
+                    (note . "Test note.")))
+          (result-text
+           (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+          (result (json-read-from-string result-text)))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'uri result) uri)))))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

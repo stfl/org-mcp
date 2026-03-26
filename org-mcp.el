@@ -1013,6 +1013,18 @@ Throws an MCP tool error if validation fails."
     (org-mcp--tool-validation-error
      "Headline title cannot contain newlines")))
 
+(defun org-mcp--validate-date-string (date-str)
+  "Validate that DATE-STR is a recognizable date format.
+Accepts ISO-like dates: YYYY-MM-DD with optional HH:MM time.
+Throws an MCP tool error if the format is invalid."
+  (unless
+      (string-match-p
+       "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\( [0-9]\\{2\\}:[0-9]\\{2\\}\\)?$"
+       date-str)
+    (org-mcp--tool-validation-error
+     "Invalid date format '%s' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM"
+     date-str)))
+
 (defun org-mcp--validate-body-no-headlines (body level)
   "Validate that BODY doesn't contain headlines at LEVEL or higher.
 LEVEL is the Org outline level (1 for *, 2 for **, etc).
@@ -1709,6 +1721,357 @@ MCP Parameters:
            replace_all
            body-begin
            body-end))))))
+
+(defconst org-mcp--special-properties
+  '("TODO"
+    "TAGS"
+    "ALLTAGS"
+    "PRIORITY"
+    "SCHEDULED"
+    "DEADLINE"
+    "CLOSED"
+    "CATEGORY"
+    "ITEM"
+    "FILE"
+    "BLOCKED"
+    "CLOCKSUM"
+    "CLOCKSUM_T"
+    "TIMESTAMP"
+    "TIMESTAMP_IA")
+  "Org special properties that cannot be set via `org-set-properties'.")
+
+(defun org-mcp--tool-set-properties (uri properties)
+  "Set or delete properties on the headline at URI.
+PROPERTIES is an alist of property name-value pairs.
+String values set the property; null/empty values delete it.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  properties - JSON object of property name-value pairs (required)
+               String value: set property to that value
+               null or empty string: delete the property
+               Special properties (TODO, TAGS, PRIORITY, etc.) are
+               forbidden"
+  (unless (and properties (listp properties))
+    (org-mcp--tool-validation-error
+     "Properties must be a non-empty JSON object"))
+  ;; Validate no special properties
+  (dolist (pair properties)
+    (let ((key
+           (if (symbolp (car pair))
+               (symbol-name (car pair))
+             (car pair))))
+      (when (member (upcase key) org-mcp--special-properties)
+        (org-mcp--tool-validation-error
+         "Cannot set special property '%s' - use the dedicated tool"
+         key))))
+
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (set-props nil)
+         (deleted-props nil))
+
+    (org-mcp--modify-and-save file-path "set properties"
+                              `((properties_set . ,set-props)
+                                (properties_deleted . ,deleted-props))
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (dolist (pair properties)
+        (let* ((key
+                (if (symbolp (car pair))
+                    (symbol-name (car pair))
+                  (car pair)))
+               (val (cdr pair)))
+          (if (or (null val) (equal val ""))
+              (progn
+                (org-delete-property key)
+                (push key deleted-props))
+            (org-set-property
+             key
+             (if (stringp val)
+                 val
+               (format "%s" val)))
+            (push key set-props))))
+      (setq set-props (nreverse set-props))
+      (setq deleted-props (nreverse deleted-props)))))
+
+(defun org-mcp--tool-update-scheduled (uri &optional scheduled)
+  "Update SCHEDULED timestamp on headline at URI.
+SCHEDULED is an ISO date string or nil/empty to remove.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  scheduled - ISO date string (optional)
+              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+              nil or empty string removes the timestamp"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (previous-scheduled nil)
+         (new-scheduled nil))
+
+    (org-mcp--modify-and-save file-path "update scheduled"
+                              `((previous_scheduled
+                                 . ,previous-scheduled)
+                                (new_scheduled . ,new-scheduled))
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (setq previous-scheduled
+            (or (org-entry-get (point) "SCHEDULED") ""))
+
+      (if (or (null scheduled) (equal scheduled ""))
+          ;; Remove scheduled
+          (progn
+            (org-schedule '(4))
+            (setq new-scheduled ""))
+        ;; Validate date format before calling org-schedule
+        (org-mcp--validate-date-string scheduled)
+        (org-schedule nil scheduled)
+        (setq new-scheduled
+              (or (org-entry-get (point) "SCHEDULED") ""))))))
+
+(defun org-mcp--tool-update-deadline (uri &optional deadline)
+  "Update DEADLINE timestamp on headline at URI.
+DEADLINE is an ISO date string or nil/empty to remove.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  deadline - ISO date string (optional)
+             Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+             nil or empty string removes the timestamp"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (previous-deadline nil)
+         (new-deadline nil))
+
+    (org-mcp--modify-and-save file-path "update deadline"
+                              `((previous_deadline
+                                 . ,previous-deadline)
+                                (new_deadline . ,new-deadline))
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (setq previous-deadline
+            (or (org-entry-get (point) "DEADLINE") ""))
+
+      (if (or (null deadline) (equal deadline ""))
+          ;; Remove deadline
+          (progn
+            (org-deadline '(4))
+            (setq new-deadline ""))
+        ;; Validate date format before calling org-deadline
+        (org-mcp--validate-date-string deadline)
+        (org-deadline nil deadline)
+        (setq new-deadline
+              (or (org-entry-get (point) "DEADLINE") ""))))))
+
+(defun org-mcp--tool-set-tags (uri &optional tags)
+  "Set tags on headline at URI.
+TAGS can be a string, list of strings, or nil/empty to clear all tags.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  tags - Tags to set (string or array, optional)
+         Single tag: \"work\"
+         Multiple tags: [\"work\", \"urgent\"]
+         nil or empty to clear all tags
+         Validated against org-tag-alist if configured"
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (previous-tags nil)
+         (new-tags nil))
+
+    ;; Validate tags if provided
+    (let ((tag-list
+           (if (or (null tags) (equal tags "") (equal tags []))
+               nil
+             (org-mcp--validate-and-normalize-tags tags))))
+
+      (org-mcp--modify-and-save file-path "set tags"
+                                `((previous_tags
+                                   .
+                                   ,(or previous-tags []))
+                                  (new_tags . ,(or new-tags [])))
+        (org-mcp--goto-headline-from-uri
+         headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+        (setq previous-tags (vconcat (org-get-tags nil t)))
+
+        (org-set-tags tag-list)
+
+        (setq new-tags (vconcat (org-get-tags nil t)))))))
+
+(defun org-mcp--tool-set-priority (uri &optional priority)
+  "Set priority on headline at URI.
+PRIORITY is a single-character string or nil/empty to remove.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  priority - Priority character (string, optional)
+             Must be within org-priority-highest to org-priority-lowest
+             nil or empty string removes the priority"
+  ;; Validate priority if provided
+  (when (and priority (not (equal priority "")))
+    (unless (= (length priority) 1)
+      (org-mcp--tool-validation-error
+       "Priority must be a single character, got '%s'"
+       priority))
+    (let ((char (string-to-char priority)))
+      (unless (and (>= char org-priority-highest)
+                   (<= char org-priority-lowest))
+        (org-mcp--tool-validation-error
+         "Priority '%s' out of range ('%c' to '%c')"
+         priority org-priority-highest org-priority-lowest))))
+
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed))
+         (previous-priority nil)
+         (new-priority nil))
+
+    (org-mcp--modify-and-save file-path "set priority"
+                              `((previous_priority
+                                 . ,previous-priority)
+                                (new_priority . ,new-priority))
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (setq previous-priority
+            (let ((p
+                   (org-element-property
+                    :priority (org-element-at-point))))
+              (if p
+                  (char-to-string p)
+                "")))
+
+      (if (or (null priority) (equal priority ""))
+          ;; Remove priority
+          (progn
+            (org-priority ?\s)
+            (setq new-priority ""))
+        ;; Set priority
+        (org-priority (string-to-char priority))
+        (setq new-priority priority)))))
+
+(defun org-mcp--tool-append-body (uri content)
+  "Append CONTENT to the body of headline at URI.
+Inserts after existing body content but before any child headlines.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  content - Text to append (string, required)
+            Cannot be empty or whitespace-only
+            Cannot contain headlines at same or higher level
+            Must have balanced #+BEGIN/#+END blocks"
+  (when (or (null content)
+            (string-empty-p content)
+            (string-match-p "\\`[[:space:]]*\\'" content))
+    (org-mcp--tool-validation-error
+     "Content cannot be empty or whitespace-only"))
+
+  (org-mcp--validate-body-no-unbalanced-blocks content)
+
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed)))
+
+    (org-mcp--modify-and-save file-path "append body" nil
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (org-mcp--validate-body-no-headlines
+       content (org-current-level))
+
+      ;; Save heading position for org-id-get-create later
+      (let ((heading-pos (point)))
+
+        ;; Skip past headline and properties/planning
+        (org-end-of-meta-data t)
+
+        ;; Find end of body (before next headline or end of subtree)
+        (let ((body-end nil))
+          (save-excursion
+            (if (org-goto-first-child)
+                (setq body-end (point))
+              (org-end-of-subtree t)
+              (setq body-end (point))))
+
+          (goto-char body-end)
+
+          ;; Ensure there's a newline before our content
+          (unless (or (= body-end (point-min))
+                      (= (char-before body-end) ?\n))
+            (insert "\n"))
+
+          (insert content)
+
+          ;; Ensure trailing newline
+          (unless (= (char-before (point)) ?\n)
+            (insert "\n")))
+
+        ;; Return to heading for org-id-get-create
+        (goto-char heading-pos)))))
+
+(defun org-mcp--tool-add-logbook-note (uri note)
+  "Add a timestamped note to the LOGBOOK drawer of headline at URI.
+
+MCP Parameters:
+  uri - URI of the headline
+        Formats:
+          - org-headline://{absolute-path}#{headline-path}
+          - org-id://{id}
+  note - Note text to add (string, required)
+         Cannot be empty or whitespace-only
+         Multi-line notes are indented properly in the LOGBOOK"
+  (when (or (null note)
+            (string-empty-p note)
+            (string-match-p "\\`[[:space:]]*\\'" note))
+    (org-mcp--tool-validation-error
+     "Note cannot be empty or whitespace-only"))
+
+  (let* ((parsed (org-mcp--parse-resource-uri uri))
+         (file-path (car parsed))
+         (headline-path (cdr parsed)))
+
+    (org-mcp--modify-and-save file-path "add logbook note" nil
+      (org-mcp--goto-headline-from-uri
+       headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
+
+      (let ((logbook-pos (org-mcp--clock-ensure-logbook))
+            (timestamp
+             (format-time-string (org-time-stamp-format t t))))
+        (goto-char logbook-pos)
+        ;; Format note lines: first line after timestamp, rest indented
+        (let* ((lines (split-string note "\n"))
+               (first-line (car lines))
+               (rest-lines (cdr lines)))
+          (insert (format "- Note taken on %s \\\\\n" timestamp))
+          (insert (format "  %s\n" first-line))
+          (dolist (line rest-lines)
+            (insert (format "  %s\n" line))))))))
 
 ;; org-ql integration
 
@@ -2577,6 +2940,183 @@ Special behavior - Empty old_body:
    :read-only nil
    :server-id org-mcp--server-id)
 
+  ;; Entry update tools
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-set-properties
+   :id "org-set-properties"
+   :description
+   "Set or delete properties on an Org headline.  Updates the
+PROPERTIES drawer.  Creates an Org ID for the headline if one
+doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  properties - JSON object of property name-value pairs (required)
+               String value: set the property
+               null or empty string: delete the property
+               Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
+               DEADLINE, etc.) are forbidden - use dedicated tools
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  properties_set - Array of property names that were set
+  properties_deleted - Array of property names that were deleted
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-update-scheduled
+   :id "org-update-scheduled"
+   :description
+   "Update the SCHEDULED timestamp on an Org headline.  Creates an
+Org ID for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  scheduled - ISO date string (string, optional)
+              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+              Omit or empty string to remove the timestamp
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  previous_scheduled - Previous SCHEDULED value (string, empty if none)
+  new_scheduled - New SCHEDULED value (string, empty if removed)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-update-deadline
+   :id "org-update-deadline"
+   :description
+   "Update the DEADLINE timestamp on an Org headline.  Creates an
+Org ID for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  deadline - ISO date string (string, optional)
+             Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+             Omit or empty string to remove the timestamp
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  previous_deadline - Previous DEADLINE value (string, empty if none)
+  new_deadline - New DEADLINE value (string, empty if removed)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-set-tags
+   :id "org-set-tags"
+   :description
+   "Set tags on an Org headline, replacing any existing tags.
+Creates an Org ID for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  tags - Tags to set (string or array, optional)
+         Single tag: \"work\"
+         Multiple tags: [\"work\", \"urgent\"]
+         Omit or empty to clear all tags
+         Validated against org-tag-alist if configured
+         Must follow Org tag rules (alphanumeric, _, @)
+         Respects mutually exclusive tag groups
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  previous_tags - Array of previous tags
+  new_tags - Array of new tags
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-set-priority
+   :id "org-set-priority"
+   :description
+   "Set or remove priority on an Org headline.  Creates an Org ID
+for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  priority - Priority character (string, optional)
+             Must be in the configured range (default \"A\" to \"C\")
+             Use org-get-priority-config to check the valid range
+             Omit or empty string to remove priority
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  previous_priority - Previous priority (string, empty if none)
+  new_priority - New priority (string, empty if removed)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-append-body
+   :id "org-append-body"
+   :description
+   "Append content to the body of an Org headline.  Inserts after
+existing body content but before any child headlines.  Creates an
+Org ID for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  content - Text to append (string, required)
+            Cannot be empty or whitespace-only
+            Cannot introduce headlines at same or higher level
+            Must maintain balanced #+BEGIN/#+END blocks
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
+   #'org-mcp--tool-add-logbook-note
+   :id "org-add-logbook-note"
+   :description
+   "Add a timestamped note to the LOGBOOK drawer of an Org headline.
+Creates the LOGBOOK drawer if it doesn't exist.  Creates an Org ID
+for the headline if one doesn't exist.
+
+Parameters:
+  uri - URI of the headline (string, required)
+        Formats:
+          - org-headline://{absolute-path}#{url-encoded-path}
+          - org-id://{uuid}
+  note - Note text to add (string, required)
+         Cannot be empty or whitespace-only
+         Multi-line notes are properly indented in the LOGBOOK
+         Note is inserted at the top of the LOGBOOK drawer
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  uri - ID-based URI (org-id://{uuid}) for the headline"
+   :read-only nil
+   :server-id org-mcp--server-id)
+
   (mcp-server-lib-register-tool
    #'org-mcp--tool-read
    :id "org-read"
@@ -3078,6 +3618,20 @@ Use this resource to:
   (mcp-server-lib-unregister-tool
    "org-rename-headline" org-mcp--server-id)
   (mcp-server-lib-unregister-tool "org-edit-body" org-mcp--server-id)
+  ;; Entry update tools
+  (mcp-server-lib-unregister-tool
+   "org-set-properties" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-update-scheduled" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-update-deadline" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-set-tags" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-set-priority" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-append-body" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-add-logbook-note" org-mcp--server-id)
   ;; Unregister workaround tools
   (mcp-server-lib-unregister-tool "org-read" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
