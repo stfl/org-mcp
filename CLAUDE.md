@@ -6,6 +6,17 @@ repository. These guidelines build on the common user's guidelines at
 <https://raw.githubusercontent.com/laurynas-biveinis/dotfiles/refs/heads/master/ai/.claude/CLAUDE.md>
 online.
 
+## Git Commits
+
+Always run `git commit` inside the Nix devshell:
+
+```sh
+nix develop --command git commit …
+```
+
+The pre-commit hooks run `just lint` and `just tests`, which require the tools
+provided by the devshell (eask, shellcheck, zizmor, etc.).
+
 ## Project Overview
 
 This repository is for org-mcp, which is an integration between Emacs Org-mode
