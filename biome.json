@@ -8,6 +8,14 @@
     "indentWidth": 2
   },
   "files": {
-    "includes": ["**", "!.eask", "!.git", "!.github", "!.claude"]
+    "includes": [
+      "**",
+      "!.direnv",
+      "!.eask",
+      "!.git",
+      "!.github",
+      "!.claude",
+      "!.pre-commit-config.yaml"
+    ]
   }
 }
