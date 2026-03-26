@@ -68,11 +68,32 @@ Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib
 
 *Note:* File paths in URIs use minimal encoding (only =#= characters are encoded). Avoid using =%= characters in Org file names.
 
-*** org://{filename}
-- *Description:* Access the raw content of an allowed Org file
-- *URI Pattern:* =org://{filename}= where filename is the absolute path to the file
+*** org://{uri}
+- *Description:* Access Org files or headlines with structured JSON (auto-detects URI type)
+- *URI Pattern:* =org://{uri}= where uri can be:
+  - Absolute file path (e.g., =/home/user/org/projects.org=)
+  - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=)
+  - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=)
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
-- *Returns:* Plain text content of the Org file
+- *Returns:* Structured JSON with file or headline data including metadata
+
+Example response for a headline:
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work", "urgent"],
+  "scheduled": "<2026-03-26 Thu>",
+  "deadline": "<2026-04-01 Mon>",
+  "level": 1,
+  "content": "Body text here...",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2, "uri": "org://..."}
+  ]
+}
+#+end_src
 
 *** org-outline://{filename}
 - *Description:* Get the hierarchical structure of an Org file
@@ -99,62 +120,39 @@ Returns: JSON structure like:
 }
 #+end_example
 
-*** org-headline://{filename}#{path}
-- *Description:* Access the content of a specific headline by its path
-- *URI Pattern:* =org-headline://{filename}#{path}= where:
-  - =filename= is the absolute path (with # encoded as %23)
-  - =path= is URL-encoded headline titles separated by =/=
-  - Headlines containing # must be encoded as %23 in the path
+*** org-headline://{uri}
+- *Description:* Access Org headlines or files as plain text (auto-detects URI type)
+- *URI Pattern:* =org-headline://{uri}= where uri can be:
+  - Absolute file path (e.g., =/home/user/org/projects.org=) → returns entire file
+  - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=) → returns headline subtree
+  - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=) → returns headline by ID
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
-- *Returns:* Plain text content of the specified headline section including all subheadings
+- *Returns:* Plain text content including the headline itself and all nested subheadings
+
+*Note:* The =org-id://= resource template has been merged into =org-headline://=. Use =org-headline://{uuid}= to access headlines by ID. Tools still accept =org-id://= URIs for backward compatibility.
 
 Example:
 #+begin_example
-# Access a headline:
+# Access a headline by path:
 URI: org-headline:///home/user/org/projects.org#Project%20Alpha/Requirements
-Returns: Content of "Requirements" under "Project Alpha"
+Returns: Plain text content of "Requirements" under "Project Alpha"
+
+# Access by UUID:
+URI: org-headline://550e8400-e29b-41d4-a716-446655440000
+Returns: Plain text content of the headline with that ID
+
+# Access entire file:
+URI: org-headline:///home/user/org/projects.org
+Returns: Plain text content of the entire file
 
 # Headline with # character (must be encoded as %23):
 URI: org-headline:///home/user/org/projects.org#Issue%20%2342
 Returns: Content of "Issue #42" headline
-
-# Access entire file (no fragment):
-URI: org-headline:///home/user/org/projects.org
-Returns: Full content of the file
-
-# File with # in the name (must be encoded as %23):
-URI: org-headline:///home/user/org/file%231.org#Headline
-Returns: Content of "Headline" from file#1.org
-
-# Both file and headline with # (all encoded):
-URI: org-headline:///home/user/org/file%231.org#Task%20%235
-Returns: Content of "Task #5" from file#1.org
 #+end_example
 
 *Encoding limitations:* File paths use minimal encoding (only =#= → =%23=) for readability.
 Files with =%= characters in their names should be avoided, as they may cause decoding issues.
-For such files, rename them or use =org-id://= URIs instead. Headline paths use full URL
-encoding.
-
-*** org-id URI Format
-- *Description:* Access Org node content by its unique ID property
-- *URI Pattern:* =org-id://{uuid}= where uuid is the value of an ID property
-- *Configuration:* The file containing the ID must be in =org-mcp-allowed-files=
-- *Returns:* Plain text content of the headline with the specified ID, including all subheadings
-
-Example:
-#+begin_example
-# Org file with ID property:
-,* Project Meeting Notes
-:PROPERTIES:
-:ID: 550e8400-e29b-41d4-a716-446655440000
-:END:
-Meeting content here...
-#+end_example
-
-Access via MCP:
-- URI: =org-id://550e8400-e29b-41d4-a716-446655440000=
-- Returns: Content of "Project Meeting Notes" section
+Headline paths use full URL encoding.
 
 ** Available MCP Tools
 
@@ -475,12 +473,31 @@ The file is auto-generated and should not be edited by hand. When =org-mcp-store
 
 *Note:* The following tools are temporary workarounds that duplicate the resource template functionality as tools. They exist because Claude Code currently doesn't discover resource templates.
 
-*** org-read-file
-- *Description:* Read complete raw content of an Org file
+*** org-read
+- *Description:* Read Org file or headline with structured JSON output (auto-detects URI format)
 - *Parameters:*
-  - =file= (string, required): Absolute path to an Org file
-- *Returns:* Plain text content of the entire Org file
+  - =uri= (string, required): URI string. Formats:
+    - =/path/to/file.org= - file path (returns file with children)
+    - =/path/to/file.org#Headline/Subhead= - headline path
+    - =UUID= (8-4-4-4-12 format) - ID-based lookup
+- *Returns:* Structured JSON with file or headline data including metadata
 - *Configuration:* File must be in =org-mcp-allowed-files=
+
+Example response for a headline:
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work"],
+  "level": 1,
+  "content": "Body text...",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2, "uri": "org://..."}
+  ]
+}
+#+end_src
 
 *** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline
@@ -490,20 +507,15 @@ The file is auto-generated and should not be edited by hand. When =org-mcp-store
 - *Configuration:* File must be in =org-mcp-allowed-files=
 
 *** org-read-headline
-- *Description:* Read specific Org headline by hierarchical path
+- *Description:* Read Org headline or file as plain text (auto-detects URI format)
 - *Parameters:*
-  - =file= (string, required): Absolute path to an Org file
-  - =headlinePath= (string, required): Non-empty slash-separated path to headline. Only slashes within headline titles must be URL-encoded as =%2F= to distinguish them from path separators. Other characters (spaces, =#=, etc.) do not need encoding. To read entire files, use =org-read-file= instead
-- *Returns:* Plain text content of the headline and its subtree
+  - =uri= (string, required): URI string. Formats:
+    - =/path/to/file.org= - returns entire file
+    - =/path/to/file.org#Headline/Subhead= - headline path
+    - =UUID= - ID-based lookup
+- *Returns:* Plain text content of the file or headline subtree
 - *Configuration:* File must be in =org-mcp-allowed-files=
-
-*** org-read-by-id
-- *Description:* Read Org headline by its unique ID property
-- *Parameters:*
-  - =uuid= (string, required): UUID from headline's ID property
-- *Returns:* Plain text content of the headline and its subtree
-- *Configuration:* File containing the ID must be in =org-mcp-allowed-files=
-- *Note:* More stable than path-based access since IDs don't change when headlines are renamed or moved
+- *Note:* Use this when you need plain text instead of structured JSON
 
 ** Clock Tracking Tools
 

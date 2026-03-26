@@ -368,6 +368,45 @@ File paths with # characters should be encoded as %23."
      (substring path-after-protocol (1+ hash-pos)))
     (cons (org-mcp--decode-file-path path-after-protocol) nil)))
 
+(defun org-mcp--detect-uri-type (uri)
+  "Detect URI type and return plist with parsed components.
+URI is a string that can be:
+- A UUID (8-4-4-4-12 hex format) → (:type id :uuid \"...\")
+- A file path with # fragment → (:type headline :file \"/...\" :headline-path (\"H1\" \"H2\"))
+- A file path starting with / → (:type file :file \"/...\")
+- A plain UUID string (for backward compatibility) → (:type id :uuid \"...\")
+Signals error if URI format is invalid."
+  (let ((uri (string-trim uri)))
+    (cond
+     ;; UUID pattern: 8-4-4-4-12 hex digits
+     ((string-match-p
+       "\\`[0-9a-fA-F]\\{8\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{12\\}\\'"
+       uri)
+      `(:type id :uuid ,uri))
+     ;; Contains # → headline path (file#headline)
+     ((string-match "#" uri)
+      (let* ((hash-pos (string-match "#" uri))
+             (file
+              (org-mcp--decode-file-path (substring uri 0 hash-pos)))
+             (headline-str (substring uri (1+ hash-pos))))
+        (if (string-empty-p file)
+            (org-mcp--resource-validation-error
+             "URI has empty file path: %s"
+             uri)
+          `(:type
+            headline
+            :file ,(expand-file-name file)
+            :headline-path
+            ,(mapcar
+              #'url-unhex-string (split-string headline-str "/"))))))
+     ;; Starts with / → file path
+     ((string-prefix-p "/" uri)
+      `(:type file :file ,(expand-file-name uri)))
+     ;; Any other string → treat as ID (e.g., "test-id-123", "my-custom-id")
+     ;; This allows org-id to validate and provide meaningful error messages
+     (t
+      `(:type id :uuid ,uri)))))
+
 (defun org-mcp--parse-resource-uri (uri)
   "Parse URI and return (file-path . headline-path).
 Validates file access and returns expanded file path."
@@ -435,6 +474,148 @@ Point should be at the headline."
     (when (and (> (point) start) (= (char-before) ?\n))
       (backward-char))
     (buffer-substring-no-properties start (point))))
+
+(defun org-mcp--build-org-uri-from-id (id)
+  "Build an org:// URI from ID.
+ID is the UUID string."
+  (concat "org://" id))
+
+(defun org-mcp--build-org-uri-from-position ()
+  "Build an org:// URI for the heading at point.
+Uses ID if available, otherwise builds path-based URI."
+  (if-let* ((id (org-entry-get (point) "ID")))
+    (org-mcp--build-org-uri-from-id id)
+    ;; Build path-based URI from current position
+    (let* ((file (buffer-file-name))
+           (headline-path (org-mcp--build-headline-path)))
+      (concat "org://" file "#" headline-path))))
+
+(defun org-mcp--extract-heading-child ()
+  "Extract lightweight child entry at current heading.
+Returns plist with title, todo, level, and uri.
+Point should be at the heading. Does not recurse into children."
+  (let* ((title (org-get-heading t t t t))
+         (todo (org-get-todo-state))
+         (level (org-current-level))
+         (id (org-entry-get (point) "ID"))
+         (uri
+          (if id
+              (org-mcp--build-org-uri-from-id id)
+            (let ((file (buffer-file-name))
+                  (headline-path (org-mcp--build-headline-path)))
+              (concat "org://" file "#" headline-path)))))
+    `((title . ,title)
+      ,@
+      (when todo
+        `((todo . ,todo)))
+      (level . ,level) (uri . ,uri))))
+
+(defun org-mcp--extract-structured-heading ()
+  "Extract full structured JSON for current heading.
+Point should be at the heading.
+Returns alist with all heading properties and lightweight children."
+  (let* ((title (org-get-heading t t t t))
+         (todo (org-get-todo-state))
+         (priority (org-entry-get (point) "PRIORITY"))
+         (tags (org-get-tags))
+         (level (org-current-level))
+         (id (org-entry-get (point) "ID"))
+         (scheduled (org-entry-get (point) "SCHEDULED"))
+         (deadline (org-entry-get (point) "DEADLINE"))
+         (closed (org-entry-get (point) "CLOSED"))
+         (props (org-entry-properties))
+         (uri (org-mcp--build-org-uri-from-position))
+         (content-start
+          (save-excursion
+            (forward-line 1)
+            (point)))
+         (children '())
+         (content-end
+          (save-excursion
+            (org-end-of-subtree t t)
+            (point)))
+         ;; Get body content (before children)
+         (body-content
+          (save-excursion
+            (goto-char content-start)
+            ;; Skip property drawer if present
+            (when (looking-at "^[ \t]*:PROPERTIES:")
+              (re-search-forward "^[ \t]*:END:" nil t)
+              (forward-line 1))
+            ;; Skip LOGBOOK drawer if present
+            (when (looking-at "^[ \t]*:LOGBOOK:")
+              (re-search-forward "^[ \t]*:END:" nil t)
+              (forward-line 1))
+            ;; Collect body until next heading
+            (let ((body-start (point)))
+              (if (re-search-forward "^\*" content-end t)
+                  (buffer-substring-no-properties
+                   body-start (line-beginning-position))
+                (buffer-substring-no-properties
+                 body-start content-end)))))
+         ;; Extract direct children
+         (child-level (1+ level)))
+    ;; Collect direct children
+    (save-excursion
+      (goto-char content-start)
+      (while (and (re-search-forward (format "^\\*\\{%d\\} "
+                                             child-level)
+                                     content-end t)
+                  (= (org-current-level) child-level))
+        (push (org-mcp--extract-heading-child) children)
+        (org-end-of-subtree t t)))
+    ;; Build result alist
+    `((title . ,title)
+      ,@
+      (when todo
+        `((todo . ,todo)))
+      ,@
+      (when priority
+        `((priority . ,priority)))
+      ,@
+      (when tags
+        `((tags . ,(vconcat tags))))
+      ,@
+      (when scheduled
+        `((scheduled . ,scheduled)))
+      ,@
+      (when deadline
+        `((deadline . ,deadline)))
+      ,@
+      (when closed
+        `((closed . ,closed)))
+      ,@
+      (when id
+        `((id . ,id)))
+      (level . ,level) (uri . ,uri) ,@
+      (when (and body-content (not (string-blank-p body-content)))
+        `((content . ,(string-trim body-content))))
+      (children . ,(vconcat (nreverse children))))))
+
+(defun org-mcp--extract-structured-file (file-path)
+  "Extract structured JSON for FILE-PATH.
+Returns alist with file path, preamble content, and top-level children."
+  (org-mcp--with-org-file file-path
+    (let ((preamble-end
+           (save-excursion
+             (if (re-search-forward "^\\* " nil t)
+                 (line-beginning-position)
+               (point-max))))
+          (children '()))
+      ;; Extract preamble (content before first heading)
+      (let ((content
+             (buffer-substring-no-properties
+              (point-min) preamble-end)))
+        (goto-char preamble-end)
+        ;; Extract top-level headings
+        (while (re-search-forward "^\\* " nil t)
+          (push (org-mcp--extract-heading-child) children)
+          (org-end-of-subtree t t))
+        `((file . ,file-path)
+          ,@
+          (when (and content (not (string-blank-p content)))
+            `((content . ,(string-trim content))))
+          (children . ,(vconcat (nreverse children))))))))
 
 (defun org-mcp--get-headline-content (file-path headline-path)
   "Get content for headline at HEADLINE-PATH in FILE-PATH.
@@ -1298,7 +1479,7 @@ MCP Parameters:
 ;; Resource handlers
 
 (defun org-mcp--handle-outline-resource (params)
-  "Handler for org://{filename}/outline template.
+  "Handler for org-outline://{filename} template.
 PARAMS is an alist containing the filename parameter."
   (let* ((filename (alist-get "filename" params nil nil #'string=))
          (allowed-file (org-mcp--validate-file-access filename))
@@ -1307,50 +1488,74 @@ PARAMS is an alist containing the filename parameter."
            (expand-file-name allowed-file))))
     (json-encode outline)))
 
-(defun org-mcp--handle-file-resource (params)
-  "Handler for org://{filename} template.
-PARAMS is an alist containing the filename parameter."
-  (let* ((filename (alist-get "filename" params nil nil #'string=))
-         (allowed-file (org-mcp--validate-file-access filename)))
-    (org-mcp--read-file (expand-file-name allowed-file))))
+(defun org-mcp--handle-org-resource (params)
+  "Handler for org://{uri} template with auto-detection.
+PARAMS is an alist containing the uri parameter.
+Returns structured JSON for files and headlines."
+  (let* ((uri (alist-get "uri" params nil nil #'string=))
+         (parsed (org-mcp--detect-uri-type uri)))
+    (pcase (plist-get parsed :type)
+      (`id
+       (let* ((uuid (plist-get parsed :uuid))
+              (file-path (org-id-find-id-file uuid)))
+         (unless file-path
+           (org-mcp--resource-not-found-error "ID" uuid))
+         (let ((allowed-file (org-mcp--find-allowed-file file-path)))
+           (unless allowed-file
+             (org-mcp--resource-file-access-error uuid))
+           (org-mcp--with-org-file allowed-file
+             (when-let* ((pos (org-find-property "ID" uuid)))
+               (goto-char pos)
+               (json-encode
+                (org-mcp--extract-structured-heading)))))))
+      (`headline
+       (let* ((file (plist-get parsed :file))
+              (headline-path (plist-get parsed :headline-path))
+              (allowed-file (org-mcp--validate-file-access file)))
+         (org-mcp--with-org-file allowed-file
+           (if (org-mcp--navigate-to-headline headline-path)
+               (json-encode (org-mcp--extract-structured-heading))
+             (org-mcp--resource-not-found-error
+              "Headline" (mapconcat #'identity headline-path "/"))))))
+      (`file
+       (let ((allowed-file
+              (org-mcp--validate-file-access
+               (plist-get parsed :file))))
+         (json-encode
+          (org-mcp--extract-structured-file allowed-file)))))))
 
 (defun org-mcp--handle-headline-resource (params)
-  "Handler for org-headline://{filename} template.
-PARAMS is an alist containing the filename parameter.
-The filename parameter includes both file and headline path."
-  (let* ((full-path (alist-get "filename" params nil nil #'string=))
-         (split-result (org-mcp--split-headline-uri full-path))
-         (filename (car split-result))
-         (allowed-file (org-mcp--validate-file-access filename))
-         (headline-path-str (cdr split-result))
-         ;; Parse the path (URL-encoded headline path)
-         (headline-path
-          (when headline-path-str
-            (mapcar
-             #'url-unhex-string
-             (split-string headline-path-str "/")))))
-    (if headline-path
-        (let ((content
-               (org-mcp--get-headline-content
-                allowed-file headline-path)))
-          (unless content
-            (org-mcp--resource-not-found-error
-             "Headline" (mapconcat #'identity headline-path "/")))
-          content)
-      ;; No headline path means get entire file
-      (org-mcp--read-file allowed-file))))
-
-(defun org-mcp--handle-id-resource (params)
-  "Handler for org-id://{uuid} template.
-PARAMS is an alist containing the uuid parameter."
-  (let* ((id (alist-get "uuid" params nil nil #'string=))
-         (file-path (org-id-find-id-file id)))
-    (unless file-path
-      (org-mcp--resource-not-found-error "ID" id))
-    (let ((allowed-file (org-mcp--find-allowed-file file-path)))
-      (unless allowed-file
-        (org-mcp--resource-file-access-error id))
-      (org-mcp--get-content-by-id allowed-file id))))
+  "Handler for org-headline://{uri} template with auto-detection.
+PARAMS is an alist containing the uri parameter (can be file, file#path, or UUID).
+Returns plain text content."
+  (let* ((uri (alist-get "uri" params nil nil #'string=))
+         (parsed (org-mcp--detect-uri-type uri)))
+    (pcase (plist-get parsed :type)
+      (`id
+       (let* ((uuid (plist-get parsed :uuid))
+              (file-path (org-id-find-id-file uuid)))
+         (unless file-path
+           (org-mcp--resource-not-found-error "ID" uuid))
+         (let ((allowed-file (org-mcp--find-allowed-file file-path)))
+           (unless allowed-file
+             (org-mcp--resource-file-access-error uuid))
+           (org-mcp--get-content-by-id allowed-file uuid))))
+      (`headline
+       (let* ((file (plist-get parsed :file))
+              (headline-path (plist-get parsed :headline-path))
+              (allowed-file (org-mcp--validate-file-access file)))
+         (let ((content
+                (org-mcp--get-headline-content
+                 allowed-file headline-path)))
+           (unless content
+             (org-mcp--resource-not-found-error
+              "Headline" (mapconcat #'identity headline-path "/")))
+           content)))
+      (`file
+       (let ((allowed-file
+              (org-mcp--validate-file-access
+               (plist-get parsed :file))))
+         (org-mcp--read-file allowed-file))))))
 
 (defun org-mcp--tool-rename-headline (uri current_title new_title)
   "Rename headline title at URI from CURRENT_TITLE to NEW_TITLE.
@@ -1753,13 +1958,17 @@ MCP Parameters:
 
 ;; Tools duplicating resource templates
 
-(defun org-mcp--tool-read-file (file)
-  "Tool wrapper for org://{filename} resource template.
-FILE is the absolute path to an Org file.
+(defun org-mcp--tool-read (uri)
+  "Tool wrapper for org://{uri} resource template.
+URI can be a file path, file#headline-path, or UUID.
+Returns structured JSON.
 
 MCP Parameters:
-  file - Absolute path to an Org file"
-  (org-mcp--handle-file-resource `(("filename" . ,file))))
+  uri - URI string. Formats:
+        - /path/to/file.org (file path)
+        - /path/to/file.org#Headline/Subhead (headline path)
+        - UUID string (8-4-4-4-12 format)"
+  (org-mcp--handle-org-resource `(("uri" . ,uri))))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool wrapper for org-outline://{filename} resource template.
@@ -1769,41 +1978,18 @@ MCP Parameters:
   file - Absolute path to an Org file"
   (org-mcp--handle-outline-resource `(("filename" . ,file))))
 
-(defun org-mcp--tool-read-headline (file headline_path)
-  "Tool wrapper for org-headline://{filename}#{path} resource.
-FILE is the absolute path to an Org file.
-HEADLINE_PATH is the non-empty slash-separated path to
-headline.
+(defun org-mcp--tool-read-headline (uri)
+  "Tool wrapper for org-headline://{uri} resource template.
+URI can be a file path, file#headline-path, or UUID.
+Returns plain text content.
 
 MCP Parameters:
-  file - Absolute path to an Org file
-  headline_path - Non-empty slash-separated path to headline
-                  (string)
-                  Only slashes in headline titles must be
-                  encoded as %2F
-                  Example: \"Project/Planning\" for nested headlines
-                  Example: \"A%2FB Testing\" for headline titled
-                  \"A/B Testing\"
-                  To read entire files, use org-read-file
-                  instead"
-  (unless (stringp headline_path)
-    (org-mcp--tool-validation-error
-     "Parameter headline_path must be a string, got: %S (type: %s)"
-     headline_path (type-of headline_path)))
-  (when (string-empty-p headline_path)
-    (org-mcp--tool-validation-error
-     "Parameter headline_path must be non-empty; use \
-org-read-file tool to read entire files"))
-  (let ((full-path (concat file "#" headline_path)))
-    (org-mcp--handle-headline-resource `(("filename" . ,full-path)))))
-
-(defun org-mcp--tool-read-by-id (uuid)
-  "Tool wrapper for org-id://{uuid} resource template.
-UUID is the UUID from headline's ID property.
-
-MCP Parameters:
-  uuid - UUID from headline's ID property"
-  (org-mcp--handle-id-resource `(("uuid" . ,uuid))))
+  uri - URI string. Formats:
+        - /path/to/file.org (returns entire file)
+        - /path/to/file.org#Headline/Subhead (headline path)
+        - UUID string (8-4-4-4-12 format)
+        Headline paths use URL encoding for special chars."
+  (org-mcp--handle-headline-resource `(("uri" . ,uri))))
 
 ;; Clock tools
 
@@ -2392,17 +2578,39 @@ Special behavior - Empty old_body:
    :server-id org-mcp--server-id)
 
   (mcp-server-lib-register-tool
-   #'org-mcp--tool-read-file
-   :id "org-read-file"
+   #'org-mcp--tool-read
+   :id "org-read"
    :description
-   "Read complete raw content of an Org file. Returns entire file as
-plain text with all formatting, properties, and structure preserved.
-File must be in org-mcp-allowed-files.
+   "Read Org file or headline with structured JSON output. Auto-detects
+URI format and returns structured data including children, properties,
+and timestamps.
 
 Parameters:
-  file - Absolute path to Org file (string, required)
+  uri - URI string (string, required). Formats:
+        - /path/to/file.org - file path (returns file with children)
+        - /path/to/file.org#Headline/Subhead - headline path
+        - UUID (8-4-4-4-12 format) - ID-based lookup
 
-Returns: Plain text content of the entire Org file"
+Returns: JSON object with structured data:
+  For files:
+    file - File path
+    content - Preamble text before first heading (if any)
+    children - Array of top-level headings (title, todo, level, uri)
+  For headlines:
+    title - Headline text
+    todo - TODO state (if present)
+    priority - Priority letter (if present)
+    tags - Array of tags (if present)
+    scheduled - Scheduled timestamp (if present)
+    deadline - Deadline timestamp (if present)
+    closed - Closed timestamp (if present)
+    id - Org ID (if present)
+    level - Heading level
+    uri - org:// URI for this heading
+    content - Body text (if present)
+    children - Array of direct children (title, todo, level, uri)
+
+File must be in org-mcp-allowed-files."
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -2425,36 +2633,18 @@ Returns: JSON object with hierarchical outline structure"
    #'org-mcp--tool-read-headline
    :id "org-read-headline"
    :description
-   "Read specific Org headline by hierarchical path. Returns headline
-   with TODO state, tags, properties, body text, and all nested
-   subheadings. File must be in org-mcp-allowed-files.
+   "Read Org headline or file as plain text. Auto-detects URI format.
+Returns headline with TODO state, tags, properties, body text, and all
+nested subheadings.
 
 Parameters:
-  file - Absolute path to Org file (string, required)
-  headline_path - Non-empty slash-separated path to headline (string,
-                  required). Only slashes (/) in  headline titles must
-                  be encoded as %2F
-                  Example: \"Project/Planning\" for nested headlines
-                  Example: \"A%2FB Testing\" for headline titled
-                  \"A/B Testing\"
-                  To read entire files, use org-read-file instead
+  uri - URI string (string, required). Formats:
+        - /path/to/file.org - returns entire file
+        - /path/to/file.org#Headline/Subhead - headline path
+        - UUID (8-4-4-4-12 format) - ID-based lookup
+        Headline paths use URL encoding for special chars.
 
-Returns: Plain text content of the headline and its subtree"
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-read-by-id
-   :id "org-read-by-id"
-   :description
-   "Read Org headline by its unique ID property. More stable than
-path-based access since IDs don't change when headlines are renamed
-or moved. File containing the ID must be in org-mcp-allowed-files.
-
-Parameters:
-  uuid - UUID from headline's ID property (string, required)
-
-Returns: Plain text content of the headline and its subtree"
+Returns: Plain text content of the headline and its subtree (or file)"
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -2754,18 +2944,39 @@ Returns JSON object:
 
   ;; Register template resources for org files
   (mcp-server-lib-register-resource
-   "org://{filename}" #'org-mcp--handle-file-resource
-   :name "Org file"
+   "org://{uri}" #'org-mcp--handle-org-resource
+   :name "Org resource (structured JSON)"
    :description
-   "Access the complete raw content of an Org file.  Returns the
-entire file as plain text, preserving all formatting, properties, and
-structure.
+   "Access Org file or headline with structured JSON output.
+Auto-detects URI format and returns structured data.
 
-URI format: org://{filename}
-  filename - Absolute path to the Org file (required)
+URI format: org://{uri}
+  uri - Can be one of:
+    - /path/to/file.org - file path
+    - /path/to/file.org#Headline/Subhead - headline path
+    - UUID (8-4-4-4-12 format) - ID-based lookup
 
-Returns: Plain text content of the entire Org file"
-   :mime-type "text/plain"
+Returns: JSON object with structured data:
+  For files:
+    file - File path
+    content - Preamble text before first heading (if any)
+    children - Array of top-level headings (title, todo, level, uri)
+  For headlines:
+    title - Headline text
+    todo - TODO state (if present)
+    priority - Priority letter (if present)
+    tags - Array of tags (if present)
+    scheduled - Scheduled timestamp (if present)
+    deadline - Deadline timestamp (if present)
+    closed - Closed timestamp (if present)
+    id - Org ID (if present)
+    level - Heading level
+    uri - org:// URI for this heading
+    content - Body text (if present)
+    children - Array of direct children (title, todo, level, uri)
+
+File must be in org-mcp-allowed-files."
+   :mime-type "application/json"
    :server-id org-mcp--server-id)
 
   (mcp-server-lib-register-resource
@@ -2812,32 +3023,18 @@ Use this resource to:
    :server-id org-mcp--server-id)
 
   (mcp-server-lib-register-resource
-   (concat org-mcp--uri-headline-prefix "{filename}")
-   #'org-mcp--handle-headline-resource
-   :name "Org headline content"
+   "org-headline://{uri}" #'org-mcp--handle-headline-resource
+   :name "Org headline or file (plain text)"
    :description
-   "Access content of a specific Org headline by its path in the
-file hierarchy.  Returns the headline and all its subheadings as
-plain text.
+   "Access Org headline or file as plain text. Auto-detects URI format.
+Returns complete subtree with all children.
 
-URI format: org-headline://{filename}#{headline-path}
-  filename - Absolute path (# characters must be encoded as %23)
-  # - Fragment separator (literal #, not encoded)
-  headline-path - URL-encoded headline titles separated by /
-
-URI encoding rules:
-  - File path # → %23 (e.g., file#1.org → file%231.org)
-  - Fragment separator → # (literal, marks start of headline path)
-  - Headline title spaces → %20
-  - Headline title # → %23 (e.g., Task #5 → Task%20%2345)
-  - Path separator → / (literal, between nested headlines)
-
-Encoding limitations:
-  - ONLY # is encoded in file paths (minimal encoding for readability)
-  - File paths with % characters should be avoided
-  - Files named with %XX patterns (e.g., \"100%23done.org\") will fail
-  - For such files, rename them or use org-id:// URIs instead
-  - Headline paths use full URL encoding (all special chars encoded)
+URI format: org-headline://{uri}
+  uri - Can be one of:
+    - /path/to/file.org - returns entire file
+    - /path/to/file.org#Headline/Subhead - headline path
+    - UUID (8-4-4-4-12 format) - ID-based lookup
+    Headline paths use URL encoding for special chars.
 
 Returns: Plain text content including:
   - The headline itself with TODO state and tags
@@ -2846,71 +3043,22 @@ Returns: Plain text content including:
   - All nested subheadings (complete subtree)
 
 Example URIs:
+  org-headline:///home/user/tasks.org
+    → Entire file
+
   org-headline:///home/user/tasks.org#Project%20Alpha
     → Top-level \"Project Alpha\" heading
 
   org-headline:///home/user/tasks.org#Project%20Alpha/Planning
     → \"Planning\" subheading under \"Project Alpha\"
 
-  org-headline:///home/user/tasks.org#Issue%20%2342
-    → Heading titled \"Issue #42\"
-
-  org-headline:///home/user/file%231.org#Task%20%235
-    → \"Task #5\" from file named \"file#1.org\"
-
-  org-headline:///home/user/tasks.org
-    → Entire file (no fragment means whole file)
-
-Use this resource to:
-  - Read specific sections of an Org file
-  - Access headline content by hierarchical path
-  - Get complete subtree including all children"
-   :mime-type "text/plain"
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-resource
-   (concat org-mcp--uri-id-prefix "{uuid}")
-   #'org-mcp--handle-id-resource
-   :name "Org node by ID"
-   :description
-   "Access content of an Org headline by its unique ID property.
-More stable than path-based access since IDs don't change when
-headlines are renamed or moved.
-
-URI format: org-id://{uuid}
-  uuid - Value of the headline's ID property (required)
-
-How IDs work in Org:
-  Headlines can have an ID property:
-    * My Headline
-    :PROPERTIES:
-    :ID: 550e8400-e29b-41d4-a716-446655440000
-    :END:
-
-  The ID provides permanent, unique identification regardless of:
-    - Headline title changes
-    - Headline moving to different locations in file
-    - File renaming or moving
-
-Security and access:
-  - The file containing the ID must be in org-mcp-allowed-files
-  - Uses org-id database for ID-to-file lookup
-  - Falls back to searching allowed files if database is stale
-
-Returns: Plain text content including:
-  - The headline itself with TODO state and tags
-  - All properties drawer content
-  - Body text
-  - All nested subheadings (complete subtree)
-
-Example URIs:
-  org-id://550e8400-e29b-41d4-a716-446655440000
+  org-headline://550e8400-e29b-41d4-a716-446655440000
     → Headline with that ID property
 
 Use this resource to:
-  - Access headlines by stable identifier
-  - Reference content that may be renamed or moved
-  - Build cross-references between Org nodes"
+  - Read specific sections of an Org file
+  - Access headline content by hierarchical path or ID
+  - Get complete subtree including all children"
    :mime-type "text/plain"
    :server-id org-mcp--server-id))
 
@@ -2931,12 +3079,11 @@ Use this resource to:
    "org-rename-headline" org-mcp--server-id)
   (mcp-server-lib-unregister-tool "org-edit-body" org-mcp--server-id)
   ;; Unregister workaround tools
-  (mcp-server-lib-unregister-tool "org-read-file" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-read" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-read-outline" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-read-headline" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-read-by-id" org-mcp--server-id)
   (mcp-server-lib-unregister-tool "org-ql-query" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-ql-list-stored-queries" org-mcp--server-id)
@@ -2961,15 +3108,11 @@ Use this resource to:
   (setq org-mcp--stored-queries 'unloaded)
   ;; Unregister template resources
   (mcp-server-lib-unregister-resource
-   "org://{filename}" org-mcp--server-id)
+   "org://{uri}" org-mcp--server-id)
   (mcp-server-lib-unregister-resource
    "org-outline://{filename}" org-mcp--server-id)
   (mcp-server-lib-unregister-resource
-   (concat
-    org-mcp--uri-headline-prefix "{filename}")
-   org-mcp--server-id)
-  (mcp-server-lib-unregister-resource
-   (concat org-mcp--uri-id-prefix "{uuid}") org-mcp--server-id))
+   "org-headline://{uri}" org-mcp--server-id))
 
 (provide 'org-mcp)
 ;;; org-mcp.el ends here
