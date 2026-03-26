@@ -21,6 +21,7 @@ the complete Org file.
 
 When adding, removing, or changing MCP tools, resource templates, or custom
 variables (`defcustom`) in `org-mcp.el`, update `README.org` accordingly:
+
 - New tools → add a `***` subsection under the appropriate `**` section in
   "Available MCP Tools"
 - New `defcustom` → document it in a "Configuring …" section and mention it in

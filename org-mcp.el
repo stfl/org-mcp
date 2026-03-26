@@ -48,8 +48,7 @@
 (defcustom org-mcp-stored-queries-file nil
   "Path to file storing named org-ql queries.
 When nil, stored query functionality is disabled."
-  :type '(choice (const :tag "Disabled" nil)
-                 (file :tag "File path"))
+  :type '(choice (const :tag "Disabled" nil) (file :tag "File path"))
   :group 'org-mcp)
 
 (defcustom org-mcp-clock-continuous-threshold 30
@@ -350,11 +349,10 @@ Specifically decodes %23 back to #."
 Returns a string suitable for use in org-headline:// URIs."
   (let ((components '()))
     (save-excursion
-      (push (url-hexify-string (org-get-heading t t t t))
-            components)
+      (push (url-hexify-string (org-get-heading t t t t)) components)
       (while (org-up-heading-safe)
-        (push (url-hexify-string (org-get-heading t t t t))
-              components)))
+        (push
+         (url-hexify-string (org-get-heading t t t t)) components)))
     (mapconcat #'identity components "/")))
 
 (defun org-mcp--split-headline-uri (path-after-protocol)
@@ -491,10 +489,14 @@ TIME is an Emacs time value.  Returns rounded time."
   "Parse ISO timestamp STR to Emacs time.
 STR should be in ISO 8601 format like 2026-03-23T14:30:00."
   (let ((parsed (parse-time-string str)))
-    (unless (and (nth 0 parsed) (nth 1 parsed) (nth 2 parsed)
-                 (nth 3 parsed) (nth 4 parsed) (nth 5 parsed))
-      (org-mcp--tool-validation-error
-       "Cannot parse timestamp: '%s'" str))
+    (unless (and (nth 0 parsed)
+                 (nth 1 parsed)
+                 (nth 2 parsed)
+                 (nth 3 parsed)
+                 (nth 4 parsed)
+                 (nth 5 parsed))
+      (org-mcp--tool-validation-error "Cannot parse timestamp: '%s'"
+                                      str))
     (encode-time parsed)))
 
 (defun org-mcp--clock-duration-string (seconds)
@@ -512,17 +514,17 @@ Returns alist with file, heading, start keys, or nil."
      (dolist (file org-mcp-allowed-files)
        (when (file-exists-p file)
          (org-mcp--with-org-file file
-           (while (re-search-forward
-                   "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
-                   nil t)
+           (while
+               (re-search-forward
+                "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
+                nil t)
              (let ((start-str (match-string 1)))
                (save-excursion
                  (org-back-to-heading t)
                  (throw 'found
                         (list
                          (cons 'file (expand-file-name file))
-                         (cons 'heading
-                               (org-get-heading t t t t))
+                         (cons 'heading (org-get-heading t t t t))
                          (cons 'start start-str)
                          (cons 'allowed t)))))))))
      nil)
@@ -535,8 +537,9 @@ Returns alist with file, heading, start keys, or nil."
            (save-excursion
              (goto-char org-clock-marker)
              (forward-line 0)
-             (when (looking-at
-                    "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$")
+             (when
+                 (looking-at
+                  "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$")
                (list
                 (cons 'file (expand-file-name file))
                 (cons 'heading nil)
@@ -550,16 +553,20 @@ Returns Emacs time of the most recent clock end, or nil."
     (dolist (file org-mcp-allowed-files)
       (when (file-exists-p file)
         (org-mcp--with-org-file file
-          (while (re-search-forward
-                  "^[ \t]*CLOCK: \\[[^]]+\\]--\\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} \\([0-9]\\{2\\}:[0-9]\\{2\\}\\)\\)\\]"
-                  nil t)
+          (while
+              (re-search-forward
+               "^[ \t]*CLOCK: \\[[^]]+\\]--\\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} \\([0-9]\\{2\\}:[0-9]\\{2\\}\\)\\)\\]"
+               nil t)
             (let* ((end-str (match-string 1))
                    (end-time (org-parse-time-string end-str)))
               (when (or (not latest)
-                        (time-less-p (car latest) (apply #'encode-time end-time)))
-                (setq latest (cons (apply #'encode-time end-time)
-                                   end-str))))))))
-    (when latest (car latest))))
+                        (time-less-p
+                         (car latest) (apply #'encode-time end-time)))
+                (setq latest
+                      (cons
+                       (apply #'encode-time end-time) end-str))))))))
+    (when latest
+      (car latest))))
 
 (defun org-mcp--clock-ensure-logbook ()
   "Create or find LOGBOOK drawer at current heading.
@@ -567,14 +574,20 @@ Point must be at a heading.  Inserts LOGBOOK after PROPERTIES
 drawer and planning lines if it doesn't exist.
 Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
   (org-back-to-heading t)
-  (let ((end (save-excursion (org-end-of-subtree t t) (point)))
+  (let ((end
+         (save-excursion
+           (org-end-of-subtree t t)
+           (point)))
         (logbook-start nil))
     ;; Look for existing LOGBOOK drawer
     (save-excursion
       (forward-line 1)
-      (while (and (< (point) end)
-                  (not logbook-start)
-                  (looking-at "^[ \t]*\\(:\\|#\\+\\|SCHEDULED\\|DEADLINE\\|CLOSED\\)"))
+      (while
+          (and
+           (< (point) end)
+           (not logbook-start)
+           (looking-at
+            "^[ \t]*\\(:\\|#\\+\\|SCHEDULED\\|DEADLINE\\|CLOSED\\)"))
         (if (looking-at "^[ \t]*:LOGBOOK:[ \t]*$")
             (progn
               (forward-line 1)
@@ -590,7 +603,8 @@ Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
         (forward-line 1))
       ;; Skip past planning lines
       (while (and (< (point) end)
-                  (looking-at "^[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
+                  (looking-at
+                   "^[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
         (forward-line 1))
       (insert ":LOGBOOK:\n:END:\n")
       (forward-line -2)
@@ -607,23 +621,28 @@ New entries are inserted at the top of the LOGBOOK drawer."
     (if end
         (let* ((duration (float-time (time-subtract end start)))
                (dur-str (org-mcp--clock-duration-string duration)))
-          (insert (format "CLOCK: %s--%s => %s\n"
-                          (org-mcp--clock-format-timestamp start)
-                          (org-mcp--clock-format-timestamp end)
-                          dur-str)))
-      (insert (format "CLOCK: %s\n"
-                      (org-mcp--clock-format-timestamp start))))))
+          (insert
+           (format "CLOCK: %s--%s => %s\n"
+                   (org-mcp--clock-format-timestamp start)
+                   (org-mcp--clock-format-timestamp end)
+                   dur-str)))
+      (insert
+       (format "CLOCK: %s\n"
+               (org-mcp--clock-format-timestamp start))))))
 
 (defun org-mcp--clock-resolve-dangling ()
   "Delete unclosed CLOCK lines in LOGBOOK at current heading.
 Point must be at a heading.  Returns count of deleted lines."
   (let ((count 0)
-        (end (save-excursion (org-end-of-subtree t t) (point))))
+        (end
+         (save-excursion
+           (org-end-of-subtree t t)
+           (point))))
     (save-excursion
       (forward-line 1)
-      (while (re-search-forward
-              "^[ \t]*CLOCK: \\[[^]]+\\][ \t]*$"
-              end t)
+      (while (re-search-forward "^[ \t]*CLOCK: \\[[^]]+\\][ \t]*$"
+                                end
+                                t)
         (forward-line 0)
         (let ((line-end (line-beginning-position 2)))
           (delete-region (point) line-end)
@@ -636,7 +655,10 @@ Point must be at a heading.  Returns count of deleted lines."
 Point must be at a heading."
   (save-excursion
     (org-back-to-heading t)
-    (let ((end (save-excursion (org-end-of-subtree t t) (point))))
+    (let ((end
+           (save-excursion
+             (org-end-of-subtree t t)
+             (point))))
       (forward-line 1)
       (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
         (forward-line 0)
@@ -650,8 +672,8 @@ Point must be at a heading."
   "Build regex matching an Org clock timestamp for START-TIME.
 Matches the date and time exactly but allows any day-of-week
 abbreviation, making the match locale-independent."
-  (format-time-string
-   "\\[%Y-%m-%d [A-Za-z]\\{2,3\\} %H:%M\\]" start-time))
+  (format-time-string "\\[%Y-%m-%d [A-Za-z]\\{2,3\\} %H:%M\\]"
+                      start-time))
 
 (defun org-mcp--clock-delete-entry (start-time)
   "Delete CLOCK line matching START-TIME in LOGBOOK at current heading.
@@ -659,21 +681,32 @@ Point must be at a heading.  START-TIME is an Emacs time value.
 Removes LOGBOOK drawer if it becomes empty.
 Returns an alist with deleted entry info, or nil if not found."
   (let* ((start-regex (org-mcp--clock-start-time-regex start-time))
-         (end (save-excursion (org-end-of-subtree t t) (point)))
-         (clock-regex (concat "^[ \t]*CLOCK: " start-regex
-                              "\\(?:--\\(\\[[^]]+\\]\\)"
-                              " => +\\([0-9]+:[0-9]+\\)\\)?[ \t]*$"))
+         (end
+          (save-excursion
+            (org-end-of-subtree t t)
+            (point)))
+         (clock-regex
+          (concat
+           "^[ \t]*CLOCK: "
+           start-regex
+           "\\(?:--\\(\\[[^]]+\\]\\)"
+           " => +\\([0-9]+:[0-9]+\\)\\)?[ \t]*$"))
          (found nil))
     (save-excursion
       (forward-line 1)
       (when (re-search-forward clock-regex end t)
         (let ((end-str (match-string 1))
               (duration-str (match-string 2)))
-          (setq found `((start
-                         . ,(org-mcp--clock-format-timestamp start-time))
-                        ,@(when end-str `((end . ,end-str)))
-                        ,@(when duration-str
-                            `((duration . ,duration-str)))))
+          (setq found
+                `((start
+                   .
+                   ,(org-mcp--clock-format-timestamp start-time))
+                  ,@
+                  (when end-str
+                    `((end . ,end-str)))
+                  ,@
+                  (when duration-str
+                    `((duration . ,duration-str)))))
           (forward-line 0)
           (delete-region (point) (line-beginning-position 2)))))
     (when found
@@ -1451,39 +1484,52 @@ Returns an alist with headline metadata suitable for JSON encoding."
          (level (org-current-level))
          (file (buffer-file-name))
          (todo (org-get-todo-state))
-         (priority (org-element-property
-                    :priority (org-element-at-point)))
+         (priority
+          (org-element-property :priority (org-element-at-point)))
          (tags (org-get-tags nil t))
          (id (org-entry-get nil "ID"))
-         (uri (if id
-                  (concat org-mcp--uri-id-prefix id)
-                (concat org-mcp--uri-headline-prefix
-                        (url-hexify-string file)
-                        "#"
-                        (org-mcp--build-headline-path))))
+         (uri
+          (if id
+              (concat org-mcp--uri-id-prefix id)
+            (concat
+             org-mcp--uri-headline-prefix
+             (url-hexify-string file)
+             "#"
+             (org-mcp--build-headline-path))))
          (parent-priority
           (save-excursion
             (when (org-up-heading-safe)
               (org-element-property
                :priority (org-element-at-point)))))
-         (props (cl-remove-if
-                 (lambda (pair)
-                   (member (car pair)
-                           '("ALLTAGS" "BLOCKED" "CATEGORY" "CLOCKSUM"
-                             "CLOCKSUM_T" "CLOSED" "DEADLINE" "FILE"
-                             "ITEM" "PRIORITY" "SCHEDULED" "TAGS"
-                             "TIMESTAMP" "TIMESTAMP_IA" "TODO")))
-                 (org-entry-properties nil 'standard)))
-         (result `((title . ,title)
-                   (level . ,level)
-                   (file . ,file))))
+         (props
+          (cl-remove-if
+           (lambda (pair)
+             (member
+              (car pair)
+              '("ALLTAGS"
+                "BLOCKED"
+                "CATEGORY"
+                "CLOCKSUM"
+                "CLOCKSUM_T"
+                "CLOSED"
+                "DEADLINE"
+                "FILE"
+                "ITEM"
+                "PRIORITY"
+                "SCHEDULED"
+                "TAGS"
+                "TIMESTAMP"
+                "TIMESTAMP_IA"
+                "TODO")))
+           (org-entry-properties nil 'standard)))
+         (result `((title . ,title) (level . ,level) (file . ,file))))
     (when todo
       (push `(todo . ,todo) result))
     (when priority
       (push `(priority . ,(char-to-string priority)) result))
     (when parent-priority
-      (push `(parent-priority . ,(char-to-string parent-priority))
-            result))
+      (push
+       `(parent-priority . ,(char-to-string parent-priority)) result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
     (when id
@@ -1507,14 +1553,16 @@ MCP Parameters:
   (when (or (not (stringp query)) (string-empty-p query))
     (org-mcp--tool-validation-error
      "Query must be a non-empty string"))
-  (let ((query-sexp (condition-case nil
-                        (read query)
-                      (error
-                       (org-mcp--tool-validation-error
-                        "Failed to parse query: %s" query)))))
+  (let ((query-sexp
+         (condition-case nil
+             (read query)
+           (error
+            (org-mcp--tool-validation-error
+             "Failed to parse query: %s"
+             query)))))
     (unless (consp query-sexp)
-      (org-mcp--tool-validation-error
-       "Query must be a list, got: %s" (type-of query-sexp)))
+      (org-mcp--tool-validation-error "Query must be a list, got: %s"
+                                      (type-of query-sexp)))
     (let ((target-files
            (if files
                (mapcar
@@ -1522,13 +1570,15 @@ MCP Parameters:
                   (or (org-mcp--find-allowed-file f)
                       (org-mcp--tool-file-access-error f)))
                 (append files nil))
-             (cl-remove-if-not #'file-exists-p
-                               org-mcp-allowed-files))))
+             (cl-remove-if-not
+              #'file-exists-p org-mcp-allowed-files))))
       (let* ((action #'org-mcp--ql-extract-match)
              (matches
               (condition-case err
-                  (org-ql-select target-files
-                    query-sexp :action action)
+                  (org-ql-select
+                   target-files
+                   query-sexp
+                   :action action)
                 (error
                  (org-mcp--tool-validation-error
                   "Org-ql query error: %s"
@@ -1559,14 +1609,15 @@ Signals an error if `org-mcp-stored-queries-file' is nil."
 (defun org-mcp--stored-queries-save ()
   "Save stored queries to disk as pretty-printed Elisp."
   (with-temp-file org-mcp-stored-queries-file
-    (insert ";;; org-mcp-stored-queries.el --- "
-            "Stored org-ql queries "
-            "-*- lexical-binding: t -*-\n"
-            ";; Auto-generated by org-mcp. Do not edit by hand.\n\n"
-            "(setq org-mcp--stored-queries\n"
-            "      '"
-            (pp-to-string org-mcp--stored-queries)
-            ")\n"))
+    (insert
+     ";;; org-mcp-stored-queries.el --- "
+     "Stored org-ql queries "
+     "-*- lexical-binding: t -*-\n"
+     ";; Auto-generated by org-mcp. Do not edit by hand.\n\n"
+     "(setq org-mcp--stored-queries\n"
+     "      '"
+     (pp-to-string org-mcp--stored-queries)
+     ")\n"))
   ;; Refresh any buffer visiting this file
   (let ((buf (find-buffer-visiting org-mcp-stored-queries-file)))
     (when buf
@@ -1577,8 +1628,7 @@ Signals an error if `org-mcp-stored-queries-file' is nil."
   "Validate KEY for stored queries.
 Must be a non-empty string matching [a-zA-Z0-9_-]+."
   (when (or (not (stringp key)) (string-empty-p key))
-    (org-mcp--tool-validation-error
-     "Key must be a non-empty string"))
+    (org-mcp--tool-validation-error "Key must be a non-empty string"))
   (unless (string-match-p "\\`[a-zA-Z0-9_-]+\\'" key)
     (org-mcp--tool-validation-error
      "Key must contain only alphanumeric characters, %s"
@@ -1599,8 +1649,7 @@ MCP Parameters: none"
                 (description . ,(alist-get 'description data)))))
           org-mcp--stored-queries)))
     (json-encode
-     `((queries . ,(vconcat queries))
-       (total . ,(length queries))))))
+     `((queries . ,(vconcat queries)) (total . ,(length queries))))))
 
 (defun org-mcp--tool-ql-save-stored-query
     (key query &optional description)
@@ -1617,28 +1666,30 @@ MCP Parameters:
   (when (or (not (stringp query)) (string-empty-p query))
     (org-mcp--tool-validation-error
      "Query must be a non-empty string"))
-  (let ((query-sexp (condition-case nil
-                        (read query)
-                      (error
-                       (org-mcp--tool-validation-error
-                        "Failed to parse query: %s" query)))))
+  (let ((query-sexp
+         (condition-case nil
+             (read query)
+           (error
+            (org-mcp--tool-validation-error
+             "Failed to parse query: %s"
+             query)))))
     (unless (consp query-sexp)
-      (org-mcp--tool-validation-error
-       "Query must be a list, got: %s" (type-of query-sexp))))
+      (org-mcp--tool-validation-error "Query must be a list, got: %s"
+                                      (type-of query-sexp))))
   (org-mcp--stored-queries-ensure-loaded)
   (let* ((existing (assoc key org-mcp--stored-queries))
-         (action (if existing "updated" "created"))
-         (data `((query . ,query)
-                 (description . ,(or description "")))))
+         (action
+          (if existing
+              "updated"
+            "created"))
+         (data
+          `((query . ,query) (description . ,(or description "")))))
     (if existing
         (setcdr existing data)
       (setq org-mcp--stored-queries
             (append org-mcp--stored-queries (list (cons key data)))))
     (org-mcp--stored-queries-save)
-    (json-encode
-     `((success . t)
-       (action . ,action)
-       (key . ,key)))))
+    (json-encode `((success . t) (action . ,action) (key . ,key)))))
 
 (defun org-mcp--tool-ql-delete-stored-query (key)
   "Delete a stored org-ql query by KEY.
@@ -1648,14 +1699,11 @@ MCP Parameters:
   (org-mcp--validate-stored-query-key key)
   (org-mcp--stored-queries-ensure-loaded)
   (unless (assoc key org-mcp--stored-queries)
-    (org-mcp--tool-validation-error
-     "Stored query not found: %s" key))
+    (org-mcp--tool-validation-error "Stored query not found: %s" key))
   (setq org-mcp--stored-queries
         (assoc-delete-all key org-mcp--stored-queries))
   (org-mcp--stored-queries-save)
-  (json-encode
-   `((success . t)
-     (key . ,key))))
+  (json-encode `((success . t) (key . ,key))))
 
 (defun org-mcp--tool-ql-run-stored-query (key &optional files)
   "Run a stored org-ql query by KEY.
@@ -1669,8 +1717,8 @@ MCP Parameters:
   (org-mcp--stored-queries-ensure-loaded)
   (let ((entry (assoc key org-mcp--stored-queries)))
     (unless entry
-      (org-mcp--tool-validation-error
-       "Stored query not found: %s" key))
+      (org-mcp--tool-validation-error "Stored query not found: %s"
+                                      key))
     (org-mcp--tool-ql-query (alist-get 'query (cdr entry)) files)))
 
 ;; Tools duplicating resource templates
@@ -1738,7 +1786,10 @@ MCP Parameters: None"
       . ,(prin1-to-string org-clock-into-drawer))
      (org_clock_rounding_minutes . ,org-clock-rounding-minutes)
      (org_clock_continuously
-      . ,(if org-clock-continuously t :json-false))
+      .
+      ,(if org-clock-continuously
+           t
+         :json-false))
      (org_mcp_clock_continuous_threshold
       . ,org-mcp-clock-continuous-threshold))))
 
@@ -1768,11 +1819,10 @@ MCP Parameters: None"
                         (goto-char marker)
                         (org-back-to-heading t)
                         (org-get-heading t t t t)))))
-              (push
-               `((file . ,clock-file)
-                 (heading . ,heading)
-                 (start . ,start-str))
-               all-clocks))))))
+              (push `((file . ,clock-file)
+                      (heading . ,heading)
+                      (start . ,start-str))
+                    all-clocks))))))
     (json-encode
      `((open_clocks . ,(vconcat (nreverse all-clocks)))
        (total . ,(length all-clocks))))))
@@ -1785,8 +1835,7 @@ MCP Parameters: None"
     (if active
         (if (eq (alist-get 'allowed active) nil)
             (json-encode
-             '((active . t)
-               (in_allowed_file . :json-false)))
+             '((active . t) (in_allowed_file . :json-false)))
           (json-encode
            `((active . t)
              (file . ,(alist-get 'file active))
@@ -1815,8 +1864,9 @@ MCP Parameters:
          (headline-path (cdr parsed))
          (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
          (now (current-time))
-         (explicit-start (when start_time
-                           (org-mcp--clock-parse-timestamp start_time)))
+         (explicit-start
+          (when start_time
+            (org-mcp--clock-parse-timestamp start_time)))
          ;; Check for active clock and close it if needed
          (active (org-mcp--clock-find-active))
          (close-time nil))
@@ -1824,16 +1874,21 @@ MCP Parameters:
     ;; active clock is in the same file, skip auto-close — resolve will
     ;; delete the dangling clock in the modify-and-save body instead.
     (when (and active
-               (not (and (equal resolve "true")
-                         (org-mcp--paths-equal-p
-                          (alist-get 'file active) file-path))))
+               (not
+                (and (equal resolve "true")
+                     (org-mcp--paths-equal-p
+                      (alist-get 'file active) file-path))))
       (let* ((active-file (alist-get 'file active))
-             (close-at (org-mcp--clock-round-time
-                        (if explicit-start explicit-start now)))
+             (close-at
+              (org-mcp--clock-round-time
+               (if explicit-start
+                   explicit-start
+                 now)))
              (start-str (alist-get 'start active))
              (start-parsed (org-parse-time-string start-str))
              (start-time (apply #'encode-time start-parsed))
-             (duration (float-time (time-subtract close-at start-time)))
+             (duration
+              (float-time (time-subtract close-at start-time)))
              (close-text
               (format "--%s => %s"
                       (org-mcp--clock-format-timestamp close-at)
@@ -1846,11 +1901,12 @@ MCP Parameters:
               (with-temp-buffer
                 (insert-file-contents active-file)
                 (goto-char (point-min))
-                (when (re-search-forward
-                       (concat "^\\([ \t]*CLOCK: \\["
-                               (regexp-quote start-str)
-                               "\\]\\)[ \t]*$")
-                       nil t)
+                (when (re-search-forward (concat
+                                          "^\\([ \t]*CLOCK: \\["
+                                          (regexp-quote
+                                           start-str)
+                                          "\\]\\)[ \t]*$")
+                                         nil t)
                   (goto-char (match-end 1))
                   (insert close-text))
                 (write-region (point-min) (point-max) active-file)
@@ -1871,23 +1927,31 @@ MCP Parameters:
               (move-marker org-clock-hd-marker nil))))))
     ;; Determine start time
     (let* ((continuous-start
-            (when (and org-clock-continuously
-                       (not explicit-start))
+            (when (and org-clock-continuously (not explicit-start))
               (let ((last-end (org-mcp--clock-find-last-closed)))
                 (when last-end
-                  (let ((elapsed (float-time (time-subtract now last-end))))
+                  (let ((elapsed
+                         (float-time (time-subtract now last-end))))
                     (when (<= elapsed
-                              (* 60 org-mcp-clock-continuous-threshold))
+                              (* 60
+                                 org-mcp-clock-continuous-threshold))
                       last-end))))))
-           (clock-start (org-mcp--clock-round-time
-                         (or explicit-start continuous-start now))))
+           (clock-start
+            (org-mcp--clock-round-time
+             (or explicit-start continuous-start now))))
       (let ((resolved-count 0))
         (org-mcp--modify-and-save file-path "clock-in"
-            `((clocked_in . t)
-              (start . ,(org-mcp--clock-format-timestamp clock-start))
-              (heading . ,(org-get-heading t t t t))
-              ,@(when (> resolved-count 0)
-                  `((resolved . ,resolved-count))))
+                                  `((clocked_in . t)
+                                    (start
+                                     .
+                                     ,(org-mcp--clock-format-timestamp
+                                       clock-start))
+                                    (heading
+                                     . ,(org-get-heading t t t t))
+                                    ,@
+                                    (when (> resolved-count 0)
+                                      `((resolved
+                                         . ,resolved-count))))
           (org-mcp--goto-headline-from-uri headline-path is-id)
           (when (equal resolve "true")
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
@@ -1910,10 +1974,11 @@ MCP Parameters:
       (org-mcp--tool-validation-error "No active clock to stop"))
     (let* ((active-file (alist-get 'file active))
            (now (current-time))
-           (end (if end_time
-                    (org-mcp--clock-round-time
-                     (org-mcp--clock-parse-timestamp end_time))
-                  (org-mcp--clock-round-time now)))
+           (end
+            (if end_time
+                (org-mcp--clock-round-time
+                 (org-mcp--clock-parse-timestamp end_time))
+              (org-mcp--clock-round-time now)))
            (start-str (alist-get 'start active))
            (start-parsed (org-parse-time-string start-str))
            (start-time (apply #'encode-time start-parsed)))
@@ -1936,17 +2001,24 @@ MCP Parameters:
                       (org-mcp--clock-format-timestamp end)
                       (org-mcp--clock-duration-string duration))))
         (org-mcp--modify-and-save active-file "clock-out"
-            `((clocked_out . t)
-              (heading . ,(alist-get 'heading active))
-              (start . ,start-str)
-              (end . ,(org-mcp--clock-format-timestamp end))
-              (duration . ,(org-mcp--clock-duration-string duration)))
+                                  `((clocked_out . t)
+                                    (heading
+                                     . ,(alist-get 'heading active))
+                                    (start . ,start-str)
+                                    (end
+                                     .
+                                     ,(org-mcp--clock-format-timestamp
+                                       end))
+                                    (duration
+                                     .
+                                     ,(org-mcp--clock-duration-string
+                                       duration)))
           ;; Find the active clock line by its exact start timestamp
-          (when (re-search-forward
-                 (concat "^\\([ \t]*CLOCK: \\["
-                         (regexp-quote start-str)
-                         "\\]\\)[ \t]*$")
-                 nil t)
+          (when (re-search-forward (concat
+                                    "^\\([ \t]*CLOCK: \\["
+                                    (regexp-quote start-str)
+                                    "\\]\\)[ \t]*$")
+                                   nil t)
             (goto-char (match-end 1))
             (insert close-text)
             ;; Navigate to heading for complete-and-save
@@ -1968,22 +2040,33 @@ MCP Parameters:
          (file-path (car parsed))
          (headline-path (cdr parsed))
          (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
-         (start-time (org-mcp--clock-round-time
-                      (org-mcp--clock-parse-timestamp start)))
-         (end-time (org-mcp--clock-round-time
-                    (org-mcp--clock-parse-timestamp end))))
+         (start-time
+          (org-mcp--clock-round-time
+           (org-mcp--clock-parse-timestamp start)))
+         (end-time
+          (org-mcp--clock-round-time
+           (org-mcp--clock-parse-timestamp end))))
     (when (time-less-p end-time start-time)
       (org-mcp--tool-validation-error
        "End time %s is before start time %s"
        (org-mcp--clock-format-timestamp end-time)
        (org-mcp--clock-format-timestamp start-time)))
     (org-mcp--modify-and-save file-path "clock-add"
-        `((added . t)
-          (start . ,(org-mcp--clock-format-timestamp start-time))
-          (end . ,(org-mcp--clock-format-timestamp end-time))
-          (duration . ,(org-mcp--clock-duration-string
-                        (float-time
-                         (time-subtract end-time start-time)))))
+                              `((added . t)
+                                (start
+                                 .
+                                 ,(org-mcp--clock-format-timestamp
+                                   start-time))
+                                (end
+                                 .
+                                 ,(org-mcp--clock-format-timestamp
+                                   end-time))
+                                (duration
+                                 .
+                                 ,(org-mcp--clock-duration-string
+                                   (float-time
+                                    (time-subtract
+                                     end-time start-time)))))
       (org-mcp--goto-headline-from-uri headline-path is-id)
       (org-mcp--clock-insert-entry start-time end-time))))
 
@@ -2003,12 +2086,12 @@ MCP Parameters:
          (file-path (car parsed))
          (headline-path (cdr parsed))
          (is-id (string-prefix-p org-mcp--uri-id-prefix uri))
-         (start-time (org-mcp--clock-round-time
-                      (org-mcp--clock-parse-timestamp start)))
+         (start-time
+          (org-mcp--clock-round-time
+           (org-mcp--clock-parse-timestamp start)))
          (deleted-info nil))
     (org-mcp--modify-and-save file-path "clock-delete"
-        `((deleted . t)
-          ,@deleted-info)
+                              `((deleted . t) ,@deleted-info)
       (org-mcp--goto-headline-from-uri headline-path is-id)
       (setq deleted-info (org-mcp--clock-delete-entry start-time))
       (unless deleted-info
@@ -2820,8 +2903,7 @@ Use this resource to:
   (mcp-server-lib-unregister-tool
    "org-read-headline" org-mcp--server-id)
   (mcp-server-lib-unregister-tool "org-read-by-id" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-ql-query" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-ql-query" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-ql-list-stored-queries" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
@@ -2835,12 +2917,9 @@ Use this resource to:
    "org-get-clock-config" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-get-active" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-in" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-out" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-add" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-clock-in" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-clock-out" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool "org-clock-add" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-delete" org-mcp--server-id)
   (mcp-server-lib-unregister-tool

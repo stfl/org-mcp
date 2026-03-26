@@ -64,7 +64,10 @@
             biome
             nodejs
           ];
-          shellHook = config.pre-commit.installationScript;
+          shellHook = ''
+            export NODE_PATH="${pkgs.textlint-rule-terminology}/lib/node_modules:''${NODE_PATH:-}"
+            ${config.pre-commit.installationScript}
+          '';
         };
       };
     };

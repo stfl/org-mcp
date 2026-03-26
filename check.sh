@@ -143,8 +143,10 @@ fi
 
 # Run checkov on GitHub Actions workflows
 echo "Checking GitHub Actions workflows..."
-if ! checkov --framework github_actions --directory .github/workflows --compact --quiet; then
-	ERRORS=$((ERRORS + 1))
+if command -v checkov >/dev/null 2>&1; then
+	if ! checkov --framework github_actions --directory .github/workflows --compact --quiet; then
+		ERRORS=$((ERRORS + 1))
+	fi
 fi
 
 echo -n "Checking GitHub Actions security... $(echo .github/workflows/*.yml) "
