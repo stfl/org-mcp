@@ -1043,14 +1043,14 @@ EXPECTED-PATTERN is a regexp that the file content should match."
 
 ;; Helper functions for testing org-update-todo-state MCP tool
 
-(defun org-mcp-test--call-update-todo-state (uri current-state new-state)
+(defun org-mcp-test--call-update-todo-state (uri new-state &optional current-state)
   "Call org-update-todo-state tool via JSON-RPC and return the result.
-URI is the headline URI, CURRENT-STATE is the expected current TODO state,
-NEW-STATE is the new TODO state to set."
+URI is the headline URI, NEW-STATE is the new TODO state to set.
+CURRENT-STATE, when provided, is the expected current TODO state."
   (let* ((params
           `((uri . ,uri)
-            (current_state . ,current-state)
-            (new_state . ,new-state)))
+            (new_state . ,new-state)
+            ,@(when current-state `((current_state . ,current-state)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-update-todo-state" params)))
     (json-read-from-string result-text)))
@@ -1060,7 +1060,7 @@ NEW-STATE is the new TODO state to set."
   "Call org-update-todo-state tool expecting an error and verify file unchanged.
 TEST-FILE is the test file path to verify remains unchanged.
 RESOURCE-URI is the URI to update.
-CURRENT-STATE is the current TODO state.
+CURRENT-STATE is the expected current TODO state (nil to omit).
 NEW-STATE is the new TODO state to set."
   (org-mcp-test--assert-error-and-file
    test-file
@@ -1068,7 +1068,7 @@ NEW-STATE is the new TODO state to set."
             (mcp-server-lib-create-tools-call-request
              "org-update-todo-state" 1
              `((uri . ,resource-uri)
-               (current_state . ,current-state)
+               ,@(when current-state `((current_state . ,current-state)))
                (new_state . ,new-state))))
           (response (mcp-server-lib-process-jsonrpc-parsed request mcp-server-lib-ert-server-id))
           (result (mcp-server-lib-ert-process-tool-response response)))
@@ -1085,7 +1085,7 @@ TEST-FILE is the file to verify content after update.
 EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
   (let ((result
          (org-mcp-test--call-update-todo-state
-          resource-uri old-state new-state)))
+          resource-uri new-state old-state)))
     (should (= (length result) 4))
     (should (equal (alist-get 'success result) t))
     (should (equal (alist-get 'previous_state result) old-state))
@@ -2031,6 +2031,46 @@ Another task."))
                        test-file)))
           (org-mcp-test--call-update-todo-state-expecting-error
            test-file resource-uri "TODO" "IN-PROGRESS"))))))
+
+(ert-deftest org-mcp-test-update-todo-state-without-current-state ()
+  "Test TODO state update without providing current_state."
+  (let ((test-content "* TODO Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO(t!)" "IN-PROGRESS(i!)" "|" "DONE(d!)"))))
+        (let ((resource-uri
+               (format "org-headline://%s#Task%%20One" test-file)))
+          (let ((result
+                 (org-mcp-test--call-update-todo-state
+                  resource-uri "IN-PROGRESS")))
+            (should (= (length result) 4))
+            (should (equal (alist-get 'success result) t))
+            (should (equal (alist-get 'previous_state result) "TODO"))
+            (should (equal (alist-get 'new_state result) "IN-PROGRESS"))
+            (should (stringp (alist-get 'uri result)))
+            (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--expected-task-one-in-progress-regex)))))))
+
+(ert-deftest org-mcp-test-update-todo-state-without-current-state-no-state ()
+  "Test TODO state update without current_state on headline with no TODO state."
+  (let ((test-content "* Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO(t!)" "|" "DONE(d!)"))))
+        (let ((resource-uri
+               (format "org-headline://%s#Task%%20One" test-file)))
+          (let ((result
+                 (org-mcp-test--call-update-todo-state
+                  resource-uri "TODO")))
+            (should (= (length result) 4))
+            (should (equal (alist-get 'success result) t))
+            (should (equal (alist-get 'previous_state result) ""))
+            (should (equal (alist-get 'new_state result) "TODO"))
+            (should (stringp (alist-get 'uri result)))
+            (should (string-prefix-p "org-id://" (alist-get 'uri result)))))))))
 
 (ert-deftest org-mcp-test-add-todo-top-level ()
   "Test adding a top-level TODO item."

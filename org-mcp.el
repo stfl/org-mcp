@@ -1124,39 +1124,45 @@ BODY-END is the buffer position where body ends."
   "Return the list of allowed Org files."
   (json-encode `((files . ,(vconcat org-mcp-allowed-files)))))
 
-(defun org-mcp--tool-update-todo-state (uri current_state new_state)
+(defun org-mcp--tool-update-todo-state
+    (uri new_state &optional current_state)
   "Update the TODO state of a headline at URI.
 Creates an Org ID for the headline if one doesn't exist.
 Returns the ID-based URI for the updated headline.
-CURRENT_STATE is the current TODO state (empty string for no state).
 NEW_STATE is the new TODO state to set.
+CURRENT_STATE, when provided, is checked against the actual state.
 
 MCP Parameters:
   uri - URI of the headline
         Formats:
           - org-headline://{absolute-path}#{headline-path}
           - org-id://{id}
-  current_state - Current TODO state (empty string for no state)
-  new_state - New TODO state (must be in `org-todo-keywords')"
+  new_state - New TODO state (must be in `org-todo-keywords')
+  current_state - Expected current TODO state (string, optional)
+                  When provided, must match actual state or tool will error
+                  Omit to skip the state check"
   (let* ((parsed (org-mcp--parse-resource-uri uri))
          (file-path (car parsed))
-         (headline-path (cdr parsed)))
+         (headline-path (cdr parsed))
+         (actual-prev nil))
     (org-mcp--validate-todo-state new_state)
     (org-mcp--modify-and-save file-path "update"
-                              `((previous_state
-                                 .
-                                 ,(or current_state ""))
+                              `((previous_state . ,actual-prev)
                                 (new_state . ,new_state))
       (org-mcp--goto-headline-from-uri
        headline-path (string-prefix-p org-mcp--uri-id-prefix uri))
 
-      ;; Check current state matches
+      ;; Capture actual previous state
       (beginning-of-line)
-      (let ((actual-state (org-get-todo-state)))
-        (unless (string= actual-state current_state)
+      (setq actual-prev (or (org-get-todo-state) ""))
+
+      ;; Check current state matches (only when caller provided it)
+      (when current_state
+        (unless (string= actual-prev current_state)
           (org-mcp--state-mismatch-error
-           (or current_state "(no state)")
-           (or actual-state "(no state)") "State")))
+           current_state
+           (or (org-get-todo-state) "(no state)")
+           "State")))
 
       ;; Update the state
       (org-todo new_state))))
@@ -2235,9 +2241,9 @@ Parameters:
         Formats:
           - org-headline://{absolute-path}#{url-encoded-path}
           - org-id://{uuid}
-  current_state - Expected current TODO state (string, required)
-                  Use empty string \"\" if headline has no TODO state
-                  Must match actual state or tool will error
+  current_state - Expected current TODO state (string, optional)
+                  When provided, must match actual state or tool will error
+                  Omit to skip the state check
   new_state - New TODO state to set (string, required)
               Must be valid keyword from org-todo-keywords
 

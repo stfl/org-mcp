@@ -246,7 +246,7 @@ Empty configuration returns:
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
   - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
-  - =currentState= (string, required): Current TODO state (empty string "" for no state) - must match actual state
+  - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
 - *Returns:* Success status with previous and new states, and ID-based URI of the updated headline
 
