@@ -196,8 +196,7 @@ Creates or gets an Org ID for the current headline and returns it.
 FILE-PATH is the visited file path; used only for buffer refresh.
 RESPONSE-ALIST is an alist of response fields."
   (let ((id (org-id-get-create)))
-    (let ((require-final-newline nil))
-      (save-buffer))
+    (save-buffer)
     (org-mcp--refresh-file-buffers file-path)
     (json-encode
      (append
@@ -1911,8 +1910,7 @@ MCP Parameters:
                                          nil t)
                   (goto-char (match-end 1))
                   (insert close-text))
-                (let ((require-final-newline nil))
-                  (save-buffer))
+                (save-buffer)
                 (org-mcp--refresh-file-buffers active-file)))
           ;; Non-allowed file: close via buffer edit and clear markers
           (let ((buf (marker-buffer org-clock-marker)))

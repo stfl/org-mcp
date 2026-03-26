@@ -253,7 +253,7 @@ Second child content.
     ":ID: +%s\n"
     ":END:\n"
     "Second child content\\.\n"
-    "\\*\\* Third Child #3\\'")
+    "\\*\\* Third Child #3\n?\\'")
    org-mcp-test--content-with-id-id)
   "Regex matching complete buffer after renaming Second Child.")
 
@@ -315,7 +315,7 @@ Second child content.
    ":ID: +" org-mcp-test--content-with-id-id "\n"
    ":END:\n"
    "Second child content\\.\n"
-   "\\*\\* Third Child #3\\'")
+   "\\*\\* Third Child #3\n?\\'")
   "Regex matching complete buffer after adding top-level TODO with headers.")
 
 (defconst org-mcp-test--regex-child-under-parent
@@ -376,7 +376,7 @@ Second child content.
    ":ID: +" org-mcp-test--content-with-id-id "\n"
    ":END:\n"
    "Second child content\\.\n"
-   "\\*\\* Third Child #3\\'")
+   "\\*\\* Third Child #3\n?\\'")
   "Pattern for TODO added after specific sibling.")
 
 (defconst org-mcp-test--regex-todo-without-tags
@@ -415,7 +415,7 @@ Second child content.
    " *:END:\n"
    "First line of body\\.\n"
    "Second line of body\\.\n"
-   "Third line of body\\.\\'")
+   "Third line of body\\.\n?\\'")
   "Pattern for renamed simple TODO with generated ID.")
 
 (defconst org-mcp-test--pattern-renamed-todo-with-tags
@@ -480,7 +480,7 @@ Second child content.
    " *:PROPERTIES:\n"
    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
    " *:END:\n"
-   "This is a single headline with a slash, not nested under Parent\\.\\'")
+   "This is a single headline with a slash, not nested under Parent\\.\n?\\'")
   "Pattern for renamed headline containing slash character.")
 
 (defconst org-mcp-test--regex-slash-not-nested-after
@@ -492,7 +492,7 @@ Second child content.
    " *:PROPERTIES:\n"
    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
    " *:END:\n"
-   "This is a single headline with a slash, not nested under Parent\\.\\'")
+   "This is a single headline with a slash, not nested under Parent\\.\n?\\'")
   "Regex for slash-not-nested test after renaming Parent/Child.")
 
 (defconst org-mcp-test--regex-percent-after
@@ -516,7 +516,7 @@ Second child content.
     ":ID: +%s\n"
     ":END:\n"
     "Second child content\\.\n"
-    "\\*\\* Third Child #3\\'")
+    "\\*\\* Third Child #3\n?\\'")
    org-mcp-test--content-nested-siblings-parent-id
    org-mcp-test--content-with-id-id)
   "Expected pattern after renaming headline with percent sign.")
@@ -534,7 +534,7 @@ Second child content.
    "Second review content\\.\n"
    "\\* Planning\n"
    "\\*\\* Project Review\n"
-   "Third review content\\.\\'")
+   "Third review content\\.\n?\\'")
   "Regex for duplicate headlines after renaming first occurrence.")
 
 (defconst org-mcp-test--regex-hierarchy-second-target-renamed
@@ -549,7 +549,7 @@ Second child content.
    " *:PROPERTIES:\n"
    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
    " *:END:\n"
-   "This Target is under Second Section, not First Section\\.\\'")
+   "This Target is under Second Section, not First Section\\.\n?\\'")
   "Regex for hierarchy test after renaming second Target.")
 
 (defconst org-mcp-test--regex-add-todo-with-mutex-tags
@@ -571,7 +571,7 @@ Second child content.
    " *:END:\n"
    "This task needs to be renamed\n"
    "\\*\\* DONE Review Code\n"
-   "This is already done\\'")
+   "This is already done\n?\\'")
   "Regex for todo-keywords test after renaming TODO headline.")
 
 (defconst org-mcp-test--pattern-edit-body-single-line
