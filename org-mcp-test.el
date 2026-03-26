@@ -754,6 +754,46 @@ Content of subsection 2.1."
    "Content of subsection 1.1.")
   "Expected content when reading 'First Section/Subsection 1.1' nested headline.")
 
+(defconst org-mcp-test--clock-task-content
+  "* TODO Task One\n"
+  "Initial Org file content for clock tool tests.")
+
+(defconst org-mcp-test--clock-task-with-open-clock
+  "* TODO Task One\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 10:00]\n:END:\n"
+  "Org file content with an unclosed CLOCK entry, used for clock-out tests.")
+
+(defconst org-mcp-test--clock-add-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the complete file after org-clock-add adds a closed CLOCK entry.")
+
+(defconst org-mcp-test--clock-in-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the complete file after org-clock-in inserts an open CLOCK entry.")
+
+(defconst org-mcp-test--clock-out-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the complete file after org-clock-out closes the CLOCK entry.")
+
 ;; Test helpers
 
 (defun org-mcp-test--read-file (file)
@@ -1216,6 +1256,34 @@ FILE is the file path, HEADLINE-PATH is the slash-separated path to the headline
 UUID is the ID property of the headline to read."
   (let ((params `((uuid . ,uuid))))
     (mcp-server-lib-ert-call-tool "org-read-by-id" params)))
+
+;; Helper functions for testing clock MCP tools
+
+(defun org-mcp-test--call-clock-add (uri start end)
+  "Call org-clock-add tool via JSON-RPC and return the parsed result.
+URI is the headline URI, START and END are ISO 8601 timestamps."
+  (let* ((params `((uri . ,uri) (start . ,start) (end . ,end)))
+         (result-text
+          (mcp-server-lib-ert-call-tool "org-clock-add" params)))
+    (json-read-from-string result-text)))
+
+(defun org-mcp-test--call-clock-in (uri &optional start-time)
+  "Call org-clock-in tool via JSON-RPC and return the parsed result.
+URI is the headline URI.  START-TIME is an optional ISO 8601 timestamp."
+  (let* ((params (if start-time
+                     `((uri . ,uri) (start_time . ,start-time))
+                   `((uri . ,uri))))
+         (result-text
+          (mcp-server-lib-ert-call-tool "org-clock-in" params)))
+    (json-read-from-string result-text)))
+
+(defun org-mcp-test--call-clock-out (&optional end-time)
+  "Call org-clock-out tool via JSON-RPC and return the parsed result.
+END-TIME is an optional ISO 8601 end timestamp."
+  (let* ((params (if end-time `((end_time . ,end-time)) '()))
+         (result-text
+          (mcp-server-lib-ert-call-tool "org-clock-out" params)))
+    (json-read-from-string result-text)))
 
 ;; Helper functions for testing org-headline MCP resource
 
@@ -3015,6 +3083,40 @@ Some quote
        (string-match-p
         org-mcp-test--pattern-tool-read-by-id
         result-text)))))
+
+(ert-deftest org-mcp-test-clock-add-saves-file-to-disk ()
+  "Test org-clock-add saves the completed CLOCK entry to disk."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "org-headline://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-add
+                    uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'added result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-add-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-saves-file-to-disk ()
+  "Test org-clock-in saves the open CLOCK entry to disk."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "org-headline://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_in result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-out-saves-file-to-disk ()
+  "Test org-clock-out saves the closed CLOCK entry to disk.
+This exercises the write path in org-mcp--complete-and-save."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((result (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_out result) t)))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--clock-out-expected-regex)))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

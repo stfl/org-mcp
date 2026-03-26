@@ -193,10 +193,11 @@ Check your Emacs hooks (`before-revert-hook', \
 (defun org-mcp--complete-and-save (file-path response-alist)
   "Create ID if needed, save FILE-PATH, return JSON.
 Creates or gets an Org ID for the current headline and returns it.
-FILE-PATH is the path to save the buffer contents to.
+FILE-PATH is the visited file path; used only for buffer refresh.
 RESPONSE-ALIST is an alist of response fields."
   (let ((id (org-id-get-create)))
-    (write-region (point-min) (point-max) file-path)
+    (let ((require-final-newline nil))
+      (save-buffer))
     (org-mcp--refresh-file-buffers file-path)
     (json-encode
      (append
@@ -1899,6 +1900,7 @@ MCP Parameters:
             (progn
               (org-mcp--fail-if-modified active-file "clock-in")
               (with-temp-buffer
+                (set-visited-file-name active-file t)
                 (insert-file-contents active-file)
                 (goto-char (point-min))
                 (when (re-search-forward (concat
@@ -1909,7 +1911,8 @@ MCP Parameters:
                                          nil t)
                   (goto-char (match-end 1))
                   (insert close-text))
-                (write-region (point-min) (point-max) active-file)
+                (let ((require-final-newline nil))
+                  (save-buffer))
                 (org-mcp--refresh-file-buffers active-file)))
           ;; Non-allowed file: close via buffer edit and clear markers
           (let ((buf (marker-buffer org-clock-marker)))
