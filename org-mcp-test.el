@@ -2085,6 +2085,44 @@ Another task."))
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching buffer after updating Task One to DONE with a note.")
 
+(defconst org-mcp-test--content-task-scheduled-repeat
+  "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu +1w>"
+  "Task with a +1w SCHEDULED repeater.")
+
+(defconst org-mcp-test--content-task-scheduled-repeat-to-state
+  (concat "* TODO Weekly Task\n"
+          ":PROPERTIES:\n"
+          ":REPEAT_TO_STATE: NEXT\n"
+          ":END:\n"
+          "SCHEDULED: <2026-01-01 Thu +1w>")
+  "Task with +1w SCHEDULED repeater and REPEAT_TO_STATE: NEXT.")
+
+;; After marking DONE, repeat reverts to TODO, SCHEDULED advances
+(defconst org-mcp-test--expected-weekly-task-repeat-triggered-regex
+  (concat
+   "\\`\\* TODO Weekly Task\n"
+   "\\(?::PROPERTIES:\n"
+   "\\(?::REPEAT_TO_STATE:[ \t]+\\S-+\n\\)?"
+   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
+   "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
+   ":END:\n\\)?"
+   "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
+   "\\(?:.\\|\n\\)*\\'")
+  "Regex: Weekly Task after repeat triggered (state back to TODO, date advanced).")
+
+;; After marking DONE, repeat reverts to NEXT (REPEAT_TO_STATE)
+(defconst org-mcp-test--expected-weekly-task-repeat-to-state-regex
+  (concat
+   "\\`\\* NEXT Weekly Task\n"
+   "\\(?::PROPERTIES:\n"
+   "\\(?::REPEAT_TO_STATE:[ \t]+NEXT\n\\)?"
+   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
+   "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
+   ":END:\n\\)?"
+   "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
+   "\\(?:.\\|\n\\)*\\'")
+  "Regex: Weekly Task after repeat with REPEAT_TO_STATE reverts to NEXT.")
+
 (ert-deftest org-mcp-test-update-todo-state-with-note ()
   "Test TODO state update with an attached note."
   (let ((test-content "* TODO Task One\nTask description."))
@@ -2106,6 +2144,39 @@ Another task."))
             (org-mcp-test--verify-file-matches
              test-file
              org-mcp-test--expected-task-one-done-with-note-regex)))))))
+
+(ert-deftest org-mcp-test-update-todo-state-triggers-repeat ()
+  "Test that marking DONE on a task with a repeater triggers the repeat."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((resource-uri (format "org-headline://%s#Weekly%%20Task" test-file))
+             (result (org-mcp-test--call-update-todo-state resource-uri "DONE")))
+        ;; Response fields
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'previous_state result) "TODO"))
+        (should (equal (alist-get 'new_state result) "DONE"))
+        ;; File: repeat fired — state reverted to TODO, SCHEDULED advanced
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-repeat-triggered-regex)))))
+
+(ert-deftest org-mcp-test-update-todo-state-repeat-to-state ()
+  "Test that REPEAT_TO_STATE is respected when repeat triggers."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-repeat-to-state))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
+      (let* ((resource-uri (format "org-headline://%s#Weekly%%20Task" test-file))
+             (result (org-mcp-test--call-update-todo-state resource-uri "DONE")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'previous_state result) "TODO"))
+        (should (equal (alist-get 'new_state result) "DONE"))
+        ;; File: state reverted to NEXT (from REPEAT_TO_STATE)
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-repeat-to-state-regex)))))
 
 (ert-deftest org-mcp-test-add-todo-top-level ()
   "Test adding a top-level TODO item."
