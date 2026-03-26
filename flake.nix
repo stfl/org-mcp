@@ -2,7 +2,7 @@
   description = "org-mcp development environment";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/*.tar.gz";
     flake-parts.url = "github:hercules-ci/flake-parts";
   };
 
