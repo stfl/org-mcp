@@ -57,15 +57,12 @@
             # Markdown / text
             mdl
             prettier
-            textlint
-            textlint-rule-terminology
 
             # JSON / JS
             biome
             nodejs
           ];
           shellHook = ''
-            export NODE_PATH="${pkgs.textlint-rule-terminology}/lib/node_modules:''${NODE_PATH:-}"
             ${config.pre-commit.installationScript}
           '';
         };

@@ -30,7 +30,6 @@
 # - Markdown:
 #   - Lint with mdl
 #   - Check formatting with prettier
-#   - Check terminology with textlint
 
 set -eu -o pipefail
 
@@ -190,18 +189,6 @@ if prettier --log-level warn --check .github/workflows/*.yml; then
 else
 	echo "prettier check failed!"
 	ERRORS=$((ERRORS + 1))
-fi
-
-echo -n "Checking terminology... "
-if [ ${#MARKDOWN_FILES[@]} -gt 0 ]; then
-	if textlint --rule terminology "${MARKDOWN_FILES[@]}"; then
-		echo "OK!"
-	else
-		echo "textlint check failed"
-		ERRORS=$((ERRORS + 1))
-	fi
-else
-	echo "No markdown files to check"
 fi
 
 # Biome
