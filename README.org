@@ -129,7 +129,7 @@ Returns: JSON structure like:
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
 - *Returns:* Plain text content including the headline itself and all nested subheadings
 
-*Note:* The =org-id://= resource template has been merged into =org-headline://=. Use =org-headline://{uuid}= to access headlines by ID. Tools still accept =org-id://= URIs for backward compatibility.
+*Note:* Use =org://{uuid}= to access headlines by ID. This is the standard URI format returned by all tools.
 
 Example:
 #+begin_example
@@ -243,7 +243,7 @@ Empty configuration returns:
 *** org-update-todo-state
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
@@ -263,7 +263,7 @@ Example:
   "success": true,
   "previousState": "TODO",
   "newState": "IN-PROGRESS",
-  "uri": "org-id://554A22F6-E29F-4759-8AD2-E7CA225C6397"
+  "uri": "org://554A22F6-E29F-4759-8AD2-E7CA225C6397"
 }
 
 # State mismatch error:
@@ -275,7 +275,7 @@ Example:
 *** org-rename-headline
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
 - *Returns:* Success status with previous and new titles
@@ -294,7 +294,7 @@ Example:
   "success": true,
   "previousTitle": "Original Task",
   "newTitle": "Updated Task Name",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440002"
+  "uri": "org://550e8400-e29b-41d4-a716-446655440002"
 }
 
 # Title mismatch error:
@@ -328,7 +328,7 @@ Example:
 # Success response:
 {
   "success": true,
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440001",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440001",
   "file": "projects.org",
   "title": "Implement new feature"
 }
@@ -337,18 +337,18 @@ Example:
 *** org-edit-body
 - *Description:* Edit body content of an Org node using partial string replacement
 - *Parameters:*
-  - =resourceUri= (string, required): URI of the node to edit (supports =org-headline://= or =org-id://=)
+  - =resourceUri= (string, required): URI of the node to edit (supports =org-headline://= or =org://=)
   - =oldBody= (string, required): Substring to search for within the node's body (must be unique unless replaceAll is true). Use empty string "" to add content to an empty node
   - =newBody= (string, required): Replacement text
   - =replaceAll= (boolean, optional): Replace all occurrences (default: false)
-- *Returns:* Success status with ID-based URI of the updated node
+- *Returns:* Success status with org:// URI of the updated node
 - *Special behavior:* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
 #+begin_src json
 # Request:
 {
-  "resourceUri": "org-id://abc-123",
+  "resourceUri": "org://abc-123",
   "oldBody": "This is a placeholder.",
   "newBody": "Implementation started - using Strategy pattern."
 }
@@ -356,12 +356,12 @@ Example:
 # Success response:
 {
   "success": true,
-  "uri": "org-id://abc-123"
+  "uri": "org://abc-123"
 }
 
 # Adding content to empty node:
 {
-  "resourceUri": "org-id://new-task",
+  "resourceUri": "org://new-task",
   "oldBody": "",
   "newBody": "Initial task description."
 }
@@ -370,15 +370,15 @@ Example:
 *** org-set-properties
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
-- *Returns:* Success status with arrays of =properties_set= and =properties_deleted=, plus ID-based URI
+- *Returns:* Success status with arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
 Example:
 #+begin_src json
 # Set and delete properties:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "properties": {
     "EFFORT": "2:00",
     "CATEGORY": null
@@ -390,14 +390,14 @@ Example:
   "success": true,
   "properties_set": ["EFFORT"],
   "properties_deleted": ["CATEGORY"],
-  "uri": "org-id://abc-123"
+  "uri": "org://abc-123"
 }
 #+end_src
 
 *** org-update-scheduled
 - *Description:* Update the SCHEDULED timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status with =previous_scheduled=, =new_scheduled=, and ID-based URI
 
@@ -405,13 +405,13 @@ Example:
 #+begin_src json
 # Set scheduled:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "scheduled": "2026-03-27"
 }
 
 # Remove scheduled:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "scheduled": ""
 }
 #+end_src
@@ -419,7 +419,7 @@ Example:
 *** org-update-deadline
 - *Description:* Update the DEADLINE timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status with =previous_deadline=, =new_deadline=, and ID-based URI
 
@@ -427,13 +427,13 @@ Example:
 #+begin_src json
 # Set deadline:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "deadline": "2026-04-15"
 }
 
 # Remove deadline:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "deadline": ""
 }
 #+end_src
@@ -441,28 +441,28 @@ Example:
 *** org-set-tags
 - *Description:* Set tags on an Org headline, replacing any existing tags
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
-- *Returns:* Success status with =previous_tags= and =new_tags= arrays, plus ID-based URI
+- *Returns:* Success status with =previous_tags= and =new_tags= arrays, plus org:// URI
 
 Example:
 #+begin_src json
 # Set tags:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "tags": ["work", "urgent"]
 }
 
 # Clear all tags:
 {
-  "uri": "org-id://abc-123"
+  "uri": "org://abc-123"
 }
 #+end_src
 
 *** org-set-priority
 - *Description:* Set or remove priority on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
 - *Returns:* Success status with =previous_priority=, =new_priority=, and ID-based URI
 
@@ -470,13 +470,13 @@ Example:
 #+begin_src json
 # Set priority:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "priority": "A"
 }
 
 # Remove priority:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "priority": ""
 }
 #+end_src
@@ -484,44 +484,44 @@ Example:
 *** org-append-body
 - *Description:* Append content to the body of an Org headline, inserting after existing body content but before any child headlines
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =content= (string, required): Text to append. Cannot be empty, cannot introduce headlines at same or higher level, must maintain balanced =#+BEGIN/#+END= blocks
-- *Returns:* Success status with ID-based URI
+- *Returns:* Success status with org:// URI
 
 Example:
 #+begin_src json
 # Append to body:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "content": "Additional notes from meeting."
 }
 
 # Success response:
 {
   "success": true,
-  "uri": "org-id://abc-123"
+  "uri": "org://abc-123"
 }
 #+end_src
 
 *** org-add-logbook-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
-- *Returns:* Success status with ID-based URI
+- *Returns:* Success status with org:// URI
 
 Example:
 #+begin_src json
 # Add a note:
 {
-  "uri": "org-id://abc-123",
+  "uri": "org://abc-123",
   "note": "Discussed with team - approved approach B."
 }
 
 # Success response:
 {
   "success": true,
-  "uri": "org-id://abc-123"
+  "uri": "org://abc-123"
 }
 #+end_src
 
@@ -548,7 +548,7 @@ Example:
       "file": "/home/user/org/tasks.org",
       "todo": "TODO",
       "priority": "A",
-      "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+      "uri": "org://550e8400-e29b-41d4-a716-446655440000"
     }
   ],
   "total": 1,
@@ -722,7 +722,7 @@ Example responses:
 *** org-clock-in
 - *Description:* Clock in to the specified heading. If another clock is active, it is automatically closed first. Supports continuous clocking and time rounding
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
   - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
 - *Returns:* JSON object with clock-in details
@@ -731,7 +731,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "start_time": "2026-03-23T14:30:00"
 }
 
@@ -741,7 +741,7 @@ Example:
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
 }
 
 # With dangling clocks resolved:
@@ -750,7 +750,7 @@ Example:
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "resolved": 1
 }
 #+end_src
@@ -772,14 +772,14 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 
 *** org-clock-add
 - *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
 - *Returns:* JSON object with the added clock entry details
@@ -788,7 +788,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "start": "2026-03-23T14:30:00",
   "end": "2026-03-23T16:45:00"
 }
@@ -800,14 +800,14 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 
 *** org-clock-delete
 - *Description:* Delete a clock entry from a heading. Removes the LOGBOOK drawer if it becomes empty after deletion
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org-id://=)
+  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
 - *Returns:* JSON object with the deleted entry details
 
@@ -815,7 +815,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "start": "2026-03-23T14:30:00"
 }
 
@@ -826,7 +826,7 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org-id://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 

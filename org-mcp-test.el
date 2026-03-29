@@ -26,7 +26,7 @@
   "ID value for org-mcp-test--content-with-id.")
 
 (defconst org-mcp-test--content-with-id-uri
-  (format "org-id://%s" org-mcp-test--content-with-id-id)
+  (format "org://%s" org-mcp-test--content-with-id-id)
   "URI for org-mcp-test--content-with-id.")
 
 (defconst org-mcp-test--content-nested-siblings-parent-id
@@ -1036,7 +1036,7 @@ EXPECTED-PATTERN is a regexp that the file content should match."
     ;; Check result structure
     (should (= (length result) 4))
     (should (equal (alist-get 'success result) t))
-    (should (string-match-p "\\`org-id://.+" (alist-get 'uri result)))
+    (should (string-match-p "\\`org://.+" (alist-get 'uri result)))
     (should (equal (alist-get 'file result) basename))
     (should (equal (alist-get 'title result) title))
     (org-mcp-test--verify-file-matches test-file expected-pattern)))
@@ -1093,9 +1093,9 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
     (should (equal (alist-get 'previous_state result) old-state))
     (should (equal (alist-get 'new_state result) new-state))
     (should (stringp (alist-get 'uri result)))
-    (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+    (should (string-prefix-p "org://" (alist-get 'uri result)))
     ;; For ID-based URIs, verify the returned URI matches the input
-    (when (string-prefix-p "org-id://" resource-uri)
+    (when (string-prefix-p "org://" resource-uri)
       (should (equal (alist-get 'uri result) resource-uri)))
     (org-mcp-test--verify-file-matches test-file expected-content-regex)))
 
@@ -1122,9 +1122,9 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
     (should (equal (alist-get 'previous_title result) current-title))
     (should (equal (alist-get 'new_title result) new-title))
     (should (stringp result-uri))
-    (should (string-prefix-p "org-id://" result-uri))
+    (should (string-prefix-p "org://" result-uri))
     ;; If input URI was ID-based, result URI should remain ID-based
-    (when (string-prefix-p "org-id://" uri)
+    (when (string-prefix-p "org://" uri)
       (should (equal result-uri uri)))
     (org-mcp-test--verify-file-matches test-file expected-content-regex)))
 
@@ -1187,8 +1187,8 @@ EXPECTED-ID if provided, check the returned URI has this exact ID."
     (should (equal (alist-get 'success result) t))
     (let ((uri (alist-get 'uri result)))
       (if expected-id
-          (should (equal uri (concat "org-id://" expected-id)))
-        (should (string-prefix-p "org-id://" uri))))
+          (should (equal uri (concat "org://" expected-id)))
+        (should (string-prefix-p "org://" uri))))
     (org-mcp-test--verify-file-matches test-file expected-pattern)))
 
 (defun org-mcp-test--call-edit-body-expecting-error
@@ -1902,7 +1902,7 @@ Very deep content."))
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (org-mcp-test--with-id-setup test-file test-content
           `("20240101T120000")
-        (let ((uri "org-id://20240101T120000"))
+        (let ((uri "org://20240101T120000"))
           (org-mcp-test--update-todo-state-and-check
            uri "TODO" "DONE"
            test-file
@@ -2002,12 +2002,12 @@ Another task description."))
            '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
       (org-mcp-test--with-id-setup test-file test-content '()
         ;; Try to update a non-existent ID
-        (let ((resource-uri "org-id://nonexistent-uuid-12345"))
+        (let ((resource-uri "org://nonexistent-uuid-12345"))
           (org-mcp-test--call-update-todo-state-expecting-error
            test-file resource-uri "TODO" "IN-PROGRESS"))))))
 
 (ert-deftest org-mcp-test-update-todo-state-by-id ()
-  "Test updating TODO state using org-id:// URI."
+  "Test updating TODO state using org:// URI."
   (let ((test-content org-mcp-test--content-with-id-todo))
     (let ((org-todo-keywords
            '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
@@ -2053,7 +2053,7 @@ Another task."))
             (should (equal (alist-get 'previous_state result) "TODO"))
             (should (equal (alist-get 'new_state result) "IN-PROGRESS"))
             (should (stringp (alist-get 'uri result)))
-            (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+            (should (string-prefix-p "org://" (alist-get 'uri result)))
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--expected-task-one-in-progress-regex)))))))
 
@@ -2074,7 +2074,7 @@ Another task."))
             (should (equal (alist-get 'previous_state result) ""))
             (should (equal (alist-get 'new_state result) "TODO"))
             (should (stringp (alist-get 'uri result)))
-            (should (string-prefix-p "org-id://" (alist-get 'uri result)))))))))
+            (should (string-prefix-p "org://" (alist-get 'uri result)))))))))
 
 (defconst org-mcp-test--expected-task-one-done-with-note-regex
   (concat
@@ -2668,7 +2668,7 @@ level 3 sibling (via ID)."
         (let ((parent-uri
                (format "org-headline://%s#Top%%20Level/Review%%20the%%20package"
                        test-file))
-              (after-uri (format "org-id://%s"
+              (after-uri (format "org://%s"
                                  org-mcp-test--level2-parent-level3-sibling-id)))
           ;; BUG: org-insert-heading creates level 1 (*) instead of level 3 (***)
           (org-mcp-test--add-todo-and-check
@@ -2841,7 +2841,7 @@ This is valid Org-mode syntax and should be allowed."
           (let ((parent-uri
                  (format "org-headline://%s#Parent%%20Task"
                          test-file))
-                (after-uri (format "org-id://%s" first-id)))
+                (after-uri (format "org://%s" first-id)))
             (org-mcp-test--add-todo-and-check
              "New Task After First"
              "TODO"
@@ -2865,22 +2865,22 @@ This is valid Org-mode syntax and should be allowed."
              (format "org-headline://%s#First%%20Parent"
                      test-file))
             (after-uri
-             (format "org-id://%s" org-mcp-test--other-child-id)))
+             (format "org://%s" org-mcp-test--other-child-id)))
        ;; Error: Other Child is not a child of First Parent
        (org-mcp-test--call-add-todo-expecting-error
         test-file "New Task" "TODO" '("work") nil parent-uri
         after-uri)))))
 
 (ert-deftest org-mcp-test-add-todo-parent-id-uri ()
-  "Test adding TODO with parent specified as org-id:// URI."
+  "Test adding TODO with parent specified as org:// URI."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
     (let ((org-todo-keywords '((sequence "TODO(t!)" "|" "DONE(d!)")))
           (org-tag-alist '("work"))
           (org-id-locations-file nil))
-      ;; Use org-id:// for parent instead of org-headline://
+      ;; Use org:// for parent instead of org-headline://
       (let ((parent-uri
-             (format "org-id://%s"
+             (format "org://%s"
                      org-mcp-test--content-nested-siblings-parent-id)))
         (org-mcp-test--add-todo-and-check
          "Child via ID"
@@ -3087,7 +3087,7 @@ paths and only matches headlines at the appropriate hierarchy level."
       ;; Try to rename non-existent ID
       (org-mcp-test--call-rename-headline-expecting-error
        test-file
-       "org-id://non-existent-id-12345"
+       "org://non-existent-id-12345"
        "Whatever"
        "Should Fail"))))
 
@@ -3273,7 +3273,7 @@ content here."
       org-mcp-test--content-with-id-repeated-text
       `("test-id")
     (org-mcp-test--call-edit-body-expecting-error
-     test-file "org-id://test-id" "occurrence of pattern" "REPLACED" nil)))
+     test-file "org://test-id" "occurrence of pattern" "REPLACED" nil)))
 
 (ert-deftest org-mcp-test-edit-body-replace-all ()
   "Test org-edit-body tool with replaceAll functionality."
@@ -3282,7 +3282,7 @@ content here."
       `("test-id")
     (org-mcp-test--call-edit-body-and-check
      test-file
-     "org-id://test-id"
+     "org://test-id"
      "occurrence of pattern"
      "REPLACED"
      org-mcp-test--pattern-edit-body-replace-all
@@ -3296,7 +3296,7 @@ content here."
     ;; Should error because multiple occurrences exist
     (org-mcp-test--call-edit-body-expecting-error
      test-file
-     "org-id://test-id"
+     "org://test-id"
      "occurrence of pattern"
      "REPLACED"
      :false)))
@@ -3346,7 +3346,7 @@ content here."
       `(,org-mcp-test--timestamp-id)
     (org-mcp-test--call-edit-body-and-check
      test-file
-     (format "org-id://%s" org-mcp-test--timestamp-id)
+     (format "org://%s" org-mcp-test--timestamp-id)
      ""
      "Content added after properties."
      org-mcp-test--pattern-edit-body-empty-with-props)))
@@ -3589,7 +3589,7 @@ This exercises the write path in org-mcp--complete-and-save."
             (mcp-server-lib-ert-call-tool "org-set-properties" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (should (string-prefix-p "org://" (alist-get 'uri result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-new))))
 
@@ -3646,7 +3646,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (properties . ((EFFORT . "1:00")))))
           (result-text
@@ -3729,7 +3729,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (scheduled . "2026-03-27")))
           (result-text
@@ -3812,7 +3812,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (deadline . "2026-03-27")))
           (result-text
@@ -3929,7 +3929,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (tags . "work")))
           (result-text
@@ -4026,7 +4026,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (priority . "A")))
           (result-text
@@ -4048,7 +4048,7 @@ This exercises the write path in org-mcp--complete-and-save."
             (mcp-server-lib-ert-call-tool "org-append-body" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (should (string-prefix-p "org://" (alist-get 'uri result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body))))
 
@@ -4121,7 +4121,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (content . "Appended.")))
           (result-text
@@ -4143,7 +4143,7 @@ This exercises the write path in org-mcp--complete-and-save."
             (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (string-prefix-p "org-id://" (alist-get 'uri result)))
+      (should (string-prefix-p "org://" (alist-get 'uri result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-logbook-note-new))))
 
@@ -4199,7 +4199,7 @@ This exercises the write path in org-mcp--complete-and-save."
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (format "org-id://%s" org-mcp-test--crud-test-id))
+   (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
           (params `((uri . ,uri)
                     (note . "Test note.")))
           (result-text
