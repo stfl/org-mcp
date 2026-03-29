@@ -70,9 +70,6 @@ Symbol `unloaded' before first access.")
 (defconst org-mcp--uri-headline-prefix "org-headline://"
   "URI prefix for headline resources.")
 
-(defconst org-mcp--uri-id-prefix "org-id://"
-  "URI prefix for legacy org-id:// resources (backward compat).")
-
 (defun org-mcp--extract-uri-suffix (uri prefix)
   "Extract suffix from URI after PREFIX.
 Returns the suffix string if URI starts with PREFIX, nil otherwise."
@@ -80,18 +77,13 @@ Returns the suffix string if URI starts with PREFIX, nil otherwise."
     (substring uri (length prefix))))
 
 (defun org-mcp--extract-id-from-uri (uri)
-  "Extract org ID from an ID-based URI.
-Supports org:// (UUID or custom ID) and org-id:// formats.
-Returns the ID string, or nil if URI is not ID-based."
-  (or (org-mcp--extract-uri-suffix uri "org-id://")
-      (when (string-prefix-p "org://" uri)
-        (let ((suffix (substring uri (length "org://"))))
-          (when (eq
-                 (plist-get
-                  (org-mcp--detect-uri-type suffix)
-                  :type)
-                 'id)
-            suffix)))))
+  "Extract org ID from an org:// URI.
+Returns the ID string if URI is ID-based, nil otherwise."
+  (when (string-prefix-p "org://" uri)
+    (let ((suffix (substring uri (length "org://"))))
+      (when (eq
+             (plist-get (org-mcp--detect-uri-type suffix) :type) 'id)
+        suffix))))
 
 (defun org-mcp--uri-is-id-based (uri)
   "Return non-nil if URI is based on an Org ID."
@@ -295,12 +287,12 @@ URI is the URI string to dispatch on.
 HEADLINE-BODY is executed when URI starts with
 `org-mcp--uri-headline-prefix', with the URI after the prefix bound
 to `headline'.
-ID-BODY is executed when URI is an ID-based org:// or org-id:// URI,
+ID-BODY is executed when URI is an ID-based org:// URI,
 with the ID bound to `id'.
 Throws an error if URI format is not recognized."
   (declare (indent 1))
   `(cond
-    ;; Handle org:// URIs (unified scheme - auto-detect by content)
+    ;; Handle org:// URIs (auto-detect by content)
     ((string-prefix-p "org://" ,uri)
      (let* ((suffix (substring ,uri (length "org://")))
             (parsed-type
@@ -316,12 +308,6 @@ Throws an error if URI format is not recognized."
          (org-mcp--tool-validation-error
           "URI does not refer to a headline: %s"
           ,uri)))))
-    ;; Handle org-id:// URIs (backward compat)
-    ((string-prefix-p org-mcp--uri-id-prefix ,uri)
-     (let ((id
-            (org-mcp--extract-uri-suffix
-             ,uri org-mcp--uri-id-prefix)))
-       ,id-body))
     ;; Handle org-headline:// URIs
     ((string-prefix-p org-mcp--uri-headline-prefix ,uri)
      (let ((headline
