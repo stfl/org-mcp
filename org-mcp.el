@@ -67,9 +67,6 @@ Symbol `unloaded' before first access.")
 (defconst org-mcp--server-id "org-mcp"
   "Server ID for org-mcp MCP server registration.")
 
-(defconst org-mcp--uri-headline-prefix "org-headline://"
-  "URI prefix for headline resources.")
-
 (defun org-mcp--extract-uri-suffix (uri prefix)
   "Extract suffix from URI after PREFIX.
 Returns the suffix string if URI starts with PREFIX, nil otherwise."
@@ -282,17 +279,15 @@ is not found."
 
 (defmacro org-mcp--with-uri-prefix-dispatch
     (uri headline-body id-body)
-  "Dispatch tool URI handling based on prefix.
-URI is the URI string to dispatch on.
-HEADLINE-BODY is executed when URI starts with
-`org-mcp--uri-headline-prefix', with the URI after the prefix bound
-to `headline'.
+  "Dispatch tool URI handling based on org:// prefix.
+URI is the URI string to dispatch on (must use org:// scheme).
+HEADLINE-BODY is executed when URI refers to a headline,
+with the URI suffix after org:// bound to `headline'.
 ID-BODY is executed when URI is an ID-based org:// URI,
 with the ID bound to `id'.
 Throws an error if URI format is not recognized."
   (declare (indent 1))
   `(cond
-    ;; Handle org:// URIs (auto-detect by content)
     ((string-prefix-p "org://" ,uri)
      (let* ((suffix (substring ,uri (length "org://")))
             (parsed-type
@@ -308,12 +303,6 @@ Throws an error if URI format is not recognized."
          (org-mcp--tool-validation-error
           "URI does not refer to a headline: %s"
           ,uri)))))
-    ;; Handle org-headline:// URIs
-    ((string-prefix-p org-mcp--uri-headline-prefix ,uri)
-     (let ((headline
-            (org-mcp--extract-uri-suffix
-             ,uri org-mcp--uri-headline-prefix)))
-       ,headline-body))
     (t
      (org-mcp--tool-validation-error "Invalid resource URI format: %s"
                                      ,uri))))
@@ -371,7 +360,7 @@ Specifically decodes %23 back to #."
 
 (defun org-mcp--build-headline-path ()
   "Build URL-encoded slash-separated headline path from point.
-Returns a string suitable for use in org-headline:// URIs."
+Returns a string suitable for use in org:// URIs."
   (let ((components '()))
     (save-excursion
       (push (url-hexify-string (org-get-heading t t t t)) components)
@@ -382,7 +371,7 @@ Returns a string suitable for use in org-headline:// URIs."
 
 (defun org-mcp--split-headline-uri (path-after-protocol)
   "Split PATH-AFTER-PROTOCOL into (file-path . headline-path).
-PATH-AFTER-PROTOCOL is the part after `org-headline://'.
+PATH-AFTER-PROTOCOL is the part after the scheme prefix (e.g. `org://').
 Returns (FILE . HEADLINE) where FILE is the decoded file path and
 HEADLINE is the part after the fragment separator.
 File paths with # characters should be encoded as %23."
@@ -439,7 +428,7 @@ Validates file access and returns expanded file path."
         headline-path)
     (org-mcp--with-uri-prefix-dispatch
         uri
-      ;; Handle org-headline:// URIs
+      ;; Handle headline URIs
       (let* ((split-result (org-mcp--split-headline-uri headline))
              (filename (car split-result))
              (headline-path-str (cdr split-result))
@@ -1352,7 +1341,7 @@ NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   new_state - New TODO state (must be in `org-todo-keywords')
   current_state - Expected current TODO state (string, optional)
@@ -1424,12 +1413,12 @@ MCP Parameters:
   body - Optional body text content
   parent_uri - Parent item URI
                Formats:
-                 - org-headline://{absolute-path}#{headline-path}
+                 - org://{absolute-path}#{headline-path}
                  - org://{id}
   tags - Tags to add (optional, single string or array of strings)
   after_uri - Sibling to insert after (optional)
               Formats:
-                - org-headline://{absolute-path}#{headline-path}
+                - org://{absolute-path}#{headline-path}
                 - org://{id}"
   (org-mcp--validate-headline-title title)
   (org-mcp--validate-todo-state todo_state)
@@ -1441,7 +1430,7 @@ MCP Parameters:
     ;; Parse parent URI once to extract file-path and parent location
     (org-mcp--with-uri-prefix-dispatch
         parent_uri
-      ;; Handle org-headline:// URIs
+      ;; Handle org:// URIs
       (let* ((split-result (org-mcp--split-headline-uri headline))
              (filename (car split-result))
              (path-str (cdr split-result))
@@ -1601,7 +1590,7 @@ Returns the ID-based URI for the renamed headline.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   current_title - Current title without TODO state or tags
   new_title - New title without TODO state or tags"
@@ -1640,7 +1629,7 @@ REPLACE_ALL if non-nil, replace all occurrences.
 MCP Parameters:
   resource_uri - URI of the node
                  Formats:
-                   - org-headline://{absolute-path}#{headline-path}
+                   - org://{absolute-path}#{headline-path}
                    - org://{id}
   old_body - Substring to replace within the body (must be unique
              unless replace_all).  Use \"\" to add to empty nodes
@@ -1770,7 +1759,7 @@ String values set the property; null/empty values delete it.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   properties - JSON object of property name-value pairs (required)
                String value: set property to that value
@@ -1829,7 +1818,7 @@ SCHEDULED is an ISO date string or nil/empty to remove.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   scheduled - ISO date string (optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
@@ -1868,7 +1857,7 @@ DEADLINE is an ISO date string or nil/empty to remove.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   deadline - ISO date string (optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
@@ -1907,7 +1896,7 @@ TAGS can be a string, list of strings, or nil/empty to clear all tags.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   tags - Tags to set (string or array, optional)
          Single tag: \"work\"
@@ -1947,7 +1936,7 @@ PRIORITY is a single-character string or nil/empty to remove.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   priority - Priority character (string, optional)
              Must be within org-priority-highest to org-priority-lowest
@@ -2002,7 +1991,7 @@ Inserts after existing body content but before any child headlines.
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   content - Text to append (string, required)
             Cannot be empty or whitespace-only
@@ -2063,7 +2052,7 @@ MCP Parameters:
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   note - Note text to add (string, required)
          Cannot be empty or whitespace-only
@@ -2337,16 +2326,20 @@ MCP Parameters:
 ;; Tools duplicating resource templates
 
 (defun org-mcp--tool-read (uri)
-  "Tool wrapper for org://{uri} resource template.
-URI can be a file path, file#headline-path, or UUID.
+  "Tool handler for org-read.
+URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}.
 Returns structured JSON.
 
 MCP Parameters:
-  uri - URI string. Formats:
-        - /path/to/file.org (file path)
-        - /path/to/file.org#Headline/Subhead (headline path)
-        - UUID string (8-4-4-4-12 format)"
-  (org-mcp--handle-org-resource `(("uri" . ,uri))))
+  uri - URI string in org:// format (string, required). Formats:
+        - org:///path/to/file.org (file path)
+        - org:///path/to/file.org#Headline/Subhead (headline path)
+        - org://UUID (8-4-4-4-12 format)"
+  (unless (string-prefix-p "org://" uri)
+    (org-mcp--tool-validation-error "URI must use org:// format: %s"
+                                    uri))
+  (org-mcp--handle-org-resource
+   `(("uri" . ,(substring uri (length "org://"))))))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool wrapper for org-outline://{filename} resource template.
@@ -2357,17 +2350,21 @@ MCP Parameters:
   (org-mcp--handle-outline-resource `(("filename" . ,file))))
 
 (defun org-mcp--tool-read-headline (uri)
-  "Tool wrapper for org-headline://{uri} resource template.
-URI can be a file path, file#headline-path, or UUID.
+  "Tool handler for org-read-headline.
+URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}.
 Returns plain text content.
 
 MCP Parameters:
-  uri - URI string. Formats:
-        - /path/to/file.org (returns entire file)
-        - /path/to/file.org#Headline/Subhead (headline path)
-        - UUID string (8-4-4-4-12 format)
+  uri - URI string in org:// format (string, required). Formats:
+        - org:///path/to/file.org (returns entire file)
+        - org:///path/to/file.org#Headline/Subhead (headline path)
+        - org://UUID (8-4-4-4-12 format)
         Headline paths use URL encoding for special chars."
-  (org-mcp--handle-headline-resource `(("uri" . ,uri))))
+  (unless (string-prefix-p "org://" uri)
+    (org-mcp--tool-validation-error "URI must use org:// format: %s"
+                                    uri))
+  (org-mcp--handle-headline-resource
+   `(("uri" . ,(substring uri (length "org://"))))))
 
 ;; Clock tools
 
@@ -2449,7 +2446,7 @@ the target heading are deleted before clocking in.
 MCP Parameters:
   uri - URI of the headline to clock in
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
   resolve - When \"true\", delete dangling clocks before clocking in"
@@ -2561,7 +2558,7 @@ END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 MCP Parameters:
   uri - Optional URI to validate against active clock
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
   (let ((active (org-mcp--clock-find-active)))
@@ -2627,7 +2624,7 @@ END is ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   start - ISO 8601 start time (e.g. 2026-03-23T14:30:00)
   end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
@@ -2673,7 +2670,7 @@ START is the ISO 8601 start time of the clock entry to delete
 MCP Parameters:
   uri - URI of the headline
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{id}
   start - ISO 8601 start time of the clock entry to delete
           (e.g. 2026-03-23T14:30:00)"
@@ -2808,7 +2805,7 @@ Empty configuration returns:
 
 Use cases:
   - Discovery: What Org files can I access through MCP?
-  - URI Construction: I need to build an org-headline:// URI - what's
+  - URI Construction: I need to build an org:// URI - what's
     the exact path?
   - Access Troubleshooting: Why is my file access failing?
   - Configuration Verification: Did my org-mcp-allowed-files setting
@@ -2827,7 +2824,7 @@ Creates an Org ID property for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline to update (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   current_state - Expected current TODO state (string, optional)
                   When provided, must match actual state or tool will error
@@ -2869,8 +2866,8 @@ Parameters:
          Cannot contain headlines at same or higher level as new item
          If #+BEGIN/#+END blocks are present, they must be balanced
   parent_uri - Parent location (string, required)
-               For top-level: org-headline://{absolute-path}
-               For child: org-headline://{path}#{parent-path}
+               For top-level: org://{absolute-path}
+               For child: org://{path}#{parent-path}
                          or org://{parent-uuid}
   after_uri - Sibling to insert after (string, optional)
               Must be org://{uuid} format
@@ -2901,7 +2898,7 @@ the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline to rename (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   current_title - Expected current title without TODO/tags (string,
 required)
@@ -2931,7 +2928,7 @@ exist.
 Parameters:
   resource_uri - URI of the headline to edit (string, required)
                  Formats:
-                   - org-headline://{absolute-path}#{url-encoded-path}
+                   - org://{absolute-path}#{url-encoded-path}
                    - org://{uuid}
   old_body - Substring to find and replace (string, required)
              Must appear exactly once unless replace_all is true
@@ -2967,7 +2964,7 @@ doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   properties - JSON object of property name-value pairs (required)
                String value: set the property
@@ -2993,7 +2990,7 @@ Org ID for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   scheduled - ISO date string (string, optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
@@ -3017,7 +3014,7 @@ Org ID for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   deadline - ISO date string (string, optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
@@ -3041,7 +3038,7 @@ Creates an Org ID for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   tags - Tags to set (string or array, optional)
          Single tag: \"work\"
@@ -3069,7 +3066,7 @@ for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   priority - Priority character (string, optional)
              Must be in the configured range (default \"A\" to \"C\")
@@ -3095,7 +3092,7 @@ Org ID for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   content - Text to append (string, required)
             Cannot be empty or whitespace-only
@@ -3119,7 +3116,7 @@ for the headline if one doesn't exist.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{url-encoded-path}
+          - org://{absolute-path}#{url-encoded-path}
           - org://{uuid}
   note - Note text to add (string, required)
          Cannot be empty or whitespace-only
@@ -3141,10 +3138,10 @@ URI format and returns structured data including children, properties,
 and timestamps.
 
 Parameters:
-  uri - URI string (string, required). Formats:
-        - /path/to/file.org - file path (returns file with children)
-        - /path/to/file.org#Headline/Subhead - headline path
-        - UUID (8-4-4-4-12 format) - ID-based lookup
+  uri - URI in org:// format (string, required). Formats:
+        - org:///path/to/file.org - file path (returns file with children)
+        - org:///path/to/file.org#Headline/Subhead - headline path
+        - org://UUID (8-4-4-4-12 format) - ID-based lookup
 
 Returns: JSON object with structured data:
   For files:
@@ -3193,10 +3190,10 @@ Returns headline with TODO state, tags, properties, body text, and all
 nested subheadings.
 
 Parameters:
-  uri - URI string (string, required). Formats:
-        - /path/to/file.org - returns entire file
-        - /path/to/file.org#Headline/Subhead - headline path
-        - UUID (8-4-4-4-12 format) - ID-based lookup
+  uri - URI in org:// format (string, required). Formats:
+        - org:///path/to/file.org - returns entire file
+        - org:///path/to/file.org#Headline/Subhead - headline path
+        - org://UUID (8-4-4-4-12 format) - ID-based lookup
         Headline paths use URL encoding for special chars.
 
 Returns: Plain text content of the headline and its subtree (or file)"
@@ -3371,7 +3368,7 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   uri - URI of the headline to clock in (string, required)
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{uuid}
   start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
@@ -3402,7 +3399,7 @@ Parameters:
   uri - Optional URI to validate against active clock (string)
         If provided, must match the file of the active clock
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{uuid}
   end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
@@ -3432,7 +3429,7 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{uuid}
   start - ISO 8601 start time (string, required)
           Example: 2026-03-23T14:30:00
@@ -3462,7 +3459,7 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   uri - URI of the headline (string, required)
         Formats:
-          - org-headline://{absolute-path}#{headline-path}
+          - org://{absolute-path}#{headline-path}
           - org://{uuid}
   start - ISO 8601 start time of the clock entry to delete
           (string, required)

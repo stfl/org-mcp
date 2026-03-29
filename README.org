@@ -218,7 +218,7 @@ Example response:
 
 Use cases:
 - Discovery: "What Org files can I access through MCP?"
-- URI Construction: "I need to build an org-headline:// URI - what's the exact path?"
+- URI Construction: "I need to build an org:// URI - what's the exact path?"
 - Access Troubleshooting: "Why is my file access failing?"
 - Configuration Verification: "Did my org-mcp-allowed-files setting work correctly?"
 
@@ -243,7 +243,7 @@ Empty configuration returns:
 *** org-update-todo-state
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
@@ -253,7 +253,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org-headline:///home/user/org/projects.org/Project%20Alpha",
+  "uri": "org:///home/user/org/projects.org#Project%20Alpha",
   "currentState": "TODO",
   "newState": "IN-PROGRESS"
 }
@@ -275,7 +275,7 @@ Example:
 *** org-rename-headline
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
 - *Returns:* Success status with previous and new titles
@@ -284,7 +284,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org-headline:///home/user/org/projects.org/Original%20Task",
+  "uri": "org:///home/user/org/projects.org#Original%20Task",
   "currentTitle": "Original Task",
   "newTitle": "Updated Task Name"
 }
@@ -310,7 +310,7 @@ Example:
   - =todoState= (string, required): TODO state from =org-todo-keywords=
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =body= (string, optional): Body text content to add under the heading
-  - =parentUri= (string, required): URI of parent item. Use =org-headline://filename.org/= for top-level items in a file
+  - =parentUri= (string, required): URI of parent item. Use =org:///path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): URI of sibling to insert after. If not given, append as last child of parent
 - *Returns:* Object with success status, new item URI, file name, and title
 
@@ -322,7 +322,7 @@ Example:
   "todoState": "TODO",
   "tags": ["work", "urgent"],
   "body": "This feature needs to be completed by end of week.",
-  "parentUri": "org-headline:///home/user/org/projects.org/"
+  "parentUri": "org:///home/user/org/projects.org#"
 }
 
 # Success response:
@@ -337,7 +337,7 @@ Example:
 *** org-edit-body
 - *Description:* Edit body content of an Org node using partial string replacement
 - *Parameters:*
-  - =resourceUri= (string, required): URI of the node to edit (supports =org-headline://= or =org://=)
+  - =resourceUri= (string, required): URI of the node to edit (=org://= format)
   - =oldBody= (string, required): Substring to search for within the node's body (must be unique unless replaceAll is true). Use empty string "" to add content to an empty node
   - =newBody= (string, required): Replacement text
   - =replaceAll= (boolean, optional): Replace all occurrences (default: false)
@@ -370,7 +370,7 @@ Example:
 *** org-set-properties
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
 - *Returns:* Success status with arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
@@ -397,7 +397,7 @@ Example:
 *** org-update-scheduled
 - *Description:* Update the SCHEDULED timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status with =previous_scheduled=, =new_scheduled=, and ID-based URI
 
@@ -419,7 +419,7 @@ Example:
 *** org-update-deadline
 - *Description:* Update the DEADLINE timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status with =previous_deadline=, =new_deadline=, and ID-based URI
 
@@ -441,7 +441,7 @@ Example:
 *** org-set-tags
 - *Description:* Set tags on an Org headline, replacing any existing tags
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
 - *Returns:* Success status with =previous_tags= and =new_tags= arrays, plus org:// URI
 
@@ -462,7 +462,7 @@ Example:
 *** org-set-priority
 - *Description:* Set or remove priority on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
 - *Returns:* Success status with =previous_priority=, =new_priority=, and ID-based URI
 
@@ -484,7 +484,7 @@ Example:
 *** org-append-body
 - *Description:* Append content to the body of an Org headline, inserting after existing body content but before any child headlines
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =content= (string, required): Text to append. Cannot be empty, cannot introduce headlines at same or higher level, must maintain balanced =#+BEGIN/#+END= blocks
 - *Returns:* Success status with org:// URI
 
@@ -506,7 +506,7 @@ Example:
 *** org-add-logbook-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
 - *Returns:* Success status with org:// URI
 
@@ -722,7 +722,7 @@ Example responses:
 *** org-clock-in
 - *Description:* Clock in to the specified heading. If another clock is active, it is automatically closed first. Supports continuous clocking and time rounding
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
   - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
 - *Returns:* JSON object with clock-in details
@@ -779,7 +779,7 @@ Example:
 *** org-clock-add
 - *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
 - *Returns:* JSON object with the added clock entry details
@@ -807,7 +807,7 @@ Example:
 *** org-clock-delete
 - *Description:* Delete a clock entry from a heading. Removes the LOGBOOK drawer if it becomes empty after deletion
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (supports =org-headline://= or =org://=)
+  - =uri= (string, required): URI of the headline (=org://= format)
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
 - *Returns:* JSON object with the deleted entry details
 
