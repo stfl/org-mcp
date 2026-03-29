@@ -4208,5 +4208,66 @@ This exercises the write path in org-mcp--complete-and-save."
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'uri result) uri)))))
 
+;; Helper functions for testing org-ql-query MCP tool
+
+(defun org-mcp-test--call-ql-query (query)
+  "Call org-ql-query tool via JSON-RPC and return the parsed result.
+QUERY is the org-ql query sexp as a string."
+  (let* ((params `((query . ,query)))
+         (result-text
+          (mcp-server-lib-ert-call-tool "org-ql-query" params)))
+    (json-read-from-string result-text)))
+
+(ert-deftest org-mcp-test-ql-query-uri-with-id ()
+  "Test that org-ql-query returns org:// URI with UUID for headlines with IDs."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-with-id-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (first-match (aref matches 0))
+           (uri (alist-get 'uri first-match)))
+      (should (equal (alist-get 'total result) 1))
+      (should (equal uri org-mcp-test--content-with-id-uri)))))
+
+(ert-deftest org-mcp-test-ql-query-uri-without-id ()
+  "Test that org-ql-query returns org:// path URI for headlines without IDs."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (first-match (aref matches 0))
+           (uri (alist-get 'uri first-match)))
+      (should (equal (alist-get 'total result) 1))
+      (should (string-match-p
+               (concat "\\`org://" (regexp-quote test-file)
+                       "#Simple%20Task\\'")
+               uri)))))
+
+(ert-deftest org-mcp-test-ql-run-stored-query-uri ()
+  "Test that org-ql-run-stored-query returns org:// URIs."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((queries-file (make-temp-file "org-mcp-test-queries" nil ".el")))
+      (unwind-protect
+          (let ((org-mcp-stored-queries-file queries-file)
+                (org-mcp--stored-queries 'unloaded))
+            (mcp-server-lib-ert-call-tool
+             "org-ql-save-stored-query"
+             `((key . "test-query") (query . "(todo \"TODO\")")))
+            (let* ((params `((key . "test-query")))
+                   (result-text
+                    (mcp-server-lib-ert-call-tool
+                     "org-ql-run-stored-query" params))
+                   (result (json-read-from-string result-text))
+                   (matches (alist-get 'matches result))
+                   (first-match (aref matches 0))
+                   (uri (alist-get 'uri first-match)))
+              (should (equal (alist-get 'total result) 1))
+              (should (string-match-p
+                       (concat "\\`org://" (regexp-quote test-file)
+                               "#Simple%20Task\\'")
+                       uri))))
+        (delete-file queries-file)))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

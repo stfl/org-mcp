@@ -2108,14 +2108,7 @@ Returns an alist with headline metadata suitable for JSON encoding."
           (org-element-property :priority (org-element-at-point)))
          (tags (org-get-tags nil t))
          (id (org-entry-get nil "ID"))
-         (uri
-          (if id
-              (org-mcp--build-org-uri-from-id id)
-            (concat
-             org-mcp--uri-headline-prefix
-             (url-hexify-string file)
-             "#"
-             (org-mcp--build-headline-path))))
+         (uri (org-mcp--build-org-uri-from-position))
          (parent-priority
           (save-excursion
             (when (org-up-heading-safe)
