@@ -725,34 +725,6 @@ Second child content.
    "Content of section with ID.")
   "Content for ID resource tests.")
 
-(defconst org-mcp-test--content-headline-resource
-  "* First Section
-Some content in first section.
-** Subsection 1.1
-Content of subsection 1.1.
-** Subsection 1.2
-Content of subsection 1.2.
-* Second Section
-Content in second section.
-** Subsection 2.1
-Content of subsection 2.1."
-  "Test content with hierarchical headlines for resource read tests.")
-
-(defconst org-mcp-test--expected-first-section
-  (concat
-   "* First Section\n"
-   "Some content in first section.\n"
-   "** Subsection 1.1\n"
-   "Content of subsection 1.1.\n"
-   "** Subsection 1.2\n"
-   "Content of subsection 1.2.")
-  "Expected content when reading 'First Section' top-level headline.")
-
-(defconst org-mcp-test--expected-subsection-1-1
-  (concat
-   "** Subsection 1.1\n"
-   "Content of subsection 1.1.")
-  "Expected content when reading 'First Section/Subsection 1.1' nested headline.")
 
 (defconst org-mcp-test--clock-task-content
   "* TODO Task One\n"
@@ -1268,24 +1240,6 @@ END-TIME is an optional ISO 8601 end timestamp."
           (mcp-server-lib-ert-call-tool "org-clock-out" params)))
     (json-read-from-string result-text)))
 
-;; Helper functions for testing org-headline MCP resource
-
-(defun org-mcp-test--test-headline-resource-with-extension (extension)
-  "Test headline resource with file having EXTENSION.
-EXTENSION can be a string like \".txt\" or nil for no extension."
-  (let ((test-file
-         (make-temp-file
-          "org-mcp-test" nil extension org-mcp-test--content-nested-siblings)))
-    (unwind-protect
-        (let ((org-mcp-allowed-files (list test-file))
-              (uri
-               (format "org-headline://%s#Parent%%20Task"
-                       test-file)))
-          (org-mcp-test--with-enabled
-           (org-mcp-test--verify-resource-read
-            uri
-            org-mcp-test--expected-parent-task-from-nested-siblings)))
-      (delete-file test-file))))
 
 ;;; Tests
 
@@ -1544,8 +1498,8 @@ BODY-WITH-HEADLINE is the body containing invalid headline."
     (org-mcp-test--with-enabled
       (let ((templates
              (mcp-server-lib-ert-get-resource-templates-list)))
-        ;; Check that we have three templates now (org://, org-outline://, org-headline://)
-        (should (= (length templates) 3))
+        ;; Check that we have two templates now (org://, org-outline://)
+        (should (= (length templates) 2))
         ;; Check that we have all templates
         (let ((template-uris
                (mapcar
@@ -1553,8 +1507,7 @@ BODY-WITH-HEADLINE is the body containing invalid headline."
                   (alist-get 'uriTemplate template))
                 (append templates nil))))
           (should (member "org://{uri}" template-uris))
-          (should (member "org-outline://{filename}" template-uris))
-          (should (member "org-headline://{uri}" template-uris)))))))
+          (should (member "org-outline://{filename}" template-uris)))))))
 
 (defun org-mcp-test--assert-add-todo-invalid-title (invalid-title)
   "Assert that adding TODO with INVALID-TITLE throws an error.
@@ -1692,123 +1645,74 @@ Very deep content."))
          uri
          (format "'%s': the referenced file not in allowed list" forbidden-file))))))
 
-(ert-deftest org-mcp-test-headline-resource-returns-top-level-content ()
-  "Test that headline resource returns top-level headline content."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-headline-resource))
-    (let ((uri
-           (format "org-headline://%s#First%%20Section"
-                   test-file)))
-      (org-mcp-test--verify-resource-read
-       uri
-       org-mcp-test--expected-first-section))))
-
-(ert-deftest org-mcp-test-headline-resource-returns-nested-content ()
-  "Test that headline resource returns nested headline content."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-headline-resource))
-    (let ((uri
-           (format (concat
-                    "org-headline://%s#"
-                    "First%%20Section/Subsection%%201.1")
-                   test-file)))
-      (org-mcp-test--verify-resource-read
-       uri
-       org-mcp-test--expected-subsection-1-1))))
-
 (ert-deftest org-mcp-test-headline-resource-not-found ()
-  "Test headline resource error for non-existent headline."
+  "Test org-read-headline tool error for non-existent headline."
   (let ((test-content "* Existing Section\nSome content."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
-      (let ((uri
-             (format "org-headline://%s#Nonexistent" test-file)))
-        (org-mcp-test--read-resource-expecting-error
-         uri "Cannot find Headline: 'Nonexistent'")))))
+      (should-error
+       (org-mcp-test--call-read-headline
+        (format "org://%s#Nonexistent" test-file))))))
 
 (ert-deftest org-mcp-test-headline-resource-file-with-hash ()
-  "Test headline resource with # in filename."
+  "Test org-read-headline tool with # in filename."
   (org-mcp-test--with-temp-org-files
       ((file org-mcp-test--content-nested-siblings "org-mcp-test-file#"))
     ;; Test accessing the file with # encoded as %23
     (let* ((encoded-path (replace-regexp-in-string "#" "%23" file))
            (uri
-            (format "org-headline://%s#Parent%%20Task/First%%20Child%%2050%%25%%20Complete"
-                    encoded-path)))
-      (org-mcp-test--verify-resource-read
-       uri
-       "** First Child 50% Complete\nFirst child content.\nIt spans multiple lines."))))
+            (format "org://%s#Parent%%20Task/First%%20Child%%2050%%25%%20Complete"
+                    encoded-path))
+           (result (org-mcp-test--call-read-headline uri)))
+      (should
+       (string=
+        result
+        "** First Child 50% Complete\nFirst child content.\nIt spans multiple lines.")))))
 
 (ert-deftest org-mcp-test-headline-resource-headline-with-hash ()
-  "Test headline resource with # in headline title."
-  (let ((test-content org-mcp-test--content-nested-siblings))
-    (org-mcp-test--with-temp-org-files
-        ((file test-content))
-      ;; Test accessing headline with # encoded as %23
-      (let ((uri
-             (format "org-headline://%s#Parent%%20Task/Third%%20Child%%20%%233"
-                     file)))
-        (org-mcp-test--verify-resource-read
-         uri
-         "** Third Child #3")))))
+  "Test org-read-headline tool with # in headline title."
+  (org-mcp-test--with-temp-org-files
+      ((file org-mcp-test--content-nested-siblings))
+    ;; Test accessing headline with # encoded as %23
+    (let* ((uri
+            (format "org://%s#Parent%%20Task/Third%%20Child%%20%%233" file))
+           (result (org-mcp-test--call-read-headline uri)))
+      (should (string= result "** Third Child #3")))))
 
 (ert-deftest
     org-mcp-test-headline-resource-file-and-headline-with-hash
     ()
-  "Test headline resource with # in both filename and headline."
+  "Test org-read-headline tool with # in both filename and headline."
   (org-mcp-test--with-temp-org-files
       ((file org-mcp-test--content-nested-siblings "org-mcp-test-file#"))
     ;; Test with both file and headline containing #
     (let* ((encoded-path (replace-regexp-in-string "#" "%23" file))
            (uri
-            (format "org-headline://%s#Parent%%20Task/Third%%20Child%%20%%233"
-                    encoded-path)))
-      (org-mcp-test--verify-resource-read
-       uri
-       "** Third Child #3"))))
-
-(ert-deftest org-mcp-test-headline-resource-txt-extension ()
-  "Test that headline resource works with .txt files, not just .org files."
-  (org-mcp-test--test-headline-resource-with-extension ".txt"))
-
-(ert-deftest org-mcp-test-headline-resource-no-extension ()
-  "Test that headline resource works with files having no extension."
-  (org-mcp-test--test-headline-resource-with-extension nil))
+            (format "org://%s#Parent%%20Task/Third%%20Child%%20%%233"
+                    encoded-path))
+           (result (org-mcp-test--call-read-headline uri)))
+      (should (string= result "** Third Child #3")))))
 
 (ert-deftest org-mcp-test-headline-resource-path-traversal ()
-  "Test that path traversal with ../ in org-headline URIs is rejected."
+  "Test that path traversal with ../ in org:// URIs is rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
-    ;; Test with ../ in the filename part - expanded path won't be in allowed list
-    (let* ((uri
-            (format "org-headline://../%s#Parent%%20Task"
-                    (file-name-nondirectory test-file)))
-           (request (mcp-server-lib-create-resources-read-request uri))
-           (response-json (mcp-server-lib-process-jsonrpc request mcp-server-lib-ert-server-id))
-           (response (json-parse-string response-json :object-type 'alist)))
-      ;; Check that we got an error
-      (should (alist-get 'error response))
-      ;; Check that the error message mentions file not in allowed list
-      (let ((error-msg (alist-get 'message (alist-get 'error response))))
-        (should (string-match-p "not in allowed list" error-msg))))))
+    ;; Test with ../ in the filename part - path won't be absolute
+    (should-error
+     (org-mcp-test--call-read-headline
+      (format "org://../%s#Parent%%20Task"
+              (file-name-nondirectory test-file))))))
 
 (ert-deftest org-mcp-test-headline-resource-encoded-path-traversal ()
-  "Test that URL-encoded path traversal in org-headline URIs is rejected."
+  "Test that URL-encoded path traversal in org:// URIs is rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
     ;; Test with URL-encoded ../ (%2E%2E%2F) in the filename part
     ;; The encoding is NOT decoded, so %2E%2E%2F remains literal
-    (let* ((uri
-            (format "org-headline://%%2E%%2E%%2F%s#Parent%%20Task"
-                    (file-name-nondirectory test-file)))
-           (request (mcp-server-lib-create-resources-read-request uri))
-           (response-json (mcp-server-lib-process-jsonrpc request mcp-server-lib-ert-server-id))
-           (response (json-parse-string response-json :object-type 'alist)))
-      ;; Check that we got an error
-      (should (alist-get 'error response))
-      ;; Check that the error message mentions file not in allowed list
-      (let ((error-msg (alist-get 'message (alist-get 'error response))))
-        (should (string-match-p "not in allowed list" error-msg))))))
+    (should-error
+     (org-mcp-test--call-read-headline
+      (format "org://%%2E%%2E%%2F%s#Parent%%20Task"
+              (file-name-nondirectory test-file))))))
 
 (ert-deftest org-mcp-test-headline-resource-navigation ()
   "Test that headline navigation respects structure."
@@ -1816,36 +1720,20 @@ Very deep content."))
    ((test-file org-mcp-test--content-wrong-levels))
    ;; Test accessing "Target Headline" under "First Parent"
    ;; Should get the level-2 headline, NOT the level-3 one
-   (let ((uri
-          (format
-           "org-headline://%s#First%%20Parent/Target%%20Headline"
-           test-file)))
-     ;; This SHOULD throw an error because First Parent has no such child
-     ;; But the bug causes it to return the wrong headline
-     (org-mcp-test--read-resource-expecting-error
-      uri
-      "Cannot find Headline: 'First Parent/Target Headline'"))))
-
-(ert-deftest org-mcp-test-id-resource-returns-content ()
-  "Test that org-headline with UUID returns content for valid ID."
-  (org-mcp-test--with-id-setup
-   test-file org-mcp-test--content-id-resource
-   `("12345678-abcd-efgh-ijkl-1234567890ab")
-   (let ((uri "org-headline://12345678-abcd-efgh-ijkl-1234567890ab"))
-     (org-mcp-test--verify-resource-read
-      uri
-      org-mcp-test--content-id-resource))))
+   ;; This SHOULD throw an error because First Parent has no such child
+   (should-error
+    (org-mcp-test--call-read-headline
+     (format "org://%s#First%%20Parent/Target%%20Headline" test-file)))))
 
 (ert-deftest org-mcp-test-id-resource-not-found ()
-  "Test org-headline with UUID error for non-existent ID."
+  "Test org-read-headline tool error for non-existent ID."
   (let ((test-content "* Section without ID\nNo ID here."))
     (org-mcp-test--with-id-setup test-file test-content '()
-      (let ((uri "org-headline://nonexistent-id-12345"))
-        (org-mcp-test--read-resource-expecting-error
-         uri "Cannot find ID: 'nonexistent-id-12345'")))))
+      (should-error
+       (org-mcp-test--call-read-headline "org://nonexistent-id-12345")))))
 
 (ert-deftest org-mcp-test-id-resource-file-not-allowed ()
-  "Test org-headline with UUID validates file is in allowed list."
+  "Test org-read-headline tool validates file is in allowed list."
   ;; Create two files - one allowed, one not
   (org-mcp-test--with-temp-org-files
       ((allowed-file "* Allowed\n")
@@ -1859,15 +1747,8 @@ Very deep content."))
     (org-mcp-test--with-id-tracking
         (list allowed-file)
         `(("test-id-789" . ,other-file))
-      (let* ((uri "org-headline://test-id-789")
-             (request (mcp-server-lib-create-resources-read-request uri))
-             (response-json (mcp-server-lib-process-jsonrpc request mcp-server-lib-ert-server-id))
-             (response (json-parse-string response-json :object-type 'alist)))
-        ;; Check that we got an error
-        (should (alist-get 'error response))
-        ;; Check that the error message mentions file not in allowed list
-        (let ((error-msg (alist-get 'message (alist-get 'error response))))
-          (should (string-match-p "not in allowed list" error-msg)))))))
+      (should-error
+       (org-mcp-test--call-read-headline "org://test-id-789")))))
 
 (ert-deftest org-mcp-test-update-todo-state-success ()
   "Test successful TODO state update."

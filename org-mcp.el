@@ -1549,7 +1549,7 @@ Returns structured JSON for files and headlines."
           (org-mcp--extract-structured-file allowed-file)))))))
 
 (defun org-mcp--handle-headline-resource (params)
-  "Handler for org-headline://{uri} template with auto-detection.
+  "Handler for org-read-headline tool with auto-detection.
 PARAMS is an alist containing the uri parameter (can be file, file#path, or UUID).
 Returns plain text content."
   (let* ((uri (alist-get "uri" params nil nil #'string=))
@@ -3572,46 +3572,6 @@ Use this resource to:
   - Get document structure overview
   - Understand file organization without reading full content"
    :mime-type "application/json"
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-resource
-   "org-headline://{uri}" #'org-mcp--handle-headline-resource
-   :name "Org headline or file (plain text)"
-   :description
-   "Access Org headline or file as plain text. Auto-detects URI format.
-Returns complete subtree with all children.
-
-URI format: org-headline://{uri}
-  uri - Can be one of:
-    - /path/to/file.org - returns entire file
-    - /path/to/file.org#Headline/Subhead - headline path
-    - UUID (8-4-4-4-12 format) - ID-based lookup
-    Headline paths use URL encoding for special chars.
-
-Returns: Plain text content including:
-  - The headline itself with TODO state and tags
-  - All properties drawer content
-  - Body text
-  - All nested subheadings (complete subtree)
-
-Example URIs:
-  org-headline:///home/user/tasks.org
-    → Entire file
-
-  org-headline:///home/user/tasks.org#Project%20Alpha
-    → Top-level \"Project Alpha\" heading
-
-  org-headline:///home/user/tasks.org#Project%20Alpha/Planning
-    → \"Planning\" subheading under \"Project Alpha\"
-
-  org-headline://550e8400-e29b-41d4-a716-446655440000
-    → Headline with that ID property
-
-Use this resource to:
-  - Read specific sections of an Org file
-  - Access headline content by hierarchical path or ID
-  - Get complete subtree including all children"
-   :mime-type "text/plain"
    :server-id org-mcp--server-id))
 
 (defun org-mcp-disable ()
@@ -3676,9 +3636,7 @@ Use this resource to:
   (mcp-server-lib-unregister-resource
    "org://{uri}" org-mcp--server-id)
   (mcp-server-lib-unregister-resource
-   "org-outline://{filename}" org-mcp--server-id)
-  (mcp-server-lib-unregister-resource
-   "org-headline://{uri}" org-mcp--server-id))
+   "org-outline://{filename}" org-mcp--server-id))
 
 (provide 'org-mcp)
 ;;; org-mcp.el ends here

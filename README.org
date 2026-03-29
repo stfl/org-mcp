@@ -120,39 +120,6 @@ Returns: JSON structure like:
 }
 #+end_example
 
-*** org-headline://{uri}
-- *Description:* Access Org headlines or files as plain text (auto-detects URI type)
-- *URI Pattern:* =org-headline://{uri}= where uri can be:
-  - Absolute file path (e.g., =/home/user/org/projects.org=) → returns entire file
-  - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=) → returns headline subtree
-  - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=) → returns headline by ID
-- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
-- *Returns:* Plain text content including the headline itself and all nested subheadings
-
-*Note:* Use =org://{uuid}= to access headlines by ID. This is the standard URI format returned by all tools.
-
-Example:
-#+begin_example
-# Access a headline by path:
-URI: org-headline:///home/user/org/projects.org#Project%20Alpha/Requirements
-Returns: Plain text content of "Requirements" under "Project Alpha"
-
-# Access by UUID:
-URI: org-headline://550e8400-e29b-41d4-a716-446655440000
-Returns: Plain text content of the headline with that ID
-
-# Access entire file:
-URI: org-headline:///home/user/org/projects.org
-Returns: Plain text content of the entire file
-
-# Headline with # character (must be encoded as %23):
-URI: org-headline:///home/user/org/projects.org#Issue%20%2342
-Returns: Content of "Issue #42" headline
-#+end_example
-
-*Encoding limitations:* File paths use minimal encoding (only =#= → =%23=) for readability.
-Files with =%= characters in their names should be avoided, as they may cause decoding issues.
-Headline paths use full URL encoding.
 
 ** Available MCP Tools
 
