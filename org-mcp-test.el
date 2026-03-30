@@ -611,19 +611,6 @@ Second child content.
           org-mcp-test--content-with-id-id)
   "Pattern for multiline edit-body test result.")
 
-(defconst org-mcp-test--pattern-edit-body-replace-all
-  (concat
-   "\\`\\* Test Heading\n"
-   ":PROPERTIES:\n"
-   ":ID: +test-id\n"
-   ":END:\n"
-   "First REPLACED\\.\n"
-   "Some other text\\.\n"
-   "Second REPLACED\\.\n"
-   "More text\\.\n"
-   "Third REPLACED\\.\n"
-   "?\\'")
-  "Pattern for replace-all edit-body test result.")
 
 (defconst org-mcp-test--pattern-edit-body-nested-headlines
   (format
@@ -1139,20 +1126,20 @@ NEW-TITLE is the new title to set."
 
 (defun org-mcp-test--call-edit-body-and-check
     (test-file resource-uri old-body new-body expected-pattern
-               &optional replace-all expected-id)
+               &optional append expected-id)
   "Call org-edit-body tool and check result structure and file content.
 TEST-FILE is the path to the file to check.
 RESOURCE-URI is the URI of the node to edit.
 OLD-BODY is the substring to search for within the node's body.
 NEW-BODY is the replacement text.
 EXPECTED-PATTERN is a regexp that the file content should match.
-REPLACE-ALL if true, replace all occurrences (default: nil).
+APPEND if true, append new-body to end of body (default: nil).
 EXPECTED-ID if provided, check the returned URI has this exact ID."
   (let* ((params
           `((resource_uri . ,resource-uri)
             (old_body . ,old-body)
             (new_body . ,new-body)
-            (replace_all . ,replace-all)))
+            (append . ,append)))
          (result-text (mcp-server-lib-ert-call-tool "org-edit-body" params))
          (result (json-read-from-string result-text)))
     (should (= (length result) 2))
@@ -1164,20 +1151,18 @@ EXPECTED-ID if provided, check the returned URI has this exact ID."
     (org-mcp-test--verify-file-matches test-file expected-pattern)))
 
 (defun org-mcp-test--call-edit-body-expecting-error
-    (test-file resource-uri old-body new-body &optional replace-all)
+    (test-file resource-uri old-body new-body)
   "Call org-edit-body tool expecting an error and verify file unchanged.
 TEST-FILE is the test file path to verify remains unchanged.
 RESOURCE-URI is the URI of the node to edit.
 OLD-BODY is the substring to search for within the node's body.
-NEW-BODY is the replacement text.
-REPLACE-ALL if true, replace all occurrences (default: nil)."
+NEW-BODY is the replacement text."
   (org-mcp-test--assert-error-and-file
    test-file
    (let* ((params
            `((resource_uri . ,resource-uri)
              (old_body . ,old-body)
-             (new_body . ,new-body)
-             (replace_all . ,replace-all)))
+             (new_body . ,new-body)))
           (request
             (mcp-server-lib-create-tools-call-request
              "org-edit-body" 1 params))
@@ -3148,39 +3133,14 @@ content here."
      nil
      org-mcp-test--content-with-id-id)))
 
-(ert-deftest org-mcp-test-edit-body-multiple-without-replaceall ()
-  "Test error for multiple occurrences without replaceAll."
+(ert-deftest org-mcp-test-edit-body-multiple-occurrences-error ()
+  "Test error for multiple occurrences."
   (org-mcp-test--with-id-setup test-file
       org-mcp-test--content-with-id-repeated-text
       `("test-id")
     (org-mcp-test--call-edit-body-expecting-error
-     test-file "org://test-id" "occurrence of pattern" "REPLACED" nil)))
+     test-file "org://test-id" "occurrence of pattern" "REPLACED")))
 
-(ert-deftest org-mcp-test-edit-body-replace-all ()
-  "Test org-edit-body tool with replaceAll functionality."
-  (org-mcp-test--with-id-setup test-file
-      org-mcp-test--content-with-id-repeated-text
-      `("test-id")
-    (org-mcp-test--call-edit-body-and-check
-     test-file
-     "org://test-id"
-     "occurrence of pattern"
-     "REPLACED"
-     org-mcp-test--pattern-edit-body-replace-all
-     t)))
-
-(ert-deftest org-mcp-test-edit-body-replace-all-explicit-false ()
-  "Test that explicit replace_all=false triggers error on multiple matches."
-  (org-mcp-test--with-id-setup test-file
-      org-mcp-test--content-with-id-repeated-text
-      `("test-id")
-    ;; Should error because multiple occurrences exist
-    (org-mcp-test--call-edit-body-expecting-error
-     test-file
-     "org://test-id"
-     "occurrence of pattern"
-     "REPLACED"
-     :false)))
 
 (ert-deftest org-mcp-test-edit-body-not-found ()
   "Test org-edit-body tool error when text is not found."
@@ -3191,8 +3151,7 @@ content here."
      test-file
      org-mcp-test--content-with-id-uri
      "nonexistent text"
-     "replacement"
-     nil)))
+     "replacement")))
 
 (ert-deftest org-mcp-test-edit-body-empty ()
   "Test org-edit-body tool can add content to empty body."
@@ -3217,8 +3176,7 @@ content here."
      test-file
      org-mcp-test--content-with-id-uri
      "" ; Empty oldBody
-     "replacement"
-     nil)))
+     "replacement")))
 
 (ert-deftest org-mcp-test-edit-body-empty-with-properties ()
   "Test adding content to empty body with properties drawer."
@@ -3253,8 +3211,7 @@ content here."
      org-mcp-test--content-with-id-uri
      "Second child content."
      "replacement text
-* This would become a headline"
-     nil)))
+* This would become a headline")))
 
 (ert-deftest org-mcp-test-edit-body-accept-lower-level-headline ()
   "Test org-edit-body accepts newBody with lower-level headline."
@@ -3280,8 +3237,7 @@ When editing a level 2 node, level 1 headlines should be rejected."
              test-file)
      "Second child content."
      "New text
-* Top level heading"
-     nil)))
+* Top level heading")))
 
 (ert-deftest org-mcp-test-edit-body-reject-headline-at-start ()
   "Test org-edit-body rejects newBody with headline at beginning."
@@ -3292,8 +3248,7 @@ When editing a level 2 node, level 1 headlines should be rejected."
      test-file
      org-mcp-test--content-with-id-uri
      "Second child content."
-     "* Heading at start"
-     nil)))
+     "* Heading at start")))
 
 (ert-deftest org-mcp-test-edit-body-reject-unbalanced-begin-block ()
   "Test org-edit-body rejects newBody with unbalanced BEGIN block."
@@ -3306,8 +3261,7 @@ When editing a level 2 node, level 1 headlines should be rejected."
      "Second child content."
      "Some text
 #+BEGIN_EXAMPLE
-Code without END_EXAMPLE"
-     nil)))
+Code without END_EXAMPLE")))
 
 (ert-deftest org-mcp-test-edit-body-reject-orphaned-end-block ()
   "Test org-edit-body rejects newBody with orphaned END block."
@@ -3320,8 +3274,7 @@ Code without END_EXAMPLE"
      "Second child content."
      "Some text
 #+END_SRC
-Without BEGIN_SRC"
-     nil)))
+Without BEGIN_SRC")))
 
 (ert-deftest org-mcp-test-edit-body-reject-mismatched-blocks ()
   "Test org-edit-body rejects newBody with mismatched blocks."
@@ -3335,8 +3288,7 @@ Without BEGIN_SRC"
      "Text here
 #+BEGIN_QUOTE
 Some quote
-#+END_EXAMPLE"
-     nil)))
+#+END_EXAMPLE")))
 
 ;;; Resource template workaround tool tests
 
@@ -3419,8 +3371,7 @@ URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uui
        "org-edit-body"
        `((resource_uri . ,(format "org://%s#Headline" test-file))
          (old_body . "Original body")
-         (new_body . "Updated body")
-         (replace_all . nil)))
+         (new_body . "Updated body")))
       (should hook-called))))
 
 (ert-deftest org-mcp-test-clock-add-saves-file-to-disk ()
@@ -3916,54 +3867,60 @@ This exercises the write path in org-mcp--complete-and-save."
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'uri result) uri)))))
 
-;;; Tests for org-append-body
+;;; Tests for org-edit-body append mode
 
-(ert-deftest org-mcp-test-append-body ()
+(ert-deftest org-mcp-test-edit-body-append ()
   "Test appending to existing body."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((uri (format "org://%s#Simple%%20Task" test-file))
-           (params `((uri . ,uri)
-                     (content . "Appended line.")))
+           (params `((resource_uri . ,uri)
+                     (old_body . "")
+                     (new_body . "Appended line.")
+                     (append . t)))
            (result-text
-            (mcp-server-lib-ert-call-tool "org-append-body" params))
+            (mcp-server-lib-ert-call-tool "org-edit-body" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (string-prefix-p "org://" (alist-get 'uri result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body))))
 
-(ert-deftest org-mcp-test-append-body-empty-entry ()
+(ert-deftest org-mcp-test-edit-body-append-empty-entry ()
   "Test appending to entry with no body."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-empty-body))
     (let* ((uri (format "org://%s#Empty%%20Body%%20Task"
                         test-file))
-           (params `((uri . ,uri)
-                     (content . "New body content.")))
+           (params `((resource_uri . ,uri)
+                     (old_body . "")
+                     (new_body . "New body content.")
+                     (append . t)))
            (result-text
-            (mcp-server-lib-ert-call-tool "org-append-body" params))
+            (mcp-server-lib-ert-call-tool "org-edit-body" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body-empty))))
 
-(ert-deftest org-mcp-test-append-body-before-children ()
+(ert-deftest org-mcp-test-edit-body-append-before-children ()
   "Test that appended content goes before child headlines."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-children))
     (let* ((uri (format "org://%s#Parent%%20Task" test-file))
-           (params `((uri . ,uri)
-                     (content . "Appended text.")))
+           (params `((resource_uri . ,uri)
+                     (old_body . "")
+                     (new_body . "Appended text.")
+                     (append . t)))
            (result-text
-            (mcp-server-lib-ert-call-tool "org-append-body" params))
+            (mcp-server-lib-ert-call-tool "org-edit-body" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body-with-children))))
 
-(ert-deftest org-mcp-test-append-body-headline-error ()
-  "Test that content with headlines is rejected."
+(ert-deftest org-mcp-test-edit-body-append-headline-error ()
+  "Test that content with headlines is rejected in append mode."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((uri (format "org://%s#Simple%%20Task" test-file)))
@@ -3971,16 +3928,18 @@ This exercises the write path in org-mcp--complete-and-save."
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
-                "org-append-body" 1
-                `((uri . ,uri)
-                  (content . "* A headline"))))
+                "org-edit-body" 1
+                `((resource_uri . ,uri)
+                  (old_body . "")
+                  (new_body . "* A headline")
+                  (append . t))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-append-body-unbalanced-blocks-error ()
-  "Test that unbalanced blocks are rejected."
+(ert-deftest org-mcp-test-edit-body-append-unbalanced-blocks-error ()
+  "Test that unbalanced blocks are rejected in append mode."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((uri (format "org://%s#Simple%%20Task" test-file)))
@@ -3988,25 +3947,29 @@ This exercises the write path in org-mcp--complete-and-save."
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
-                "org-append-body" 1
-                `((uri . ,uri)
-                  (content . "#+BEGIN_SRC\ncode\n"))))
+                "org-edit-body" 1
+                `((resource_uri . ,uri)
+                  (old_body . "")
+                  (new_body . "#+BEGIN_SRC\ncode\n")
+                  (append . t))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-append-body-id-uri ()
+(ert-deftest org-mcp-test-edit-body-append-id-uri ()
   "Test appending body via ID-based URI."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
    (let* ((uri (format "org://%s" org-mcp-test--crud-test-id))
-          (params `((uri . ,uri)
-                    (content . "Appended.")))
+          (params `((resource_uri . ,uri)
+                    (old_body . "")
+                    (new_body . "Appended.")
+                    (append . t)))
           (result-text
-           (mcp-server-lib-ert-call-tool "org-append-body" params))
+           (mcp-server-lib-ert-call-tool "org-edit-body" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'uri result) uri)))))

@@ -302,18 +302,18 @@ Example:
 #+end_src
 
 *** org-edit-body
-- *Description:* Edit body content of an Org node using partial string replacement
+- *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
   - =resourceUri= (string, required): URI of the node to edit (=org://= format)
-  - =oldBody= (string, required): Substring to search for within the node's body (must be unique unless replaceAll is true). Use empty string "" to add content to an empty node
-  - =newBody= (string, required): Replacement text
-  - =replaceAll= (boolean, optional): Replace all occurrences (default: false)
+  - =oldBody= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
+  - =newBody= (string, required): Replacement or appended text
+  - =append= (boolean, optional, default false): When true, append =newBody= to end of body instead of replacing
 - *Returns:* Success status with org:// URI of the updated node
-- *Special behavior:* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
+- *Special behavior (replace mode):* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
 #+begin_src json
-# Request:
+# Replace mode:
 {
   "resourceUri": "org://abc-123",
   "oldBody": "This is a placeholder.",
@@ -326,7 +326,14 @@ Example:
   "uri": "org://abc-123"
 }
 
-# Adding content to empty node:
+# Append mode:
+{
+  "resourceUri": "org://abc-123",
+  "newBody": "Additional notes from meeting.",
+  "append": true
+}
+
+# Adding content to empty node (replace mode):
 {
   "resourceUri": "org://new-task",
   "oldBody": "",
@@ -448,27 +455,6 @@ Example:
 }
 #+end_src
 
-*** org-append-body
-- *Description:* Append content to the body of an Org headline, inserting after existing body content but before any child headlines
-- *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
-  - =content= (string, required): Text to append. Cannot be empty, cannot introduce headlines at same or higher level, must maintain balanced =#+BEGIN/#+END= blocks
-- *Returns:* Success status with org:// URI
-
-Example:
-#+begin_src json
-# Append to body:
-{
-  "uri": "org://abc-123",
-  "content": "Additional notes from meeting."
-}
-
-# Success response:
-{
-  "success": true,
-  "uri": "org://abc-123"
-}
-#+end_src
 
 *** org-add-logbook-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK

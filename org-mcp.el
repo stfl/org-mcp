@@ -1234,12 +1234,11 @@ After insertion, point is left on the heading line at end-of-line."
       (insert title))))
 
 (defun org-mcp--replace-body-content
-    (old-body new-body body-content replace-all body-begin body-end)
+    (old-body new-body body-content body-begin body-end)
   "Replace body content in the current buffer.
 OLD-BODY is the substring to replace.
 NEW-BODY is the replacement text.
 BODY-CONTENT is the current body content string.
-REPLACE-ALL if non-nil, replace all occurrences.
 BODY-BEGIN is the buffer position where body starts.
 BODY-END is the buffer position where body ends."
   (let ((new-body-content
@@ -1248,11 +1247,6 @@ BODY-END is the buffer position where body ends."
           ((and (string= old-body "")
                 (string-match-p "\\`[[:space:]]*\\'" body-content))
            new-body)
-          ;; Normal replacement with replaceAll
-          (replace-all
-           (replace-regexp-in-string
-            (regexp-quote old-body) new-body body-content
-            t t))
           ;; Normal single replacement
           (t
            (let ((pos
@@ -1618,120 +1612,171 @@ MCP Parameters:
       (org-edit-headline new_title))))
 
 (defun org-mcp--tool-edit-body
-    (resource_uri old_body new_body replace_all)
-  "Edit body content of an Org node using partial string replacement.
+    (resource_uri old_body new_body &optional append)
+  "Edit or append to body content of an Org node.
 RESOURCE_URI is the URI of the node to edit.
-OLD_BODY is the substring to search for within the node's body.
-         Use empty string \"\" to add content to an empty node.
-NEW_BODY is the replacement text.
-REPLACE_ALL if non-nil, replace all occurrences.
+OLD_BODY is the substring to search for (replace mode only).
+NEW_BODY is the replacement or appended text.
+APPEND if non-nil, append NEW_BODY to end of body instead of replacing.
 
 MCP Parameters:
   resource_uri - URI of the node
                  Formats:
                    - org://{absolute-path}#{headline-path}
                    - org://{id}
-  old_body - Substring to replace within the body (must be unique
-             unless replace_all).  Use \"\" to add to empty nodes
-  new_body - Replacement text
-  replace_all - Replace all occurrences (optional, default false)"
+  old_body - Substring to replace within the body (replace mode only).
+             Must be unique.  Use \"\" to add to empty nodes.
+             Ignored when append is true.
+  new_body - Replacement or appended text
+  append - Append to end of body instead of replacing (optional,
+           default false)"
   ;; Normalize JSON false to nil for proper boolean handling
   ;; JSON false can arrive as :false (keyword) or "false" (string)
-  (let ((replace_all
+  (let ((append
          (cond
-          ((eq replace_all :false)
+          ((eq append :false)
            nil)
-          ((equal replace_all "false")
+          ((equal append "false")
            nil)
           (t
-           replace_all))))
-    (org-mcp--validate-body-no-unbalanced-blocks new_body)
-
-    (let* ((parsed (org-mcp--parse-resource-uri resource_uri))
-           (file-path (car parsed))
-           (headline-path (cdr parsed)))
-
-      (org-mcp--modify-and-save file-path "edit body" nil
-        (org-mcp--goto-headline-from-uri
-         headline-path (org-mcp--uri-is-id-based resource_uri))
-
-        (org-mcp--validate-body-no-headlines
-         new_body (org-current-level))
-
-        ;; Skip past headline and properties
-        (org-end-of-meta-data t)
-
-        ;; Get body boundaries
-        (let ((body-begin (point))
-              (body-end nil)
-              (body-content nil)
-              (occurrence-count 0))
-
-          ;; Find end of body (before next headline or end of subtree)
-          (save-excursion
-            (if (org-goto-first-child)
-                ;; Has children - body ends before first child
-                (setq body-end (point))
-              ;; No children - body extends to end of subtree
-              (org-end-of-subtree t)
-              (setq body-end (point))))
-
-          ;; Extract body content
-          (setq body-content
-                (buffer-substring-no-properties body-begin body-end))
-
-          ;; Trim leading newline if present
-          ;; (`org-end-of-meta-data' includes it)
-          (when (and (> (length body-content) 0)
-                     (= (aref body-content 0) ?\n))
-            (setq body-content (substring body-content 1))
-            (setq body-begin (1+ body-begin)))
-
-          ;; Check if body is empty
-          (when (string-match-p "\\`[[:space:]]*\\'" body-content)
-            ;; Empty oldBody + empty body -> add content
-            (if (string= old_body "")
-                ;; Treat as single replacement
-                (setq occurrence-count 1)
-              (org-mcp--tool-validation-error
-               "Node has no body content")))
-
-          ;; Count occurrences (unless already handled above)
-          (unless (= occurrence-count 1)
-            ;; Empty oldBody with non-empty body is an error
-            (if (and (string= old_body "")
-                     (not
-                      (string-match-p
-                       "\\`[[:space:]]*\\'" body-content)))
-                (org-mcp--tool-validation-error
-                 "Cannot use empty old_body with non-empty body")
-              ;; Normal occurrence counting
-              (let ((case-fold-search nil)
-                    (search-pos 0))
-                (while (string-match
-                        (regexp-quote old_body) body-content
-                        search-pos)
-                  (setq occurrence-count (1+ occurrence-count))
-                  (setq search-pos (match-end 0))))))
-
-          ;; Validate occurrences
-          (cond
-           ((= occurrence-count 0)
-            (org-mcp--tool-validation-error "Body text not found: %s"
-                                            old_body))
-           ((and (> occurrence-count 1) (not replace_all))
+           append))))
+    (if append
+        ;; Append mode
+        (progn
+          (when (or (null new_body)
+                    (string-empty-p new_body)
+                    (string-match-p "\\`[[:space:]]*\\'" new_body))
             (org-mcp--tool-validation-error
-             (concat "Text appears %d times (use replace_all)")
-             occurrence-count)))
+             "new_body cannot be empty or whitespace-only"))
 
-          ;; Perform replacement
-          (org-mcp--replace-body-content
-           old_body
-           new_body
-           body-content
-           replace_all
-           body-begin
-           body-end))))))
+          (org-mcp--validate-body-no-unbalanced-blocks new_body)
+
+          (let* ((parsed (org-mcp--parse-resource-uri resource_uri))
+                 (file-path (car parsed))
+                 (headline-path (cdr parsed)))
+
+            (org-mcp--modify-and-save file-path "append body" nil
+              (org-mcp--goto-headline-from-uri
+               headline-path (org-mcp--uri-is-id-based resource_uri))
+
+              (org-mcp--validate-body-no-headlines
+               new_body (org-current-level))
+
+              ;; Save heading position for org-id-get-create later
+              (let ((heading-pos (point)))
+
+                ;; Skip past headline and properties/planning
+                (org-end-of-meta-data t)
+
+                ;; Find end of body (before next headline or end of subtree)
+                (let ((body-end nil))
+                  (save-excursion
+                    (if (org-goto-first-child)
+                        (setq body-end (point))
+                      (org-end-of-subtree t)
+                      (setq body-end (point))))
+
+                  (goto-char body-end)
+
+                  ;; Ensure there's a newline before our content
+                  (unless (or (= body-end (point-min))
+                              (= (char-before body-end) ?\n))
+                    (insert "\n"))
+
+                  (insert new_body)
+
+                  ;; Ensure trailing newline
+                  (unless (= (char-before (point)) ?\n)
+                    (insert "\n")))
+
+                ;; Return to heading for org-id-get-create
+                (goto-char heading-pos)))))
+
+      ;; Replace mode
+      (org-mcp--validate-body-no-unbalanced-blocks new_body)
+
+      (let* ((parsed (org-mcp--parse-resource-uri resource_uri))
+             (file-path (car parsed))
+             (headline-path (cdr parsed)))
+
+        (org-mcp--modify-and-save file-path "edit body" nil
+          (org-mcp--goto-headline-from-uri
+           headline-path (org-mcp--uri-is-id-based resource_uri))
+
+          (org-mcp--validate-body-no-headlines
+           new_body (org-current-level))
+
+          ;; Skip past headline and properties
+          (org-end-of-meta-data t)
+
+          ;; Get body boundaries
+          (let ((body-begin (point))
+                (body-end nil)
+                (body-content nil)
+                (occurrence-count 0))
+
+            ;; Find end of body (before next headline or end of subtree)
+            (save-excursion
+              (if (org-goto-first-child)
+                  ;; Has children - body ends before first child
+                  (setq body-end (point))
+                ;; No children - body extends to end of subtree
+                (org-end-of-subtree t)
+                (setq body-end (point))))
+
+            ;; Extract body content
+            (setq body-content
+                  (buffer-substring-no-properties
+                   body-begin body-end))
+
+            ;; Trim leading newline if present
+            ;; (`org-end-of-meta-data' includes it)
+            (when (and (> (length body-content) 0)
+                       (= (aref body-content 0) ?\n))
+              (setq body-content (substring body-content 1))
+              (setq body-begin (1+ body-begin)))
+
+            ;; Check if body is empty
+            (when (string-match-p "\\`[[:space:]]*\\'" body-content)
+              ;; Empty oldBody + empty body -> add content
+              (if (string= old_body "")
+                  ;; Treat as single replacement
+                  (setq occurrence-count 1)
+                (org-mcp--tool-validation-error
+                 "Node has no body content")))
+
+            ;; Count occurrences (unless already handled above)
+            (unless (= occurrence-count 1)
+              ;; Empty oldBody with non-empty body is an error
+              (if (and (string= old_body "")
+                       (not
+                        (string-match-p
+                         "\\`[[:space:]]*\\'" body-content)))
+                  (org-mcp--tool-validation-error
+                   "Cannot use empty old_body with non-empty body")
+                ;; Normal occurrence counting
+                (let ((case-fold-search nil)
+                      (search-pos 0))
+                  (while (string-match
+                          (regexp-quote old_body) body-content
+                          search-pos)
+                    (setq occurrence-count (1+ occurrence-count))
+                    (setq search-pos (match-end 0))))))
+
+            ;; Validate occurrences
+            (cond
+             ((= occurrence-count 0)
+              (org-mcp--tool-validation-error
+               "Body text not found: %s"
+               old_body))
+             ((> occurrence-count 1)
+              (org-mcp--tool-validation-error
+               "Text appears %d times (must be unique)"
+               occurrence-count)))
+
+            ;; Perform replacement
+            (org-mcp--replace-body-content
+             old_body new_body body-content body-begin body-end)))))))
 
 (defconst org-mcp--special-properties
   '("TODO"
@@ -1984,67 +2029,6 @@ MCP Parameters:
         (org-priority (string-to-char priority))
         (setq new-priority priority)))))
 
-(defun org-mcp--tool-append-body (uri content)
-  "Append CONTENT to the body of headline at URI.
-Inserts after existing body content but before any child headlines.
-
-MCP Parameters:
-  uri - URI of the headline
-        Formats:
-          - org://{absolute-path}#{headline-path}
-          - org://{id}
-  content - Text to append (string, required)
-            Cannot be empty or whitespace-only
-            Cannot contain headlines at same or higher level
-            Must have balanced #+BEGIN/#+END blocks"
-  (when (or (null content)
-            (string-empty-p content)
-            (string-match-p "\\`[[:space:]]*\\'" content))
-    (org-mcp--tool-validation-error
-     "Content cannot be empty or whitespace-only"))
-
-  (org-mcp--validate-body-no-unbalanced-blocks content)
-
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed)))
-
-    (org-mcp--modify-and-save file-path "append body" nil
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
-
-      (org-mcp--validate-body-no-headlines
-       content (org-current-level))
-
-      ;; Save heading position for org-id-get-create later
-      (let ((heading-pos (point)))
-
-        ;; Skip past headline and properties/planning
-        (org-end-of-meta-data t)
-
-        ;; Find end of body (before next headline or end of subtree)
-        (let ((body-end nil))
-          (save-excursion
-            (if (org-goto-first-child)
-                (setq body-end (point))
-              (org-end-of-subtree t)
-              (setq body-end (point))))
-
-          (goto-char body-end)
-
-          ;; Ensure there's a newline before our content
-          (unless (or (= body-end (point-min))
-                      (= (char-before body-end) ?\n))
-            (insert "\n"))
-
-          (insert content)
-
-          ;; Ensure trailing newline
-          (unless (= (char-before (point)) ?\n)
-            (insert "\n")))
-
-        ;; Return to heading for org-id-get-create
-        (goto-char heading-pos)))))
 
 (defun org-mcp--tool-add-logbook-note (uri note)
   "Add a timestamped note to the LOGBOOK drawer of headline at URI.
@@ -2920,31 +2904,33 @@ Returns JSON object:
    #'org-mcp--tool-edit-body
    :id "org-edit-body"
    :description
-   "Edit the body content of an Org headline using partial string
-replacement.  Finds and replaces a substring within the headline's
-body text.  Creates an Org ID property for the headline if one doesn't
-exist.
+   "Edit or append to the body content of an Org headline.  In replace
+mode (default), finds and replaces a unique substring within the
+headline's body text.  In append mode, inserts new content after
+existing body content but before any child headlines.  Creates an
+Org ID property for the headline if one doesn't exist.
 
 Parameters:
   resource_uri - URI of the headline to edit (string, required)
                  Formats:
                    - org://{absolute-path}#{url-encoded-path}
                    - org://{uuid}
-  old_body - Substring to find and replace (string, required)
-             Must appear exactly once unless replace_all is true
+  old_body - Substring to find and replace (string, required in
+             replace mode, ignored when append is true)
+             Must appear exactly once in the body
              Use empty string \"\" only for adding to empty nodes
-  new_body - Replacement text (string, required)
+  new_body - Replacement or appended text (string, required)
              Cannot introduce headlines at same or higher level
              Must maintain balanced #+BEGIN/#+END blocks
-  replace_all - Replace all occurrences (boolean, optional, default
-                false). When false, old_body must be unique in the
-                body.
+  append - Append new_body to end of body instead of replacing
+           (boolean, optional, default false)
+           When true, old_body is ignored
 
 Returns JSON object:
   success - Always true on success (boolean)
   uri - org:// URI (org://{uuid}) for the edited headline
 
-Special behavior - Empty old_body:
+Special behavior - Empty old_body (replace mode):
   When old_body is \"\", the tool adds content to empty nodes:
   - Only works if node body is empty or whitespace-only
   - Error if node already has content
@@ -3077,30 +3063,6 @@ Returns JSON object:
   success - Always true on success (boolean)
   previous_priority - Previous priority (string, empty if none)
   new_priority - New priority (string, empty if removed)
-  uri - org:// URI (org://{uuid}) for the headline"
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-append-body
-   :id "org-append-body"
-   :description
-   "Append content to the body of an Org headline.  Inserts after
-existing body content but before any child headlines.  Creates an
-Org ID for the headline if one doesn't exist.
-
-Parameters:
-  uri - URI of the headline (string, required)
-        Formats:
-          - org://{absolute-path}#{url-encoded-path}
-          - org://{uuid}
-  content - Text to append (string, required)
-            Cannot be empty or whitespace-only
-            Cannot introduce headlines at same or higher level
-            Must maintain balanced #+BEGIN/#+END blocks
-
-Returns JSON object:
-  success - Always true on success (boolean)
   uri - org:// URI (org://{uuid}) for the headline"
    :read-only nil
    :server-id org-mcp--server-id)
@@ -3600,8 +3562,6 @@ Use this resource to:
   (mcp-server-lib-unregister-tool "org-set-tags" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-set-priority" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-append-body" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-add-logbook-note" org-mcp--server-id)
   ;; Unregister workaround tools
