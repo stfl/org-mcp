@@ -14,7 +14,7 @@ Always run `git commit` inside the Nix devshell:
 nix develop --command git commit …
 ```
 
-The pre-commit hooks run `just lint` and `just tests`, which require the tools
+The pre-commit hooks run `just lint` and `just test`, which require the tools
 provided by the devshell (eask, shellcheck, zizmor, etc.).
 
 ## Project Overview

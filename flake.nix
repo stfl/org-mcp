@@ -18,7 +18,11 @@
         "aarch64-darwin"
       ];
 
-      perSystem = {pkgs, config, ...}: {
+      perSystem = {
+        pkgs,
+        config,
+        ...
+      }: {
         pre-commit.settings.hooks = {
           lint = {
             enable = true;
@@ -26,10 +30,10 @@
             entry = "just lint";
             pass_filenames = false;
           };
-          tests = {
+          test = {
             enable = true;
-            name = "tests";
-            entry = "just tests";
+            name = "test";
+            entry = "just test";
             pass_filenames = false;
           };
         };

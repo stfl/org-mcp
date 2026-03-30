@@ -4,7 +4,7 @@ default:
 build:
     eask recompile
 
-tests:
+test:
     eask run script test
 
 lint:

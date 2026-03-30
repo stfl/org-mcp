@@ -2080,7 +2080,7 @@ Returns an alist with headline metadata suitable for JSON encoding."
          (priority
           (org-element-property :priority (org-element-at-point)))
          (tags (org-get-tags nil t))
-         (id (org-entry-get nil "ID"))
+         ;; (id (org-entry-get nil "ID"))
          (uri (org-mcp--build-org-uri-from-position))
          (parent-priority
           (save-excursion
@@ -2118,8 +2118,8 @@ Returns an alist with headline metadata suitable for JSON encoding."
        `(parent-priority . ,(char-to-string parent-priority)) result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
-    (when id
-      (push `(id . ,id) result))
+    ;; (when id
+    ;;   (push `(id . ,id) result))
     (push `(uri . ,uri) result)
     (when props
       (let ((props-alist

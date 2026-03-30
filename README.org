@@ -67,7 +67,6 @@ Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib
 ** Available MCP Resources
 
 *Note:* File paths in URIs use minimal encoding (only =#= characters are encoded). Avoid using =%= characters in Org file names.
-
 *** org://{uri}
 - *Description:* Access Org files or headlines with structured JSON (auto-detects URI type)
 - *URI Pattern:* =org://{uri}= where uri can be:
@@ -94,32 +93,6 @@ Example response for a headline:
   ]
 }
 #+end_src
-
-*** org-outline://{filename}
-- *Description:* Get the hierarchical structure of an Org file
-- *URI Pattern:* =org-outline://{filename}= where filename is the absolute path to the file
-- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
-- *Returns:* JSON representation of the document structure with headings and their levels
-
-Example:
-#+begin_example
-# Access via MCP:
-URI: org-outline:///home/user/org/projects.org
-Returns: JSON structure like:
-{
-  "headings": [
-    {
-      "title": "Project Alpha",
-      "level": 1,
-      "children": [
-        {"title": "Requirements", "level": 2, "children": []},
-        {"title": "Implementation", "level": 2, "children": []}
-      ]
-    }
-  ]
-}
-#+end_example
-
 
 ** Available MCP Tools
 
@@ -455,7 +428,6 @@ Example:
 }
 #+end_src
 
-
 *** org-add-logbook-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
@@ -500,7 +472,8 @@ Example:
       "level": 1,
       "file": "/home/user/org/tasks.org",
       "todo": "TODO",
-      "priority": "A",
+      "priority": "C",
+      "parent-priority": "A",
       "uri": "org://550e8400-e29b-41d4-a716-446655440000"
     }
   ],
@@ -583,7 +556,6 @@ The file is auto-generated and should not be edited by hand. When =org-mcp-store
 ** Workaround Tools Duplicating Resource Templates
 
 *Note:* The following tools are temporary workarounds that duplicate the resource template functionality as tools. They exist because Claude Code currently doesn't discover resource templates.
-
 *** org-read
 - *Description:* Read Org file or headline with structured JSON output (auto-detects URI format)
 - *Parameters:*
@@ -629,7 +601,6 @@ Example response for a headline:
 - *Note:* Use this when you need plain text instead of structured JSON
 
 ** Clock Tracking Tools
-
 *** org-get-clock-config
 - *Description:* Get clock-related configuration from the current Emacs Org-mode settings
 - *Parameters:* None
@@ -803,7 +774,6 @@ Example response:
 #+end_src
 
 ** Configuring Clock Tracking
-
 *** =org-mcp-clock-continuous-threshold=
 
 When =org-clock-continuously= is non-nil, a new clock-in within this many minutes of the last clock-out will start at the previous clock's end time rather than the current time. Defaults to =30= minutes.
@@ -815,3 +785,4 @@ When =org-clock-continuously= is non-nil, a new clock-in within this many minute
 * License
 
 This project is licensed under the GNU General Public License v3.0 (GPLv3) - see the LICENSE file for details.
+
