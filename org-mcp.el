@@ -59,6 +59,42 @@ at the previous clock's end time."
   :type 'integer
   :group 'org-mcp)
 
+(defcustom org-mcp-ql-extra-properties nil
+  "Alist of extra properties to include in org-ql query results.
+Each entry is (KEY . FUNCTION) where KEY is a symbol used as the
+JSON key and FUNCTION is called with no arguments at point during
+`org-mcp--ql-extract-match'.  Non-nil return values are included
+in the result alist."
+  :type '(alist :key-type symbol :value-type function)
+  :group 'org-mcp)
+
+(defcustom org-mcp-query-inbox-fn nil
+  "Function returning an org-ql sexp for inbox items.
+Called with no arguments.  When nil, the query-inbox tool is disabled."
+  :type '(choice (const :tag "Disabled" nil) function)
+  :group 'org-mcp)
+
+(defcustom org-mcp-query-backlog-fn nil
+  "Function returning an org-ql sexp for backlog items.
+Called with one optional TAG argument (a string).
+When nil, the query-backlog tool is disabled."
+  :type '(choice (const :tag "Disabled" nil) function)
+  :group 'org-mcp)
+
+(defcustom org-mcp-query-next-fn nil
+  "Function returning an org-ql sexp for next action items.
+Called with one optional TAG argument (a string).
+When nil, the query-next tool is disabled."
+  :type '(choice (const :tag "Disabled" nil) function)
+  :group 'org-mcp)
+
+(defcustom org-mcp-query-sort-fn nil
+  "Sort comparator for GTD query tools.
+Passed as the `:sort' argument to `org-ql-select'.
+When nil, no sorting is applied."
+  :type '(choice (const :tag "No sorting" nil) function)
+  :group 'org-mcp)
+
 (defvar org-mcp--stored-queries 'unloaded
   "In-memory alist of stored org-ql queries.
 Each entry is (KEY . ((query . QUERY-STRING) (description . DESC))).
@@ -2072,7 +2108,8 @@ MCP Parameters:
 
 (defun org-mcp--ql-extract-match ()
   "Extract match data at point for `org-ql-select' :action.
-Returns an alist with headline metadata suitable for JSON encoding."
+Returns an alist with headline metadata suitable for JSON encoding.
+Extra properties from `org-mcp-ql-extra-properties' are appended."
   (let* ((title (org-get-heading t t t t))
          (level (org-current-level))
          (file (buffer-file-name))
@@ -2082,11 +2119,6 @@ Returns an alist with headline metadata suitable for JSON encoding."
          (tags (org-get-tags nil t))
          ;; (id (org-entry-get nil "ID"))
          (uri (org-mcp--build-org-uri-from-position))
-         (parent-priority
-          (save-excursion
-            (when (org-up-heading-safe)
-              (org-element-property
-               :priority (org-element-at-point)))))
          (props
           (cl-remove-if
            (lambda (pair)
@@ -2113,9 +2145,6 @@ Returns an alist with headline metadata suitable for JSON encoding."
       (push `(todo . ,todo) result))
     (when priority
       (push `(priority . ,(char-to-string priority)) result))
-    (when parent-priority
-      (push
-       `(parent-priority . ,(char-to-string parent-priority)) result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
     ;; (when id
@@ -2125,6 +2154,10 @@ Returns an alist with headline metadata suitable for JSON encoding."
       (let ((props-alist
              (mapcar (lambda (p) (cons (car p) (cdr p))) props)))
         (push `(properties . ,props-alist) result)))
+    (dolist (extra org-mcp-ql-extra-properties)
+      (let ((val (funcall (cdr extra))))
+        (when val
+          (push (cons (car extra) val) result))))
     (nreverse result)))
 
 (defun org-mcp--tool-ql-query (query &optional files)
@@ -2306,6 +2339,67 @@ MCP Parameters:
       (org-mcp--tool-validation-error "Stored query not found: %s"
                                       key))
     (org-mcp--tool-ql-query (alist-get 'query (cdr entry)) files)))
+
+;; GTD query tools
+
+(defun org-mcp--run-gtd-query (query-sexp)
+  "Run QUERY-SEXP via `org-ql-select' with optional sorting.
+Uses `org-mcp-query-sort-fn' for sorting when set.
+Returns JSON-encoded results in the same format as org-ql-query."
+  (let* ((target-files
+          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files))
+         (matches
+          (condition-case err
+              (org-ql-select
+               target-files
+               query-sexp
+               :action #'org-mcp--ql-extract-match
+               :sort org-mcp-query-sort-fn)
+            (error
+             (org-mcp--tool-validation-error "Org-ql query error: %s"
+                                             (error-message-string
+                                              err))))))
+    (json-encode
+     `((matches . ,(vconcat matches))
+       (total . ,(length matches))
+       (files_searched . ,(length target-files))))))
+
+(defun org-mcp--tool-query-inbox ()
+  "Query inbox items using the configured query function.
+
+MCP Parameters: None
+
+Returns: Same format as org-ql-query tool, sorted by
+`org-mcp-query-sort-fn' when configured."
+  (org-mcp--run-gtd-query (funcall org-mcp-query-inbox-fn)))
+
+(defun org-mcp--tool-query-next (&optional tag)
+  "Query next action items, optionally filtered by TAG.
+
+MCP Parameters:
+  tag - Tag string to filter by (string, optional)
+
+Returns: Same format as org-ql-query tool, sorted by
+`org-mcp-query-sort-fn' when configured."
+  (let ((tag-filter
+         (when (and tag (not (string-empty-p tag)))
+           `(tags ,tag))))
+    (org-mcp--run-gtd-query
+     (funcall org-mcp-query-next-fn tag-filter))))
+
+(defun org-mcp--tool-query-backlog (&optional tag)
+  "Query backlog items, optionally filtered by TAG.
+
+MCP Parameters:
+  tag - Tag string to filter by (string, optional)
+
+Returns: Same format as org-ql-query tool, sorted by
+`org-mcp-query-sort-fn' when configured."
+  (let ((tag-filter
+         (when (and tag (not (string-empty-p tag)))
+           `(tags ,tag))))
+    (org-mcp--run-gtd-query
+     (funcall org-mcp-query-backlog-fn tag-filter))))
 
 ;; Tools duplicating resource templates
 
@@ -3269,6 +3363,54 @@ Returns: Same as org-ql-query tool"
    :read-only t
    :server-id org-mcp--server-id)
 
+  ;; GTD query tools (registered only when configured)
+  (when org-mcp-query-inbox-fn
+    (mcp-server-lib-register-tool
+     #'org-mcp--tool-query-inbox
+     :id "query-inbox"
+     :description
+     "Query inbox items using the configured GTD workflow.
+Returns items matching the inbox query, sorted by rank when
+a sort function is configured.
+
+Parameters: None
+
+Returns: Same format as org-ql-query tool"
+     :read-only t
+     :server-id org-mcp--server-id))
+
+  (when org-mcp-query-next-fn
+    (mcp-server-lib-register-tool
+     #'org-mcp--tool-query-next
+     :id "query-next"
+     :description
+     "Query next action items using the configured GTD workflow.
+Returns actionable items sorted by rank when a sort function
+is configured.
+
+Parameters:
+  tag - Tag string to filter results (string, optional)
+
+Returns: Same format as org-ql-query tool"
+     :read-only t
+     :server-id org-mcp--server-id))
+
+  (when org-mcp-query-backlog-fn
+    (mcp-server-lib-register-tool
+     #'org-mcp--tool-query-backlog
+     :id "query-backlog"
+     :description
+     "Query backlog items (projects and standalone actions) using
+the configured GTD workflow.  Returns items sorted by rank when
+a sort function is configured.
+
+Parameters:
+  tag - Tag string to filter results (string, optional)
+
+Returns: Same format as org-ql-query tool"
+     :read-only t
+     :server-id org-mcp--server-id))
+
   ;; Clock tools
   (mcp-server-lib-register-tool
    #'org-mcp--tool-get-clock-config
@@ -3579,6 +3721,14 @@ Use this resource to:
    "org-ql-delete-stored-query" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-ql-run-stored-query" org-mcp--server-id)
+  ;; GTD query tools (ignore errors if they weren't registered)
+  (ignore-errors
+    (mcp-server-lib-unregister-tool "query-inbox" org-mcp--server-id))
+  (ignore-errors
+    (mcp-server-lib-unregister-tool "query-next" org-mcp--server-id))
+  (ignore-errors
+    (mcp-server-lib-unregister-tool
+     "query-backlog" org-mcp--server-id))
   ;; Clock tools
   (mcp-server-lib-unregister-tool
    "org-get-clock-config" org-mcp--server-id)

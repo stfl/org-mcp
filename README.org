@@ -543,6 +543,51 @@ Example:
 - *Returns:* Same as =org-ql-query=
 - *Configuration:* Requires =org-mcp-stored-queries-file= to be set
 
+*** query-inbox
+- *Description:* Query inbox items using the configured GTD workflow
+- *Parameters:* None
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
+
+*** query-next
+- *Description:* Query next action items using the configured GTD workflow
+- *Parameters:*
+  - =tag= (string, optional): Tag string to filter results
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
+
+*** query-backlog
+- *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
+- *Parameters:*
+  - =tag= (string, optional): Tag string to filter results
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
+
+** Configuring GTD Query Tools
+
+The GTD query tools are opt-in.  Set the query functions and an optional sort comparator:
+
+#+begin_src emacs-lisp
+(setq org-mcp-query-inbox-fn   #'my-inbox-query
+      org-mcp-query-backlog-fn #'my-backlog-query
+      org-mcp-query-next-fn    #'my-next-actions-query
+      org-mcp-query-sort-fn    #'my-rank-comparator)
+#+end_src
+
+Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= and =org-mcp-query-next-fn= receive an optional tag-filter argument (an org-ql sexp or =nil=).  =org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=.
+
+** Configuring Extra Query Properties
+
+=org-mcp-ql-extra-properties= lets you append computed values to every org-ql query result:
+
+#+begin_src emacs-lisp
+(setq org-mcp-ql-extra-properties
+      '((parent-priority . my-parent-priority-fn)
+        (rank . my-rank-fn)))
+#+end_src
+
+Each function is called at point with no arguments during result extraction.  Non-nil return values are included in the JSON result under the given key.
+
 ** Configuring Stored Queries
 
 To enable stored queries, set the file path where queries will be persisted:

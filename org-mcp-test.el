@@ -4113,5 +4113,140 @@ QUERY is the org-ql query sexp as a string."
                        uri))))
         (delete-file queries-file)))))
 
+;;; Extra-properties tests
+
+(defconst org-mcp-test--content-parent-child
+  "* [#A] Parent
+** TODO Child Task
+Child body."
+  "Parent with priority A and a child TODO.")
+
+(ert-deftest org-mcp-test-ql-extra-properties ()
+  "Extra properties from `org-mcp-ql-extra-properties' appear in results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-parent-child))
+    (let ((org-mcp-ql-extra-properties
+           `((parent-priority
+              . ,(lambda ()
+                   (let ((p (save-excursion
+                              (when (org-up-heading-safe)
+                                (org-element-property
+                                 :priority (org-element-at-point))))))
+                     (when p (char-to-string p)))))
+             (rank . ,(lambda () 42)))))
+      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+             (matches (alist-get 'matches result))
+             (match (aref matches 0)))
+        (should (equal (alist-get 'parent-priority match) "A"))
+        (should (equal (alist-get 'rank match) 42))))))
+
+(ert-deftest org-mcp-test-ql-extra-properties-nil-omitted ()
+  "Extra properties returning nil are omitted from results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-mcp-ql-extra-properties
+           `((nope . ,(lambda () nil)))))
+      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+             (matches (alist-get 'matches result))
+             (match (aref matches 0)))
+        (should-not (assq 'nope match))))))
+
+;;; GTD query tool tests
+
+(defconst org-mcp-test--content-gtd-items
+  "* TODO Inbox item :#inbox:
+
+* TODO [#B] Next action
+
+* TODO [#A] High priority next"
+  "Items for GTD query tool tests.")
+
+(defmacro org-mcp-test--with-gtd-tools (file-specs bindings &rest body)
+  "Create temp org files and enable org-mcp with GTD tool BINDINGS.
+FILE-SPECS are (VAR CONTENT) pairs.  BINDINGS is a list of let-style
+bindings for GTD customizations that must be set before `org-mcp-enable'."
+  (declare (indent 2))
+  (let* ((vars (mapcar #'car file-specs))
+         (temp-vars (mapcar (lambda (v) (gensym (symbol-name v))) vars))
+         (let-bindings (cl-mapcar (lambda (v tv) `(,v ,tv)) vars temp-vars))
+         (inits (cl-mapcar
+                 (lambda (tv spec)
+                   `(setq ,tv (make-temp-file "org-mcp-test" nil ".org"
+                                              ,(nth 1 spec))))
+                 temp-vars file-specs))
+         (cleanups (mapcar (lambda (tv)
+                             `(when ,tv (delete-file ,tv)))
+                           temp-vars)))
+    `(let (,@temp-vars)
+       (unwind-protect
+           (progn
+             ,@inits
+             (let (,@let-bindings
+                   (org-mcp-allowed-files (list ,@temp-vars))
+                   ,@bindings)
+               (org-mcp-enable)
+               (unwind-protect
+                   (mcp-server-lib-ert-with-server :tools t :resources t
+                     ,@body)
+                 (org-mcp-disable))))
+         ,@cleanups))))
+
+(ert-deftest org-mcp-test-query-inbox-tool ()
+  "query-inbox tool returns inbox-tagged items."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-gtd-items))
+      ((org-mcp-query-inbox-fn
+        (lambda () '(and (not (done)) (tags "#inbox" "inbox"))))
+       (org-mcp-query-sort-fn nil))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool "query-inbox" nil))
+           (result (json-read-from-string result-text))
+           (matches (alist-get 'matches result)))
+      (should (equal (alist-get 'total result) 1))
+      (should (equal (alist-get 'title (aref matches 0))
+                     "Inbox item")))))
+
+(ert-deftest org-mcp-test-query-next-tool ()
+  "query-next tool returns next action items."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-gtd-items))
+      ((org-mcp-query-next-fn
+        (lambda (&optional _tag-filter)
+          '(and (todo "TODO") (not (tags "#inbox" "inbox")))))
+       (org-mcp-query-sort-fn nil))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool "query-next" nil))
+           (result (json-read-from-string result-text))
+           (matches (alist-get 'matches result)))
+      (should (equal (alist-get 'total result) 2)))))
+
+(ert-deftest org-mcp-test-query-backlog-tool ()
+  "query-backlog tool returns backlog items."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-gtd-items))
+      ((org-mcp-query-backlog-fn
+        (lambda (&optional _tag-filter)
+          '(todo "TODO")))
+       (org-mcp-query-sort-fn nil))
+    (let* ((result-text
+            (mcp-server-lib-ert-call-tool "query-backlog" nil))
+           (result (json-read-from-string result-text))
+           (matches (alist-get 'matches result)))
+      (should (equal (alist-get 'total result) 3)))))
+
+(ert-deftest org-mcp-test-query-tools-not-registered-when-nil ()
+  "GTD query tools are not registered when their fns are nil."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-bare-todo))
+      ((org-mcp-query-inbox-fn nil)
+       (org-mcp-query-next-fn nil)
+       (org-mcp-query-backlog-fn nil))
+    (should-error
+     (mcp-server-lib-ert-call-tool "query-inbox" nil))
+    (should-error
+     (mcp-server-lib-ert-call-tool "query-next" nil))
+    (should-error
+     (mcp-server-lib-ert-call-tool "query-backlog" nil))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
