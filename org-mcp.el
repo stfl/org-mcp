@@ -76,14 +76,18 @@ Called with no arguments.  When nil, the query-inbox tool is disabled."
 
 (defcustom org-mcp-query-backlog-fn nil
   "Function returning an org-ql sexp for backlog items.
-Called with one optional TAG argument (a string).
+Called with one optional TAG-FILTER argument, which is either nil
+or an org-ql sexp of the form `(tags TAG)' built from the tag
+string supplied by the MCP caller at call time.
 When nil, the query-backlog tool is disabled."
   :type '(choice (const :tag "Disabled" nil) function)
   :group 'org-mcp)
 
 (defcustom org-mcp-query-next-fn nil
   "Function returning an org-ql sexp for next action items.
-Called with one optional TAG argument (a string).
+Called with one optional TAG-FILTER argument, which is either nil
+or an org-ql sexp of the form `(tags TAG)' built from the tag
+string supplied by the MCP caller at call time.
 When nil, the query-next tool is disabled."
   :type '(choice (const :tag "Disabled" nil) function)
   :group 'org-mcp)
