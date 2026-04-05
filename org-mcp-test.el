@@ -4151,6 +4151,67 @@ Child body."
              (match (aref matches 0)))
         (should-not (assq 'nope match))))))
 
+(defconst org-mcp-test--content-ql-tags-scheduled-deadline
+  "* TODO Tagged Task                                                 :work:home:
+SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
+  "TODO task with tags, scheduled, and deadline for org-ql query tests.")
+
+(ert-deftest org-mcp-test-ql-query-exports-tags ()
+  "Test that org-ql-query includes tags in match results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should (equal (alist-get 'tags match) ["work" "home"])))))
+
+(ert-deftest org-mcp-test-ql-query-exports-scheduled ()
+  "Test that org-ql-query includes scheduled date in match results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should (stringp (alist-get 'scheduled match)))
+      (should (string-match-p "2024-03-15" (alist-get 'scheduled match))))))
+
+(ert-deftest org-mcp-test-ql-query-exports-deadline ()
+  "Test that org-ql-query includes deadline in match results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should (stringp (alist-get 'deadline match)))
+      (should (string-match-p "2024-03-20" (alist-get 'deadline match))))))
+
+(ert-deftest org-mcp-test-ql-query-no-tags-absent ()
+  "Test that tags key is absent when headline has no tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should-not (assq 'tags match)))))
+
+(ert-deftest org-mcp-test-ql-query-no-scheduled-absent ()
+  "Test that scheduled key is absent when headline has no scheduled date."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should-not (assq 'scheduled match)))))
+
+(ert-deftest org-mcp-test-ql-query-no-deadline-absent ()
+  "Test that deadline key is absent when headline has no deadline."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should-not (assq 'deadline match)))))
+
 ;;; GTD query tool tests
 
 (defconst org-mcp-test--content-gtd-items

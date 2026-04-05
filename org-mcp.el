@@ -2121,6 +2121,8 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
          (priority
           (org-element-property :priority (org-element-at-point)))
          (tags (org-get-tags nil t))
+         (scheduled (org-entry-get nil "SCHEDULED"))
+         (deadline (org-entry-get nil "DEADLINE"))
          ;; (id (org-entry-get nil "ID"))
          (uri (org-mcp--build-org-uri-from-position))
          (props
@@ -2151,6 +2153,10 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
       (push `(priority . ,(char-to-string priority)) result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
+    (when scheduled
+      (push `(scheduled . ,scheduled) result))
+    (when deadline
+      (push `(deadline . ,deadline) result))
     ;; (when id
     ;;   (push `(id . ,id) result))
     (push `(uri . ,uri) result)
