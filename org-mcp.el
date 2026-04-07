@@ -2360,11 +2360,24 @@ Returns JSON-encoded results in the same format as org-ql-query."
           (cl-remove-if-not #'file-exists-p org-mcp-allowed-files))
          (matches
           (condition-case err
-              (org-ql-select
-               target-files
-               query-sexp
-               :action #'org-mcp--ql-extract-match
-               :sort org-mcp-query-sort-fn)
+              ;; Collect org-elements with the default action, then
+              ;; sort.  We map `org-mcp--ql-extract-match' in a second
+              ;; pass because `org-ql-select' applies :action before
+              ;; :sort — custom actions that return non-element data
+              ;; would break sort functions expecting org-elements.
+              (let ((elements
+                     (org-ql-select
+                      target-files
+                      query-sexp
+                      :sort org-mcp-query-sort-fn)))
+                (mapcar
+                 (lambda (el)
+                   (with-current-buffer (org-element-property
+                                         :buffer el)
+                     (save-excursion
+                       (goto-char (org-element-property :begin el))
+                       (org-mcp--ql-extract-match))))
+                 elements))
             (error
              (org-mcp--tool-validation-error "Org-ql query error: %s"
                                              (error-message-string
