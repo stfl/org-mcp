@@ -6,3 +6,4 @@ org-mcp-autoloads.el
 .eask/
 dist/
 .direnv/
+.omc/
