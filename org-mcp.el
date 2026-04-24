@@ -910,21 +910,30 @@ current buffer guarantees the markers we operate on."
 
 (defun org-mcp--clock-remove-empty-logbook ()
   "Remove LOGBOOK drawer at current heading if it is empty.
-Point must be at a heading."
+Point must be at a heading.  Delegates to
+`org-remove-empty-drawer-at', which is a no-op when the drawer has
+any contents (additional CLOCK entries, state notes, plain notes,
+etc.)."
   (save-excursion
     (org-back-to-heading t)
-    (let ((end
-           (save-excursion
-             (org-end-of-subtree t t)
-             (point))))
-      (forward-line 1)
-      (when (re-search-forward "^[ \t]*:LOGBOOK:[ \t]*$" end t)
-        (forward-line 0)
-        (let ((drawer-start (point)))
-          (forward-line 1)
-          (when (looking-at "^[ \t]*:END:[ \t]*$")
-            (forward-line 1)
-            (delete-region drawer-start (point))))))))
+    (let* ((subtree-begin (point))
+           (subtree-end
+            (save-excursion
+              (org-end-of-subtree t t)
+              (point))))
+      (save-restriction
+        (narrow-to-region subtree-begin subtree-end)
+        (let ((drawer-pos
+               (org-element-map
+                (org-element-parse-buffer 'element) 'drawer
+                (lambda (el)
+                  (when (equal
+                         (org-element-property :drawer-name el)
+                         "LOGBOOK")
+                    (org-element-property :begin el)))
+                nil t)))
+          (when drawer-pos
+            (org-remove-empty-drawer-at drawer-pos)))))))
 
 (defun org-mcp--clock-delete-entry (start-time)
   "Delete CLOCK entry whose start matches START-TIME under current heading.

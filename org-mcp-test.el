@@ -3949,6 +3949,79 @@ The Org element parser should still recognize the open clock."
        (org-mcp-test--call-clock-delete
         uri "2026-01-03T09:00:00")))))
 
+(defconst org-mcp-test--clock-delete-with-state-note-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "- State \"DONE\"       from \"TODO\"       [2026-01-01 Thu 12:00]\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "LOGBOOK with a state-change note and one closed CLOCK entry.")
+
+(defconst org-mcp-test--clock-delete-keeps-state-note-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "- State \"DONE\"       from \"TODO\"       "
+   "\\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "After deleting the only CLOCK, the state note keeps the LOGBOOK alive.")
+
+(ert-deftest org-mcp-test-clock-delete-keeps-drawer-with-state-note ()
+  "Test clock-delete leaves LOGBOOK intact when state notes remain.
+The drawer must NOT be removed just because the only CLOCK entry
+is gone — any non-CLOCK content (e.g. state-change notes) must
+keep the drawer alive."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-with-state-note-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result
+            (org-mcp-test--call-clock-delete
+             uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-delete-keeps-state-note-expected-regex))))
+
+(defconst org-mcp-test--clock-delete-with-blank-line-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "LOGBOOK with a leading blank line and a single CLOCK entry.
+The blank line is NOT part of the CLOCK element's region, so
+deleting the CLOCK leaves whitespace-only content behind.")
+
+(defconst org-mcp-test--clock-delete-keeps-blank-line-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "\n"
+   ":END:\n"
+   "\\'")
+  "After deleting the CLOCK, a lone blank line keeps LOGBOOK intact.")
+
+(ert-deftest org-mcp-test-clock-delete-keeps-drawer-with-blank-line ()
+  "Test clock-delete leaves LOGBOOK intact when only whitespace remains.
+`org-remove-empty-drawer-at' treats a blank line as content, so
+the drawer must remain.  This pins down behavior on the
+whitespace-between-markers edge case."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-with-blank-line-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result
+            (org-mcp-test--call-clock-delete
+             uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-delete-keeps-blank-line-expected-regex))))
+
 ;;; Tests for org-set-properties
 
 (ert-deftest org-mcp-test-set-properties-new ()
