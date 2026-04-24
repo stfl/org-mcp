@@ -1215,18 +1215,17 @@ as a child, or nil if inserting at top-level.
 Assumes point is positioned where the heading should be inserted.
 After insertion, point is left on the heading line at end-of-line."
   (if parent-level
-      ;; We're inside a parent
+      ;; We're inside a parent.  Pass the explicit LEVEL argument to
+      ;; `org-insert-heading' so the new heading lands at parent + 1
+      ;; regardless of what heading point currently sits inside (e.g.
+      ;; at the end of a sibling subtree positioned via after_uri).
+      ;; This is what avoids the "creates a sibling of the parent
+      ;; instead of a child" pitfall of bare `org-insert-heading' when
+      ;; the parent has no children.
       (progn
         (org-mcp--ensure-newline)
-        ;; Insert heading manually at parent level + 1
-        ;; We don't use `org-insert-heading' because when parent has
-        ;; no children, it creates a sibling of the parent instead of
-        ;; a child
-        (let ((heading-start (point)))
-          (insert (make-string (1+ parent-level) ?*) " " title "\n")
-          ;; Set point to heading for `org-todo' and `org-set-tags'
-          (goto-char heading-start)
-          (end-of-line)))
+        (org-insert-heading nil nil (1+ parent-level))
+        (insert title))
     ;; Top-level heading
     ;; Check if there are no headlines yet (empty buffer or only
     ;; headers before us)

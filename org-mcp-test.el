@@ -55,6 +55,20 @@ Second child content.
    org-mcp-test--content-with-id-id)
   "Parent with multiple child tasks and doc file header.")
 
+(defconst org-mcp-test--childless-parent-id
+  "childless-parent-id-003"
+  "ID for the parent in org-mcp-test--content-childless-parent.")
+
+(defconst org-mcp-test--content-childless-parent
+  (format
+   "* Parent Task
+:PROPERTIES:
+:ID:       %s
+:END:
+Some parent content."
+   org-mcp-test--childless-parent-id)
+  "Top-level parent with body but no child headings.")
+
 (defconst org-mcp-test--level2-parent-level3-sibling-id
   "level2-parent-level3-sibling-id-001"
   "ID for Review org-mcp.el in level2-parent-level3-children.")
@@ -335,6 +349,17 @@ Second child content.
     "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?")
    org-mcp-test--content-with-id-id)
   "Pattern for child TODO (level 2) added under parent (level 1) with existing child (level 2).")
+
+(defconst org-mcp-test--regex-child-into-childless-parent
+  (concat
+   "\\`\\* Parent Task\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--childless-parent-id "\n"
+   ":END:\n"
+   "Some parent content\\.\n"
+   "\\*\\* TODO Only Child +.*:work:.*\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?\\'")
+  "Pattern for first child (level 2) added under a previously-childless parent (level 1).")
 
 (defconst org-mcp-test--regex-second-child-same-level
   (concat
@@ -2528,6 +2553,26 @@ Empty string should be treated as nil - append as last child."
        (file-name-nondirectory test-file)
        test-file
        org-mcp-test--regex-child-under-parent))))
+
+(ert-deftest org-mcp-test-add-todo-child-into-childless-parent ()
+  "Test adding the first child under a parent that has no existing children.
+This guards against the historical pitfall where bare `org-insert-heading'
+would create a sibling of the parent instead of a child when the parent
+had no children."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-childless-parent
+    (let ((parent-uri
+           (format "org://%s" org-mcp-test--childless-parent-id)))
+      (org-mcp-test--add-todo-and-check
+       "Only Child"
+       "TODO"
+       '("work")
+       nil ; no body
+       parent-uri
+       nil ; no afterUri
+       (file-name-nondirectory test-file)
+       test-file
+       org-mcp-test--regex-child-into-childless-parent))))
 
 (ert-deftest org-mcp-test-add-todo-second-child-same-level ()
   "Test that adding a second child creates it at the same level as first child.
