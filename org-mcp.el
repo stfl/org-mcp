@@ -721,8 +721,10 @@ TIME is an Emacs time value.  Returns rounded time."
     time))
 
 (defun org-mcp--clock-format-timestamp (time)
-  "Format TIME as Org clock timestamp `[YYYY-MM-DD Day HH:MM]'."
-  (format-time-string "[%Y-%m-%d %a %H:%M]" time))
+  "Format TIME as an inactive Org clock timestamp, e.g. `[YYYY-MM-DD Day HH:MM]'.
+Delegates the format to `org-time-stamp-format' so the output tracks
+Org's own `org-timestamp-formats' customization."
+  (format-time-string (org-time-stamp-format t t) time))
 
 (defun org-mcp--clock-parse-timestamp (str)
   "Parse ISO timestamp STR to Emacs time.
@@ -739,11 +741,10 @@ STR should be in ISO 8601 format like 2026-03-23T14:30:00."
     (encode-time parsed)))
 
 (defun org-mcp--clock-duration-string (seconds)
-  "Format SECONDS as clock duration string `H:MM'."
-  (let* ((minutes (round seconds 60))
-         (hours (/ minutes 60))
-         (mins (% minutes 60)))
-    (format "%d:%02d" hours mins)))
+  "Format SECONDS as clock duration string `H:MM'.
+Delegates to `org-duration-from-minutes' with the `h:mm' specifier
+that Org itself uses for CLOCK lines."
+  (org-duration-from-minutes (round seconds 60) 'h:mm))
 
 (defun org-mcp--clock-element-start-str (clock)
   "Return CLOCK element's start timestamp text, without surrounding brackets.
@@ -847,19 +848,33 @@ Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
   "Insert CLOCK line in LOGBOOK at current heading.
 START is the clock start time.  END is optional clock end time.
 If END is provided, inserts a closed clock entry with duration.
-New entries are inserted at the top of the LOGBOOK drawer."
+New entries are inserted at the top of the LOGBOOK drawer.
+
+Why this writes the CLOCK line by hand instead of calling
+`org-clock-in' / `org-clock-out': the caller runs inside
+`org-mcp--modify-and-save', which executes in a `with-temp-buffer'
+that is killed on save.  Those Org APIs start mode-line/idle
+timers, set `org-clock-marker' and `org-clock-hd-marker', push to
+`org-clock-history', and invoke `org-resolve-clocks' interactively
+on dangling clocks -- all of which either leak timers, leave stale
+markers pointing at a dead buffer, or block a non-TTY MCP server.
+Formatting is delegated to Org via `org-mcp--clock-format-timestamp'
+and `org-mcp--clock-duration-string', and the `CLOCK:' prefix uses
+`org-clock-string' so the wire format tracks Org's own constant."
   (let ((logbook-pos (org-mcp--clock-ensure-logbook)))
     (goto-char logbook-pos)
     (if end
         (let* ((duration (float-time (time-subtract end start)))
                (dur-str (org-mcp--clock-duration-string duration)))
           (insert
-           (format "CLOCK: %s--%s => %s\n"
+           (format "%s %s--%s => %s\n"
+                   org-clock-string
                    (org-mcp--clock-format-timestamp start)
                    (org-mcp--clock-format-timestamp end)
                    dur-str)))
       (insert
-       (format "CLOCK: %s\n"
+       (format "%s %s\n"
+               org-clock-string
                (org-mcp--clock-format-timestamp start))))))
 
 (defun org-mcp--clock-resolve-dangling ()
