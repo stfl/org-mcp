@@ -864,32 +864,48 @@ New entries are inserted at the top of the LOGBOOK drawer."
 
 (defun org-mcp--clock-resolve-dangling ()
   "Delete unclosed CLOCK entries under current heading.
-Point must be at a heading.  Walks clock elements via
-`org-element-map' and deletes each open clock by :begin / :end
-positions.  Returns count of deleted entries."
+Point must be at a heading.  Running clocks under the current
+subtree are discovered via `org-element-map', then each deletion
+is delegated to Org's `org-clock-clock-cancel', which removes the
+CLOCK line and collapses the containing drawer when it becomes
+empty via `org-remove-empty-drawer-at'.  Returns count of deleted
+entries.
+
+`org-find-open-clocks' is deliberately not used here: the caller
+runs inside a `with-temp-buffer' from `org-mcp--modify-and-save',
+but another buffer may already be visiting the same file (e.g. the
+buffer opened earlier by `org-mcp--clock-find-active').  That API
+returns markers in whichever buffer `get-file-buffer' finds first,
+which is not guaranteed to be the edit buffer.  Element-map on the
+current buffer guarantees the markers we operate on."
   (org-back-to-heading t)
   (let* ((subtree-begin (point))
          (subtree-end
           (save-excursion
             (org-end-of-subtree t t)
             (point)))
-         (regions nil)
+         (clocks nil)
          (count 0))
     (save-restriction
       (narrow-to-region subtree-begin subtree-end)
       (org-element-map
        (org-element-parse-buffer 'element) 'clock
-       (lambda (clock)
-         (when (eq (org-element-property :status clock) 'running)
-           (push (cons
-                  (copy-marker (org-element-property :begin clock))
-                  (copy-marker (org-element-property :end clock)))
-                 regions))))
-      (dolist (r regions)
-        (delete-region (car r) (cdr r))
-        (set-marker (car r) nil)
-        (set-marker (cdr r) nil)
-        (cl-incf count)))
+       (lambda (el)
+         (when (eq (org-element-property :status el) 'running)
+           ;; Build a (marker . start-time) cons matching the shape
+           ;; `org-clock-clock-cancel' expects: marker positioned at
+           ;; end-of-line of `CLOCK: [...]' so that
+           ;; `org-clock-cancel's `looking-back' succeeds.
+           (save-excursion
+             (goto-char (org-element-property :begin el))
+             (end-of-line)
+             (push (cons
+                    (copy-marker (point) t)
+                    (org-mcp--clock-element-start-time el))
+                   clocks))))))
+    (dolist (clock clocks)
+      (org-clock-clock-cancel clock)
+      (cl-incf count))
     count))
 
 (defun org-mcp--clock-remove-empty-logbook ()

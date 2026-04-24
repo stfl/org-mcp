@@ -1232,12 +1232,15 @@ URI is the headline URI, START and END are ISO 8601 timestamps."
           (mcp-server-lib-ert-call-tool "org-clock-add" params)))
     (json-read-from-string result-text)))
 
-(defun org-mcp-test--call-clock-in (uri &optional start-time)
+(defun org-mcp-test--call-clock-in (uri &optional start-time resolve)
   "Call org-clock-in tool via JSON-RPC and return the parsed result.
-URI is the headline URI.  START-TIME is an optional ISO 8601 timestamp."
-  (let* ((params (if start-time
-                     `((uri . ,uri) (start_time . ,start-time))
-                   `((uri . ,uri))))
+URI is the headline URI.  START-TIME is an optional ISO 8601 timestamp.
+RESOLVE when non-nil is passed as the `resolve' parameter (e.g. \"true\")."
+  (let* ((params
+          (append
+           `((uri . ,uri))
+           (when start-time `((start_time . ,start-time)))
+           (when resolve `((resolve . ,resolve)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-clock-in" params)))
     (json-read-from-string result-text)))
@@ -3618,6 +3621,126 @@ Body after everything."))
       (should (equal (alist-get 'clocked_in result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-in-expected-regex))))
+
+;;; Tests for org-clock-in with resolve=true (dangling clock cleanup)
+
+(defconst org-mcp-test--clock-resolve-one-dangling-content
+  "* TODO Task One\n:LOGBOOK:\nCLOCK: [2025-12-30 Tue 09:00]\n:END:\n"
+  "Heading with exactly one dangling CLOCK entry.")
+
+(defconst org-mcp-test--clock-resolve-multi-dangling-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-29 Mon 09:00]\n"
+   "CLOCK: [2025-12-30 Tue 09:00]\n"
+   ":END:\n")
+  "Heading with two dangling CLOCK entries.")
+
+(defconst org-mcp-test--clock-resolve-mixed-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-30 Tue 09:00]\n"
+   "CLOCK: [2025-12-28 Sun 09:00]--[2025-12-28 Sun 10:00] =>  1:00\n"
+   ":END:\n")
+  "Heading mixing a dangling and a closed CLOCK entry.")
+
+(defconst org-mcp-test--clock-resolve-other-heading-content
+  (concat
+   "* TODO Task One\n"
+   "* TODO Task Two\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-30 Tue 09:00]\n"
+   ":END:\n")
+  "Dangling CLOCK under Task Two; resolve target is Task One.")
+
+(defconst org-mcp-test--clock-in-resolve-mixed-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   "CLOCK: \\[2025-12-28 [A-Za-z]\\{2,3\\} 09:00\\]"
+   "--\\[2025-12-28 [A-Za-z]\\{2,3\\} 10:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents after resolve=true clears dangling and preserves closed.")
+
+(defconst org-mcp-test--clock-in-resolve-other-heading-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "After resolve=true on Task One, Task Two's dangling CLOCK survives.")
+
+(ert-deftest org-mcp-test-clock-in-resolve-no-dangling ()
+  "Test clock-in with resolve=true on a heading with no dangling clocks."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in
+                    uri "2026-01-01T10:00:00" "true")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'clocked_in result) t))
+      ;; The `resolved' key is only present when clocks were deleted.
+      (should (null (assq 'resolved result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-one-dangling ()
+  "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-resolve-one-dangling-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in
+                    uri "2026-01-01T10:00:00" "true")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'resolved result) 1))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-multi-dangling ()
+  "Test clock-in with resolve=true deletes multiple dangling CLOCK entries."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-resolve-multi-dangling-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in
+                    uri "2026-01-01T10:00:00" "true")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'resolved result) 2))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-mixed ()
+  "Test clock-in with resolve=true deletes dangling but preserves closed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-resolve-mixed-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in
+                    uri "2026-01-01T10:00:00" "true")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'resolved result) 1))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-resolve-mixed-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-scoped-to-subtree ()
+  "Test resolve=true does not touch dangling clocks in sibling headings."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-resolve-other-heading-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result (org-mcp-test--call-clock-in
+                    uri "2026-01-01T10:00:00" "true")))
+      (should (equal (alist-get 'success result) t))
+      ;; No clocks were under Task One; Task Two's dangling CLOCK is untouched.
+      (should (null (assq 'resolved result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-in-resolve-other-heading-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-out-saves-file-to-disk ()
   "Test org-clock-out saves the closed CLOCK entry to disk.
