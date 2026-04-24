@@ -515,14 +515,56 @@ Uses ID if available, otherwise builds path-based URI."
            (headline-path (org-mcp--build-headline-path)))
       (concat "org://" file "#" headline-path))))
 
+(defun org-mcp--heading-metadata-at-point (&optional inherit-tags)
+  "Return canonical heading metadata at point as a plist.
+
+Reads from a single `org-element-at-point' call so callers do not have
+to chain `org-entry-get'/`org-get-tags'/`org-get-todo-state'.
+
+Returned plist keys:
+  :title      string, with TODO/priority/tags/comment stripped
+  :todo       string or nil
+  :priority   one-character string or nil
+  :tags       list of strings (heading-local by default)
+  :level      integer
+  :id         string or nil
+  :scheduled  Org timestamp string or nil
+  :deadline   Org timestamp string or nil
+  :closed     Org timestamp string or nil
+
+When INHERIT-TAGS is non-nil, :tags is the inherited tag list from
+`org-get-tags'.  Otherwise it is the heading's own tags from the
+parsed element.  Timestamps are returned as their `:raw-value' so the
+result matches `org-entry-get' (canonical Org abbreviation, no
+locale-dependent reformatting)."
+  (let* ((el (org-element-at-point))
+         (priority-char (org-element-property :priority el))
+         (sched (org-element-property :scheduled el))
+         (deadl (org-element-property :deadline el))
+         (clsd (org-element-property :closed el)))
+    (list
+     :title (org-element-property :raw-value el)
+     :todo (org-element-property :todo-keyword el)
+     :priority (and priority-char (char-to-string priority-char))
+     :tags
+     (if inherit-tags
+         (org-get-tags)
+       (org-element-property :tags el))
+     :level (org-element-property :level el)
+     :id (org-element-property :ID el)
+     :scheduled (and sched (org-element-property :raw-value sched))
+     :deadline (and deadl (org-element-property :raw-value deadl))
+     :closed (and clsd (org-element-property :raw-value clsd)))))
+
 (defun org-mcp--extract-heading-child ()
   "Extract lightweight child entry at current heading.
 Returns plist with title, todo, level, and uri.
 Point should be at the heading. Does not recurse into children."
-  (let* ((title (org-get-heading t t t t))
-         (todo (org-get-todo-state))
-         (level (org-current-level))
-         (id (org-entry-get (point) "ID"))
+  (let* ((meta (org-mcp--heading-metadata-at-point))
+         (title (plist-get meta :title))
+         (todo (plist-get meta :todo))
+         (level (plist-get meta :level))
+         (id (plist-get meta :id))
          (uri
           (if id
               (org-mcp--build-org-uri-from-id id)
@@ -540,16 +582,16 @@ Point should be at the heading. Does not recurse into children."
 Point should be at the heading.
 Returns alist with all heading properties and lightweight children."
   (let*
-      ((title (org-get-heading t t t t))
-       (todo (org-get-todo-state))
-       (priority (org-entry-get (point) "PRIORITY"))
-       (tags (org-get-tags))
-       (level (org-current-level))
-       (id (org-entry-get (point) "ID"))
-       (scheduled (org-entry-get (point) "SCHEDULED"))
-       (deadline (org-entry-get (point) "DEADLINE"))
-       (closed (org-entry-get (point) "CLOSED"))
-       (props (org-entry-properties))
+      ((meta (org-mcp--heading-metadata-at-point t))
+       (title (plist-get meta :title))
+       (todo (plist-get meta :todo))
+       (priority (plist-get meta :priority))
+       (tags (plist-get meta :tags))
+       (level (plist-get meta :level))
+       (id (plist-get meta :id))
+       (scheduled (plist-get meta :scheduled))
+       (deadline (plist-get meta :deadline))
+       (closed (plist-get meta :closed))
        (uri (org-mcp--build-org-uri-from-position))
        (children '())
        (content-end
@@ -2043,16 +2085,16 @@ MCP Parameters:
   "Extract match data at point for `org-ql-select' :action.
 Returns an alist with headline metadata suitable for JSON encoding.
 Extra properties from `org-mcp-ql-extra-properties' are appended."
-  (let* ((title (org-get-heading t t t t))
-         (level (org-current-level))
+  (let* ((meta (org-mcp--heading-metadata-at-point))
+         (title (plist-get meta :title))
+         (level (plist-get meta :level))
          (file (buffer-file-name))
-         (todo (org-get-todo-state))
-         (priority
-          (org-element-property :priority (org-element-at-point)))
-         (tags (org-get-tags nil t))
-         (scheduled (org-entry-get nil "SCHEDULED"))
-         (deadline (org-entry-get nil "DEADLINE"))
-         ;; (id (org-entry-get nil "ID"))
+         (todo (plist-get meta :todo))
+         (priority (plist-get meta :priority))
+         (tags (plist-get meta :tags))
+         (scheduled (plist-get meta :scheduled))
+         (deadline (plist-get meta :deadline))
+         (closed (plist-get meta :closed))
          (uri (org-mcp--build-org-uri-from-position))
          (props
           (cl-remove-if
@@ -2079,15 +2121,15 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
     (when todo
       (push `(todo . ,todo) result))
     (when priority
-      (push `(priority . ,(char-to-string priority)) result))
+      (push `(priority . ,priority) result))
     (when tags
       (push `(tags . ,(vconcat tags)) result))
     (when scheduled
       (push `(scheduled . ,scheduled) result))
     (when deadline
       (push `(deadline . ,deadline) result))
-    ;; (when id
-    ;;   (push `(id . ,id) result))
+    (when closed
+      (push `(closed . ,closed) result))
     (push `(uri . ,uri) result)
     (when props
       (let ((props-alist

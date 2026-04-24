@@ -4367,6 +4367,148 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
            (match (aref matches 0)))
       (should-not (assq 'deadline match)))))
 
+(defconst org-mcp-test--content-ql-priority-closed
+  "* DONE [#A] Closed Task
+CLOSED: [2024-04-01 Mon 15:30]"
+  "DONE task with priority A and a CLOSED timestamp for ql tests.")
+
+(ert-deftest org-mcp-test-ql-query-exports-priority ()
+  "Test that org-ql-query returns priority as a one-character string."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-priority-closed))
+    (let* ((result (org-mcp-test--call-ql-query "(done)"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should (equal (alist-get 'priority match) "A")))))
+
+(ert-deftest org-mcp-test-ql-query-exports-closed ()
+  "Test that org-ql-query includes CLOSED timestamp in match results."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-priority-closed))
+    (let* ((result (org-mcp-test--call-ql-query "(done)"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should (stringp (alist-get 'closed match)))
+      (should (string-match-p "2024-04-01" (alist-get 'closed match))))))
+
+(ert-deftest org-mcp-test-ql-query-no-priority-absent ()
+  "Test that priority key is absent when headline has no priority."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should-not (assq 'priority match)))))
+
+(ert-deftest org-mcp-test-ql-query-no-closed-absent ()
+  "Test that closed key is absent when headline has no CLOSED timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0)))
+      (should-not (assq 'closed match)))))
+
+(defconst org-mcp-test--content-ql-with-custom-prop
+  "* TODO Task with Custom
+:PROPERTIES:
+:EFFORT: 2:00
+:CONTEXT: laptop
+:END:"
+  "TODO task with custom properties for ql standard-properties test.")
+
+(ert-deftest org-mcp-test-ql-query-exports-standard-properties ()
+  "Test that org-ql-query includes non-filtered PROPERTIES drawer values."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ql-with-custom-prop))
+    (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'matches result))
+           (match (aref matches 0))
+           (props (alist-get 'properties match)))
+      (should (equal (alist-get 'EFFORT props) "2:00"))
+      (should (equal (alist-get 'CONTEXT props) "laptop")))))
+
+;;; Tests for org-read structured metadata extraction
+;;
+;; These verify `org-mcp--extract-structured-heading' (via the org-read
+;; tool) emits priority, planning timestamps, and ID consistently with
+;; the canonical metadata extractor.
+
+(defconst org-mcp-test--content-read-full-metadata
+  "* TODO [#B] Full Metadata Task                                 :work:home:
+SCHEDULED: <2024-05-01 Wed> DEADLINE: <2024-05-08 Wed>
+:PROPERTIES:
+:ID: full-meta-task-id
+:END:
+Body line."
+  "TODO task with priority B, tags, scheduled, deadline, and ID.")
+
+(defconst org-mcp-test--content-read-closed-task
+  "* DONE [#A] Closed Read Task
+CLOSED: [2024-05-15 Wed 09:00]"
+  "DONE task with CLOSED timestamp for org-read tests.")
+
+(defun org-mcp-test--read-structured (file headline)
+  "Return parsed JSON alist for HEADLINE in FILE via org-read."
+  (let* ((uri (format "org://%s#%s" file headline))
+         (result-text (org-mcp-test--call-read uri)))
+    (json-parse-string result-text :object-type 'alist)))
+
+(ert-deftest org-mcp-test-read-exports-priority ()
+  "Test that org-read returns priority as a one-character string."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-full-metadata))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Full%20Metadata%20Task")))
+      (should (equal (alist-get 'priority result) "B")))))
+
+(ert-deftest org-mcp-test-read-exports-scheduled-deadline ()
+  "Test that org-read includes scheduled and deadline timestamps."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-full-metadata))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Full%20Metadata%20Task")))
+      (should (equal (alist-get 'scheduled result) "<2024-05-01 Wed>"))
+      (should (equal (alist-get 'deadline result) "<2024-05-08 Wed>")))))
+
+(ert-deftest org-mcp-test-read-exports-id ()
+  "Test that org-read includes ID from PROPERTIES drawer."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-full-metadata))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Full%20Metadata%20Task")))
+      (should (equal (alist-get 'id result) "full-meta-task-id")))))
+
+(ert-deftest org-mcp-test-read-exports-tags-with-inheritance ()
+  "Test that org-read includes the heading's tag list."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-full-metadata))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Full%20Metadata%20Task")))
+      (should (equal (alist-get 'tags result) ["work" "home"])))))
+
+(ert-deftest org-mcp-test-read-exports-closed ()
+  "Test that org-read includes CLOSED timestamp."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-closed-task))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Closed%20Read%20Task")))
+      (should (equal (alist-get 'closed result)
+                     "[2024-05-15 Wed 09:00]")))))
+
+(ert-deftest org-mcp-test-read-bare-omits-optional-fields ()
+  "Test that org-read omits optional fields when absent on bare heading."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result (org-mcp-test--read-structured
+                   test-file "Simple%20Task")))
+      (should-not (assq 'priority result))
+      (should-not (assq 'scheduled result))
+      (should-not (assq 'deadline result))
+      (should-not (assq 'closed result))
+      (should-not (assq 'id result))
+      (should-not (assq 'tags result)))))
+
 ;;; GTD query tool tests
 
 (defconst org-mcp-test--content-gtd-items
