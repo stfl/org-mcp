@@ -359,33 +359,30 @@ Returns the full path if allowed, signals an error otherwise."
       (org-mcp--resource-file-access-error filename))
     allowed-file))
 
-(defun org-mcp--extract-children (target-level)
-  "Extract children at TARGET-LEVEL until next lower level heading."
-  (let ((children '()))
-    (save-excursion
-      (while (and (re-search-forward "^\\*+ " nil t)
-                  (>= (org-current-level) target-level))
-        (when (= (org-current-level) target-level)
-          (let* ((title (org-get-heading t t t t))
-                 (child
-                  `((title . ,title)
-                    (level . ,target-level)
-                    (children . []))))
-            (push child children)))))
-    (vconcat (nreverse children))))
-
 (defun org-mcp--extract-headings ()
-  "Extract heading structure from current org buffer."
-  (let ((result '()))
-    (goto-char (point-min))
-    (while (re-search-forward "^\\* " nil t) ; Find level 1 headings
-      (let* ((title (org-get-heading t t t t))
-             ;; Get level 2 children
-             (children (org-mcp--extract-children 2))
-             (heading
-              `((title . ,title) (level . 1) (children . ,children))))
-        (push heading result)))
-    (vconcat (nreverse result))))
+  "Extract heading structure from current org buffer.
+Returns a vector of level-1 heading alists.  Each level-1 heading
+includes its immediate level-2 children; deeper levels are not
+included."
+  (vconcat
+   (org-element-map
+    (org-element-parse-buffer 'headline) 'headline
+    (lambda (h)
+      (when (= (org-element-property :level h) 1)
+        `((title . ,(org-element-property :raw-value h))
+          (level . 1)
+          (children
+           .
+           ,(vconcat
+             (org-element-map
+              (org-element-contents h) 'headline
+              (lambda (child)
+                (when (= (org-element-property :level child) 2)
+                  `((title . ,(org-element-property :raw-value child))
+                    (level . 2)
+                    (children . []))))
+              nil nil 'headline))))))
+    nil nil 'headline)))
 
 (defun org-mcp--generate-outline (file-path)
   "Generate JSON outline structure for FILE-PATH."
@@ -583,15 +580,15 @@ Returns alist with all heading properties and lightweight children."
                  body-start content-end)))))
          ;; Extract direct children
          (child-level (1+ level)))
-    ;; Collect direct children
+    ;; Collect direct children via sibling navigation.
     (save-excursion
-      (goto-char content-start)
-      (while (and (re-search-forward (format "^\\*\\{%d\\} "
-                                             child-level)
-                                     content-end t)
-                  (= (org-current-level) child-level))
-        (push (org-mcp--extract-heading-child) children)
-        (org-end-of-subtree t t)))
+      (org-back-to-heading t)
+      (when (org-goto-first-child)
+        (cl-loop
+         do
+         (when (= (org-current-level) child-level)
+           (push (org-mcp--extract-heading-child) children))
+         while (org-get-next-sibling))))
     ;; Build result alist
     `((title . ,title)
       ,@
