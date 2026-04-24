@@ -24,16 +24,13 @@
         ...
       }: {
         pre-commit.settings.hooks = {
-          lint = {
+          # Single combined hook so pre-commit only emits one status line
+          # (`check.....Passed`) on success.  The recipe runs lint first,
+          # then tests, and aborts on the first failure.
+          check = {
             enable = true;
-            name = "lint";
-            entry = "just lint";
-            pass_filenames = false;
-          };
-          test = {
-            enable = true;
-            name = "test";
-            entry = "just test";
+            name = "check";
+            entry = "just check";
             pass_filenames = false;
           };
         };
@@ -57,14 +54,6 @@
             # GitHub Actions checks
             # checkov
             zizmor
-
-            # Markdown / text
-            mdl
-            prettier
-
-            # JSON / JS
-            biome
-            nodejs
           ];
           shellHook = ''
             ${config.pre-commit.installationScript}
