@@ -17,6 +17,16 @@ nix develop --command git commit …
 The pre-commit hooks run `just lint` and `just test`, which require the tools
 provided by the devshell (eask, shellcheck, zizmor, etc.).
 
+## Formatting
+
+Run `just fmt` inside the Nix devshell to auto-format Elisp and shell code:
+
+```sh
+nix develop --command just fmt
+```
+
+This runs `elisp-autofmt` on `.el` files and `shfmt` on shell scripts.
+
 ## Project Overview
 
 This repository is for org-mcp, which is an integration between Emacs Org-mode
