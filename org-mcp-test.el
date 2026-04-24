@@ -14,10 +14,6 @@
 
 (setq mcp-server-lib-ert-server-id "org-mcp")
 
-;; Emit only ERT's concise batch output (one-line summary on success,
-;; failing tests' backtraces + condition blocks on failure).
-(setq ert-quiet t)
-
 ;;; Test Data Constants
 
 ;; Initial content strings for various test scenarios
