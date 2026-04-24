@@ -708,7 +708,15 @@ Returns the content string or nil if not found."
 
 (defun org-mcp--clock-round-time (time)
   "Round TIME per `org-clock-rounding-minutes'.
-TIME is an Emacs time value.  Returns rounded time."
+TIME is an Emacs time value.  Returns rounded time.
+
+This helper mirrors the rounding logic that `org-clock-in' and
+`org-clock-out' apply inline before writing CLOCK lines.  Org does
+not expose a public rounding helper, so we reimplement the same
+semantics: when `org-clock-rounding-minutes' is a positive integer
+greater than 1, round the minutes to the nearest multiple and zero
+the seconds.  Any change to Org's rounding behaviour should be
+reflected here."
   (if (and (boundp 'org-clock-rounding-minutes)
            (numberp org-clock-rounding-minutes)
            (> org-clock-rounding-minutes 1))
@@ -728,17 +736,15 @@ Org's own `org-timestamp-formats' customization."
 
 (defun org-mcp--clock-parse-timestamp (str)
   "Parse ISO timestamp STR to Emacs time.
-STR should be in ISO 8601 format like 2026-03-23T14:30:00."
-  (let ((parsed (parse-time-string str)))
-    (unless (and (nth 0 parsed)
-                 (nth 1 parsed)
-                 (nth 2 parsed)
-                 (nth 3 parsed)
-                 (nth 4 parsed)
-                 (nth 5 parsed))
-      (org-mcp--tool-validation-error "Cannot parse timestamp: '%s'"
-                                      str))
-    (encode-time parsed)))
+STR should be in ISO 8601 format like 2026-03-23T14:30:00.
+The `T' separator is normalised to a space so `org-time-string-to-time'
+accepts it."
+  (let ((normalised (replace-regexp-in-string "T" " " (or str ""))))
+    (condition-case _
+        (org-time-string-to-time normalised)
+      (error
+       (org-mcp--tool-validation-error "Cannot parse timestamp: '%s'"
+                                       str)))))
 
 (defun org-mcp--clock-duration-string (seconds)
   "Format SECONDS as clock duration string `H:MM'.
