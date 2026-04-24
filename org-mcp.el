@@ -805,46 +805,13 @@ Returns Emacs time of the most recent clock end, or nil."
 
 (defun org-mcp--clock-ensure-logbook ()
   "Create or find LOGBOOK drawer at current heading.
-Point must be at a heading.  Inserts LOGBOOK after PROPERTIES
-drawer and planning lines if it doesn't exist.
+Point must be at a heading.  Delegates to `org-log-beginning',
+which correctly handles any order of PROPERTIES drawer and
+planning lines (SCHEDULED/DEADLINE/CLOSED).
 Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
   (org-back-to-heading t)
-  (let ((end
-         (save-excursion
-           (org-end-of-subtree t t)
-           (point)))
-        (logbook-start nil))
-    ;; Look for existing LOGBOOK drawer
-    (save-excursion
-      (forward-line 1)
-      (while
-          (and
-           (< (point) end)
-           (not logbook-start)
-           (looking-at
-            "^[ \t]*\\(:\\|#\\+\\|SCHEDULED\\|DEADLINE\\|CLOSED\\)"))
-        (if (looking-at "^[ \t]*:LOGBOOK:[ \t]*$")
-            (progn
-              (forward-line 1)
-              (setq logbook-start (point)))
-          (forward-line 1))))
-    (if logbook-start
-        (goto-char logbook-start)
-      ;; Create LOGBOOK drawer
-      (forward-line 1)
-      ;; Skip past PROPERTIES drawer
-      (when (looking-at "^[ \t]*:PROPERTIES:")
-        (re-search-forward "^[ \t]*:END:" end t)
-        (forward-line 1))
-      ;; Skip past planning lines
-      (while (and (< (point) end)
-                  (looking-at
-                   "^[ \t]*\\(SCHEDULED\\|DEADLINE\\|CLOSED\\):"))
-        (forward-line 1))
-      (insert ":LOGBOOK:\n:END:\n")
-      (forward-line -2)
-      (forward-line 1)
-      (point))))
+  (let ((org-log-into-drawer t))
+    (org-log-beginning t)))
 
 (defun org-mcp--clock-insert-entry (start &optional end)
   "Insert CLOCK line in LOGBOOK at current heading.
