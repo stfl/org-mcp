@@ -539,47 +539,38 @@ Point should be at the heading. Does not recurse into children."
   "Extract full structured JSON for current heading.
 Point should be at the heading.
 Returns alist with all heading properties and lightweight children."
-  (let* ((title (org-get-heading t t t t))
-         (todo (org-get-todo-state))
-         (priority (org-entry-get (point) "PRIORITY"))
-         (tags (org-get-tags))
-         (level (org-current-level))
-         (id (org-entry-get (point) "ID"))
-         (scheduled (org-entry-get (point) "SCHEDULED"))
-         (deadline (org-entry-get (point) "DEADLINE"))
-         (closed (org-entry-get (point) "CLOSED"))
-         (props (org-entry-properties))
-         (uri (org-mcp--build-org-uri-from-position))
-         (content-start
-          (save-excursion
-            (forward-line 1)
-            (point)))
-         (children '())
-         (content-end
-          (save-excursion
-            (org-end-of-subtree t t)
-            (point)))
-         ;; Get body content (before children)
-         (body-content
-          (save-excursion
-            (goto-char content-start)
-            ;; Skip property drawer if present
-            (when (looking-at "^[ \t]*:PROPERTIES:")
-              (re-search-forward "^[ \t]*:END:" nil t)
-              (forward-line 1))
-            ;; Skip LOGBOOK drawer if present
-            (when (looking-at "^[ \t]*:LOGBOOK:")
-              (re-search-forward "^[ \t]*:END:" nil t)
-              (forward-line 1))
-            ;; Collect body until next heading
-            (let ((body-start (point)))
-              (if (re-search-forward "^\*" content-end t)
-                  (buffer-substring-no-properties
-                   body-start (line-beginning-position))
+  (let*
+      ((title (org-get-heading t t t t))
+       (todo (org-get-todo-state))
+       (priority (org-entry-get (point) "PRIORITY"))
+       (tags (org-get-tags))
+       (level (org-current-level))
+       (id (org-entry-get (point) "ID"))
+       (scheduled (org-entry-get (point) "SCHEDULED"))
+       (deadline (org-entry-get (point) "DEADLINE"))
+       (closed (org-entry-get (point) "CLOSED"))
+       (props (org-entry-properties))
+       (uri (org-mcp--build-org-uri-from-position))
+       (children '())
+       (content-end
+        (save-excursion
+          (org-end-of-subtree t t)
+          (point)))
+       ;; Get body content (before children).  Use `org-end-of-meta-data'
+       ;; (with FULL=t) to skip planning lines, PROPERTIES, LOGBOOK, and
+       ;; any other drawers in any order — matching the behaviour of
+       ;; `org-mcp--tool-edit-body'.
+       (body-content
+        (save-excursion
+          (org-end-of-meta-data t)
+          (let ((body-start (point)))
+            (if (re-search-forward "^\*" content-end t)
                 (buffer-substring-no-properties
-                 body-start content-end)))))
-         ;; Extract direct children
-         (child-level (1+ level)))
+                 body-start (line-beginning-position))
+              (buffer-substring-no-properties
+               body-start content-end)))))
+       ;; Extract direct children
+       (child-level (1+ level)))
     ;; Collect direct children via sibling navigation.
     (save-excursion
       (org-back-to-heading t)

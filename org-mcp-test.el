@@ -3392,6 +3392,129 @@ URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uui
         org-mcp-test--pattern-tool-read-by-id
         result-text)))))
 
+;; Tests for body extraction across various metadata layouts.  These
+;; verify `org-mcp--extract-structured-heading' (via the org-read tool)
+;; correctly skips planning lines and PROPERTIES/LOGBOOK drawers in any
+;; order, by delegating to `org-end-of-meta-data'.
+
+(defun org-mcp-test--read-content (file headline)
+  "Return parsed `content' field for HEADLINE in FILE via org-read."
+  (let* ((uri (format "org://%s#%s" file headline))
+         (result-text (org-mcp-test--call-read uri))
+         (result (json-parse-string result-text :object-type 'alist)))
+    (alist-get 'content result)))
+
+(ert-deftest org-mcp-test-extract-body-no-metadata ()
+  "Body is extracted when the heading has no metadata at all."
+  (let ((test-content "* Plain Heading\nFirst body line.\nSecond body line."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (should
+       (equal (org-mcp-test--read-content test-file "Plain%20Heading")
+              "First body line.\nSecond body line.")))))
+
+(ert-deftest org-mcp-test-extract-body-only-properties ()
+  "Body is extracted past a lone PROPERTIES drawer."
+  (let ((test-content
+         "* Heading
+:PROPERTIES:
+:CUSTOM_ID: foo
+:END:
+Body after properties."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (should
+       (equal (org-mcp-test--read-content test-file "Heading")
+              "Body after properties.")))))
+
+(ert-deftest org-mcp-test-extract-body-only-logbook ()
+  "Body is extracted past a lone LOGBOOK drawer."
+  (let ((test-content
+         "* Heading
+:LOGBOOK:
+- State \"DONE\" from \"TODO\" [2026-01-01 Thu 10:00]
+:END:
+Body after logbook."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (should
+       (equal (org-mcp-test--read-content test-file "Heading")
+              "Body after logbook.")))))
+
+(ert-deftest org-mcp-test-extract-body-properties-then-logbook ()
+  "Body is extracted past PROPERTIES followed by LOGBOOK."
+  (let ((test-content
+         "* Heading
+:PROPERTIES:
+:CUSTOM_ID: foo
+:END:
+:LOGBOOK:
+- State \"DONE\" from \"TODO\" [2026-01-01 Thu 10:00]
+:END:
+Body after both."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (should
+       (equal (org-mcp-test--read-content test-file "Heading")
+              "Body after both.")))))
+
+(ert-deftest org-mcp-test-extract-body-logbook-then-properties ()
+  "Body is extracted past LOGBOOK followed by PROPERTIES.
+This was the bug in the previous manual drawer-skipping code: it only
+handled PROPERTIES-then-LOGBOOK order, leaving the PROPERTIES drawer
+inside the body when LOGBOOK came first."
+  (let ((test-content
+         "* Heading
+:LOGBOOK:
+- State \"DONE\" from \"TODO\" [2026-01-01 Thu 10:00]
+:END:
+:PROPERTIES:
+:CUSTOM_ID: foo
+:END:
+Body after both."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (should
+       (equal (org-mcp-test--read-content test-file "Heading")
+              "Body after both.")))))
+
+(ert-deftest org-mcp-test-extract-body-with-planning-lines ()
+  "Body is extracted past SCHEDULED/DEADLINE planning lines."
+  (let ((test-content
+         "* TODO Heading
+SCHEDULED: <2026-01-01 Thu> DEADLINE: <2026-01-08 Thu>
+:PROPERTIES:
+:CUSTOM_ID: foo
+:END:
+Body after planning."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO" "|" "DONE"))))
+        (should
+         (equal (org-mcp-test--read-content test-file "Heading")
+                "Body after planning."))))))
+
+(ert-deftest org-mcp-test-extract-body-planning-properties-logbook ()
+  "Body is extracted past planning + PROPERTIES + LOGBOOK in order."
+  (let ((test-content
+         "* TODO Heading
+SCHEDULED: <2026-01-01 Thu>
+:PROPERTIES:
+:CUSTOM_ID: foo
+:END:
+:LOGBOOK:
+- State \"DONE\" from \"TODO\" [2026-01-01 Thu 10:00]
+:END:
+Body after everything."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO" "|" "DONE"))))
+        (should
+         (equal (org-mcp-test--read-content test-file "Heading")
+                "Body after everything."))))))
+
 (ert-deftest org-mcp-test-before-save-hook-runs ()
   "Test that before-save-hook runs when org-mcp saves a file."
   (org-mcp-test--with-temp-org-files
