@@ -1250,6 +1250,28 @@ END-TIME is an optional ISO 8601 end timestamp."
           (mcp-server-lib-ert-call-tool "org-clock-out" params)))
     (json-read-from-string result-text)))
 
+(defun org-mcp-test--call-clock-get-active ()
+  "Call org-clock-get-active tool via JSON-RPC and return the parsed result."
+  (let ((result-text
+         (mcp-server-lib-ert-call-tool "org-clock-get-active" nil)))
+    (json-read-from-string result-text)))
+
+(defun org-mcp-test--call-clock-delete (uri start)
+  "Call org-clock-delete tool via JSON-RPC and return the parsed result.
+URI is the headline URI.  START is the ISO 8601 start timestamp of the
+clock entry to delete."
+  (let* ((params `((uri . ,uri) (start . ,start)))
+         (result-text
+          (mcp-server-lib-ert-call-tool "org-clock-delete" params)))
+    (json-read-from-string result-text)))
+
+(defun org-mcp-test--call-clock-find-dangling ()
+  "Call org-clock-find-dangling tool via JSON-RPC and return the parsed result."
+  (let ((result-text
+         (mcp-server-lib-ert-call-tool
+          "org-clock-find-dangling" nil)))
+    (json-read-from-string result-text)))
+
 
 ;;; Tests
 
@@ -3607,6 +3629,202 @@ This exercises the write path in org-mcp--complete-and-save."
       (should (equal (alist-get 'clocked_out result) t)))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--clock-out-expected-regex)))
+
+;;; Tests for org-clock-get-active
+
+(defconst org-mcp-test--clock-mixed-open-closed-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-02 Fri 09:00]\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "LOGBOOK with one open and one closed CLOCK entry.")
+
+(defconst org-mcp-test--clock-only-closed-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "LOGBOOK with only a single closed CLOCK entry.")
+
+(defconst org-mcp-test--clock-locale-variant-open-content
+  "* TODO Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Mon 10:00]\n:END:\n"
+  "Open CLOCK with an incorrect day-of-week label (Mon for a Thursday).
+Used to verify that date/time matching tolerates locale/label drift.")
+
+(ert-deftest org-mcp-test-clock-get-active-none ()
+  "Test org-clock-get-active reports no active clock."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) :json-false)))))
+
+(ert-deftest org-mcp-test-clock-get-active-open-clock ()
+  "Test org-clock-get-active finds an open CLOCK in an allowed file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) t))
+      (should (equal (alist-get 'heading result) "Task One"))
+      (should
+       (equal (alist-get 'start result) "2026-01-01 Thu 10:00")))))
+
+(ert-deftest org-mcp-test-clock-get-active-ignores-closed ()
+  "Test org-clock-get-active ignores files with only closed clocks."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-only-closed-content))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) :json-false)))))
+
+(ert-deftest org-mcp-test-clock-get-active-mixed-open-closed ()
+  "Test clock-get-active picks the open entry in a mixed LOGBOOK."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-mixed-open-closed-content))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) t))
+      (should
+       (equal (alist-get 'start result) "2026-01-02 Fri 09:00")))))
+
+(ert-deftest org-mcp-test-clock-get-active-multiple-files-first-wins ()
+  "Test clock-get-active returns the first open clock by file order."
+  (org-mcp-test--with-temp-org-files
+      ((file-a
+        "* TODO First Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 10:00]\n:END:\n")
+       (file-b
+        "* TODO Second Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 11:00]\n:END:\n"))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) t))
+      (should (equal (alist-get 'heading result) "First Task"))
+      (should
+       (equal (alist-get 'start result) "2026-01-01 Thu 10:00")))))
+
+(ert-deftest org-mcp-test-clock-get-active-locale-variant-day ()
+  "Test clock-get-active tolerates a non-canonical day-of-week label.
+2026-01-01 is a Thursday; the stored CLOCK timestamp uses \"Mon\".
+The Org element parser should still recognize the open clock."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-locale-variant-open-content))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) t))
+      (should
+       (equal (alist-get 'start result) "2026-01-01 Mon 10:00")))))
+
+;;; Tests for org-clock-find-dangling
+
+(ert-deftest org-mcp-test-clock-find-dangling-empty ()
+  "Test clock-find-dangling returns no open clocks."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((result (org-mcp-test--call-clock-find-dangling)))
+      (should (equal (alist-get 'total result) 0))
+      (should (equal (length (alist-get 'open_clocks result)) 0)))))
+
+(ert-deftest org-mcp-test-clock-find-dangling-mixed-open-closed ()
+  "Test clock-find-dangling ignores closed entries in a mixed LOGBOOK."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-mixed-open-closed-content))
+    (let* ((result (org-mcp-test--call-clock-find-dangling))
+           (clocks (alist-get 'open_clocks result)))
+      (should (equal (alist-get 'total result) 1))
+      (should (equal (length clocks) 1))
+      (should
+       (equal (alist-get 'start (aref clocks 0))
+              "2026-01-02 Fri 09:00")))))
+
+(ert-deftest org-mcp-test-clock-find-dangling-multiple-files ()
+  "Test clock-find-dangling aggregates open clocks across multiple files."
+  (org-mcp-test--with-temp-org-files
+      ((file-a
+        "* TODO First Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 10:00]\n:END:\n")
+       (file-b
+        "* TODO Second Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 11:00]\n:END:\n"))
+    (let* ((result (org-mcp-test--call-clock-find-dangling))
+           (clocks (alist-get 'open_clocks result))
+           (starts
+            (mapcar (lambda (c) (alist-get 'start c))
+                    (append clocks nil))))
+      (should (equal (alist-get 'total result) 2))
+      (should (member "2026-01-01 Thu 10:00" starts))
+      (should (member "2026-01-01 Thu 11:00" starts)))))
+
+;;; Tests for org-clock-delete
+
+(defconst org-mcp-test--clock-delete-only-entry-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "\\'")
+  "After deleting the sole CLOCK entry, the LOGBOOK drawer is removed.")
+
+(defconst org-mcp-test--clock-delete-multi-initial-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-02 Fri 10:00]--[2026-01-02 Fri 11:00] =>  1:00\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n"))
+
+(defconst org-mcp-test--clock-delete-one-of-several-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-02 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-02 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\'")
+  "After deleting one of several CLOCK entries, the LOGBOOK drawer remains.")
+
+(ert-deftest org-mcp-test-clock-delete-only-entry-removes-logbook ()
+  "Test clock-delete removes the LOGBOOK drawer when it becomes empty."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-only-closed-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result
+            (org-mcp-test--call-clock-delete
+             uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-delete-only-entry-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-delete-one-of-several-keeps-drawer ()
+  "Test clock-delete keeps the LOGBOOK drawer when other entries remain."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-multi-initial-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (result
+            (org-mcp-test--call-clock-delete
+             uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-delete-one-of-several-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-delete-locale-variant-day ()
+  "Test clock-delete matches on date/time regardless of day-of-week label."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat
+         "* TODO Task\n:LOGBOOK:\n"
+         "CLOCK: [2026-01-01 Mon 10:00]--[2026-01-01 Mon 11:00] =>  1:00\n"
+         ":END:\n")))
+    (let* ((uri (format "org://%s#Task" test-file))
+           (result
+            (org-mcp-test--call-clock-delete
+             uri "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'deleted result) t)))))
+
+(ert-deftest org-mcp-test-clock-delete-not-found-errors ()
+  "Test clock-delete surfaces an MCP error when no entry matches."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-only-closed-content))
+    (let ((uri (format "org://%s#Task%%20One" test-file)))
+      (should-error
+       (org-mcp-test--call-clock-delete
+        uri "2026-01-03T09:00:00")))))
 
 ;;; Tests for org-set-properties
 

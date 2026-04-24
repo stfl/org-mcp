@@ -745,67 +745,93 @@ STR should be in ISO 8601 format like 2026-03-23T14:30:00."
          (mins (% minutes 60)))
     (format "%d:%02d" hours mins)))
 
+(defun org-mcp--clock-element-start-str (clock)
+  "Return CLOCK element's start timestamp text, without surrounding brackets.
+CLOCK is an Org element of type `clock'.  For a closed-range clock
+the returned text is the start half of the range."
+  (let ((raw
+         (org-element-property
+          :raw-value (org-element-property :value clock))))
+    (when (and raw (string-match "\\`\\[\\([^]]+\\)\\]" raw))
+      (match-string 1 raw))))
+
+(defun org-mcp--clock-element-start-time (clock)
+  "Return CLOCK element's start as an Emacs time value."
+  (org-timestamp-to-time (org-element-property :value clock)))
+
+(defun org-mcp--clock-element-end-time (clock)
+  "Return CLOCK element's end as an Emacs time value.
+Returns nil for open (unclosed) clocks."
+  (let ((value (org-element-property :value clock)))
+    (when (eq (org-element-property :type value) 'inactive-range)
+      (org-timestamp-to-time value t))))
+
 (defun org-mcp--clock-find-active ()
-  "Search allowed files for unclosed CLOCK line.
-Returns alist with file, heading, start keys, or nil."
-  (or
-   (catch 'found
-     (dolist (file org-mcp-allowed-files)
-       (when (file-exists-p file)
-         (org-mcp--with-org-file file
-           (while
-               (re-search-forward
-                "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$"
-                nil t)
-             (let ((start-str (match-string 1)))
-               (save-excursion
-                 (org-back-to-heading t)
-                 (throw 'found
-                        (list
-                         (cons 'file (expand-file-name file))
-                         (cons 'heading (org-get-heading t t t t))
-                         (cons 'start start-str)
-                         (cons 'allowed t)))))))))
-     nil)
-   ;; Fallback: check native Emacs clock marker in non-allowed file
-   (when (org-clock-is-active)
-     (let* ((buf (org-clock-is-active))
-            (file (buffer-file-name buf)))
-       (when (and file (not (org-mcp--find-allowed-file file)))
-         (with-current-buffer buf
-           (save-excursion
-             (goto-char org-clock-marker)
-             (forward-line 0)
-             (when
-                 (looking-at
-                  "^[ \t]*CLOCK: \\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} [0-9]\\{2\\}:[0-9]\\{2\\}\\)\\][ \t]*$")
-               (list
-                (cons 'file (expand-file-name file))
-                (cons 'heading nil)
-                (cons 'start (match-string 1))
-                (cons 'allowed nil))))))))))
+  "Find the first open CLOCK across allowed files.
+Returns alist with file, heading, start, allowed keys, or nil.
+Uses `org-find-open-clocks' on allowed files.  Falls back to the
+native Emacs clock marker for an unclosed clock in a non-allowed
+file, reading the timestamp via the Org element API."
+  (or (catch 'found
+        (dolist (file org-mcp-allowed-files)
+          (when (file-exists-p file)
+            (when-let* ((open (org-find-open-clocks file))
+                        (marker (car (car open))))
+              (with-current-buffer (marker-buffer marker)
+                (save-excursion
+                  (goto-char marker)
+                  (let* ((el (org-element-at-point))
+                         (start-str
+                          (org-mcp--clock-element-start-str el))
+                         (heading
+                          (save-excursion
+                            (org-back-to-heading t)
+                            (org-get-heading t t t t))))
+                    (throw 'found
+                           (list
+                            (cons 'file (expand-file-name file))
+                            (cons 'heading heading)
+                            (cons 'start start-str)
+                            (cons 'allowed t)))))))))
+        nil)
+      ;; Fallback: native Emacs clock marker in a non-allowed file.
+      ;; Use `org-element-at-point' instead of a CLOCK regex.
+      (when (org-clock-is-active)
+        (let* ((buf (org-clock-is-active))
+               (file (buffer-file-name buf)))
+          (when (and file (not (org-mcp--find-allowed-file file)))
+            (with-current-buffer buf
+              (save-excursion
+                (goto-char org-clock-marker)
+                (let ((el (org-element-at-point)))
+                  (when (eq (org-element-type el) 'clock)
+                    (list
+                     (cons 'file (expand-file-name file))
+                     (cons 'heading nil)
+                     (cons
+                      'start (org-mcp--clock-element-start-str el))
+                     (cons 'allowed nil)))))))))))
 
 (defun org-mcp--clock-find-last-closed ()
-  "Find most recent closed clock end time across allowed files.
-Returns Emacs time of the most recent clock end, or nil."
+  "Return the most recent closed-clock end time across allowed files.
+Walks clock elements via `org-element-map' and picks the latest
+`:value' end timestamp.  Returns an Emacs time, or nil when no closed
+clocks exist."
   (let ((latest nil))
     (dolist (file org-mcp-allowed-files)
       (when (file-exists-p file)
         (org-mcp--with-org-file file
-          (while
-              (re-search-forward
-               "^[ \t]*CLOCK: \\[[^]]+\\]--\\[\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\} [A-Za-z]\\{2,3\\} \\([0-9]\\{2\\}:[0-9]\\{2\\}\\)\\)\\]"
-               nil t)
-            (let* ((end-str (match-string 1))
-                   (end-time (org-parse-time-string end-str)))
-              (when (or (not latest)
-                        (time-less-p
-                         (car latest) (apply #'encode-time end-time)))
-                (setq latest
-                      (cons
-                       (apply #'encode-time end-time) end-str))))))))
-    (when latest
-      (car latest))))
+          (org-element-map
+           (org-element-parse-buffer 'element) 'clock
+           (lambda (clock)
+             (when (eq (org-element-property :status clock) 'closed)
+               (let ((end-time
+                      (org-mcp--clock-element-end-time clock)))
+                 (when (and end-time
+                            (or (not latest)
+                                (time-less-p latest end-time)))
+                   (setq latest end-time)))))))))
+    latest))
 
 (defun org-mcp--clock-ensure-logbook ()
   "Create or find LOGBOOK drawer at current heading.
@@ -837,23 +863,33 @@ New entries are inserted at the top of the LOGBOOK drawer."
                (org-mcp--clock-format-timestamp start))))))
 
 (defun org-mcp--clock-resolve-dangling ()
-  "Delete unclosed CLOCK lines in LOGBOOK at current heading.
-Point must be at a heading.  Returns count of deleted lines."
-  (let ((count 0)
-        (end
-         (save-excursion
-           (org-end-of-subtree t t)
-           (point))))
-    (save-excursion
-      (forward-line 1)
-      (while (re-search-forward "^[ \t]*CLOCK: \\[[^]]+\\][ \t]*$"
-                                end
-                                t)
-        (forward-line 0)
-        (let ((line-end (line-beginning-position 2)))
-          (delete-region (point) line-end)
-          (setq end (- end (- line-end (point))))
-          (cl-incf count))))
+  "Delete unclosed CLOCK entries under current heading.
+Point must be at a heading.  Walks clock elements via
+`org-element-map' and deletes each open clock by :begin / :end
+positions.  Returns count of deleted entries."
+  (org-back-to-heading t)
+  (let* ((subtree-begin (point))
+         (subtree-end
+          (save-excursion
+            (org-end-of-subtree t t)
+            (point)))
+         (regions nil)
+         (count 0))
+    (save-restriction
+      (narrow-to-region subtree-begin subtree-end)
+      (org-element-map
+       (org-element-parse-buffer 'element) 'clock
+       (lambda (clock)
+         (when (eq (org-element-property :status clock) 'running)
+           (push (cons
+                  (copy-marker (org-element-property :begin clock))
+                  (copy-marker (org-element-property :end clock)))
+                 regions))))
+      (dolist (r regions)
+        (delete-region (car r) (cdr r))
+        (set-marker (car r) nil)
+        (set-marker (cdr r) nil)
+        (cl-incf count)))
     count))
 
 (defun org-mcp--clock-remove-empty-logbook ()
@@ -874,47 +910,54 @@ Point must be at a heading."
             (forward-line 1)
             (delete-region drawer-start (point))))))))
 
-(defun org-mcp--clock-start-time-regex (start-time)
-  "Build regex matching an Org clock timestamp for START-TIME.
-Matches the date and time exactly but allows any day-of-week
-abbreviation, making the match locale-independent."
-  (format-time-string "\\[%Y-%m-%d [A-Za-z]\\{2,3\\} %H:%M\\]"
-                      start-time))
-
 (defun org-mcp--clock-delete-entry (start-time)
-  "Delete CLOCK line matching START-TIME in LOGBOOK at current heading.
+  "Delete CLOCK entry whose start matches START-TIME under current heading.
 Point must be at a heading.  START-TIME is an Emacs time value.
-Removes LOGBOOK drawer if it becomes empty.
+Walks clock elements via `org-element-map' and deletes by :begin / :end
+positions.  Removes the LOGBOOK drawer if it becomes empty.
 Returns an alist with deleted entry info, or nil if not found."
-  (let* ((start-regex (org-mcp--clock-start-time-regex start-time))
-         (end
+  (org-back-to-heading t)
+  (let* ((subtree-begin (point))
+         (subtree-end
           (save-excursion
             (org-end-of-subtree t t)
             (point)))
-         (clock-regex
-          (concat
-           "^[ \t]*CLOCK: "
-           start-regex
-           "\\(?:--\\(\\[[^]]+\\]\\)"
-           " => +\\([0-9]+:[0-9]+\\)\\)?[ \t]*$"))
+         (target (float-time start-time))
          (found nil))
-    (save-excursion
-      (forward-line 1)
-      (when (re-search-forward clock-regex end t)
-        (let ((end-str (match-string 1))
-              (duration-str (match-string 2)))
-          (setq found
-                `((start
-                   .
-                   ,(org-mcp--clock-format-timestamp start-time))
-                  ,@
-                  (when end-str
-                    `((end . ,end-str)))
-                  ,@
-                  (when duration-str
-                    `((duration . ,duration-str)))))
-          (forward-line 0)
-          (delete-region (point) (line-beginning-position 2)))))
+    (save-restriction
+      (narrow-to-region subtree-begin subtree-end)
+      (let* ((tree (org-element-parse-buffer 'element))
+             (match
+              (catch 'match
+                (org-element-map
+                 tree 'clock
+                 (lambda (clock)
+                   (let ((s
+                          (float-time
+                           (org-mcp--clock-element-start-time
+                            clock))))
+                     (when (= s target)
+                       (throw 'match clock)))))
+                nil)))
+        (when match
+          (let* ((begin (org-element-property :begin match))
+                 (end (org-element-property :end match))
+                 (end-time (org-mcp--clock-element-end-time match))
+                 (duration (org-element-property :duration match))
+                 (start-str
+                  (org-mcp--clock-format-timestamp start-time))
+                 (end-str
+                  (when end-time
+                    (org-mcp--clock-format-timestamp end-time))))
+            (setq found
+                  `((start . ,start-str)
+                    ,@
+                    (when end-str
+                      `((end . ,end-str)))
+                    ,@
+                    (when duration
+                      `((duration . ,duration)))))
+            (delete-region begin end)))))
     (when found
       (org-mcp--clock-remove-empty-logbook))
     found))
@@ -2458,6 +2501,7 @@ MCP Parameters: None"
 (defun org-mcp--tool-clock-find-dangling ()
   "Find all open (unclosed) clocks in allowed Org files.
 Uses `org-find-open-clocks' on each file in `org-mcp-allowed-files'.
+Reads each clock's timestamp via the Org element API.
 
 MCP Parameters: None"
   (let ((all-clocks nil))
@@ -2465,29 +2509,27 @@ MCP Parameters: None"
       (when (file-exists-p file)
         (let ((open (org-find-open-clocks file)))
           (dolist (clock open)
-            (let* ((marker (car clock))
-                   (clock-file (expand-file-name file))
-                   (start-str
-                    (with-current-buffer (marker-buffer marker)
-                      (save-excursion
-                        (goto-char marker)
-                        (forward-line 0)
-                        (when (looking-at
-                               "[ \t]*CLOCK: \\[\\([^]]+\\)\\]")
-                          (match-string 1)))))
-                   (heading
-                    (with-current-buffer (marker-buffer marker)
-                      (save-excursion
-                        (goto-char marker)
-                        (org-back-to-heading t)
-                        (org-get-heading t t t t)))))
-              (push `((file . ,clock-file)
-                      (heading . ,heading)
-                      (start . ,start-str))
-                    all-clocks))))))
-    (json-encode
-     `((open_clocks . ,(vconcat (nreverse all-clocks)))
-       (total . ,(length all-clocks))))))
+            (let ((marker (car clock))
+                  (clock-file (expand-file-name file)))
+              (with-current-buffer (marker-buffer marker)
+                (save-excursion
+                  (goto-char marker)
+                  (let* ((el (org-element-at-point))
+                         (start-str
+                          (when (eq (org-element-type el) 'clock)
+                            (org-mcp--clock-element-start-str el)))
+                         (heading
+                          (save-excursion
+                            (org-back-to-heading t)
+                            (org-get-heading t t t t))))
+                    (push `((file . ,clock-file)
+                            (heading . ,heading)
+                            (start . ,start-str))
+                          all-clocks)))))))))
+    (let ((total (length all-clocks)))
+      (json-encode
+       `((open_clocks . ,(vconcat (nreverse all-clocks)))
+         (total . ,total))))))
 
 (defun org-mcp--tool-clock-get-active ()
   "Return the currently active clock entry, if any.
