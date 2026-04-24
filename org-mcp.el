@@ -401,13 +401,7 @@ Specifically decodes %23 back to #."
 (defun org-mcp--build-headline-path ()
   "Build URL-encoded slash-separated headline path from point.
 Returns a string suitable for use in org:// URIs."
-  (let ((components '()))
-    (save-excursion
-      (push (url-hexify-string (org-get-heading t t t t)) components)
-      (while (org-up-heading-safe)
-        (push
-         (url-hexify-string (org-get-heading t t t t)) components)))
-    (mapconcat #'identity components "/")))
+  (mapconcat #'url-hexify-string (org-get-outline-path t) "/"))
 
 (defun org-mcp--split-headline-uri (path-after-protocol)
   "Split PATH-AFTER-PROTOCOL into (file-path . headline-path).
@@ -489,34 +483,14 @@ Validates file access and returns expanded file path."
   "Navigate to headline in HEADLINE-PATH.
 HEADLINE-PATH is a list of headline titles forming a path.
 Returns t if found, nil otherwise.  Point is left at the headline."
-  (catch 'not-found
-    (let ((search-start (point-min))
-          (search-end (point-max))
-          (current-level 0)
-          (found nil)
-          (path-index 0))
-      (dolist (target-title headline-path)
-        (setq found nil)
-        (goto-char search-start)
-        (while (and (not found)
-                    (re-search-forward "^\\*+ " search-end t))
-          (let ((title (org-get-heading t t t t))
-                (level (org-current-level)))
-            (when (and (string= title target-title)
-                       (or (= current-level 0)
-                           (= level (1+ current-level))))
-              (setq found t)
-              (setq current-level level)
-              ;; Limit search to this subtree for nesting
-              (when (< (1+ path-index) (length headline-path))
-                (setq search-start (point))
-                (setq search-end
-                      (save-excursion
-                        (org-end-of-subtree t t)
-                        (point)))))))
-        (unless found
-          (throw 'not-found nil))
-        (setq path-index (1+ path-index))))
+  (when-let* ((marker
+               (let ((case-fold-search nil))
+                 (condition-case nil
+                     (org-find-olp headline-path t)
+                   (error
+                    nil)))))
+    (goto-char marker)
+    (set-marker marker nil)
     t))
 
 (defun org-mcp--extract-headline-content ()

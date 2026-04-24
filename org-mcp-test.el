@@ -1710,6 +1710,33 @@ Very deep content."))
     (org-mcp-test--call-read-headline
      (format "org://%s#First%%20Parent/Target%%20Headline" test-file)))))
 
+(ert-deftest org-mcp-test-headline-resource-deep-nested-path ()
+  "Test navigation through a 3-level outline path."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-wrong-levels))
+    (let ((result
+           (org-mcp-test--call-read-headline
+            (format
+             "org://%s#Second%%20Parent/Other%%20Child/Target%%20Headline"
+             test-file))))
+      (should
+       (string=
+        result
+        (concat
+         "*** Target Headline\n"
+         "This should NOT be found via First Parent/Target Headline path."))))))
+
+(ert-deftest org-mcp-test-headline-resource-bare-non-toplevel-rejected ()
+  "Test that a bare single-element path that only exists below level 1 errors.
+`org-find-olp' resolves a single-element path at the top level only; a
+title that only exists at deeper levels cannot be reached without its
+parent."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-wrong-levels))
+    (should-error
+     (org-mcp-test--call-read-headline
+      (format "org://%s#Target%%20Headline" test-file)))))
+
 (ert-deftest org-mcp-test-id-resource-not-found ()
   "Test org-read-headline tool error for non-existent ID."
   (let ((test-content "* Section without ID\nNo ID here."))
@@ -3029,22 +3056,27 @@ More content."
    "Parent Task/First Child 50% Complete"
    "First Line\nSecond Line"))
 
-(ert-deftest org-mcp-test-rename-headline-duplicate-first-match ()
-  "Test that when multiple headlines have the same name, first match is renamed.
-This test documents the first-match behavior when duplicate headlines exist."
+(ert-deftest org-mcp-test-rename-headline-duplicate-requires-full-path ()
+  "Test that a bare duplicate title cannot be addressed without a parent.
+With `org-find-olp' navigation, a single-element path is resolved at the
+top level.  When the title only exists at deeper levels under different
+parents, the URI is rejected; the caller must include the parent to
+disambiguate."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-duplicate-headlines-before))
-    ;; Use headline:// URI with ambiguous path
-    (let ((resource-uri
-           (format "org://%s#Project%%20Review"
-                   test-file)))
-      ;; Should succeed - renames first match
-      (org-mcp-test--call-rename-headline-and-check
-       resource-uri
-       "Project Review"
-       "Q1 Review"
-       test-file
-       org-mcp-test--regex-duplicate-first-renamed))))
+    ;; Bare "Project Review" has no level-1 match -> rejected.
+    (org-mcp-test--call-rename-headline-expecting-error
+     test-file
+     (format "org://%s#Project%%20Review" test-file)
+     "Project Review"
+     "Q1 Review")
+    ;; Full path disambiguates and renames exactly that subtree's entry.
+    (org-mcp-test--call-rename-headline-and-check
+     (format "org://%s#Team%%20Updates/Project%%20Review" test-file)
+     "Project Review"
+     "Q1 Review"
+     test-file
+     org-mcp-test--regex-duplicate-first-renamed)))
 
 (ert-deftest org-mcp-test-rename-headline-creates-id ()
   "Test that renaming a headline creates an Org ID and returns it."
