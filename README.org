@@ -99,6 +99,22 @@ Example response for a headline:
 Note: All write tools will create Org IDs for any touched nodes that did not have
 them originally. The IDs will be returned in the tool response.
 
+Write tools (e.g. =org-update-todo-state=, =org-edit-body=, =org-clock-in=,
+=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-set-tags=,
+=org-set-priority=, =org-set-properties=, =org-update-scheduled=,
+=org-update-deadline=, =org-add-todo=, =org-rename-headline=,
+=org-add-logbook-note=) operate on the canonical Emacs buffer visiting the
+file, preserving any unsaved edits the user may have. The auto-save behaviour
+depends on the buffer state:
+
+- *No existing buffer:* org-mcp opens the file's canonical visited buffer,
+  performs the edit, and saves the buffer to disk.
+- *Clean buffer already visiting the file:* org-mcp edits the buffer and saves
+  it to disk.
+- *Dirty (modified) buffer:* org-mcp edits the buffer in place but does /not/
+  auto-save. The user's unsaved changes are preserved, and the file on disk
+  remains unchanged. The buffer stays modified.
+
 *** org-get-todo-config
 - *Description:* Get TODO keyword configuration for understanding task states
 - *Parameters:* None
