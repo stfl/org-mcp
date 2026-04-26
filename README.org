@@ -137,6 +137,32 @@ Example return value:
 }
 #+end_src
 
+*** org-get-tag-candidates
+- *Description:* Get every tag a user might want to set on a headline,
+  combining configured tags with the tags actually present in allowed
+  files.  Mirrors what Org's interactive tag completion (=C-c C-q=) offers.
+- *Parameters:* None
+- *Returns:* JSON object with =tags= array (sorted, deduplicated).
+
+The union covers:
+- =org-tag-alist= and =org-tag-persistent-alist=
+- Per-file =#+TAGS:= / =#+FILETAGS:=
+- Every tag present on any headline across =org-mcp-allowed-files=
+
+Group keywords (=:startgroup=, =:endgroup=, =:startgrouptag=,
+=:grouptags=, =:endgrouptag=) are filtered out.
+
+Example return value:
+#+begin_src json
+{
+  "tags": ["@home", "@office", "personal", "project", "urgent", "work"]
+}
+#+end_src
+
+Use this when suggesting or completing tag names; use
+=org-get-tag-config= when you need the raw static configuration
+(group structure, key bindings, inheritance settings).
+
 *** org-get-priority-config
 - *Description:* Get priority configuration for understanding the valid priority range
 - *Parameters:* None

@@ -1019,41 +1019,52 @@ inside `org-mcp--modify-and-save')."
      "Invalid TODO state: '%s' - valid states: %s"
      state (mapconcat #'identity org-todo-keywords-1 ", "))))
 
+(defun org-mcp--mutex-tag-groups (alist)
+  "Return mutex tag groups from ALIST as a list of lists of tag strings.
+A mutex group is delimited by `:startgroup' / `:endgroup' tokens.
+
+Org's `org-tag-alist-to-groups' covers only the grouptag form
+\(`:startgrouptag' / `:grouptags' / `:endgrouptag'); it does not
+expose mutex (`:startgroup' / `:endgroup') groups, and Org has no
+other public API that does.  Revisit if Org gains one."
+  (let (groups
+        current
+        in-group)
+    (dolist (entry alist)
+      (let ((token
+             (if (consp entry)
+                 (car entry)
+               entry)))
+        (cond
+         ((eq token :startgroup)
+          (setq
+           in-group t
+           current nil))
+         ((eq token :endgroup)
+          (when (and in-group current)
+            (push (nreverse current) groups))
+          (setq
+           in-group nil
+           current nil))
+         ((and in-group (stringp token))
+          (push token current)))))
+    (nreverse groups)))
+
 (defun org-mcp--validate-and-normalize-tags (tags)
   "Validate and normalize TAGS.
 TAGS can be a single tag string or list of tag strings.
 Returns normalized tag list.
-Validates:
-- Tag names follow Org rules (alphanumeric, underscore, at-sign)
-- Tags are in configured tag alist (if configured)
-- Tags don't violate mutual exclusivity groups
-Signals error for invalid tags."
+
+Org permits free-form tags in headlines, so any name matching
+`org-tag-re' is accepted regardless of whether it appears in
+`org-tag-alist' or `org-tag-persistent-alist'.  Mutual-exclusivity
+groups (`:startgroup' / `:endgroup') in those alists are still
+enforced because they express a conflict, not an allow-list."
   (let ((tag-list (org-mcp--normalize-tags-to-list tags))
-        (allowed-tags
-         (append
-          (mapcar
-           #'org-mcp--extract-tag-from-alist-entry org-tag-alist)
-          (mapcar
-           #'org-mcp--extract-tag-from-alist-entry
-           org-tag-persistent-alist))))
-    ;; Remove special keywords like :startgroup
-    (setq allowed-tags
-          (cl-remove-if
-           #'org-mcp--is-tag-group-keyword-p allowed-tags))
-    ;; If tag alists are configured, validate against them
-    (when allowed-tags
-      (dolist (tag tag-list)
-        (unless (member tag allowed-tags)
-          (org-mcp--tool-validation-error
-           "Tag not in configured tag alist: %s"
-           tag))))
-    ;; Always validate tag names follow Org's rules
+        (tag-name-re (concat "\\`" org-tag-re "\\'")))
     (dolist (tag tag-list)
-      (unless (string-match "^[[:alnum:]_@]+$" tag)
-        (org-mcp--tool-validation-error
-         "Invalid tag name (must be alphanumeric, _, or @): %s"
-         tag)))
-    ;; Validate mutual exclusivity if tag-alist is configured
+      (unless (string-match-p tag-name-re tag)
+        (org-mcp--tool-validation-error "Invalid tag name: %s" tag)))
     (when org-tag-alist
       (org-mcp--validate-mutex-tag-groups tag-list org-tag-alist))
     (when org-tag-persistent-alist
@@ -1061,56 +1072,17 @@ Signals error for invalid tags."
        tag-list org-tag-persistent-alist))
     tag-list))
 
-(defun org-mcp--extract-tag-from-alist-entry (entry)
-  "Extract tag name from an `org-tag-alist' ENTRY.
-ENTRY can be a string or a cons cell (tag . key)."
-  (if (consp entry)
-      (car entry)
-    entry))
-
-(defun org-mcp--is-tag-group-keyword-p (tag)
-  "Check if symbol TAG is a special keyword like :startgroup."
-  (and (symbolp tag) (string-match "^:" (symbol-name tag))))
-
-(defun org-mcp--parse-mutex-tag-groups (tag-alist)
-  "Parse mutually exclusive tag groups from TAG-ALIST.
-Returns a list of lists, where each inner list contains tags
-that are mutually exclusive with each other."
-  (let ((groups '())
-        (current-group nil)
-        (in-group nil))
-    (dolist (entry tag-alist)
-      (cond
-       ;; Start of a mutex group
-       ((eq entry :startgroup)
-        (setq in-group t)
-        (setq current-group '()))
-       ;; End of a mutex group
-       ((eq entry :endgroup)
-        (when (and in-group current-group)
-          (push current-group groups))
-        (setq in-group nil)
-        (setq current-group nil))
-       ;; Inside a group - collect tags
-       (in-group
-        (let ((tag (org-mcp--extract-tag-from-alist-entry entry)))
-          (when (and tag (not (org-mcp--is-tag-group-keyword-p tag)))
-            (push tag current-group))))))
-    groups))
-
 (defun org-mcp--validate-mutex-tag-groups (tags tag-alist)
   "Validate that TAGS don't violate mutex groups in TAG-ALIST.
 TAGS is a list of tag strings.
 Errors if multiple tags from same mutex group."
-  (let ((mutex-groups (org-mcp--parse-mutex-tag-groups tag-alist)))
-    (dolist (group mutex-groups)
-      (let ((tags-in-group
-             (cl-intersection tags group :test #'string=)))
-        (when (> (length tags-in-group) 1)
-          (org-mcp--tool-validation-error
-           "Tags %s are mutually exclusive (cannot use together)"
-           (mapconcat (lambda (tag) (format "'%s'" tag)) tags-in-group
-                      ", ")))))))
+  (dolist (group (org-mcp--mutex-tag-groups tag-alist))
+    (let ((conflict (cl-intersection tags group :test #'string=)))
+      (when (> (length conflict) 1)
+        (org-mcp--tool-validation-error
+         "Tags %s are mutually exclusive (cannot use together)"
+         (mapconcat (lambda (tag) (format "'%s'" tag)) conflict
+                    ", "))))))
 
 (defun org-mcp--validate-headline-title (title)
   "Validate that TITLE is not empty or whitespace-only.
@@ -1416,6 +1388,34 @@ fields, and the parsed siblings discard them."
      (org-tag-alist . ,(prin1-to-string org-tag-alist))
      (org-tag-persistent-alist
       . ,(prin1-to-string org-tag-persistent-alist)))))
+
+(defun org-mcp--tool-get-tag-candidates ()
+  "Return the union of all candidate tags across `org-mcp-allowed-files'.
+Mirrors the set Org's interactive tag completion offers via
+`org-global-tags-completion-table': configured tags from
+`org-tag-alist' / `org-tag-persistent-alist', any per-file
+`#+TAGS:' / `#+FILETAGS:', plus every tag actually present on
+headlines in those files.  Group keywords (`:startgroup' etc.)
+are filtered out.  Tags are returned sorted and deduplicated."
+  (let* ((files
+          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files))
+         (table
+          (if files
+              (org-global-tags-completion-table files)
+            (append org-tag-alist org-tag-persistent-alist)))
+         (tags
+          (delete-dups
+           (delq
+            nil
+            (mapcar
+             (lambda (entry)
+               (let ((token
+                      (if (consp entry)
+                          (car entry)
+                        entry)))
+                 (and (stringp token) token)))
+             table)))))
+    (json-encode `((tags . ,(vconcat (sort tags #'string<)))))))
 
 (defun org-mcp--tool-get-priority-config ()
   "Return the priority configuration."
@@ -2926,6 +2926,29 @@ adding or modifying tags on TODO items."
    :server-id org-mcp--server-id)
 
   (mcp-server-lib-register-tool
+   #'org-mcp--tool-get-tag-candidates
+   :id "org-get-tag-candidates"
+   :description
+   "Return all candidate tags the user might want to use across the
+files in `org-mcp-allowed-files'.
+
+Mirrors Org's interactive tag completion (C-c C-q): the result is
+the union of configured tags from `org-tag-alist' /
+`org-tag-persistent-alist', any per-file `#+TAGS:' / `#+FILETAGS:'
+keywords, and every tag actually present on a headline in any
+allowed file.  Group keywords like `:startgroup' are filtered out.
+
+Parameters: None
+
+Returns JSON object with:
+  tags - Sorted, deduplicated array of tag-name strings.
+
+Use this when suggesting or completing tags rather than
+`org-get-tag-config', which only exposes the static configuration."
+   :read-only t
+   :server-id org-mcp--server-id)
+
+  (mcp-server-lib-register-tool
    #'org-mcp--tool-get-priority-config
    :id "org-get-priority-config"
    :description
@@ -3775,6 +3798,8 @@ Use this resource to:
    "org-get-todo-config" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-get-tag-config" org-mcp--server-id)
+  (mcp-server-lib-unregister-tool
+   "org-get-tag-candidates" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-get-priority-config" org-mcp--server-id)
   (mcp-server-lib-unregister-tool

@@ -1481,6 +1481,86 @@ clock entry to delete."
      "(\"work\" \"personal\")" "nil" "(\"work\")"
      "nil")))
 
+(defun org-mcp-test--call-get-tag-candidates ()
+  "Call org-get-tag-candidates and return the parsed `tags' vector."
+  (let* ((result-text
+          (mcp-server-lib-ert-call-tool "org-get-tag-candidates" nil))
+         (result (json-read-from-string result-text)))
+    (alist-get 'tags result)))
+
+(ert-deftest org-mcp-test-tool-get-tag-candidates-empty ()
+  "No allowed files and no configured tags returns an empty vector."
+  (let ((org-tag-alist nil)
+        (org-tag-persistent-alist nil)
+        (org-mcp-allowed-files nil))
+    (org-mcp-test--with-enabled
+     (should
+      (equal (org-mcp-test--call-get-tag-candidates) [])))))
+
+(ert-deftest org-mcp-test-tool-get-tag-candidates-config-only ()
+  "Without allowed files, returns configured tags from both alists."
+  (let ((org-tag-alist '(("work" . ?w) "personal"))
+        (org-tag-persistent-alist '(("important" . ?i)))
+        (org-mcp-allowed-files nil))
+    (org-mcp-test--with-enabled
+     (should
+      (equal
+       (org-mcp-test--call-get-tag-candidates)
+       ["important" "personal" "work"])))))
+
+(ert-deftest org-mcp-test-tool-get-tag-candidates-from-files ()
+  "Returns the union of configured tags and tags present in headlines."
+  (org-mcp-test--with-temp-org-files
+      ((file-a
+        (concat
+         "#+TITLE: A\n#+TAGS: filetag_a\n\n"
+         "* TODO Task A1                                       :alpha:\n"
+         "* TODO Task A2                                       :beta:\n"))
+       (file-b
+        (concat
+         "#+TITLE: B\n\n"
+         "* DONE Task B1                                 :gamma:alpha:\n")))
+    (let ((org-tag-alist '(("configured" . ?c)))
+          (org-tag-persistent-alist nil))
+      (let ((tags (org-mcp-test--call-get-tag-candidates)))
+        (should (vectorp tags))
+        (should (member "configured" (append tags nil)))
+        (should (member "filetag_a" (append tags nil)))
+        (should (member "alpha" (append tags nil)))
+        (should (member "beta" (append tags nil)))
+        (should (member "gamma" (append tags nil)))
+        ;; sorted, deduplicated
+        (should (equal (append tags nil)
+                       (delete-dups (sort (append tags nil) #'string<))))))))
+
+(ert-deftest org-mcp-test-tool-get-tag-candidates-filters-group-keywords ()
+  "Group keywords like `:startgroup' do not appear in the result."
+  (let ((org-tag-alist
+         '((:startgroup)
+           ("@office" . ?o)
+           ("@home" . ?h)
+           (:endgroup)
+           "laptop"
+           (:startgrouptag)
+           ("project")
+           (:grouptags)
+           ("proj_a")
+           ("proj_b")
+           (:endgrouptag)))
+        (org-tag-persistent-alist nil)
+        (org-mcp-allowed-files nil))
+    (org-mcp-test--with-enabled
+     (let ((tags (append (org-mcp-test--call-get-tag-candidates) nil)))
+       (should (member "@office" tags))
+       (should (member "@home" tags))
+       (should (member "laptop" tags))
+       (should (member "project" tags))
+       (should (member "proj_a" tags))
+       (should (member "proj_b" tags))
+       (dolist (kw '(":startgroup" ":endgroup"
+                     ":startgrouptag" ":grouptags" ":endgrouptag"))
+         (should-not (member kw tags)))))))
+
 (ert-deftest org-mcp-test-tool-get-allowed-files-empty ()
   "Test org-get-allowed-files with empty configuration."
   (org-mcp-test--get-allowed-files-and-check nil nil))
@@ -2564,14 +2644,27 @@ fast key `c' + log timestamp on entry)."
   (org-mcp-test--assert-add-todo-invalid-title
    "First Line\nSecond Line"))
 
-(ert-deftest org-mcp-test-add-todo-tag-reject-invalid-with-alist ()
-  "Test that tags not in `org-tag-alist' are rejected."
+(ert-deftest org-mcp-test-add-todo-tag-free-form-with-alist ()
+  "Free-form tags are accepted even when `org-tag-alist' is configured.
+Org permits free-form tags in headlines, so we only enforce
+`org-tag-re' here, not membership in the configured alist."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (let ((parent-uri (format "org://%s#" test-file)))
-      ;; Should reject tags not in org-tag-alist
-      (org-mcp-test--call-add-todo-expecting-error
-       test-file "Task" "TODO" '("invalid") nil parent-uri))))
+      (org-mcp-test--add-todo-and-check
+       "Task1"
+       "TODO"
+       '("freeform")
+       nil
+       parent-uri
+       nil
+       (file-name-nondirectory test-file)
+       test-file
+       (concat
+        "^\\* TODO Task1 +:freeform:\n"
+        "\\(?: *:PROPERTIES:\n"
+        " *:ID: +[^\n]+\n"
+        " *:END:\n\\)?$")))))
 
 (ert-deftest org-mcp-test-add-todo-tag-accept-valid-with-alist ()
   "Test that tags in `org-tag-alist' are accepted."
@@ -2619,19 +2712,100 @@ fast key `c' + log timestamp on entry)."
           " *:END:\n\\)?$"))))))
 
 (ert-deftest org-mcp-test-add-todo-tag-invalid-characters ()
-  "Test that tags with invalid characters are rejected."
+  "Test that tags with characters outside `org-tag-re' are rejected."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (let ((org-tag-alist nil)
           (org-tag-persistent-alist nil))
       (let ((parent-uri (format "org://%s#" test-file)))
-        ;; Should reject tags with special characters
+        ;; Reject tags containing characters outside `org-tag-re'
+        ;; (which permits [:alnum:], `_', `@', `#', `%').  Note that
+        ;; Emacs's [:alnum:] is Unicode-aware, so e.g. \"café\" is a
+        ;; legal tag and is therefore not tested here.
         (org-mcp-test--call-add-todo-expecting-error
          test-file "Task" "TODO" '("invalid-tag!") nil parent-uri)
         (org-mcp-test--call-add-todo-expecting-error
          test-file "Task" "TODO" '("tag-with-dash") nil parent-uri)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag#hash") nil parent-uri)))))
+         test-file "Task" "TODO" '("tag with space") nil parent-uri)
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file "Task" "TODO" '("tag:colon") nil parent-uri)
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file "Task" "TODO" '("tag.dot") nil parent-uri)
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file "Task" "TODO" '("tag~tilde") nil parent-uri)))))
+
+(ert-deftest org-mcp-test-add-todo-tag-org-tag-re-extras ()
+  "Test that `#' and `%' are accepted (per `org-tag-re')."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (let ((org-tag-alist nil)
+          (org-tag-persistent-alist nil))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        (org-mcp-test--add-todo-and-check
+         "Task1"
+         "TODO"
+         '("tag#hash" "pct%tag")
+         nil
+         parent-uri
+         nil
+         (file-name-nondirectory test-file)
+         test-file
+         (concat
+          "^\\* TODO Task1 +:"
+          ".*tag#hash.*pct%tag.*:\n"
+          "\\(?: *:PROPERTIES:\n"
+          " *:ID: +[^\n]+\n"
+          " *:END:\n\\)?$"))))))
+
+(ert-deftest org-mcp-test-add-todo-grouptags-children-allowed ()
+  "Tags inside `:startgrouptag'/`:grouptags'/`:endgrouptag' are allowed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "#+TITLE: Test Org File\n\n"))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-id-locations-file nil)
+          (org-tag-alist
+           '((:startgrouptag)
+             ("project")
+             (:grouptags)
+             ("proj_a")
+             ("proj_b")
+             (:endgrouptag))))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        ;; Both the umbrella tag and a child tag are valid.
+        (org-mcp-test--add-todo-and-check
+         "Task1"
+         "TODO"
+         '("project" "proj_a")
+         nil
+         parent-uri
+         nil
+         (file-name-nondirectory test-file)
+         test-file
+         (concat
+          "^\\* TODO Task1 +:"
+          "\\(?:project:proj_a\\|proj_a:project\\):\n"
+          "\\(?: *:PROPERTIES:\n"
+          " *:ID: +[^\n]+\n"
+          " *:END:\n\\)?$"))))))
+
+(ert-deftest org-mcp-test-add-todo-mutex-tags-from-persistent-alist ()
+  "Mutex group declared in `org-tag-persistent-alist' is enforced."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "#+TITLE: Test Org File\n\n"))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-id-locations-file nil)
+          (org-tag-alist nil)
+          (org-tag-persistent-alist
+           '(:startgroup
+             ("@office" . ?o)
+             ("@home" . ?h)
+             :endgroup)))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file "Task" "TODO"
+         ["@office" "@home"]
+         nil parent-uri)))))
 
 (ert-deftest org-mcp-test-add-todo-child-under-parent ()
   "Test adding a child TODO under an existing parent."
@@ -4422,23 +4596,21 @@ whitespace-between-markers edge case."
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-set-tags-not-in-alist ()
-  "Test that tags not in org-tag-alist are rejected."
+(ert-deftest org-mcp-test-set-tags-free-form-with-alist ()
+  "Free-form tags are accepted even when `org-tag-alist' is configured.
+Org permits free-form tags, so we only enforce `org-tag-re' here,
+not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-tag-alist '("work" "personal"))
-          (uri (format "org://%s#Simple%%20Task" test-file)))
-      (org-mcp-test--assert-error-and-file
-       test-file
-       (let* ((request
-               (mcp-server-lib-create-tools-call-request
-                "org-set-tags" 1
-                `((uri . ,uri)
-                  (tags . "nonexistent"))))
-              (response (mcp-server-lib-process-jsonrpc-parsed
-                         request mcp-server-lib-ert-server-id))
-              (result (mcp-server-lib-ert-process-tool-response response)))
-         (error "Expected error but got success: %s" result))))))
+    (let* ((org-tag-alist '("work" "personal"))
+           (uri (format "org://%s#Simple%%20Task" test-file))
+           (params `((uri . ,uri)
+                     (tags . "nonexistent")))
+           (result-text
+            (mcp-server-lib-ert-call-tool "org-set-tags" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_tags result) ["nonexistent"])))))
 
 (ert-deftest org-mcp-test-set-tags-mutex-violation ()
   "Test that mutually exclusive tags are rejected."
