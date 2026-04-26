@@ -1160,48 +1160,37 @@ Throws an MCP tool error if invalid headlines are found."
 
 (defun org-mcp--validate-body-no-unbalanced-blocks (body)
   "Validate that BODY doesn't contain unbalanced blocks.
-Uses a state machine: tracks if we're in a block, and which one.
-Text inside blocks is literal and doesn't start/end other blocks.
+Each #+BEGIN_/#+END_ marker in BODY must be part of a balanced block
+element as classified by Org's parser.  Org's block element types all
+share the `-block' suffix (e.g. `example-block', `src-block',
+`special-block'), so every #+BEGIN_X / #+END_X line whose enclosing
+element does not end in `-block' is unbalanced.  Markers nested inside
+another block are correctly ignored as literal text by
+`org-element-at-point'.
 Throws an MCP tool error if unbalanced blocks are found."
   (with-temp-buffer
+    (let ((org-inhibit-startup t))
+      (delay-mode-hooks
+        (org-mode)))
     (insert body)
     (goto-char (point-min))
-    (let
-        ((current-block nil)) ; Current block type or nil
-      ;; Scan forward for all block markers
-      ;; Block names can be any non-whitespace chars
-      (while (re-search-forward
-              "^#\\+\\(BEGIN\\|END\\|begin\\|end\\)_\\(\\S-+\\)"
-              nil t)
-        (let ((marker-type (upcase (match-string 1)))
-              (block-type (upcase (match-string 2))))
+    (while (re-search-forward
+            "^#\\+\\(BEGIN\\|END\\|begin\\|end\\)_\\(\\S-+\\)"
+            nil t)
+      (let* ((marker-type (upcase (match-string 1)))
+             (block-type (upcase (match-string 2)))
+             (etype (org-element-type (org-element-at-point))))
+        (unless (and etype
+                     (string-suffix-p "-block" (symbol-name etype)))
           (cond
-           ;; Found BEGIN
            ((string= marker-type "BEGIN")
-            (if current-block
-                ;; Already in block - BEGIN is literal
-                nil
-              ;; Not in a block - enter this block
-              (setq current-block block-type)))
-           ;; Found END
+            (org-mcp--tool-validation-error
+             "Body contains unclosed %s block"
+             block-type))
            ((string= marker-type "END")
-            (cond
-             ;; Not in any block - this END is orphaned
-             ((null current-block)
-              (org-mcp--tool-validation-error
-               "Orphaned END_%s without BEGIN_%s"
-               block-type block-type))
-             ;; In matching block - exit the block
-             ((string= current-block block-type)
-              (setq current-block nil))
-             ;; In different block - this END is just literal text
-             (t
-              nil))))))
-      ;; After scanning, check if we're still in a block
-      (when current-block
-        (org-mcp--tool-validation-error
-         "Body contains unclosed %s block"
-         current-block)))))
+            (org-mcp--tool-validation-error
+             "Orphaned END_%s without BEGIN_%s"
+             block-type block-type))))))))
 
 (defun org-mcp--normalize-tags-to-list (tags)
   "Normalize TAGS parameter to a list format.

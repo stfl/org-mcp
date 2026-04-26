@@ -3725,6 +3725,50 @@ Without BEGIN_SRC")))
 Some quote
 #+END_EXAMPLE")))
 
+(ert-deftest org-mcp-test-edit-body-reject-lowercase-unbalanced-begin ()
+  "Test org-edit-body rejects newBody with lowercase unbalanced BEGIN."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--content-nested-siblings
+      `(,org-mcp-test--content-with-id-id)
+    (org-mcp-test--call-edit-body-expecting-error
+     test-file
+     org-mcp-test--content-with-id-uri
+     "Second child content."
+     "Some text
+#+begin_example
+Code without end_example")))
+
+(ert-deftest org-mcp-test-edit-body-reject-lowercase-orphaned-end ()
+  "Test org-edit-body rejects newBody with lowercase orphaned END."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--content-nested-siblings
+      `(,org-mcp-test--content-with-id-id)
+    (org-mcp-test--call-edit-body-expecting-error
+     test-file
+     org-mcp-test--content-with-id-uri
+     "Second child content."
+     "Some text
+#+end_src
+Without begin_src")))
+
+(ert-deftest org-mcp-test-edit-body-reject-second-block-unclosed ()
+  "Test org-edit-body rejects two blocks where the second is unclosed."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--content-nested-siblings
+      `(,org-mcp-test--content-with-id-id)
+    (org-mcp-test--call-edit-body-expecting-error
+     test-file
+     org-mcp-test--content-with-id-uri
+     "Second child content."
+     "First block:
+#+BEGIN_EXAMPLE
+done
+#+END_EXAMPLE
+
+Second block:
+#+BEGIN_QUOTE
+unfinished")))
+
 ;;; Resource template workaround tool tests
 
 (defun org-mcp-test--call-read (uri)
