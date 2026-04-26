@@ -1668,6 +1668,57 @@ clock entry to delete."
                  (car org-agenda-files)
                  real-file))))))
 
+(ert-deftest org-mcp-test-uri-relative-allowed-absolute-uri ()
+  "Path URI with absolute path resolves when allowed list uses relative path."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\nBody"))
+    (let* ((dir (file-name-directory real-file))
+           (name (file-name-nondirectory real-file))
+           (org-directory dir)
+           (org-mcp-allowed-files (list name))
+           (uri (format "%s#Heading" real-file))
+           (result (org-mcp-test--call-read-headline uri)))
+      (should (string= result "* Heading\nBody")))))
+
+(ert-deftest org-mcp-test-uri-absolute-allowed-absolute-uri ()
+  "Path URI with absolute path resolves when allowed list uses absolute path."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\nBody"))
+    ;; with-temp-org-files already binds allowed-files to (list real-file).
+    (let* ((uri (format "%s#Heading" real-file))
+           (result (org-mcp-test--call-read-headline uri)))
+      (should (string= result "* Heading\nBody")))))
+
+(ert-deftest org-mcp-test-uri-interchangeable-paths-same-result ()
+  "Same file is reachable whether the allowed entry is absolute or relative."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\nBody"))
+    (let* ((dir (file-name-directory real-file))
+           (name (file-name-nondirectory real-file))
+           (uri (format "%s#Heading" real-file)))
+      ;; Configured as absolute path
+      (let ((org-mcp-allowed-files (list real-file)))
+        (should (string= (org-mcp-test--call-read-headline uri)
+                         "* Heading\nBody")))
+      ;; Configured as relative path (same physical file)
+      (let ((org-directory dir)
+            (org-mcp-allowed-files (list name)))
+        (should (string= (org-mcp-test--call-read-headline uri)
+                         "* Heading\nBody"))))))
+
+(ert-deftest org-mcp-test-uri-relative-allowed-rejects-other-file ()
+  "Relative allowed entry does not accidentally allow a sibling file."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file "* Allowed\n")
+       (forbidden-file "* Forbidden\n"))
+    (let* ((dir (file-name-directory allowed-file))
+           (allowed-name (file-name-nondirectory allowed-file))
+           (org-directory dir)
+           ;; Only the relative allowed-name is in the list.
+           (org-mcp-allowed-files (list allowed-name))
+           (uri (format "%s#Forbidden" forbidden-file)))
+      (should-error (org-mcp-test--call-read-headline uri)))))
+
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)
   "Helper for org-add-todo test.
