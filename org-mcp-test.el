@@ -4203,6 +4203,98 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
          test-file
          org-mcp-test--clock-in-no-drawer-expected-regex)))))
 
+(defconst org-mcp-test--clock-in-close-same-file-content
+  (concat
+   "* TODO Task One\n"
+   "* TODO Task Two\n")
+  "File with two tasks, neither clocked in.")
+
+(defconst org-mcp-test--clock-in-close-same-file-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching file after clock-in to Task Two closes Task One.")
+
+(defconst org-mcp-test--clock-in-close-different-file-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching file after active clock closed by clock-in to different file.")
+
+(ert-deftest org-mcp-test-clock-in-closes-active-same-file ()
+  "Test clock-in closes an active clock in the same file."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-in-close-same-file-content))
+    (let* ((uri-1 (format "org://%s#Task%%20One" file-1))
+           (uri-2 (format "org://%s#Task%%20Two" file-1))
+           (result-1 (org-mcp-test--call-clock-in
+                      uri-1 "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result-1) t))
+      (should (equal (alist-get 'clocked_in result-1) t))
+      ;; Clock in to Task Two — should close Task One first
+      (let ((result-2 (org-mcp-test--call-clock-in
+                       uri-2 "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result-2) t))
+        (should (equal (alist-get 'clocked_in result-2) t))
+        (org-mcp-test--verify-file-matches
+         file-1
+         org-mcp-test--clock-in-close-same-file-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-closes-active-different-file ()
+  "Test clock-in closes an active clock in a different file."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-task-content)
+       (file-2 org-mcp-test--clock-task-content))
+    (let* ((uri-1 (format "org://%s#Task%%20One" file-1))
+           (uri-2 (format "org://%s#Task%%20One" file-2))
+           (result-1 (org-mcp-test--call-clock-in
+                      uri-1 "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result-1) t))
+      (should (equal (alist-get 'clocked_in result-1) t))
+      ;; Clock in to file-2 — should close file-1 first
+      (let ((result-2 (org-mcp-test--call-clock-in
+                       uri-2 "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result-2) t))
+        (should (equal (alist-get 'clocked_in result-2) t))
+        (org-mcp-test--verify-file-matches
+         file-1
+         org-mcp-test--clock-in-close-different-file-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-closes-active-explicit-start ()
+  "Test clock-in with explicit start closes active clock at that start time."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-task-content)
+       (file-2 org-mcp-test--clock-task-content))
+    (let* ((uri-1 (format "org://%s#Task%%20One" file-1))
+           (uri-2 (format "org://%s#Task%%20One" file-2))
+           (result-1 (org-mcp-test--call-clock-in
+                      uri-1 "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result-1) t))
+      ;; Clock in to file-2 at 12:00 — should close file-1 at 12:00
+      (let ((result-2 (org-mcp-test--call-clock-in
+                       uri-2 "2026-01-01T12:00:00")))
+        (should (equal (alist-get 'success result-2) t))
+        ;; Verify file-1 has a 2-hour closed clock
+         (should
+          (string-match-p
+           "=>  2:00"
+           (org-mcp-test--read-file file-1)))))))
+
 (ert-deftest org-mcp-test-clock-out-no-drawer ()
   "Test clock-out closes a bare CLOCK when `org-clock-into-drawer' is nil."
   (org-mcp-test--with-temp-org-files

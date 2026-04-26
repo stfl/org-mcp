@@ -799,7 +799,8 @@ file, reading the timestamp via the Org element API."
                             (cons 'file (expand-file-name file))
                             (cons 'heading heading)
                             (cons 'start start-str)
-                            (cons 'allowed t)))))))))
+                            (cons 'allowed t)
+                            (cons 'marker marker)))))))))
         nil)
       ;; Fallback: native Emacs clock marker in a non-allowed file.
       ;; Use `org-element-at-point' instead of a CLOCK regex.
@@ -817,7 +818,8 @@ file, reading the timestamp via the Org element API."
                      (cons 'heading nil)
                      (cons
                       'start (org-mcp--clock-element-start-str el))
-                     (cons 'allowed nil)))))))))))
+                     (cons 'allowed nil)
+                     (cons 'marker org-clock-marker)))))))))))
 
 (defun org-mcp--clock-find-last-closed ()
   "Return the most recent closed-clock end time across allowed files.
@@ -2630,8 +2632,8 @@ MCP Parameters:
           (when start_time
             (org-mcp--clock-parse-timestamp start_time)))
          ;; Check for active clock and close it if needed
-         (active (org-mcp--clock-find-active))
-         (close-time nil))
+         ;; Check for active clock and close it if needed
+         (active (org-mcp--clock-find-active)))
     ;; Close active clock if exists.  When resolve is requested and the
     ;; active clock is in the same file, skip auto-close — resolve will
     ;; delete the dangling clock in the modify-and-save body instead.
@@ -2646,48 +2648,35 @@ MCP Parameters:
                (if explicit-start
                    explicit-start
                  now)))
-             (start-str (alist-get 'start active))
-             (start-parsed (org-parse-time-string start-str))
-             (start-time (apply #'encode-time start-parsed))
-             (duration
-              (float-time (time-subtract close-at start-time)))
-             (close-text
-              (format "--%s => %s"
-                      (org-mcp--clock-format-timestamp close-at)
-                      (org-mcp--clock-duration-string duration))))
-        (setq close-time close-at)
+             (marker (alist-get 'marker active)))
         (if (alist-get 'allowed active)
-            ;; Allowed file: close via text replacement
+            ;; Allowed file: close via org-clock-out
             (progn
               (org-mcp--fail-if-modified active-file "clock-in")
-              (with-temp-buffer
-                (set-visited-file-name active-file t)
-                (insert-file-contents active-file)
-                (goto-char (point-min))
-                (when (re-search-forward (concat
-                                          "^\\([ \t]*CLOCK: \\["
-                                          (regexp-quote
-                                           start-str)
-                                          "\\]\\)[ \t]*$")
-                                         nil t)
-                  (goto-char (match-end 1))
-                  (insert close-text))
-                (save-buffer)
+              (when marker
+                (let ((buf (marker-buffer marker)))
+                  (with-current-buffer buf
+                    (save-excursion
+                      (goto-char marker)
+                      (let ((el (org-element-at-point)))
+                        (when (eq (org-element-type el) 'clock)
+                          (move-marker
+                           org-clock-marker
+                           (org-element-property :begin el))
+                          (move-marker
+                           org-clock-hd-marker
+                           (save-excursion
+                             (org-back-to-heading t)
+                             (point)))
+                          (org-clock-out nil t close-at)
+                          (save-buffer))))))
                 (org-mcp--refresh-file-buffers active-file)))
-          ;; Non-allowed file: close via buffer edit and clear markers
+          ;; Non-allowed file: close via org-clock-out
           (let ((buf (marker-buffer org-clock-marker)))
             (when buf
               (with-current-buffer buf
-                (save-excursion
-                  (goto-char org-clock-marker)
-                  (forward-line 0)
-                  (when (looking-at
-                         "^\\([ \t]*CLOCK: \\[[^]]+\\]\\)[ \t]*$")
-                    (goto-char (match-end 1))
-                    (insert close-text)
-                    (save-buffer))))
-              (move-marker org-clock-marker nil)
-              (move-marker org-clock-hd-marker nil))))))
+                (org-clock-out nil t close-at)
+                (save-buffer)))))))
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously (not explicit-start))
