@@ -272,6 +272,17 @@ OPERATION is a string describing the operation for error messages."
      (goto-char (point-min))
      ,@body))
 
+(defmacro org-mcp--with-allowed-agenda-files (&rest body)
+  "Execute BODY with `org-agenda-files' bound to existing allowed files.
+The binding is the subset of `org-mcp-allowed-files' that exists on
+disk.  This is the single ingress point that maps the org-mcp
+security boundary onto Org's multi-file convention, so tool handlers
+can rely on `org-agenda-files' instead of re-implementing the filter."
+  (declare (indent 0) (debug (body)))
+  `(let ((org-agenda-files
+          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files)))
+     ,@body))
+
 (defmacro org-mcp--modify-and-save
     (file-path operation response-alist &rest body)
   "Execute BODY to modify Org file at FILE-PATH, then save result.
@@ -1423,25 +1434,25 @@ Mirrors the set Org's interactive tag completion offers via
 `#+TAGS:' / `#+FILETAGS:', plus every tag actually present on
 headlines in those files.  Group keywords (`:startgroup' etc.)
 are filtered out.  Tags are returned sorted and deduplicated."
-  (let* ((files
-          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files))
-         (table
-          (if files
-              (org-global-tags-completion-table files)
-            (append org-tag-alist org-tag-persistent-alist)))
-         (tags
-          (delete-dups
-           (delq
-            nil
-            (mapcar
-             (lambda (entry)
-               (let ((token
-                      (if (consp entry)
-                          (car entry)
-                        entry)))
-                 (and (stringp token) token)))
-             table)))))
-    (json-encode `((tags . ,(vconcat (sort tags #'string<)))))))
+  (org-mcp--with-allowed-agenda-files
+    (let* ((table
+            (append
+             (org-global-tags-completion-table)
+             org-tag-alist
+             org-tag-persistent-alist))
+           (tags
+            (delete-dups
+             (delq
+              nil
+              (mapcar
+               (lambda (entry)
+                 (let ((token
+                        (if (consp entry)
+                            (car entry)
+                          entry)))
+                   (and (stringp token) token)))
+               table)))))
+      (json-encode `((tags . ,(vconcat (sort tags #'string<))))))))
 
 (defun org-mcp--tool-get-priority-config ()
   "Return the priority configuration."
@@ -2265,16 +2276,16 @@ MCP Parameters:
     (unless (consp query-sexp)
       (org-mcp--tool-validation-error "Query must be a list, got: %s"
                                       (type-of query-sexp)))
-    (let ((target-files
-           (if files
-               (mapcar
-                (lambda (f)
-                  (or (org-mcp--find-allowed-file f)
-                      (org-mcp--tool-file-access-error f)))
-                (append files nil))
-             (cl-remove-if-not
-              #'file-exists-p org-mcp-allowed-files))))
-      (let* ((action #'org-mcp--ql-extract-match)
+    (org-mcp--with-allowed-agenda-files
+      (let* ((target-files
+              (if files
+                  (mapcar
+                   (lambda (f)
+                     (or (org-mcp--find-allowed-file f)
+                         (org-mcp--tool-file-access-error f)))
+                   (append files nil))
+                org-agenda-files))
+             (action #'org-mcp--ql-extract-match)
              (matches
               (condition-case err
                   (org-ql-select
@@ -2429,36 +2440,37 @@ MCP Parameters:
   "Run QUERY-SEXP via `org-ql-select' with optional sorting.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-ql-query."
-  (let* ((target-files
-          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files))
-         (matches
-          (condition-case err
-              ;; Collect org-elements with the default action, then
-              ;; sort.  We map `org-mcp--ql-extract-match' in a second
-              ;; pass because `org-ql-select' applies :action before
-              ;; :sort — custom actions that return non-element data
-              ;; would break sort functions expecting org-elements.
-              (let ((elements
-                     (org-ql-select
-                      target-files
-                      query-sexp
-                      :sort org-mcp-query-sort-fn)))
-                (mapcar
-                 (lambda (el)
-                   (with-current-buffer (org-element-property
-                                         :buffer el)
-                     (save-excursion
-                       (goto-char (org-element-property :begin el))
-                       (org-mcp--ql-extract-match))))
-                 elements))
-            (error
-             (org-mcp--tool-validation-error "Org-ql query error: %s"
-                                             (error-message-string
-                                              err))))))
-    (json-encode
-     `((matches . ,(vconcat matches))
-       (total . ,(length matches))
-       (files_searched . ,(length target-files))))))
+  (org-mcp--with-allowed-agenda-files
+    (let* ((target-files org-agenda-files)
+           (matches
+            (condition-case err
+                ;; Collect org-elements with the default action, then
+                ;; sort.  We map `org-mcp--ql-extract-match' in a
+                ;; second pass because `org-ql-select' applies :action
+                ;; before :sort — custom actions that return
+                ;; non-element data would break sort functions
+                ;; expecting org-elements.
+                (let ((elements
+                       (org-ql-select
+                        target-files
+                        query-sexp
+                        :sort org-mcp-query-sort-fn)))
+                  (mapcar
+                   (lambda (el)
+                     (with-current-buffer (org-element-property
+                                           :buffer el)
+                       (save-excursion
+                         (goto-char (org-element-property :begin el))
+                         (org-mcp--ql-extract-match))))
+                   elements))
+              (error
+               (org-mcp--tool-validation-error
+                "Org-ql query error: %s"
+                (error-message-string err))))))
+      (json-encode
+       `((matches . ,(vconcat matches))
+         (total . ,(length matches))
+         (files_searched . ,(length target-files)))))))
 
 (defun org-mcp--tool-query-inbox ()
   "Query inbox items using the configured query function.
@@ -2564,9 +2576,9 @@ Uses `org-find-open-clocks' on each file in `org-mcp-allowed-files'.
 Reads each clock's timestamp via the Org element API.
 
 MCP Parameters: None"
-  (let ((all-clocks nil))
-    (dolist (file org-mcp-allowed-files)
-      (when (file-exists-p file)
+  (org-mcp--with-allowed-agenda-files
+    (let ((all-clocks nil))
+      (dolist (file org-agenda-files)
         (let ((open (org-find-open-clocks file)))
           (dolist (clock open)
             (let ((marker (car clock))
@@ -2585,11 +2597,11 @@ MCP Parameters: None"
                     (push `((file . ,clock-file)
                             (heading . ,heading)
                             (start . ,start-str))
-                          all-clocks)))))))))
-    (let ((total (length all-clocks)))
-      (json-encode
-       `((open_clocks . ,(vconcat (nreverse all-clocks)))
-         (total . ,total))))))
+                          all-clocks))))))))
+      (let ((total (length all-clocks)))
+        (json-encode
+         `((open_clocks . ,(vconcat (nreverse all-clocks)))
+           (total . ,total)))))))
 
 (defun org-mcp--tool-clock-get-active ()
   "Return the currently active clock entry, if any.
