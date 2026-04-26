@@ -28,11 +28,14 @@ Then configure in =config.el=:
 #+begin_src emacs-lisp
 (use-package org-mcp
   :after org
-  :custom
-  ;; Entries may be absolute or relative paths.  Relative entries are
-  ;; resolved against `org-directory' (same convention as
-  ;; `org-agenda-files'), so the two lists can be reused directly.
-  (org-mcp-allowed-files org-agenda-files)
+  ;; By default org-mcp falls back to `org-agenda-files' when
+  ;; `org-mcp-allowed-files' is nil, so no extra setup is needed
+  ;; if you already have an agenda configured.  Set
+  ;; `org-mcp-allowed-files' explicitly to expose a different (or
+  ;; narrower) set of files to MCP.  Entries may be absolute or
+  ;; relative; relative paths resolve against `org-directory'.
+  ;; :custom
+  ;; (org-mcp-allowed-files '("inbox.org" "projects/work.org"))
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
   :config (if mcp-server-lib--running
@@ -49,22 +52,28 @@ strongly advised.
 
 ** Configuring allowed files
 
-Once you read and internalized the warning above, set the allowed Org file set.
-Entries may be absolute or relative paths.  Relative entries are resolved against
-=org-directory= (matching =org-agenda-files= behavior), and tilde / environment
-variable expansion applies.  Absolute and relative entries can be mixed freely:
+Once you read and internalized the warning above, decide which Org files MCP
+clients may touch.
+
+By default, =org-mcp-allowed-files= is nil and org-mcp falls back to
+=org-agenda-files=.  If your agenda already lists the right files, no extra
+configuration is needed.  Set =org-mcp-allowed-files= explicitly to expose a
+different (or narrower) set:
 
 #+begin_src emacs-lisp
+;; Default: nil — org-mcp uses `org-agenda-files'
+
 ;; Absolute paths
 (setq org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
 
-;; Relative paths (resolved against `org-directory')
+;; Relative paths (resolved against `org-directory', same convention as
+;; `org-agenda-files'; tilde and environment variables also expand)
 (setq org-directory "~/org")
 (setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
-
-;; Reuse `org-agenda-files' directly
-(setq org-mcp-allowed-files org-agenda-files)
 #+end_src
+
+Absolute and relative entries are interchangeable: a file allowed via a
+relative entry can be referenced through an absolute-path URI, and vice versa.
 
 ** Registering with an MCP Client
 

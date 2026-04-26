@@ -1719,6 +1719,58 @@ clock entry to delete."
            (uri (format "%s#Forbidden" forbidden-file)))
       (should-error (org-mcp-test--call-read-headline uri)))))
 
+(ert-deftest org-mcp-test-allowed-files-fn-returns-configured ()
+  "`org-mcp-allowed-files' (function) returns the variable when set."
+  (let ((org-mcp-allowed-files '("a.org" "b.org"))
+        (org-agenda-files '("never-used.org")))
+    (should (equal (org-mcp-allowed-files) '("a.org" "b.org")))))
+
+(ert-deftest org-mcp-test-allowed-files-fn-falls-back-to-agenda ()
+  "`org-mcp-allowed-files' (function) falls back to `org-agenda-files' when nil."
+  (org-mcp-test--with-temp-org-files
+      ((agenda-file "* Heading\n"))
+    (let ((org-mcp-allowed-files nil)
+          (org-agenda-files (list agenda-file)))
+      (should (equal (org-mcp-allowed-files) (list agenda-file))))))
+
+(ert-deftest org-mcp-test-fallback-uri-tool-uses-agenda-files ()
+  "URI tool calls work when allowed list is nil and `org-agenda-files' is set."
+  (org-mcp-test--with-temp-org-files
+      ((agenda-file "* Heading\nBody"))
+    (let ((org-mcp-allowed-files nil)
+          (org-agenda-files (list agenda-file)))
+      (let* ((uri (format "%s#Heading" agenda-file))
+             (result (org-mcp-test--call-read-headline uri)))
+        (should (string= result "* Heading\nBody"))))))
+
+(ert-deftest org-mcp-test-fallback-respects-relative-agenda-entries ()
+  "Fallback to `org-agenda-files' resolves relative entries against `org-directory'."
+  (org-mcp-test--with-temp-org-files
+      ((agenda-file "* Heading\nBody"))
+    (let* ((dir (file-name-directory agenda-file))
+           (name (file-name-nondirectory agenda-file))
+           (org-mcp-allowed-files nil)
+           (org-directory dir)
+           (org-agenda-files (list name)))
+      (let* ((uri (format "%s#Heading" agenda-file))
+             (result (org-mcp-test--call-read-headline uri)))
+        (should (string= result "* Heading\nBody"))))))
+
+(ert-deftest org-mcp-test-fallback-explicit-overrides-agenda ()
+  "When `org-mcp-allowed-files' is set, `org-agenda-files' is ignored."
+  (org-mcp-test--with-temp-org-files
+      ((allowed "* Allowed\n")
+       (agenda-only "* AgendaOnly\n"))
+    (let ((org-mcp-allowed-files (list allowed))
+          (org-agenda-files (list allowed agenda-only)))
+      ;; Allowed file is reachable
+      (let ((uri (format "%s#Allowed" allowed)))
+        (should (string= (org-mcp-test--call-read-headline uri)
+                         "* Allowed")))
+      ;; A file only in `org-agenda-files' must NOT be reachable.
+      (let ((uri (format "%s#AgendaOnly" agenda-only)))
+        (should-error (org-mcp-test--call-read-headline uri))))))
+
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)
   "Helper for org-add-todo test.

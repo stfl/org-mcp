@@ -46,7 +46,12 @@ Entries may be absolute or relative paths.  Relative paths are
 resolved against `org-directory', matching the behavior of
 `org-agenda-files'.  Tilde expansion (`~/...') and environment
 variable substitution apply.  Absolute paths pass through
-unchanged, so absolute and relative entries are interchangeable."
+unchanged, so absolute and relative entries are interchangeable.
+
+When nil (the default), org-mcp falls back to `org-agenda-files',
+so an existing Org-mode configuration works out of the box.  Set
+this variable explicitly to expose a different (or narrower) set
+of files to MCP."
   :type '(repeat file)
   :group 'org-mcp)
 
@@ -223,14 +228,33 @@ If no buffer is visiting FILE-PATH yet, the buffer is opened with
 Handles symlinks and path variations by normalizing both paths."
   (string= (file-truename path1) (file-truename path2)))
 
+(defun org-mcp-allowed-files ()
+  "Return the effective allowed-files list (the function form).
+Mirrors the Emacs idiom of `org-agenda-files': the same symbol
+serves as a defcustom holding the user-configured list and as a
+function returning the resolved list at call time.
+
+When the variable `org-mcp-allowed-files' is non-nil, its entries
+are returned verbatim (entries may be relative; expansion happens
+in `org-mcp--expanded-allowed-files').  When nil, the result of
+`(org-agenda-files t)' is returned, which uniformly handles list,
+string-pointing-to-file, and directory forms of `org-agenda-files'
+and yields fully absolute paths."
+  (if org-mcp-allowed-files
+      org-mcp-allowed-files
+    (org-agenda-files t)))
+
 (defun org-mcp--expanded-allowed-files ()
-  "Return `org-mcp-allowed-files' with each entry made absolute.
-Relative entries are resolved against `org-directory', matching the
-behavior of `org-agenda-files'.  Absolute entries are returned as-is
-after tilde and environment variable expansion."
+  "Return the effective allowed-files list with each entry made absolute.
+Pulls the source list from the function `org-mcp-allowed-files'
+(which falls back to `org-agenda-files' when the variable
+`org-mcp-allowed-files' is nil), then resolves relative entries
+against `org-directory' exactly as `org-agenda-files' does.
+Absolute entries pass through after tilde and environment variable
+expansion."
   (mapcar
    (lambda (f) (expand-file-name f org-directory))
-   org-mcp-allowed-files))
+   (org-mcp-allowed-files)))
 
 (defun org-mcp--find-allowed-file (filename)
   "Find FILENAME in `org-mcp-allowed-files'.
