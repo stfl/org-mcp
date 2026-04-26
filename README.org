@@ -579,9 +579,17 @@ Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= an
 
 Each function is called at point with no arguments during result extraction.  Non-nil return values are included in the JSON result under the given key.
 
-** Workaround Tools Duplicating Resource Templates
+** Read Tools
 
-*Note:* The following tools are temporary workarounds that duplicate the resource template functionality as tools. They exist because Claude Code currently doesn't discover resource templates.
+These read-only tools mirror the resource templates above as model-invokable
+tools. Resource templates (=org://{uri}=, =org-outline://{filename}=) are
+/application-controlled/: they are surfaced through the MCP client's
+@-mention / resource picker UI and require the user (or client heuristics) to
+select them. Tools, by contrast, are /model-controlled/: the LLM can invoke
+them directly without user mediation. =org-read= and =org-read-outline= cover
+the same data as their matching resource templates; =org-read-headline= is a
+tool-only plain-text variant with no resource-template counterpart.
+
 *** org-read
 - *Description:* Read Org file or headline with structured JSON output (auto-detects URI format)
 - *Parameters:*
