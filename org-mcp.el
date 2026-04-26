@@ -102,14 +102,22 @@ Returns the suffix string if URI starts with PREFIX, nil otherwise."
   (when (string-prefix-p prefix uri)
     (substring uri (length prefix))))
 
+(defun org-mcp--strip-uri-prefix (uri)
+  "Strip the optional `org://' scheme prefix from URI.
+The URI may be passed with or without the `org://' prefix.  Tools
+accept a bare UUID, file path, or `file#headline' descriptor in
+addition to the fully-qualified `org://{uri}' form."
+  (if (string-prefix-p "org://" uri)
+      (substring uri (length "org://"))
+    uri))
+
 (defun org-mcp--extract-id-from-uri (uri)
-  "Extract org ID from an org:// URI.
+  "Extract org ID from URI.
+URI may be an `org://' URI or a bare identifier.
 Returns the ID string if URI is ID-based, nil otherwise."
-  (when (string-prefix-p "org://" uri)
-    (let ((suffix (substring uri (length "org://"))))
-      (when (eq
-             (plist-get (org-mcp--detect-uri-type suffix) :type) 'id)
-        suffix))))
+  (let ((suffix (org-mcp--strip-uri-prefix uri)))
+    (when (eq (plist-get (org-mcp--detect-uri-type suffix) :type) 'id)
+      suffix)))
 
 (defun org-mcp--uri-is-id-based (uri)
   "Return non-nil if URI is based on an Org ID."
@@ -360,33 +368,29 @@ is not found."
 
 (defmacro org-mcp--with-uri-prefix-dispatch
     (uri headline-body id-body)
-  "Dispatch tool URI handling based on org:// prefix.
-URI is the URI string to dispatch on (must use org:// scheme).
+  "Dispatch tool URI handling based on parsed URI type.
+URI is the URI string to dispatch on.  The optional `org://' scheme
+prefix is accepted but not required: a bare UUID, file path, or
+`file#headline' descriptor are also valid.
 HEADLINE-BODY is executed when URI refers to a headline,
-with the URI suffix after org:// bound to `headline'.
-ID-BODY is executed when URI is an ID-based org:// URI,
-with the ID bound to `id'.
+with the URI suffix bound to `headline'.
+ID-BODY is executed when URI is ID-based, with the ID bound to `id'.
 Throws an error if URI format is not recognized."
   (declare (indent 1))
-  `(cond
-    ((string-prefix-p "org://" ,uri)
-     (let* ((suffix (substring ,uri (length "org://")))
-            (parsed-type
-             (plist-get (org-mcp--detect-uri-type suffix) :type)))
-       (cond
-        ((eq parsed-type 'id)
-         (let ((id suffix))
-           ,id-body))
-        ((eq parsed-type 'headline)
-         (let ((headline suffix))
-           ,headline-body))
-        (t
-         (org-mcp--tool-validation-error
-          "URI does not refer to a headline: %s"
-          ,uri)))))
-    (t
-     (org-mcp--tool-validation-error "Invalid resource URI format: %s"
-                                     ,uri))))
+  `(let* ((suffix (org-mcp--strip-uri-prefix ,uri))
+          (parsed-type
+           (plist-get (org-mcp--detect-uri-type suffix) :type)))
+     (cond
+      ((eq parsed-type 'id)
+       (let ((id suffix))
+         ,id-body))
+      ((eq parsed-type 'headline)
+       (let ((headline suffix))
+         ,headline-body))
+      (t
+       (org-mcp--tool-validation-error
+        "URI does not refer to a headline: %s"
+        ,uri)))))
 
 (defun org-mcp--validate-file-access (filename)
   "Validate that FILENAME is in the allowed list.
@@ -1294,7 +1298,7 @@ Throws validation error if AFTER-URI is invalid or sibling not found."
               (found nil))
           (unless after-id
             (org-mcp--tool-validation-error
-             "Field after_uri must be an ID-based URI (org://{uuid}): %s"
+             "Field after_uri must be an ID-based URI ({uuid} or org://{uuid}): %s"
              after-uri))
           ;; Find the sibling with the specified ID
           (org-back-to-heading t) ;; At parent
@@ -2408,19 +2412,20 @@ Returns: Same format as org-ql-query tool, sorted by
 
 (defun org-mcp--tool-read (uri)
   "Tool handler for org-read.
-URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}.
+URI may be supplied with or without the `org://' scheme prefix.
+Accepted formats: {path}, {path}#{headline}, or {uuid}, each
+optionally prefixed with `org://'.
 Returns structured JSON.
 
 MCP Parameters:
-  uri - URI string in org:// format (string, required). Formats:
-        - org:///path/to/file.org (file path)
-        - org:///path/to/file.org#Headline/Subhead (headline path)
-        - org://UUID (8-4-4-4-12 format)"
-  (unless (string-prefix-p "org://" uri)
-    (org-mcp--tool-validation-error "URI must use org:// format: %s"
-                                    uri))
+  uri - URI string (string, required). Formats (the `org://' prefix
+        is optional):
+        - /path/to/file.org (file path)
+        - /path/to/file.org#Headline/Subhead (headline path)
+        - UUID (8-4-4-4-12 format)
+        - org://{uri} (any of the above prefixed with `org://')"
   (org-mcp--handle-org-resource
-   `(("uri" . ,(substring uri (length "org://"))))))
+   `(("uri" . ,(org-mcp--strip-uri-prefix uri)))))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool wrapper for org-outline://{filename} resource template.
@@ -2432,20 +2437,21 @@ MCP Parameters:
 
 (defun org-mcp--tool-read-headline (uri)
   "Tool handler for org-read-headline.
-URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}.
+URI may be supplied with or without the `org://' scheme prefix.
+Accepted formats: {path}, {path}#{headline}, or {uuid}, each
+optionally prefixed with `org://'.
 Returns plain text content.
 
 MCP Parameters:
-  uri - URI string in org:// format (string, required). Formats:
-        - org:///path/to/file.org (returns entire file)
-        - org:///path/to/file.org#Headline/Subhead (headline path)
-        - org://UUID (8-4-4-4-12 format)
+  uri - URI string (string, required). Formats (the `org://' prefix
+        is optional):
+        - /path/to/file.org (returns entire file)
+        - /path/to/file.org#Headline/Subhead (headline path)
+        - UUID (8-4-4-4-12 format)
+        - org://{uri} (any of the above prefixed with `org://')
         Headline paths use URL encoding for special chars."
-  (unless (string-prefix-p "org://" uri)
-    (org-mcp--tool-validation-error "URI must use org:// format: %s"
-                                    uri))
   (org-mcp--handle-headline-resource
-   `(("uri" . ,(substring uri (length "org://"))))))
+   `(("uri" . ,(org-mcp--strip-uri-prefix uri)))))
 
 ;; Clock tools
 

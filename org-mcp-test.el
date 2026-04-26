@@ -1200,7 +1200,7 @@ NEW-BODY is the replacement text."
 
 (defun org-mcp-test--call-read (uri)
   "Call org-read tool via JSON-RPC and return the result.
-URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}."
+URI is {path}, {path}#{headline}, or {uuid}, optionally `org://'-prefixed."
   (let ((params `((uri . ,uri))))
     (mcp-server-lib-ert-call-tool "org-read" params)))
 
@@ -1218,7 +1218,7 @@ FILE is the file path to read the outline from."
 
 (defun org-mcp-test--call-read-headline (uri)
   "Call org-read-headline tool via JSON-RPC and return the result.
-URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}."
+URI is {path}, {path}#{headline}, or {uuid}, optionally `org://'-prefixed."
   (let ((params `((uri . ,uri))))
     (mcp-server-lib-ert-call-tool "org-read-headline" params)))
 
@@ -3789,7 +3789,7 @@ unfinished")))
 
 (defun org-mcp-test--call-read (uri)
   "Call org-read tool via JSON-RPC and return the result.
-URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uuid}."
+URI is {path}, {path}#{headline}, or {uuid}, optionally `org://'-prefixed."
   (let ((params `((uri . ,uri))))
     (mcp-server-lib-ert-call-tool "org-read" params)))
 
@@ -3854,6 +3854,53 @@ URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uui
        (string-match-p
         org-mcp-test--pattern-tool-read-by-id
         result-text)))))
+
+(ert-deftest org-mcp-test-tool-read-file-without-prefix ()
+  "Test org-read accepts a bare file path without the `org://' prefix."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-nested-siblings))
+    (let* ((result-text (org-mcp-test--call-read test-file))
+           (result (json-parse-string result-text :object-type 'alist))
+           (children (alist-get 'children result)))
+      (should (equal (alist-get 'file result) test-file))
+      (should (= (length children) 1))
+      (should (equal (alist-get 'title (aref children 0)) "Parent Task")))))
+
+(ert-deftest org-mcp-test-tool-read-headline-by-id-without-prefix ()
+  "Test org-read-headline accepts a bare UUID without the `org://' prefix."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-nested-siblings
+      `(,org-mcp-test--content-with-id-id)
+    (let ((result-text
+           (org-mcp-test--call-read-headline
+            org-mcp-test--content-with-id-id)))
+      (should
+       (string-match-p
+        org-mcp-test--pattern-tool-read-by-id
+        result-text)))))
+
+(ert-deftest org-mcp-test-tool-read-headline-path-without-prefix ()
+  "Test org-read-headline accepts a bare file#headline without the prefix."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-nested-siblings))
+    (let ((result-text
+           (org-mcp-test--call-read-headline
+            (format "%s#Parent%%20Task/First%%20Child%%2050%%25%%20Complete"
+                    test-file))))
+      (should
+       (string-match-p
+        org-mcp-test--pattern-tool-read-headline-nested
+        result-text)))))
+
+(ert-deftest org-mcp-test-tool-read-by-id-without-prefix ()
+  "Test org-read accepts a bare UUID without the `org://' prefix."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-nested-siblings
+      `(,org-mcp-test--content-with-id-id)
+    (let* ((result-text
+            (org-mcp-test--call-read
+             org-mcp-test--content-with-id-id))
+           (result (json-parse-string result-text :object-type 'alist)))
+      (should (equal (alist-get 'id result)
+                     org-mcp-test--content-with-id-id)))))
 
 (ert-deftest org-mcp-test-tool-read-file-prefers-modified-buffer ()
   "Test org-read-headline file reads prefer modified visited buffers."
