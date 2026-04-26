@@ -30,7 +30,6 @@ Then configure in =config.el=:
   :after org
   :custom
   (org-mcp-allowed-files (mapcar (lambda (f) (expand-file-name f org-directory)) org-agenda-files))
-  (org-mcp-stored-queries-file (expand-file-name "org-mcp-stored-queries.el" doom-user-dir))
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
   :config (if mcp-server-lib--running
@@ -524,67 +523,6 @@ Example:
 }
 #+end_src
 
-*** org-ql-list-stored-queries
-- *Description:* List all stored org-ql queries that have been saved for reuse
-- *Parameters:* None
-- *Returns:* JSON object with =queries= array and =total= count
-- *Configuration:* Requires =org-mcp-stored-queries-file= to be set
-
-Example response:
-#+begin_src json
-{
-  "queries": [
-    {
-      "key": "active-todos",
-      "query": "(todo \"TODO\")",
-      "description": "All active TODO items"
-    }
-  ],
-  "total": 1
-}
-#+end_src
-
-*** org-ql-save-stored-query
-- *Description:* Save a named org-ql query for reuse across sessions. Creates or updates a stored query
-- *Parameters:*
-  - =key= (string, required): Query identifier (alphanumeric, hyphens, and underscores only)
-  - =query= (string, required): org-ql query sexp as a string
-  - =description= (string, optional): Human-readable description
-- *Returns:* JSON object with =success=, =action= (="created"= or ="updated"=), and =key=
-- *Configuration:* Requires =org-mcp-stored-queries-file= to be set
-
-Example:
-#+begin_src json
-# Request:
-{
-  "key": "urgent-work",
-  "query": "(and (todo \"TODO\") (priority \"A\"))",
-  "description": "Urgent work tasks"
-}
-
-# Response:
-{
-  "success": true,
-  "action": "created",
-  "key": "urgent-work"
-}
-#+end_src
-
-*** org-ql-delete-stored-query
-- *Description:* Delete a stored org-ql query by key
-- *Parameters:*
-  - =key= (string, required): Query identifier to delete
-- *Returns:* JSON object with =success= and =key=
-- *Configuration:* Requires =org-mcp-stored-queries-file= to be set
-
-*** org-ql-run-stored-query
-- *Description:* Run a previously saved org-ql query by key
-- *Parameters:*
-  - =key= (string, required): Query identifier to run
-  - =files= (array of strings, optional): Subset of allowed files to search. Defaults to all =org-mcp-allowed-files=
-- *Returns:* Same as =org-ql-query=
-- *Configuration:* Requires =org-mcp-stored-queries-file= to be set
-
 *** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
 - *Parameters:* None
@@ -629,16 +567,6 @@ Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= an
 #+end_src
 
 Each function is called at point with no arguments during result extraction.  Non-nil return values are included in the JSON result under the given key.
-
-** Configuring Stored Queries
-
-To enable stored queries, set the file path where queries will be persisted:
-
-#+begin_src emacs-lisp
-(setq org-mcp-stored-queries-file "~/org/org-mcp-stored-queries.el")
-#+end_src
-
-The file is auto-generated and should not be edited by hand. When =org-mcp-stored-queries-file= is =nil= (the default), stored query tools will return an error.
 
 ** Workaround Tools Duplicating Resource Templates
 
