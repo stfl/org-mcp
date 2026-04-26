@@ -4086,6 +4086,107 @@ This exercises the write path in org-mcp--complete-and-save."
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--clock-out-expected-regex)))
 
+;;; Tests for org-clock-into-drawer behavior (nil and custom drawer name)
+
+(defconst org-mcp-test--clock-task-with-open-clock-no-drawer
+  "* TODO Task One\nCLOCK: [2026-01-01 Thu 10:00]\n"
+  "Org file content with an unclosed CLOCK bare under the heading.
+Used for clock-out tests when `org-clock-into-drawer' is nil.")
+
+(defconst org-mcp-test--clock-add-no-drawer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "\\'")
+  "File contents after clock-add with `org-clock-into-drawer' nil.
+The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
+
+(defconst org-mcp-test--clock-in-no-drawer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   "\\'")
+  "File contents after clock-in with `org-clock-into-drawer' nil.")
+
+(defconst org-mcp-test--clock-out-no-drawer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "\\'")
+  "File contents after clock-out with `org-clock-into-drawer' nil.")
+
+(defconst org-mcp-test--clock-add-custom-drawer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":WORK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents after clock-add with custom `org-clock-into-drawer' name.")
+
+(ert-deftest org-mcp-test-clock-add-no-drawer ()
+  "Test clock-add inserts bare CLOCK when `org-clock-into-drawer' is nil."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((org-clock-into-drawer nil))
+      (let* ((uri (format "org://%s#Task%%20One" test-file))
+             (result (org-mcp-test--call-clock-add
+                      uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'added result) t))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-add-no-drawer-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-no-drawer ()
+  "Test clock-in inserts bare CLOCK when `org-clock-into-drawer' is nil."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((org-clock-into-drawer nil))
+      (let* ((uri (format "org://%s#Task%%20One" test-file))
+             (result (org-mcp-test--call-clock-in
+                      uri "2026-01-01T10:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-in-no-drawer-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-out-no-drawer ()
+  "Test clock-out closes a bare CLOCK when `org-clock-into-drawer' is nil."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        org-mcp-test--clock-task-with-open-clock-no-drawer))
+    (let ((org-clock-into-drawer nil))
+      (let ((result (org-mcp-test--call-clock-out
+                     "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_out result) t)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-out-no-drawer-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-add-custom-drawer ()
+  "Test clock-add uses custom drawer name from `org-clock-into-drawer'."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((org-clock-into-drawer "WORK"))
+      (let* ((uri (format "org://%s#Task%%20One" test-file))
+             (result (org-mcp-test--call-clock-add
+                      uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'added result) t))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-add-custom-drawer-expected-regex)))))
+
 ;;; Tests for org-clock-get-active
 
 (defconst org-mcp-test--clock-mixed-open-closed-content
@@ -4257,6 +4358,36 @@ The Org element parser should still recognize the open clock."
       (org-mcp-test--verify-file-matches
        test-file
        org-mcp-test--clock-delete-one-of-several-expected-regex))))
+
+(defconst org-mcp-test--clock-delete-no-drawer-content
+  (concat
+   "* TODO Task One\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n")
+  "Heading with a bare closed CLOCK entry (no drawer).")
+
+(defconst org-mcp-test--clock-delete-no-drawer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "\\'")
+  "After deleting a bare CLOCK with no drawer, only the heading remains.")
+
+(ert-deftest org-mcp-test-clock-delete-no-drawer ()
+  "Test clock-delete works when CLOCK lines are bare (no drawer).
+Exercises `org-mcp--clock-remove-empty-logbook' when
+`org-clock-drawer-name' returns nil -- it must be a no-op."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-no-drawer-content))
+    (let ((org-clock-into-drawer nil))
+      (let* ((uri (format "org://%s#Task%%20One" test-file))
+             (result
+              (org-mcp-test--call-clock-delete
+               uri "2026-01-01T10:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'deleted result) t))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-delete-no-drawer-expected-regex)))))
 
 (ert-deftest org-mcp-test-clock-delete-locale-variant-day ()
   "Test clock-delete matches on date/time regardless of day-of-week label."

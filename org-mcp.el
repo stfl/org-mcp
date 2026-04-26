@@ -840,16 +840,6 @@ clocks exist."
                    (setq latest end-time)))))))))
     latest))
 
-(defun org-mcp--clock-ensure-logbook ()
-  "Create or find LOGBOOK drawer at current heading.
-Point must be at a heading.  Delegates to `org-log-beginning',
-which correctly handles any order of PROPERTIES drawer and
-planning lines (SCHEDULED/DEADLINE/CLOSED).
-Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
-  (org-back-to-heading t)
-  (let ((org-log-into-drawer t))
-    (org-log-beginning t)))
-
 (defun org-mcp--insert-log-note
     (note purpose &optional state prev-state)
   "Insert NOTE at current heading via Org's log-note machinery.
@@ -881,10 +871,15 @@ already does the formatting and insertion."
     (org-store-log-note)))
 
 (defun org-mcp--clock-insert-entry (start &optional end)
-  "Insert CLOCK line in LOGBOOK at current heading.
+  "Insert CLOCK line at current heading.
 START is the clock start time.  END is optional clock end time.
 If END is provided, inserts a closed clock entry with duration.
-New entries are inserted at the top of the LOGBOOK drawer.
+
+Placement is delegated to `org-clock-find-position', which respects
+`org-clock-into-drawer' and `org-clock-drawer-name' the same way
+`org-clock-in' would: a drawer (LOGBOOK or custom) is created when
+configured, and CLOCK lines are inserted bare under the heading
+when `org-clock-into-drawer' is nil and no drawer already exists.
 
 Why this writes the CLOCK line by hand instead of calling
 `org-clock-in' / `org-clock-out': the caller runs inside
@@ -897,21 +892,21 @@ markers pointing at a dead buffer, or block a non-TTY MCP server.
 Formatting is delegated to Org via `org-mcp--clock-format-timestamp'
 and `org-mcp--clock-duration-string', and the `CLOCK:' prefix uses
 `org-clock-string' so the wire format tracks Org's own constant."
-  (let ((logbook-pos (org-mcp--clock-ensure-logbook)))
-    (goto-char logbook-pos)
-    (if end
-        (let* ((duration (float-time (time-subtract end start)))
-               (dur-str (org-mcp--clock-duration-string duration)))
-          (insert
-           (format "%s %s--%s => %s\n"
-                   org-clock-string
-                   (org-mcp--clock-format-timestamp start)
-                   (org-mcp--clock-format-timestamp end)
-                   dur-str)))
-      (insert
-       (format "%s %s\n"
-               org-clock-string
-               (org-mcp--clock-format-timestamp start))))))
+  (org-back-to-heading t)
+  (org-clock-find-position nil)
+  (if end
+      (let* ((duration (float-time (time-subtract end start)))
+             (dur-str (org-mcp--clock-duration-string duration)))
+        (insert
+         (format "%s %s--%s => %s\n"
+                 org-clock-string
+                 (org-mcp--clock-format-timestamp start)
+                 (org-mcp--clock-format-timestamp end)
+                 dur-str)))
+    (insert
+     (format "%s %s\n"
+             org-clock-string
+             (org-mcp--clock-format-timestamp start)))))
 
 (defun org-mcp--clock-resolve-dangling ()
   "Delete unclosed CLOCK entries under current heading.
@@ -960,8 +955,13 @@ current buffer guarantees the markers we operate on."
     count))
 
 (defun org-mcp--clock-remove-empty-logbook ()
-  "Remove LOGBOOK drawer at current heading if it is empty.
-Point must be at a heading.  Delegates to
+  "Remove the clock drawer at current heading if it is empty.
+Point must be at a heading.  The drawer name comes from
+`org-clock-drawer-name', which respects `org-clock-into-drawer'
+(returns nil when clocks are not placed in a drawer; in that case
+there is nothing to clean up).  When a custom drawer name is
+configured we also sweep the legacy `LOGBOOK' name so previously
+captured clocks are tidied alongside new ones.  Delegates to
 `org-remove-empty-drawer-at', which is a no-op when the drawer has
 any contents (additional CLOCK entries, state notes, plain notes,
 etc.)."
@@ -971,20 +971,25 @@ etc.)."
            (subtree-end
             (save-excursion
               (org-end-of-subtree t t)
-              (point))))
+              (point)))
+           (configured (org-clock-drawer-name))
+           (names
+            (delete-dups (delq nil (list configured "LOGBOOK")))))
       (save-restriction
         (narrow-to-region subtree-begin subtree-end)
-        (let ((drawer-pos
-               (org-element-map
-                (org-element-parse-buffer 'element) 'drawer
-                (lambda (el)
-                  (when (equal
-                         (org-element-property :drawer-name el)
-                         "LOGBOOK")
-                    (org-element-property :begin el)))
-                nil t)))
-          (when drawer-pos
-            (org-remove-empty-drawer-at drawer-pos)))))))
+        (dolist (name names)
+          (let ((drawer-pos
+                 (org-element-map
+                  (org-element-parse-buffer 'element) 'drawer
+                  (lambda (el)
+                    (when (equal
+                           (org-element-property
+                            :drawer-name el)
+                           name)
+                      (org-element-property :begin el)))
+                  nil t)))
+            (when drawer-pos
+              (org-remove-empty-drawer-at drawer-pos))))))))
 
 (defun org-mcp--clock-delete-entry (start-time)
   "Delete CLOCK entry whose start matches START-TIME under current heading.
