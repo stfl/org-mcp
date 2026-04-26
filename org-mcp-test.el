@@ -1588,6 +1588,86 @@ clock entry to delete."
      "/home/user/projects.org"
      "/home/user/notes.org")))
 
+(ert-deftest org-mcp-test-tool-get-allowed-files-relative-paths ()
+  "Relative entries are returned expanded against `org-directory'."
+  (let ((org-directory "/home/user/org/"))
+    (org-mcp-test--get-allowed-files-and-check
+     '("tasks.org" "subdir/projects.org")
+     '("/home/user/org/tasks.org"
+       "/home/user/org/subdir/projects.org"))))
+
+(ert-deftest org-mcp-test-tool-get-allowed-files-mixed-paths ()
+  "Absolute and relative entries coexist; relative resolved against `org-directory'."
+  (let ((org-directory "/home/user/org/"))
+    (org-mcp-test--get-allowed-files-and-check
+     '("/etc/global.org" "tasks.org" "subdir/projects.org")
+     '("/etc/global.org"
+       "/home/user/org/tasks.org"
+       "/home/user/org/subdir/projects.org"))))
+
+(ert-deftest org-mcp-test-tool-get-allowed-files-tilde-expansion ()
+  "Tilde-prefixed entries are expanded to the user's home directory."
+  (let ((org-directory "/home/user/org/"))
+    (org-mcp-test--get-allowed-files-and-check
+     '("~/notes.org")
+     (list (expand-file-name "~/notes.org")))))
+
+(ert-deftest org-mcp-test-find-allowed-file-relative-path ()
+  "`org-mcp--find-allowed-file' resolves a relative entry against `org-directory'."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\n"))
+    (let* ((dir (file-name-directory real-file))
+           (name (file-name-nondirectory real-file))
+           (org-directory dir)
+           (org-mcp-allowed-files (list name)))
+      ;; Looking up by absolute path must find the relative entry.
+      (should (org-mcp--find-allowed-file real-file))
+      (should (org-mcp--paths-equal-p
+               (org-mcp--find-allowed-file real-file)
+               real-file)))))
+
+(ert-deftest org-mcp-test-find-allowed-file-absolute-path-with-org-directory ()
+  "Absolute entries still match when `org-directory' is unrelated."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\n"))
+    (let ((org-directory "/some/other/place/")
+          (org-mcp-allowed-files (list real-file)))
+      (should (org-mcp--paths-equal-p
+               (org-mcp--find-allowed-file real-file)
+               real-file)))))
+
+(ert-deftest org-mcp-test-find-allowed-file-relative-and-absolute-interchangeable ()
+  "The same file is found whether the allowed-list entry is absolute or relative."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\n"))
+    (let* ((dir (file-name-directory real-file))
+           (name (file-name-nondirectory real-file))
+           (org-directory dir))
+      ;; Configured as absolute path
+      (let ((org-mcp-allowed-files (list real-file)))
+        (should (org-mcp--paths-equal-p
+                 (org-mcp--find-allowed-file real-file)
+                 real-file)))
+      ;; Configured as relative path
+      (let ((org-mcp-allowed-files (list name)))
+        (should (org-mcp--paths-equal-p
+                 (org-mcp--find-allowed-file real-file)
+                 real-file))))))
+
+(ert-deftest org-mcp-test-with-allowed-agenda-files-expands-relative ()
+  "`org-mcp--with-allowed-agenda-files' binds `org-agenda-files' to absolute paths."
+  (org-mcp-test--with-temp-org-files
+      ((real-file "* Heading\n"))
+    (let* ((dir (file-name-directory real-file))
+           (name (file-name-nondirectory real-file))
+           (org-directory dir)
+           (org-mcp-allowed-files (list name)))
+      (org-mcp--with-allowed-agenda-files
+        (should (= (length org-agenda-files) 1))
+        (should (org-mcp--paths-equal-p
+                 (car org-agenda-files)
+                 real-file))))))
+
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)
   "Helper for org-add-todo test.

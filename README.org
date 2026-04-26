@@ -29,7 +29,10 @@ Then configure in =config.el=:
 (use-package org-mcp
   :after org
   :custom
-  (org-mcp-allowed-files (mapcar (lambda (f) (expand-file-name f org-directory)) org-agenda-files))
+  ;; Entries may be absolute or relative paths.  Relative entries are
+  ;; resolved against `org-directory' (same convention as
+  ;; `org-agenda-files'), so the two lists can be reused directly.
+  (org-mcp-allowed-files org-agenda-files)
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
   :config (if mcp-server-lib--running
@@ -46,11 +49,21 @@ strongly advised.
 
 ** Configuring allowed files
 
-Once you read and internalized the warning above, set the allowed Org file set, using
-absolute paths:
+Once you read and internalized the warning above, set the allowed Org file set.
+Entries may be absolute or relative paths.  Relative entries are resolved against
+=org-directory= (matching =org-agenda-files= behavior), and tilde / environment
+variable expansion applies.  Absolute and relative entries can be mixed freely:
 
 #+begin_src emacs-lisp
+;; Absolute paths
 (setq org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
+
+;; Relative paths (resolved against `org-directory')
+(setq org-directory "~/org")
+(setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+
+;; Reuse `org-agenda-files' directly
+(setq org-mcp-allowed-files org-agenda-files)
 #+end_src
 
 ** Registering with an MCP Client
@@ -72,7 +85,7 @@ Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib
   - Absolute file path (e.g., =/home/user/org/projects.org=)
   - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=)
   - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=)
-- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
+- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=)
 - *Returns:* Structured JSON with file or headline data including metadata
 
 *Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to

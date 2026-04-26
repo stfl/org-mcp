@@ -41,7 +41,12 @@
 (require 'url-util)
 
 (defcustom org-mcp-allowed-files nil
-  "List of absolute paths to Org files that can be accessed via MCP."
+  "List of paths to Org files that can be accessed via MCP.
+Entries may be absolute or relative paths.  Relative paths are
+resolved against `org-directory', matching the behavior of
+`org-agenda-files'.  Tilde expansion (`~/...') and environment
+variable substitution apply.  Absolute paths pass through
+unchanged, so absolute and relative entries are interchangeable."
   :type '(repeat file)
   :group 'org-mcp)
 
@@ -218,13 +223,24 @@ If no buffer is visiting FILE-PATH yet, the buffer is opened with
 Handles symlinks and path variations by normalizing both paths."
   (string= (file-truename path1) (file-truename path2)))
 
+(defun org-mcp--expanded-allowed-files ()
+  "Return `org-mcp-allowed-files' with each entry made absolute.
+Relative entries are resolved against `org-directory', matching the
+behavior of `org-agenda-files'.  Absolute entries are returned as-is
+after tilde and environment variable expansion."
+  (mapcar
+   (lambda (f) (expand-file-name f org-directory))
+   org-mcp-allowed-files))
+
 (defun org-mcp--find-allowed-file (filename)
   "Find FILENAME in `org-mcp-allowed-files'.
+Compares against the absolute form of each allowed entry (relative
+entries resolved against `org-directory').
 Returns the expanded path if found, nil if not in the allowed list."
   (when-let* ((found
                (cl-find
                 (file-truename filename)
-                org-mcp-allowed-files
+                (org-mcp--expanded-allowed-files)
                 :test #'org-mcp--paths-equal-p)))
     (expand-file-name found)))
 
@@ -309,12 +325,15 @@ unsaved so pre-existing user edits are preserved."
 (defmacro org-mcp--with-allowed-agenda-files (&rest body)
   "Execute BODY with `org-agenda-files' bound to existing allowed files.
 The binding is the subset of `org-mcp-allowed-files' that exists on
-disk.  This is the single ingress point that maps the org-mcp
-security boundary onto Org's multi-file convention, so tool handlers
-can rely on `org-agenda-files' instead of re-implementing the filter."
+disk, with each entry expanded to an absolute path (relative entries
+resolved against `org-directory').  This is the single ingress point
+that maps the org-mcp security boundary onto Org's multi-file
+convention, so tool handlers can rely on `org-agenda-files' instead
+of re-implementing the filter."
   (declare (indent 0) (debug (body)))
   `(let ((org-agenda-files
-          (cl-remove-if-not #'file-exists-p org-mcp-allowed-files)))
+          (cl-remove-if-not
+           #'file-exists-p (org-mcp--expanded-allowed-files))))
      ,@body))
 
 (defmacro org-mcp--modify-and-save
@@ -361,7 +380,7 @@ is not found."
     ;; ID not in database - might not exist or DB is stale
     ;; Fall back to searching allowed files manually
     (let ((found-file nil))
-      (dolist (allowed-file org-mcp-allowed-files)
+      (dolist (allowed-file (org-mcp--expanded-allowed-files))
         (unless found-file
           (when (file-exists-p allowed-file)
             (org-mcp--with-org-file allowed-file
@@ -828,7 +847,7 @@ Uses `org-find-open-clocks' on allowed files.  Falls back to the
 native Emacs clock marker for an unclosed clock in a non-allowed
 file, reading the timestamp via the Org element API."
   (or (catch 'found
-        (dolist (file org-mcp-allowed-files)
+        (dolist (file (org-mcp--expanded-allowed-files))
           (when (file-exists-p file)
             (when-let* ((open (org-find-open-clocks file))
                         (marker (car (car open))))
@@ -875,7 +894,7 @@ Walks clock elements via `org-element-map' and picks the latest
 `:value' end timestamp.  Returns an Emacs time, or nil when no closed
 clocks exist."
   (let ((latest nil))
-    (dolist (file org-mcp-allowed-files)
+    (dolist (file (org-mcp--expanded-allowed-files))
       (when (file-exists-p file)
         (org-mcp--with-org-file file
           (org-element-map
@@ -1497,8 +1516,11 @@ are filtered out.  Tags are returned sorted and deduplicated."
      (default . ,(char-to-string org-priority-default)))))
 
 (defun org-mcp--tool-get-allowed-files ()
-  "Return the list of allowed Org files."
-  (json-encode `((files . ,(vconcat org-mcp-allowed-files)))))
+  "Return the list of allowed Org files.
+Each entry is returned as an absolute path; relative entries in
+`org-mcp-allowed-files' are resolved against `org-directory'."
+  (json-encode
+   `((files . ,(vconcat (org-mcp--expanded-allowed-files))))))
 
 (defun org-mcp--tool-update-todo-state
     (uri new_state &optional current_state note)
