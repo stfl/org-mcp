@@ -18,14 +18,18 @@ shfmt:
 
 # Run the full lint suite (silent on success; failing stage writes
 # .lint-output.txt and exits non-zero, short-circuiting the rest).
-lint: byte-compile elisp-lint org-lint shellcheck zizmor
+lint: install-deps byte-compile elisp-lint org-lint shellcheck zizmor
     @echo "lint: OK"
 
 # --- Individual lint stages -------------------------------------------------
 # Each recipe is a thin wrapper around scripts/quiet.sh; silent on
 # success, writes failing-stage output to .lint-output.txt on failure.
 
-byte-compile:
+install-deps:
+    @scripts/quiet.sh eask install-deps
+
+alias compile := byte-compile
+byte-compile: install-deps
     @scripts/quiet.sh eask recompile
 
 elisp-lint:
