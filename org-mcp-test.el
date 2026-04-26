@@ -1958,16 +1958,20 @@ parent."
            test-file resource-uri "TODO" "INVALID-STATE"))))))
 
 (ert-deftest org-mcp-test-update-todo-state-with-open-buffer ()
-  "Test TODO state update works when file is open in another buffer."
+  "Test TODO state update works when file is open in a clean buffer.
+When the visited buffer was clean, org-mcp edits it and auto-saves to disk."
   (let ((test-content "* TODO Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
       (let ((org-todo-keywords
              '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
-        ;; Open the file in a buffer
+        ;; Open the file in a buffer (clean — not modified)
         (let ((buffer (find-file-noselect test-file)))
           (unwind-protect
               (progn
+                ;; Buffer is clean before the update
+                (with-current-buffer buffer
+                  (should-not (buffer-modified-p)))
                 ;; Update TODO state while buffer is open
                 (let ((resource-uri
                        (format "org://%s#Task%%20One"
@@ -1985,7 +1989,9 @@ parent."
             (kill-buffer buffer)))))))
 
 (ert-deftest org-mcp-test-update-todo-state-with-modified-buffer ()
-  "Test TODO state update fails when buffer has unsaved changes."
+  "Test TODO state update succeeds on a pre-modified buffer without auto-saving.
+When the visited buffer was already dirty before org-mcp writes, the
+edit is applied in-buffer only — the file on disk must remain unchanged."
   (let ((test-content
          "* TODO Task One
 Task description.
@@ -2006,15 +2012,25 @@ Another task description."))
                   ;; Buffer is now modified but not saved
                   (should (buffer-modified-p)))
 
-                ;; Try to update while buffer has unsaved changes
+                ;; Update TODO state — should succeed without auto-save
                 (let ((resource-uri
                        (format "org://%s#Task%%20One"
                                test-file)))
-                  (org-mcp-test--call-update-todo-state-expecting-error
-                   test-file resource-uri "TODO" "IN-PROGRESS")
-                  ;; Verify buffer still has unsaved changes
+                  (let ((result
+                         (org-mcp-test--call-update-todo-state
+                          resource-uri "IN-PROGRESS" "TODO")))
+                    (should (equal (alist-get 'success result) t))
+                    (should (equal (alist-get 'new_state result) "IN-PROGRESS")))
+                  ;; Buffer must still be modified (never auto-saved)
                   (with-current-buffer buffer
-                    (should (buffer-modified-p)))))
+                    (should (buffer-modified-p))
+                    ;; Buffer content reflects the TODO change
+                    (goto-char (point-min))
+                    (should (re-search-forward "^\\* IN-PROGRESS Task One"
+                                               nil t)))
+                  ;; Disk must still have the *original* content — no auto-save
+                  (should (string= (org-mcp-test--read-file test-file)
+                                   test-content))))
             ;; Clean up: kill the buffer
             (kill-buffer buffer)))))))
 
@@ -3839,6 +3855,28 @@ URI must use org:// format: org://{path}, org://{path}#{headline}, or org://{uui
         org-mcp-test--pattern-tool-read-by-id
         result-text)))))
 
+(ert-deftest org-mcp-test-tool-read-file-prefers-modified-buffer ()
+  "Test org-read-headline file reads prefer modified visited buffers."
+  (let ((test-content "* Task One\nOriginal body\n"))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((buffer (find-file-noselect test-file)))
+        (unwind-protect
+            (progn
+              (with-current-buffer buffer
+                (goto-char (point-max))
+                (insert "Unsaved change\n")
+                (should (buffer-modified-p)))
+              (let ((result-text
+                     (org-mcp-test--call-read-headline
+                      (format "org://%s" test-file))))
+                (should (string-match-p "Unsaved change" result-text))
+                (should-not
+                 (string-match-p
+                  "Unsaved change"
+                  (org-mcp-test--read-file test-file)))))
+          (kill-buffer buffer))))))
+
 ;; Tests for body extraction across various metadata layouts.  These
 ;; verify `org-mcp--extract-structured-heading' (via the org-read tool)
 ;; correctly skips planning lines and PROPERTIES/LOGBOOK drawers in any
@@ -3988,6 +4026,35 @@ Body after everything."))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-add-expected-regex))))
 
+(ert-deftest org-mcp-test-clock-add-modified-buffer-no-auto-save ()
+  "Test clock-add on a pre-modified buffer edits in-buffer without auto-save."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            ;; Dirty the buffer with an unrelated edit
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Task Two\n")
+              (should (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-add
+                           uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (equal (alist-get 'added result) t)))
+            ;; Buffer must still be modified
+            (with-current-buffer buffer
+              (should (buffer-modified-p))
+              (goto-char (point-min))
+              (should (re-search-forward
+                       "CLOCK: \\[2026-01-01.*10:00\\].*11:00\\] =>  *1:00"
+                       nil t)))
+            ;; Disk must still equal the original content
+            (should (string= (org-mcp-test--read-file test-file)
+                             org-mcp-test--clock-task-content)))
+        (kill-buffer buffer)))))
+
 (ert-deftest org-mcp-test-clock-in-saves-file-to-disk ()
   "Test org-clock-in saves the open CLOCK entry to disk."
   (org-mcp-test--with-temp-org-files
@@ -3998,6 +4065,34 @@ Body after everything."))
       (should (equal (alist-get 'clocked_in result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-in-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-modified-buffer-no-auto-save ()
+  "Test clock-in on a pre-modified buffer edits in-buffer without auto-save.
+When the visited buffer was already dirty, org-mcp must not save to disk."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "org://%s#Task%%20One" test-file))
+           (buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            ;; Dirty the buffer with an unrelated edit
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Task Two\n")
+              (should (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-in
+                           uri "2026-01-01T10:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (equal (alist-get 'clocked_in result) t)))
+            ;; Buffer must still be modified
+            (with-current-buffer buffer
+              (should (buffer-modified-p))
+              (goto-char (point-min))
+              (should (re-search-forward "CLOCK: \\[2026-01-01" nil t)))
+            ;; Disk must still equal the original content
+            (should (string= (org-mcp-test--read-file test-file)
+                             org-mcp-test--clock-task-content)))
+        (kill-buffer buffer)))))
 
 ;;; Tests for org-clock-in with resolve=true (dangling clock cleanup)
 
@@ -4129,6 +4224,32 @@ This exercises the write path in org-mcp--complete-and-save."
       (should (equal (alist-get 'clocked_out result) t)))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--clock-out-expected-regex)))
+
+(ert-deftest org-mcp-test-clock-out-modified-buffer-no-auto-save ()
+  "Test clock-out on a pre-modified buffer edits in-buffer without auto-save."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let* ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            ;; Dirty the buffer with an unrelated edit
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Task Two\n")
+              (should (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-out
+                           "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (equal (alist-get 'clocked_out result) t)))
+            ;; Buffer must still be modified
+            (with-current-buffer buffer
+              (should (buffer-modified-p))
+              (goto-char (point-min))
+              (should (re-search-forward "CLOCK: \\[2026-01-01.*=>" nil t)))
+            ;; Disk must still equal the original content
+            (should (string= (org-mcp-test--read-file test-file)
+                             org-mcp-test--clock-task-with-open-clock)))
+        (kill-buffer buffer)))))
 
 ;;; Tests for org-clock-into-drawer behavior (nil and custom drawer name)
 

@@ -181,11 +181,37 @@ denied access."
 
 ;; Helpers
 
+(cl-defun
+ org-mcp--file-buffer-context (file-path)
+ "Return canonical buffer context for FILE-PATH.
+The result is a plist with:
+
+- `:buffer'     the canonical visited buffer
+- `:existing-p' non-nil when the buffer was already visiting FILE-PATH
+- `:modified-p' non-nil when that buffer was already modified before
+                org-mcp touched it
+
+If no buffer is visiting FILE-PATH yet, the buffer is opened with
+`find-file-noselect'."
+ (let* ((existing-buf (find-buffer-visiting file-path))
+        (buf (or existing-buf (find-file-noselect file-path))))
+   (list
+    :buffer buf
+    :existing-p (not (null existing-buf))
+    :modified-p
+    (with-current-buffer buf
+      (buffer-modified-p)))))
+
+(defun org-mcp--get-file-buffer (file-path)
+  "Return the canonical visited buffer for FILE-PATH."
+  (plist-get (org-mcp--file-buffer-context file-path) :buffer))
+
 (defun org-mcp--read-file (file-path)
-  "Read and return the contents of FILE-PATH."
-  (with-temp-buffer
-    (insert-file-contents file-path)
-    (buffer-string)))
+  "Read and return the current canonical contents of FILE-PATH."
+  (with-current-buffer (org-mcp--get-file-buffer file-path)
+    (save-restriction
+      (widen)
+      (buffer-string))))
 
 (defun org-mcp--paths-equal-p (path1 path2)
   "Return t if PATH1 and PATH2 refer to the same file.
@@ -202,97 +228,112 @@ Returns the expanded path if found, nil if not in the allowed list."
                 :test #'org-mcp--paths-equal-p)))
     (expand-file-name found)))
 
-(defun org-mcp--refresh-file-buffers (file-path)
-  "Refresh all buffers visiting FILE-PATH.
-Preserves narrowing state across the refresh operation."
+(defun org-mcp--refresh-file-buffers
+    (file-path &optional except-buffer)
+  "Refresh clean buffers visiting FILE-PATH except EXCEPT-BUFFER.
+Preserves user edits by skipping already-modified buffers. Preserves
+narrowing state across the refresh operation."
   (dolist (buf (buffer-list))
-    (with-current-buffer buf
-      (when-let* ((buf-file (buffer-file-name)))
-        (when (string= buf-file file-path)
-          (let ((was-narrowed (buffer-narrowed-p))
-                (narrow-start nil)
-                (narrow-end nil))
-            ;; Save narrowing markers if narrowed
-            (when was-narrowed
-              (setq narrow-start (point-min-marker))
-              (setq narrow-end (point-max-marker)))
-            (condition-case err
-                (unwind-protect
-                    (progn
-                      (revert-buffer t t t)
-                      ;; Check if buffer was modified by hooks
-                      (when (buffer-modified-p)
-                        (org-mcp--tool-validation-error
-                         "Buffer for file %s was modified during \
+    (when (not (eq buf except-buffer))
+      (with-current-buffer buf
+        (when-let* ((buf-file (buffer-file-name)))
+          (when (and (org-mcp--paths-equal-p buf-file file-path)
+                     (not (buffer-modified-p)))
+            (let ((was-narrowed (buffer-narrowed-p))
+                  (narrow-start nil)
+                  (narrow-end nil))
+              ;; Save narrowing markers if narrowed
+              (when was-narrowed
+                (setq narrow-start (point-min-marker))
+                (setq narrow-end (point-max-marker)))
+              (condition-case err
+                  (save-mark-and-excursion
+                    (unwind-protect
+                        (progn
+                          (revert-buffer t t t)
+                          ;; Check if buffer was modified by hooks
+                          (when (buffer-modified-p)
+                            (org-mcp--tool-validation-error
+                             "Buffer for file %s was modified during \
 refresh.  Check your `after-revert-hook' for functions that modify \
 the buffer"
-                         file-path)))
-                  ;; Restore narrowing even if revert fails
-                  (when was-narrowed
-                    (narrow-to-region narrow-start narrow-end)))
-              (error
-               (org-mcp--tool-validation-error
-                "Failed to refresh buffer for file %s: %s. \
+                             file-path)))
+                      ;; Restore narrowing even if revert fails
+                      (when was-narrowed
+                        (narrow-to-region narrow-start narrow-end))))
+                (error
+                 (org-mcp--tool-validation-error
+                  "Failed to refresh buffer for file %s: %s. \
 Check your Emacs hooks (`before-revert-hook', \
 `after-revert-hook', `revert-buffer-function')"
-                file-path (error-message-string err))))))))))
+                  file-path (error-message-string err)))))))))))
 
-(defun org-mcp--complete-and-save (file-path response-alist)
-  "Create ID if needed, save FILE-PATH, return JSON.
+(defun org-mcp--complete-and-save (response-alist)
+  "Create ID if needed and return JSON.
 Creates or gets an Org ID for the current headline and returns it.
-FILE-PATH is the visited file path; used only for buffer refresh.
 RESPONSE-ALIST is an alist of response fields."
   (let ((id (org-id-get-create)))
-    (save-buffer)
-    (org-mcp--refresh-file-buffers file-path)
     (json-encode
      (append
       `((success . t))
       response-alist
       `((uri . ,(org-mcp--build-org-uri-from-id id)))))))
 
-(defun org-mcp--fail-if-modified (file-path operation)
-  "Check if FILE-PATH has unsaved change in any buffer.
-OPERATION is a string describing the operation for error messages."
-  (dolist (buf (buffer-list))
+(defun org-mcp--maybe-save-buffer
+    (buf file-path preexisting-modified-p)
+  "Save BUF when it was clean before org-mcp wrote to it.
+FILE-PATH is refreshed in other visiting buffers only after an actual
+save. If PREEXISTING-MODIFIED-P is non-nil, BUF is left dirty and
+unsaved so pre-existing user edits are preserved."
+  (unless preexisting-modified-p
     (with-current-buffer buf
-      (when (and (buffer-file-name)
-                 (string= (buffer-file-name) file-path)
-                 (buffer-modified-p))
-        (org-mcp--tool-validation-error
-         "Cannot %s: file has unsaved changes in buffer"
-         operation)))))
+      (when (buffer-modified-p)
+        (save-buffer)))
+    (org-mcp--refresh-file-buffers file-path buf)))
 
 (defmacro org-mcp--with-org-file (file-path &rest body)
-  "Execute BODY in a temp Org buffer with file at FILE-PATH."
+  "Execute BODY in the canonical Org buffer for FILE-PATH."
   (declare (indent 1) (debug (form body)))
-  `(with-temp-buffer
-     (insert-file-contents ,file-path)
-     (org-mode)
-     (goto-char (point-min))
-     ,@body))
+  `(let ((buf (org-mcp--get-file-buffer ,file-path))
+         (result nil))
+     (with-current-buffer buf
+       (save-restriction
+         (widen)
+         (setq result
+               (save-mark-and-excursion
+                 (save-match-data
+                   (goto-char (point-min))
+                   ,@body)))))
+     result))
 
 (defmacro org-mcp--modify-and-save
     (file-path operation response-alist &rest body)
-  "Execute BODY to modify Org file at FILE-PATH, then save result.
-First validates that FILE-PATH has no unsaved changes (using
-OPERATION for error messages).  Then executes BODY in a temp buffer
-set up for the Org file.  After BODY executes, creates an Org ID if
-needed, saves the buffer, refreshes any visiting buffers, and
-returns the result of `org-mcp--complete-and-save' with FILE-PATH
-and RESPONSE-ALIST.
+  "Execute BODY to modify Org file at FILE-PATH.
+BODY runs in the canonical visited buffer for FILE-PATH. If the
+buffer was already modified before BODY runs, org-mcp leaves it dirty
+and unsaved. Otherwise it saves the buffer and refreshes other clean
+visiting buffers afterward. OPERATION is retained for call-site
+clarity and compatibility.
 BODY can access FILE-PATH, OPERATION, and RESPONSE-ALIST as
 variables."
   (declare (indent 3) (debug (form form form body)))
-  `(progn
-     (org-mcp--fail-if-modified ,file-path ,operation)
-     (with-temp-buffer
-       (set-visited-file-name ,file-path t)
-       (insert-file-contents ,file-path)
-       (org-mode)
-       (goto-char (point-min))
-       ,@body
-       (org-mcp--complete-and-save ,file-path ,response-alist))))
+  `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
+          (buf (plist-get ctx :buffer))
+          (preexisting-modified-p (plist-get ctx :modified-p))
+          (result nil))
+     (ignore ,operation)
+     (with-current-buffer buf
+       (save-restriction
+         (widen)
+         (setq result
+               (save-mark-and-excursion
+                 (save-match-data
+                   (goto-char (point-min))
+                   ,@body
+                   (org-mcp--complete-and-save ,response-alist))))))
+     (org-mcp--maybe-save-buffer
+      buf ,file-path preexisting-modified-p)
+     result))
 
 (defun org-mcp--find-allowed-file-with-id (id)
   "Find an allowed file containing the Org ID.
@@ -884,13 +925,12 @@ configured, and CLOCK lines are inserted bare under the heading
 when `org-clock-into-drawer' is nil and no drawer already exists.
 
 Why this writes the CLOCK line by hand instead of calling
-`org-clock-in' / `org-clock-out': the caller runs inside
-`org-mcp--modify-and-save', which executes in a `with-temp-buffer'
-that is killed on save.  Those Org APIs start mode-line/idle
+`org-clock-in' / `org-clock-out': `org-mcp--modify-and-save' may run
+inside an existing user buffer, and those Org APIs start mode-line/idle
 timers, set `org-clock-marker' and `org-clock-hd-marker', push to
 `org-clock-history', and invoke `org-resolve-clocks' interactively
 on dangling clocks -- all of which either leak timers, leave stale
-markers pointing at a dead buffer, or block a non-TTY MCP server.
+global clock state behind, or block a non-TTY MCP server.
 Formatting is delegated to Org via `org-mcp--clock-format-timestamp'
 and `org-mcp--clock-duration-string', and the `CLOCK:' prefix uses
 `org-clock-string' so the wire format tracks Org's own constant."
@@ -919,13 +959,12 @@ CLOCK line and collapses the containing drawer when it becomes
 empty via `org-remove-empty-drawer-at'.  Returns count of deleted
 entries.
 
-`org-find-open-clocks' is deliberately not used here: the caller
-runs inside a `with-temp-buffer' from `org-mcp--modify-and-save',
-but another buffer may already be visiting the same file (e.g. the
-buffer opened earlier by `org-mcp--clock-find-active').  That API
-returns markers in whichever buffer `get-file-buffer' finds first,
-which is not guaranteed to be the edit buffer.  Element-map on the
-current buffer guarantees the markers we operate on."
+`org-find-open-clocks' is deliberately not used here because another
+buffer may already be visiting the same file (e.g. the buffer opened
+earlier by `org-mcp--clock-find-active'). That API returns markers in
+whichever buffer `get-file-buffer' finds first, which is not guaranteed
+to be the buffer currently being edited. Element-map on the current
+buffer guarantees the markers we operate on."
   (org-back-to-heading t)
   (let* ((subtree-begin (point))
          (subtree-end
@@ -2650,33 +2689,50 @@ MCP Parameters:
                  now)))
              (marker (alist-get 'marker active)))
         (if (alist-get 'allowed active)
-            ;; Allowed file: close via org-clock-out
+            ;; Allowed file: close via org-clock-out using canonical buffer
             (progn
-              (org-mcp--fail-if-modified active-file "clock-in")
-              (when marker
-                (let ((buf (marker-buffer marker)))
+              (let* ((buf (org-mcp--get-file-buffer active-file))
+                     (was-modified
+                      (with-current-buffer buf
+                        (buffer-modified-p)))
+                     (start-str (alist-get 'start active)))
+                (when start-str
                   (with-current-buffer buf
-                    (save-excursion
-                      (goto-char marker)
-                      (let ((el (org-element-at-point)))
-                        (when (eq (org-element-type el) 'clock)
-                          (move-marker
-                           org-clock-marker
-                           (org-element-property :begin el))
-                          (move-marker
-                           org-clock-hd-marker
-                           (save-excursion
-                             (org-back-to-heading t)
-                             (point)))
-                          (org-clock-out nil t close-at)
-                          (save-buffer))))))
-                (org-mcp--refresh-file-buffers active-file)))
+                    (save-mark-and-excursion
+                      (save-match-data
+                        (goto-char (point-min))
+                        (when (re-search-forward
+                               (concat
+                                "^\\([ \t]*CLOCK: \\["
+                                (regexp-quote start-str)
+                                "\\]\\)[ \t]*$")
+                               nil t)
+                          (goto-char (match-beginning 1))
+                          (let ((el (org-element-at-point)))
+                            (when (eq (org-element-type el) 'clock)
+                              (move-marker
+                               org-clock-marker
+                               (org-element-property :begin el))
+                              (move-marker
+                               org-clock-hd-marker
+                               (save-excursion
+                                 (org-back-to-heading t)
+                                 (point)))
+                              (org-clock-out nil t close-at)))))))
+                  (org-mcp--maybe-save-buffer
+                   buf active-file was-modified))))
           ;; Non-allowed file: close via org-clock-out
           (let ((buf (marker-buffer org-clock-marker)))
             (when buf
-              (with-current-buffer buf
-                (org-clock-out nil t close-at)
-                (save-buffer)))))))
+              (let ((was-modified
+                     (with-current-buffer buf
+                       (buffer-modified-p))))
+                (with-current-buffer buf
+                  (org-clock-out nil t close-at))
+                (unless was-modified
+                  (with-current-buffer buf
+                    (when (buffer-modified-p)
+                      (save-buffer))))))))))
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously (not explicit-start))
