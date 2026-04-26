@@ -75,12 +75,16 @@ Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= using absolute paths
 - *Returns:* Structured JSON with file or headline data including metadata
 
-*Note:* Tool calls that take a =uri= parameter (e.g. =org-read=,
-=org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=) accept
-the URI either with or without the =org://= prefix. A bare UUID, file path,
-or =file#headline= descriptor is treated identically to its =org://=-prefixed
-form. The prefix is still required when accessing resources (the MCP
-resource template matches =org://{uri}= literally).
+*Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
+the MCP /resource/ layer — it is the URI scheme used by the
+=org://{uri}= resource template above. Tool calls (e.g. =org-read=,
+=org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
+take their =uri= parameter in *bare* form only — pass a UUID, file
+path, or =file#headline= descriptor *without* the =org://= prefix.
+A prefixed input is rejected with a validation error. Tool /responses/
+still emit fully-qualified =org://{uri}= URIs in their =uri= fields,
+so a returned URI is directly usable as a resource identifier (just
+strip the prefix if you want to feed it back into another tool).
 
 Example response for a headline:
 #+begin_src json
