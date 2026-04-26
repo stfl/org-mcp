@@ -2453,6 +2453,95 @@ Task body."
        nil
        parent-uri))))
 
+(ert-deftest org-mcp-test-add-todo-invalid-state-error-lists-valid-states ()
+  "Invalid TODO state error lists every valid keyword from `org-todo-keywords-1'."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-empty))
+    (let ((org-todo-keywords
+           '((sequence "TODO" "NEXT" "|" "DONE" "CANCELED")))
+          (org-tag-alist '("work")))
+      (let* ((parent-uri (format "org://%s#" test-file))
+             (params
+              `((title . "New Task")
+                (todo_state . "BOGUS")
+                (tags . ("work"))
+                (body . nil)
+                (parent_uri . ,parent-uri)))
+             (request
+              (mcp-server-lib-create-tools-call-request
+               "org-add-todo" nil params))
+             (response
+              (mcp-server-lib-process-jsonrpc-parsed
+               request mcp-server-lib-ert-server-id))
+             (err
+              (should-error
+               (mcp-server-lib-ert-process-tool-response response)
+               :type 'mcp-server-lib-tool-error))
+             (msg (error-message-string err)))
+        (should (string-match-p "Invalid TODO state: 'BOGUS'" msg))
+        (dolist (kw '("TODO" "NEXT" "DONE" "CANCELED"))
+          (should (string-match-p (regexp-quote kw) msg)))
+        (should-not (string-match-p "|" msg))))))
+
+(ert-deftest org-mcp-test-add-todo-valid-state-with-fast-access-and-log-spec ()
+  "Adding TODO accepts a bare keyword name when the sequence
+declares fast-access keys plus state-logging specs (e.g. `(c!)' =
+fast key `c' + log timestamp on entry)."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-empty))
+    (let ((org-todo-keywords
+           '((sequence "TODO(t!)" "|" "DONE(d!)" "CANCELED(c!)")))
+          (org-tag-alist '("work"))
+          (org-id-locations-file nil))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        (org-mcp-test--add-todo-and-check
+         "Cancel Me"
+         "CANCELED"
+         '("work")
+         nil
+         parent-uri
+         nil
+         (file-name-nondirectory test-file)
+         test-file
+         "^\\* CANCELED Cancel Me +:work:")))))
+
+(ert-deftest org-mcp-test-add-todo-rejects-raw-fast-access-form ()
+  "TODO state passed in raw `KEYWORD(key+logspec)' form is rejected."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-empty))
+    (let ((org-todo-keywords
+           '((sequence "TODO(t!)" "|" "DONE(d!)")))
+          (org-tag-alist '("work")))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file
+         "New Task"
+         "TODO(t!)" ; selection-key form is not the state name
+         '("work")
+         nil
+         parent-uri)))))
+
+(ert-deftest org-mcp-test-add-todo-valid-state-multiple-sequences ()
+  "Adding TODO accepts a keyword drawn from a non-first sequence."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-empty))
+    (let ((org-todo-keywords
+           '((sequence "TODO" "|" "DONE")
+             (type "BUG" "FEATURE" "|" "FIXED")))
+          (org-tag-alist '("work"))
+          (org-id-locations-file nil))
+      (let ((parent-uri (format "org://%s#" test-file)))
+        (org-mcp-test--add-todo-and-check
+         "File Bug"
+         "BUG"
+         '("work")
+         nil
+         parent-uri
+         nil
+         (file-name-nondirectory test-file)
+         test-file
+         "^\\* BUG File Bug +:work:")))))
+
 (ert-deftest org-mcp-test-add-todo-empty-title ()
   "Test that adding TODO with empty title throws error."
   (org-mcp-test--assert-add-todo-invalid-title ""))

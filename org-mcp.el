@@ -1009,16 +1009,15 @@ Returns an alist with deleted entry info, or nil if not found."
     found))
 
 (defun org-mcp--validate-todo-state (state)
-  "Validate STATE is a valid TODO keyword."
-  (let ((valid-states
-         (delete
-          "|"
-          (org-remove-keyword-keys
-           (apply #'append (mapcar #'cdr org-todo-keywords))))))
-    (unless (member state valid-states)
-      (org-mcp--tool-validation-error
-       "Invalid TODO state: '%s' - valid states: %s"
-       state (mapconcat #'identity valid-states ", ")))))
+  "Validate STATE is a valid TODO keyword.
+Reads the buffer-local `org-todo-keywords-1', which Org populates
+from the user customization merged with any per-file `#+TODO:'
+directives.  Must be called from within an Org-mode buffer (e.g.
+inside `org-mcp--modify-and-save')."
+  (unless (member state org-todo-keywords-1)
+    (org-mcp--tool-validation-error
+     "Invalid TODO state: '%s' - valid states: %s"
+     state (mapconcat #'identity org-todo-keywords-1 ", "))))
 
 (defun org-mcp--validate-and-normalize-tags (tags)
   "Validate and normalize TAGS.
@@ -1368,7 +1367,14 @@ BODY-END is the buffer position where body ends."
 ;; Tool handlers
 
 (defun org-mcp--tool-get-todo-config ()
-  "Return the TODO keyword configuration."
+  "Return the TODO keyword configuration.
+Walks `org-todo-keywords' directly rather than the parsed
+`org-todo-keywords-1' / `org-done-keywords' so the response can
+preserve each keyword's raw form (the fast-access key plus
+state-logging directives, e.g. \"TODO(t!)\" = fast key `t' and
+log a timestamp on entry) along with the explicit `\"|\"'
+separator position.  Clients of this tool depend on those
+fields, and the parsed siblings discard them."
   (let ((seq-list '())
         (sem-list '()))
     (dolist (seq org-todo-keywords)
@@ -1447,10 +1453,12 @@ MCP Parameters:
          (file-path (car parsed))
          (headline-path (cdr parsed))
          (actual-prev nil))
-    (org-mcp--validate-todo-state new_state)
     (org-mcp--modify-and-save file-path "update"
                               `((previous_state . ,actual-prev)
                                 (new_state . ,new_state))
+      ;; Validate inside the Org buffer so `org-todo-keywords-1'
+      ;; reflects merged user-customization + per-file `#+TODO:'.
+      (org-mcp--validate-todo-state new_state)
       (org-mcp--goto-headline-from-uri
        headline-path (org-mcp--uri-is-id-based uri))
 
@@ -1514,7 +1522,6 @@ MCP Parameters:
                 - org://{absolute-path}#{headline-path}
                 - org://{id}"
   (org-mcp--validate-headline-title title)
-  (org-mcp--validate-todo-state todo_state)
   (let* ((tag-list (org-mcp--validate-and-normalize-tags tags))
          file-path
          parent-path
@@ -1544,6 +1551,9 @@ MCP Parameters:
                                  .
                                  ,(file-name-nondirectory file-path))
                                 (title . ,title))
+      ;; Validate inside the Org buffer so `org-todo-keywords-1'
+      ;; reflects merged user-customization + per-file `#+TODO:'.
+      (org-mcp--validate-todo-state todo_state)
       (let ((parent-level
              (org-mcp--navigate-to-parent-or-top
               parent-path parent-id)))
