@@ -850,6 +850,36 @@ Returns point at start of LOGBOOK content (after :LOGBOOK: line)."
   (let ((org-log-into-drawer t))
     (org-log-beginning t)))
 
+(defun org-mcp--insert-log-note
+    (note purpose &optional state prev-state)
+  "Insert NOTE at current heading via Org's log-note machinery.
+
+NOTE is the user-supplied note text (may be multi-line).
+PURPOSE is a symbol from `org-log-note-headings' (e.g. `note', `state').
+STATE and PREV-STATE are the new and previous TODO state strings used
+when PURPOSE is `state'.
+
+Honors `org-log-note-headings' for the entry template and
+`org-log-into-drawer' for placement.  The interactive
+`org-add-log-note' post-command-hook is bypassed by populating the
+*Org Note* buffer directly and calling `org-store-log-note', which
+already does the formatting and insertion."
+  (move-marker org-log-note-marker (point))
+  (setq
+   org-log-note-purpose purpose
+   org-log-note-state state
+   org-log-note-previous-state prev-state
+   org-log-note-extra nil
+   org-log-note-effective-time (org-current-effective-time))
+  (move-marker org-log-note-return-to (point))
+  (setq org-log-note-window-configuration
+        (current-window-configuration))
+  (save-current-buffer
+    (set-buffer (get-buffer-create "*Org Note*"))
+    (erase-buffer)
+    (insert note)
+    (org-store-log-note)))
+
 (defun org-mcp--clock-insert-entry (start &optional end)
   "Insert CLOCK line in LOGBOOK at current heading.
 START is the clock start time.  END is optional clock end time.
@@ -1474,28 +1504,18 @@ MCP Parameters:
            (or (org-get-todo-state) "(no state)")
            "State")))
 
-      ;; Update the state
-      (org-todo new_state)
+      ;; Update the state.  Bind `post-command-hook' to nil so that any
+      ;; interactive log-note hook `org-todo' may schedule (e.g. when
+      ;; `org-log-done' is set) cannot fire later -- we attach our own
+      ;; note explicitly via `org-mcp--insert-log-note' below.
+      (let ((post-command-hook nil))
+        (org-todo new_state))
 
       ;; Add note to state transition if provided
       (when (and note (not (string-empty-p (string-trim note))))
-        ;; Discard any interactive log hook org-todo may have set up
-        (remove-hook 'post-command-hook 'org-add-log-note)
-        ;; Set up state-type note at current headline position
-        (org-add-log-setup 'state new_state actual-prev 'note)
-        ;; Remove hook again; we handle the note ourselves
-        (remove-hook 'post-command-hook 'org-add-log-note)
-        ;; Initialize the variables that org-add-log-note (the interactive
-        ;; hook we bypassed) would normally set before org-store-log-note
-        (move-marker org-log-note-return-to (point))
-        (setq org-log-note-window-configuration
-              (current-window-configuration))
-        ;; Store note text and insert into buffer via marker
-        (save-current-buffer
-          (set-buffer (get-buffer-create "*Org Note*"))
-          (erase-buffer)
-          (insert note)
-          (org-store-log-note))))))
+        (org-mcp--insert-log-note note 'state
+                                  new_state
+                                  actual-prev)))))
 
 (defun org-mcp--tool-add-todo
     (title todo_state body parent_uri &optional tags after_uri)
@@ -2163,19 +2183,7 @@ MCP Parameters:
     (org-mcp--modify-and-save file-path "add logbook note" nil
       (org-mcp--goto-headline-from-uri
        headline-path (org-mcp--uri-is-id-based uri))
-
-      (let ((logbook-pos (org-mcp--clock-ensure-logbook))
-            (timestamp
-             (format-time-string (org-time-stamp-format t t))))
-        (goto-char logbook-pos)
-        ;; Format note lines: first line after timestamp, rest indented
-        (let* ((lines (split-string note "\n"))
-               (first-line (car lines))
-               (rest-lines (cdr lines)))
-          (insert (format "- Note taken on %s \\\\\n" timestamp))
-          (insert (format "  %s\n" first-line))
-          (dolist (line rest-lines)
-            (insert (format "  %s\n" line))))))))
+      (org-mcp--insert-log-note note 'note))))
 
 ;; org-ql integration
 

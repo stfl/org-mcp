@@ -2110,6 +2110,15 @@ Another task."))
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching buffer after updating Task One to DONE with a note.")
 
+(defconst org-mcp-test--expected-task-one-done-with-note-no-drawer-regex
+  (concat
+   "\\`\\* DONE Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "- State \"DONE\"[ \t]+from \"TODO\"[ \t]+\\[.*\\] \\\\\\\\\n"
+   "  Test note\n"
+   "\\(?:.\\|\n\\)*\\'")
+  "Regex after marking Task One DONE with a note and no LOGBOOK drawer.")
+
 (defconst org-mcp-test--content-task-scheduled-repeat
   "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu +1w>"
   "Task with a +1w SCHEDULED repeater.")
@@ -2415,6 +2424,43 @@ Task body."
    "Task body text\\.\n?\\'")
   "Pattern after adding multiline logbook note.")
 
+(defconst org-mcp-test--pattern-logbook-note-special-chars
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Quotes \"like this\", backslash \\\\, percent %, asterisk \\*\\.\n"
+   ":END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding logbook note with special characters.")
+
+(defconst org-mcp-test--pattern-logbook-note-no-drawer
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Plain note\\.\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding logbook note with `org-log-into-drawer' nil.")
+
+(defconst org-mcp-test--pattern-logbook-note-custom-heading
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "- Custom note prefix \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  My note\\.\n"
+   ":END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding logbook note with custom `org-log-note-headings'.")
+
 (defconst org-mcp-test--crud-test-id
   "crud-test-id-001"
   "ID for CRUD test entries.")
@@ -2450,6 +2496,30 @@ Task body."
             (org-mcp-test--verify-file-matches
              test-file
              org-mcp-test--expected-task-one-done-with-note-regex)))))))
+
+(ert-deftest org-mcp-test-update-todo-state-with-note-no-drawer ()
+  "Test TODO state update with note when `org-log-into-drawer' is nil.
+The note is inserted directly under the heading rather than in a
+LOGBOOK drawer."
+  (let ((test-content "* TODO Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-log-into-drawer nil))
+        (let ((resource-uri
+               (format "org://%s#Task%%20One" test-file)))
+          (let* ((params `((uri . ,resource-uri)
+                           (new_state . "DONE")
+                           (note . "Test note")))
+                 (result-text (mcp-server-lib-ert-call-tool
+                               "org-update-todo-state" params))
+                 (result (json-read-from-string result-text)))
+            (should (equal (alist-get 'success result) t))
+            (should (equal (alist-get 'previous_state result) "TODO"))
+            (should (equal (alist-get 'new_state result) "DONE"))
+            (org-mcp-test--verify-file-matches
+             test-file
+             org-mcp-test--expected-task-one-done-with-note-no-drawer-regex)))))))
 
 (ert-deftest org-mcp-test-update-todo-state-triggers-repeat ()
   "Test that marking DONE on a task with a repeater triggers the repeat."
@@ -4855,45 +4925,48 @@ not membership in the configured alist."
   "Test adding logbook note to task without LOGBOOK."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (format "org://%s#Simple%%20Task" test-file))
-           (params `((uri . ,uri)
-                     (note . "This is my note.")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (string-prefix-p "org://" (alist-get 'uri result)))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-logbook-note-new))))
+    (let ((org-log-into-drawer t))
+      (let* ((uri (format "org://%s#Simple%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (note . "This is my note.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (should (string-prefix-p "org://" (alist-get 'uri result)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-new)))))
 
 (ert-deftest org-mcp-test-add-logbook-note-existing ()
   "Test adding logbook note to task with existing LOGBOOK."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-logbook))
-    (let* ((uri (format "org://%s#Task%%20with%%20Logbook"
-                        test-file))
-           (params `((uri . ,uri)
-                     (note . "Another note.")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-logbook-note-existing))))
+    (let ((org-log-into-drawer t))
+      (let* ((uri (format "org://%s#Task%%20with%%20Logbook"
+                          test-file))
+             (params `((uri . ,uri)
+                       (note . "Another note.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-existing)))))
 
 (ert-deftest org-mcp-test-add-logbook-note-multiline ()
   "Test adding multiline logbook note with proper indentation."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (format "org://%s#Simple%%20Task" test-file))
-           (params `((uri . ,uri)
-                     (note . "First line.\nSecond line.")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-logbook-note-multiline))))
+    (let ((org-log-into-drawer t))
+      (let* ((uri (format "org://%s#Simple%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (note . "First line.\nSecond line.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-multiline)))))
 
 (ert-deftest org-mcp-test-add-logbook-note-whitespace-only-error ()
   "Test that whitespace-only note is rejected."
@@ -4926,6 +4999,57 @@ not membership in the configured alist."
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'uri result) uri)))))
+
+(ert-deftest org-mcp-test-add-logbook-note-special-chars ()
+  "Test adding logbook note containing special characters."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-log-into-drawer t))
+      (let* ((uri (format "org://%s#Simple%%20Task" test-file))
+             (params
+              `((uri . ,uri)
+                (note
+                 . "Quotes \"like this\", backslash \\, percent %, asterisk *.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-special-chars)))))
+
+(ert-deftest org-mcp-test-add-logbook-note-no-drawer ()
+  "Test adding logbook note when `org-log-into-drawer' is nil.
+The note is inserted under the heading rather than in a LOGBOOK
+drawer, matching Org's own behavior."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-log-into-drawer nil))
+      (let* ((uri (format "org://%s#Simple%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (note . "Plain note.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-no-drawer)))))
+
+(ert-deftest org-mcp-test-add-logbook-note-custom-heading ()
+  "Test that a non-default `org-log-note-headings' template is honored."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-log-into-drawer t)
+          (org-log-note-headings
+           '((note . "Custom note prefix %t"))))
+      (let* ((uri (format "org://%s#Simple%%20Task" test-file))
+             (params `((uri . ,uri)
+                       (note . "My note.")))
+             (result-text
+              (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
+             (result (json-read-from-string result-text)))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-logbook-note-custom-heading)))))
 
 ;; Helper functions for testing org-ql-query MCP tool
 
