@@ -17,7 +17,8 @@
 
 (package-file "org-mcp.el")
 
-(files "org-mcp.el")
+(files "org-mcp.el"
+       "scripts/org-mcp-stdio.sh")
 
 (script "test" "eask test ert org-mcp-test.el")
 

@@ -77,13 +77,32 @@ relative entry can be referenced through an absolute-path URI, and vice versa.
 
 ** Registering with an MCP Client
 
-After =mcp-server-lib= has been properly installed (including =M-x mcp-server-lib-install=), register =org-mcp= with your MCP client:
+org-mcp ships a thin wrapper, =org-mcp-stdio.sh=, that injects the
+correct =--server-id=, =--init-function=, and =--stop-function= so
+client configs only need to point at the script.  Install both shims
+into =mcp-server-lib-install-directory= (defaults to
+=user-emacs-directory=, so =~/.emacs.d/=):
+
+#+begin_example
+M-x mcp-server-lib-install RET   ;; installs emacs-mcp-stdio.sh
+M-x org-mcp-install RET          ;; installs org-mcp-stdio.sh
+#+end_example
+
+=org-mcp-stdio.sh= resolves =emacs-mcp-stdio.sh= relative to its own
+directory, so co-locating both shims in the same directory (the
+default) requires no extra configuration.  Then register =org-mcp=
+with your MCP client:
 
 #+begin_src bash
-claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/emacs-mcp-stdio.sh --server-id=org-mcp --init-function=org-mcp-enable --stop-function=org-mcp-disable
+claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
 #+end_src
 
+Extra arguments are forwarded to =emacs-mcp-stdio.sh=, so callers can
+still pass =--socket=...= or override defaults if needed.
+
 Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib-start=. Stop it with =M-x mcp-server-lib-stop= when done.
+
+To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 
 ** Available MCP Resources
 

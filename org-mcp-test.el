@@ -6028,5 +6028,90 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
     (should-error
      (mcp-server-lib-ert-call-tool "query-backlog" nil))))
 
+;;; Script installation tests
+
+(ert-deftest org-mcp-test-install ()
+  "Test org-mcp-stdio.sh installation to a temporary directory."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
+            (org-mcp-install))
+          (should
+           (file-exists-p (org-mcp--installed-script-path)))
+          (should
+           (file-executable-p (org-mcp--installed-script-path))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest org-mcp-test-install-overwrite ()
+  "Test org-mcp-stdio.sh installation when file already exists."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir)
+         (target (org-mcp--installed-script-path)))
+    (unwind-protect
+        (progn
+          (write-region "existing content" nil target)
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
+            (org-mcp-install))
+          (should (file-exists-p target))
+          (should (file-executable-p target))
+          (should
+           (> (file-attribute-size (file-attributes target)) 20)))
+      (delete-directory temp-dir t))))
+
+(ert-deftest org-mcp-test-install-cancel ()
+  "Test cancelling org-mcp-stdio.sh installation when file exists."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir)
+         (target (org-mcp--installed-script-path)))
+    (unwind-protect
+        (progn
+          (write-region "existing content" nil target)
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) nil)))
+            (should-error (org-mcp-install) :type 'user-error))
+          (should
+           (string=
+            "existing content"
+            (with-temp-buffer
+              (insert-file-contents target)
+              (buffer-string)))))
+      (delete-directory temp-dir t))))
+
+(ert-deftest org-mcp-test-uninstall ()
+  "Test org-mcp-stdio.sh removal from a temporary directory."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir)
+         (target (org-mcp--installed-script-path)))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
+            (org-mcp-install)
+            (should (file-exists-p target))
+            (org-mcp-uninstall))
+          (should-not (file-exists-p target)))
+      (delete-directory temp-dir t))))
+
+(ert-deftest org-mcp-test-uninstall-missing ()
+  "Test uninstalling org-mcp-stdio.sh when script doesn't exist."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir))
+    (unwind-protect
+        (should-error (org-mcp-uninstall) :type 'user-error)
+      (delete-directory temp-dir t))))
+
+(ert-deftest org-mcp-test-uninstall-cancel ()
+  "Test cancelling org-mcp-stdio.sh uninstall."
+  (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+         (mcp-server-lib-install-directory temp-dir)
+         (target (org-mcp--installed-script-path)))
+    (unwind-protect
+        (progn
+          (write-region "test content" nil target)
+          (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) nil)))
+            (org-mcp-uninstall))
+          (should (file-exists-p target)))
+      (delete-directory temp-dir t))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

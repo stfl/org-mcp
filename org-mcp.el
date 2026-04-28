@@ -3752,5 +3752,65 @@ Use this resource to:
   (mcp-server-lib-unregister-resource
    "org-outline://{filename}" org-mcp--server-id))
 
+;;; Script Installation
+
+(defun org-mcp--package-script-path ()
+  "Return the path to org-mcp-stdio.sh in the package directory.
+Looks first in `scripts/' relative to org-mcp.el (development
+checkout layout), then alongside org-mcp.el (MELPA-flattened
+package layout).  Returns nil if not found."
+  (let* ((library-path (locate-library "org-mcp"))
+         (package-dir
+          (and library-path (file-name-directory library-path))))
+    (when package-dir
+      (let ((candidates
+             (list
+              (expand-file-name "scripts/org-mcp-stdio.sh"
+                                package-dir)
+              (expand-file-name "org-mcp-stdio.sh" package-dir))))
+        (cl-find-if #'file-exists-p candidates)))))
+
+(defun org-mcp--installed-script-path ()
+  "Return the path where org-mcp-stdio.sh should be installed.
+Reuses `mcp-server-lib-install-directory' so org-mcp-stdio.sh
+lands next to emacs-mcp-stdio.sh, which it resolves relative to
+its own directory."
+  (expand-file-name "org-mcp-stdio.sh"
+                    mcp-server-lib-install-directory))
+
+;;;###autoload
+(defun org-mcp-install ()
+  "Install org-mcp-stdio.sh to `mcp-server-lib-install-directory'.
+The wrapper script resolves emacs-mcp-stdio.sh relative to its
+own directory, so installing both shims to the same directory
+(the default behaviour, since org-mcp reuses mcp-server-lib's
+install directory) lets MCP clients invoke org-mcp-stdio.sh with
+no extra configuration."
+  (interactive)
+  (let ((source (org-mcp--package-script-path))
+        (target (org-mcp--installed-script-path)))
+    (unless source
+      (error "Cannot find org-mcp-stdio.sh in package directory"))
+    (when (file-exists-p target)
+      (unless (yes-or-no-p
+               (format "File already exists at %s. Overwrite? "
+                       target))
+        (user-error "Installation cancelled")))
+    (make-directory (file-name-directory target) t)
+    (copy-file source target t)
+    (set-file-modes target #o755)
+    (message "Script installed to: %s" target)))
+
+;;;###autoload
+(defun org-mcp-uninstall ()
+  "Remove installed org-mcp-stdio.sh from `mcp-server-lib-install-directory'."
+  (interactive)
+  (let ((target (org-mcp--installed-script-path)))
+    (unless (file-exists-p target)
+      (user-error "No script found at: %s" target))
+    (when (yes-or-no-p (format "Remove script at %s? " target))
+      (delete-file target)
+      (message "Script removed from: %s" target))))
+
 (provide 'org-mcp)
 ;;; org-mcp.el ends here
