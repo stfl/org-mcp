@@ -20,7 +20,9 @@ From [[https://melpa.org/#/org-mcp][MELPA]] or [[https://stable.melpa.org/#/org-
 To install this fork in Doom Emacs, add to =packages.el=:
 
 #+begin_src emacs-lisp
-(package! org-mcp :recipe (:host github :repo "stfl/org-mcp"))
+(package! org-mcp
+  :recipe (:host github :repo "stfl/org-mcp"
+           :files (:defaults "org-mcp-stdio.sh")))
 #+end_src
 
 Then configure in =config.el=:
@@ -38,9 +40,12 @@ Then configure in =config.el=:
   ;; (org-mcp-allowed-files '("inbox.org" "projects/work.org"))
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
-  :config (if mcp-server-lib--running
-              (message "org-mcp: MCP server already running, skipping start")
-            (mcp-server-lib-start)))
+  :config
+  (unless (file-exists-p (org-mcp--installed-script-path))
+    (org-mcp-install))
+  (if mcp-server-lib--running
+      (message "org-mcp: MCP server already running, skipping start")
+    (mcp-server-lib-start)))
 #+end_src
 
 * Usage
@@ -107,6 +112,7 @@ To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 ** Available MCP Resources
 
 *Note:* File paths in URIs use minimal encoding (only =#= characters are encoded). Avoid using =%= characters in Org file names.
+
 *** org://{uri}
 - *Description:* Access Org files or headlines with structured JSON (auto-detects URI type)
 - *URI Pattern:* =org://{uri}= where uri can be:
