@@ -3754,17 +3754,45 @@ Use this resource to:
 
 ;;; Script Installation
 
-(defun org-mcp--package-script-path ()
-  "Return the path to org-mcp-stdio.sh in the package directory.
-Returns nil if not found."
-  (let* ((library-path (locate-library "org-mcp"))
-         (package-dir
-          (and library-path (file-name-directory library-path)))
-         (script-path
-          (and package-dir
-               (expand-file-name "org-mcp-stdio.sh" package-dir))))
-    (when (and script-path (file-exists-p script-path))
-      script-path)))
+(defconst org-mcp--stdio-script-content
+  "#!/usr/bin/env bash
+# org-mcp-stdio.sh — convenience wrapper around emacs-mcp-stdio.sh that
+# injects the org-mcp server-id and init/stop function names so callers
+# (org-cli, MCP client configs, ad-hoc scripts) don't have to repeat the
+# boilerplate.
+#
+# Resolution order for the underlying emacs-mcp-stdio.sh:
+#   1. <script_dir>/emacs-mcp-stdio.sh — co-located install (Nix layout
+#      installs both shims into ~/.config/emacs/, so this is the fast path).
+#   2. emacs-mcp-stdio.sh in $PATH.
+#
+# Extra arguments are forwarded after the org-mcp defaults, so callers can
+# still pass --socket=..., a custom --server-id=... override, etc.
+
+set -eu -o pipefail
+
+script_dir=$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)
+shim=\"$script_dir/emacs-mcp-stdio.sh\"
+if [ ! -x \"$shim\" ]; then
+\tif ! shim=$(command -v emacs-mcp-stdio.sh 2>/dev/null); then
+\t\techo \"org-mcp-stdio.sh: cannot locate emacs-mcp-stdio.sh in '$script_dir' or \\$PATH\" >&2
+\t\texit 1
+\tfi
+fi
+
+exec \"$shim\" \\
+\t--server-id=org-mcp \\
+\t--init-function=org-mcp-enable \\
+\t--stop-function=org-mcp-disable \\
+\t\"$@\"
+"
+  "Content of the org-mcp stdio wrapper script.
+Embedded so `org-mcp-install' works regardless of how org-mcp was
+loaded (MELPA, straight.el, Nix, manual checkout).  The
+canonical source-of-truth is `org-mcp-stdio.sh' in the
+repository — keep both in sync; the
+`org-mcp-test-stdio-script-content-matches-file' ert test
+verifies this when the repo file is reachable.")
 
 (defun org-mcp--installed-script-path ()
   "Return the path where org-mcp-stdio.sh should be installed.
@@ -3783,17 +3811,15 @@ own directory, so installing both shims to the same directory
 install directory) lets MCP clients invoke org-mcp-stdio.sh with
 no extra configuration."
   (interactive)
-  (let ((source (org-mcp--package-script-path))
-        (target (org-mcp--installed-script-path)))
-    (unless source
-      (error "Cannot find org-mcp-stdio.sh in package directory"))
+  (let ((target (org-mcp--installed-script-path)))
     (when (file-exists-p target)
       (unless (yes-or-no-p
                (format "File already exists at %s. Overwrite? "
                        target))
         (user-error "Installation cancelled")))
     (make-directory (file-name-directory target) t)
-    (copy-file source target t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region org-mcp--stdio-script-content nil target))
     (set-file-modes target #o755)
     (message "Script installed to: %s" target)))
 

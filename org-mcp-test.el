@@ -6113,5 +6113,56 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
           (should (file-exists-p target)))
       (delete-directory temp-dir t))))
 
+(ert-deftest org-mcp-test-stdio-script-content-matches-file ()
+  "The embedded stdio script content must match the canonical .sh file.
+The file `org-mcp-stdio.sh' is the source of truth for the wrapper;
+`org-mcp--stdio-script-content' is its embedded copy used by
+`org-mcp-install' so installation works regardless of how org-mcp
+itself was loaded.  This test catches drift between the two."
+  (let* ((library-path (locate-library "org-mcp"))
+         (script-path
+          (and library-path
+               (expand-file-name "org-mcp-stdio.sh"
+                                 (file-name-directory library-path)))))
+    (skip-unless (and script-path (file-exists-p script-path)))
+    (let ((file-content
+           (with-temp-buffer
+             (let ((coding-system-for-read 'utf-8-unix))
+               (insert-file-contents script-path))
+             (buffer-string))))
+      (should (string= file-content org-mcp--stdio-script-content)))))
+
+(ert-deftest org-mcp-test-install-bytes-match-canonical-file ()
+  "Installed wrapper bytes match the canonical org-mcp-stdio.sh.
+Belt-and-braces check: the file `org-mcp-install' writes from the
+embedded constant must be byte-identical to the .sh file shipped
+in the repository, so MELPA / straight.el / Nix / manual installs
+all produce the same wrapper."
+  (let* ((library-path (locate-library "org-mcp"))
+         (script-path
+          (and library-path
+               (expand-file-name "org-mcp-stdio.sh"
+                                 (file-name-directory library-path)))))
+    (skip-unless (and script-path (file-exists-p script-path)))
+    (let* ((temp-dir (make-temp-file "org-mcp-test-" t))
+           (mcp-server-lib-install-directory temp-dir))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'yes-or-no-p) (lambda (_) t)))
+              (org-mcp-install))
+            (let ((installed
+                   (with-temp-buffer
+                     (set-buffer-multibyte nil)
+                     (insert-file-contents-literally
+                      (org-mcp--installed-script-path))
+                     (buffer-string)))
+                  (canonical
+                   (with-temp-buffer
+                     (set-buffer-multibyte nil)
+                     (insert-file-contents-literally script-path)
+                     (buffer-string))))
+              (should (string= installed canonical))))
+        (delete-directory temp-dir t)))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
