@@ -86,17 +86,30 @@ org-mcp ships a thin wrapper, =org-mcp-stdio.sh=, that injects the
 correct =--server-id=, =--init-function=, and =--stop-function= so
 client configs only need to point at the script.  Install both shims
 into =mcp-server-lib-install-directory= (defaults to
-=user-emacs-directory=, so =~/.emacs.d/=):
+=user-emacs-directory=):
 
 #+begin_example
 M-x mcp-server-lib-install RET   ;; installs emacs-mcp-stdio.sh
 M-x org-mcp-install RET          ;; installs org-mcp-stdio.sh
 #+end_example
 
+The actual install path depends on your Emacs setup, since
+=user-emacs-directory= varies:
+
+- Vanilla Emacs: =~/.emacs.d/=
+- XDG-style Emacs (29+): =~/.config/emacs/=
+- Doom Emacs: =~/.config/emacs/.local/cache/= (Doom rebinds
+  =user-emacs-directory= to keep state separate from config). To pin
+  the shims somewhere predictable like =~/.config/emacs/bin/=, set
+  =mcp-server-lib-install-directory= explicitly, e.g.
+  =(setq mcp-server-lib-install-directory (expand-file-name "bin/" doom-emacs-dir))=
+  before =mcp-server-lib= loads.
+
 =org-mcp-stdio.sh= resolves =emacs-mcp-stdio.sh= relative to its own
 directory, so co-locating both shims in the same directory (the
 default) requires no extra configuration.  Then register =org-mcp=
-with your MCP client:
+with your MCP client (adjust the path to match your install
+directory):
 
 #+begin_src bash
 claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
