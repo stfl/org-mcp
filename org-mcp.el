@@ -3756,19 +3756,15 @@ Use this resource to:
 
 (defun org-mcp--package-script-path ()
   "Return the path to org-mcp-stdio.sh in the package directory.
-Looks first in `scripts/' relative to org-mcp.el (development
-checkout layout), then alongside org-mcp.el (MELPA-flattened
-package layout).  Returns nil if not found."
+Returns nil if not found."
   (let* ((library-path (locate-library "org-mcp"))
          (package-dir
-          (and library-path (file-name-directory library-path))))
-    (when package-dir
-      (let ((candidates
-             (list
-              (expand-file-name "scripts/org-mcp-stdio.sh"
-                                package-dir)
-              (expand-file-name "org-mcp-stdio.sh" package-dir))))
-        (cl-find-if #'file-exists-p candidates)))))
+          (and library-path (file-name-directory library-path)))
+         (script-path
+          (and package-dir
+               (expand-file-name "org-mcp-stdio.sh" package-dir))))
+    (when (and script-path (file-exists-p script-path))
+      script-path)))
 
 (defun org-mcp--installed-script-path ()
   "Return the path where org-mcp-stdio.sh should be installed.
