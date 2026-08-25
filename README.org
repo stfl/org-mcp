@@ -713,7 +713,7 @@ Example response:
 Use this tool to understand clock settings before clocking in or out.
 
 *** org-clock-get-active
-- *Description:* Get the currently active clock, if any. Searches all allowed files for an unclosed CLOCK entry. Also detects native Emacs clocks running in non-allowed files
+- *Description:* Get the currently active clock, if any. The clock running in the Emacs session takes precedence, including one in a non-allowed file. With no clock running, allowed files are searched for an unclosed CLOCK entry left behind by an earlier session
 - *Parameters:* None
 - *Returns:* JSON object describing the active clock
 

@@ -4682,6 +4682,25 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   "Open CLOCK with an incorrect day-of-week label (Mon for a Thursday).
 Used to verify that date/time matching tolerates locale/label drift.")
 
+(defmacro org-mcp-test--with-session-clock (file &rest body)
+  "Run BODY with the Emacs clock running on the open CLOCK line in FILE.
+Points `org-clock-marker' at the end of the first unclosed CLOCK line
+in FILE, where `org-clock-in' leaves it, and unsets the marker again
+afterwards so the clock state does not leak into other tests."
+  (declare (indent 1) (debug t))
+  `(let ((buffer (find-file-noselect ,file)))
+     (unwind-protect
+         (progn
+           (with-current-buffer buffer
+             (goto-char (point-min))
+             (re-search-forward
+              (concat "^[ \t]*" org-clock-string
+                      "[ \t]*\\[[^]\n]+\\][ \t]*$"))
+             (set-marker org-clock-marker (point) buffer))
+           ,@body)
+       (set-marker org-clock-marker nil)
+       (kill-buffer buffer))))
+
 (ert-deftest org-mcp-test-clock-get-active-none ()
   "Test org-clock-get-active reports no active clock."
   (org-mcp-test--with-temp-org-files
@@ -4738,6 +4757,75 @@ The Org element parser should still recognize the open clock."
       (should (eq (alist-get 'active result) t))
       (should
        (equal (alist-get 'start result) "2026-01-01 Mon 10:00")))))
+
+(ert-deftest org-mcp-test-clock-get-active-session-clock-wins ()
+  "Test clock-get-active returns the clock the session is running.
+Both allowed files hold an open CLOCK, and the Emacs clock runs in the
+one that does not come first in the allowed list."
+  (org-mcp-test--with-temp-org-files
+      ((file-a
+        "* TODO First Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 10:00]\n:END:\n")
+       (file-b
+        "* TODO Second Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 11:00]\n:END:\n"))
+    (org-mcp-test--with-session-clock file-b
+      (let ((result (org-mcp-test--call-clock-get-active)))
+        (should (eq (alist-get 'active result) t))
+        (should (equal (alist-get 'heading result) "Second Task"))
+        (should
+         (equal (alist-get 'start result) "2026-01-01 Thu 11:00"))))))
+
+(ert-deftest org-mcp-test-clock-find-active-session-clock-allowed ()
+  "Test clock-find-active describes a session clock in an allowed file.
+The entry carries the running clock's own marker, the heading text,
+and `allowed' set to t."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (org-mcp-test--with-session-clock test-file
+      (let ((active (org-mcp--clock-find-active)))
+        (should (eq (alist-get 'marker active) org-clock-marker))
+        (should (eq (alist-get 'allowed active) t))
+        (should (equal (alist-get 'heading active) "Task One"))
+        (should
+         (equal (alist-get 'start active) "2026-01-01 Thu 10:00"))
+        (should
+         (org-mcp--paths-equal-p (alist-get 'file active) test-file))))))
+
+(ert-deftest org-mcp-test-clock-find-active-session-clock-not-allowed ()
+  "Test clock-find-active describes a session clock outside allowed files.
+The entry is returned with `allowed' nil, and org-clock-get-active
+reports it as active but not in an allowed file."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file org-mcp-test--clock-task-content)
+       (outside-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-mcp-allowed-files (list allowed-file)))
+      (org-mcp-test--with-session-clock outside-file
+        (let ((active (org-mcp--clock-find-active)))
+          (should active)
+          (should (eq (alist-get 'allowed active) nil))
+          (should (equal (alist-get 'heading active) "Task One"))
+          (should
+           (org-mcp--paths-equal-p
+            (alist-get 'file active) outside-file)))
+        (let ((result (org-mcp-test--call-clock-get-active)))
+          (should (eq (alist-get 'active result) t))
+          (should
+           (eq (alist-get 'in_allowed_file result) :json-false)))))))
+
+(ert-deftest org-mcp-test-clock-get-active-dangling-without-session ()
+  "Test clock-get-active scans allowed files when no clock is running.
+With the Emacs clock idle, a CLOCK line left unclosed by an earlier
+session is still found, even when an earlier allowed file holds only
+closed clocks."
+  (org-mcp-test--with-temp-org-files
+      ((file-a org-mcp-test--clock-only-closed-content)
+       (file-b
+        "* TODO Second Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 11:00]\n:END:\n"))
+    (should-not (org-clock-is-active))
+    (let ((result (org-mcp-test--call-clock-get-active)))
+      (should (eq (alist-get 'active result) t))
+      (should (equal (alist-get 'heading result) "Second Task"))
+      (should
+       (equal (alist-get 'start result) "2026-01-01 Thu 11:00")))))
 
 ;;; Tests for org-clock-find-dangling
 
