@@ -479,13 +479,14 @@ The new heading carries that ID and no other.")
    " *:PROPERTIES:\n"
    " *:EFFORT: +1:00\n"
    " *:OWNER: +alice\n"
+   " *:ESTIMATE: +3\n"
    " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    (regexp-quote org-mcp-test--body-text-multiline)
    "\n\\'")
   "Pattern for a TODO created with tags, a body and properties.
-The drawer sits between the heading and the body, and a property
-sent as null is not written.")
+The drawer sits between the heading and the body, a number is written
+as its text, and a property sent as null is not written.")
 
 (defconst org-mcp-test--pattern-renamed-simple-todo
   (concat
@@ -1097,6 +1098,30 @@ PROPERTIES is an optional alist sent as the properties parameter."
 (defun org-mcp-test--id-registered-p (id)
   "Return non-nil when ID has an entry in `org-id-locations'."
   (and (hash-table-p org-id-locations) (gethash id org-id-locations)))
+
+(defun org-mcp-test--verify-no-modified-buffer (file)
+  "Verify no buffer visiting FILE holds unsaved changes."
+  (let ((buffer (find-buffer-visiting file)))
+    (should-not (and buffer (buffer-modified-p buffer)))))
+
+(defun org-mcp-test--call-set-properties-expecting-error
+    (test-file uri properties)
+  "Call org-set-properties expecting an error, verify nothing changed.
+TEST-FILE is the file that must stay unchanged on disk and in any
+buffer visiting it.  URI is the headline URI.  PROPERTIES is the
+alist sent as the properties parameter."
+  (org-mcp-test--assert-error-and-file
+   test-file
+   (let* ((request
+           (mcp-server-lib-create-tools-call-request
+            "org-set-properties" nil
+            `((uri . ,uri) (properties . ,properties))))
+          (response
+           (mcp-server-lib-process-jsonrpc-parsed
+            request mcp-server-lib-ert-server-id))
+          (result (mcp-server-lib-ert-process-tool-response response)))
+     (error "Expected error but got success: %s" result)))
+  (org-mcp-test--verify-no-modified-buffer test-file))
 
 ;; Helper functions for testing org-update-todo-state MCP tool
 
@@ -3652,7 +3677,7 @@ by that ID, and the ID is not added to `org-id-locations'."
      (file-name-nondirectory test-file)
      test-file
      org-mcp-test--pattern-add-todo-with-properties
-     '((EFFORT . "1:00") (OWNER . "alice") (SKIPPED)))))
+     '((EFFORT . "1:00") (OWNER . "alice") (ESTIMATE . 3) (SKIPPED)))))
 
 (ert-deftest org-mcp-test-add-todo-properties-forbid-special ()
   "Test a create call with a special property fails, file unchanged."
@@ -3665,14 +3690,40 @@ by that ID, and the ID is not added to `org-id-locations'."
 (ert-deftest org-mcp-test-add-todo-properties-invalid-name ()
   "Test a create call with an invalid property name edits nothing.
 The call fails before the heading is inserted, so neither the file
-nor a buffer visiting it changes."
+nor a buffer visiting it changes.  The call comes from a buffer with
+Emacs Lisp syntax, where a line break is not whitespace, and a name
+with one is refused all the same."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (with-syntax-table emacs-lisp-mode-syntax-table
+      (dolist (name '("BAD NAME" "BAD\nNAME"))
+        (org-mcp-test--call-add-todo-expecting-error
+         test-file "Task" "TODO" nil nil (format "%s#" test-file) nil
+         `((,name . "value")))
+        (org-mcp-test--verify-no-modified-buffer test-file)))))
+
+(ert-deftest org-mcp-test-add-todo-properties-multiline-value ()
+  "Test a create call with a line break in a property value fails.
+The break would inject a heading, so the call edits nothing."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (org-mcp-test--call-add-todo-expecting-error
      test-file "Task" "TODO" nil nil (format "%s#" test-file) nil
-     '(("BAD NAME" . "value")))
-    (let ((buffer (find-buffer-visiting test-file)))
-      (should-not (and buffer (buffer-modified-p buffer))))))
+     '((FOO . "x\n* Injected heading")))
+    (org-mcp-test--verify-no-modified-buffer test-file)))
+
+(ert-deftest org-mcp-test-properties-refuse-non-string-values ()
+  "Test booleans and arrays are refused as property values.
+A create call with a boolean and a set call with an array both fail
+and leave the file unchanged."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-bare-todo
+    (org-mcp-test--call-add-todo-expecting-error
+     test-file "Task" "TODO" nil nil (format "%s#" test-file) nil
+     '((FLAG . :json-false)))
+    (org-mcp-test--call-set-properties-expecting-error
+     test-file (format "%s#Simple%%20Task" test-file)
+     '((ITEMS . ["a" "b"])))))
 
 (ert-deftest org-mcp-test-rename-headline-simple ()
   "Test renaming a simple TODO headline."
@@ -5550,6 +5601,27 @@ addresses it by that ID, and the ID is not added to
          test-file org-mcp-test--pattern-set-properties-id-and-custom-id)
         (should-not
          (org-mcp-test--id-registered-p org-mcp-test--client-id))))))
+
+(ert-deftest org-mcp-test-set-properties-invalid-name ()
+  "Test an invalid property name refuses the whole call.
+A valid property sent first is not written either, so the file and any
+buffer visiting it stay unchanged.  The call comes from a buffer with
+Emacs Lisp syntax, where a line break is not whitespace, and a name
+with one is refused all the same."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (with-syntax-table emacs-lisp-mode-syntax-table
+      (org-mcp-test--call-set-properties-expecting-error
+       test-file (format "%s#Simple%%20Task" test-file)
+       '((OK . "1") ("A\nB" . "v"))))))
+
+(ert-deftest org-mcp-test-set-properties-multiline-value ()
+  "Test a line break in a property value refuses the call."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-set-properties-expecting-error
+     test-file (format "%s#Simple%%20Task" test-file)
+     '((FOO . "x\r* Injected heading")))))
 
 ;;; Tests for org-update-scheduled
 

@@ -1650,8 +1650,8 @@ MCP Parameters:
                 - {id}
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
-               Values are written as given; null or empty values
-               are skipped
+               Values are single-line strings or numbers, written as
+               given; null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden"
   (org-mcp--validate-headline-title title)
@@ -2053,11 +2053,14 @@ MCP Parameters:
 (defun org-mcp--validate-properties (properties)
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
 PROPERTIES is the alist a JSON object decodes to.  NAME is a string.
-VALUE is a string, or nil for a JSON null or an empty string.  Throws
-a validation error when PROPERTIES is not a non-empty object, or when
-a name is not a valid Org property name or is a special property,
-which has its own tool.  Values are taken as given; `ID' and
-`CUSTOM_ID' are ordinary properties here."
+VALUE is a string, or nil for a JSON null or an empty string; a JSON
+number becomes its decimal text.  Throws a validation error when
+PROPERTIES is not a non-empty object, when a name is not a valid Org
+property name or is a special property, which has its own tool, or
+when a value is a boolean, array or object or spans several lines.
+Org property values are single lines, and a line break would add
+structure such as a heading to the file.  Values are otherwise taken
+as given; `ID' and `CUSTOM_ID' are ordinary properties here."
   (unless (and properties (listp properties))
     (org-mcp--tool-validation-error
      "Properties must be a non-empty JSON object"))
@@ -2068,10 +2071,14 @@ which has its own tool.  Values are taken as given; `ID' and
                 (symbol-name (car pair))
               (car pair)))
            (value (cdr pair)))
-       ;; `org-set-property' makes this check too, but only once the
-       ;; heading is being edited; making it first keeps a refused call
-       ;; from touching the buffer.
-       (unless (org--valid-property-p name)
+       ;; Org has no public predicate for property names.  This is the
+       ;; check `org-set-property' and `org-entry-put' make themselves,
+       ;; but only once the heading is being edited; making it first
+       ;; keeps a refused call from touching the buffer.  It matches
+       ;; whitespace by syntax class, so it runs under Org's syntax
+       ;; table rather than that of whichever buffer is current.
+       (unless (with-syntax-table org-mode-syntax-table
+                 (org--valid-property-p name))
          (org-mcp--tool-validation-error "Invalid property name: '%s'"
                                          name))
        (when (member (upcase name) org-mcp--special-properties)
@@ -2083,10 +2090,18 @@ which has its own tool.  Values are taken as given; `ID' and
         (cond
          ((or (null value) (equal value ""))
           nil)
-         ((stringp value)
-          value)
+         ((numberp value)
+          (number-to-string value))
+         ((not (stringp value))
+          (org-mcp--tool-validation-error
+           "Property '%s' must be a string, a number or null"
+           name))
+         ((string-match-p "[\n\r]" value)
+          (org-mcp--tool-validation-error
+           "Property '%s' must be a single line"
+           name))
          (t
-          (format "%s" value))))))
+          value)))))
    properties))
 
 (defun org-mcp--tool-set-properties (uri properties)
@@ -2100,7 +2115,8 @@ MCP Parameters:
           - {absolute-path}#{headline-path}
           - {id}
   properties - JSON object of property name-value pairs (required)
-               String value: set property to that value
+               String or number value: set property to that value;
+               it must be a single line
                null or empty string: delete the property
                ID and CUSTOM_ID are accepted and written as given
                Special properties (TODO, TAGS, PRIORITY, etc.) are
@@ -3113,8 +3129,9 @@ Parameters:
   properties - Properties for the new headline (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
-               Values are written as given and not checked; an ID
-               is not added to Org's ID index
+               Values are strings (numbers are accepted) on a
+               single line, written as given and not otherwise
+               checked; an ID is not added to Org's ID index
                null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
@@ -3222,11 +3239,12 @@ Parameters:
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   properties - JSON object of property name-value pairs (required)
-               String value: set the property
+               String value (numbers are accepted): set the
+               property; it must be a single line
                null or empty string: delete the property
                ID and CUSTOM_ID can be set; values are written as
-               given and not checked, and an ID is not added to
-               Org's ID index
+               given and not otherwise checked, and an ID is not
+               added to Org's ID index
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use dedicated tools
 
