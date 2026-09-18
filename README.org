@@ -192,8 +192,9 @@ To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 the MCP /resource/ layer — it is the URI scheme used by the
 =org://{uri}= resource template above. Tool calls (e.g. =org-read=,
 =org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
-take their =uri= parameter in *bare* form only — pass a UUID, file
-path, or =file#headline= descriptor *without* the =org://= prefix.
+take their =uri= parameter as a native Org link (see
+[[*Addressing headings with links]]) or in *bare* form — a UUID, file
+path, or =file#headline= descriptor — *without* the =org://= prefix.
 A prefixed input is rejected with a validation error. Tool /responses/
 still emit fully-qualified =org://{uri}= URIs in their =uri= fields,
 so a returned URI is directly usable as a resource identifier (just
@@ -216,6 +217,49 @@ Example response for a headline:
   ]
 }
 #+end_src
+
+** Addressing headings with links
+
+Every tool that names a heading accepts a native Org link, the text Org
+resolves inside =[[…]]=, so a link copied out of Emacs works unchanged:
+
+| Link                               | Addresses                                  |
+|------------------------------------+--------------------------------------------|
+| =id:<id>=                          | the heading with that =ID= property        |
+| =file:/abs/path.org::#<custom-id>= | the heading with that =CUSTOM_ID= property |
+| =file:/abs/path.org::*<title>=     | the first heading with that title          |
+| =file:/abs/path.org=               | the whole file                             |
+
+- A link may be bare or bracketed, with or without a description:
+  =id:abc=, =[[id:abc]]= and =[[id:abc][Project Alpha]]= name the same
+  heading.
+- org-mcp resolves a link with Org's own lookup: =org-id-find= for an ID,
+  which includes the org-roam database and Org's rescan when the ID is not in
+  the index, and =org-link-search= for the part after =::=. The search part of
+  an =id:= link, as in =id:<id>::*Review=, runs within that heading's subtree;
+  a =file:= link searches the whole file. A title that matches several
+  headings resolves to the first, as it does in Org, and =::<n>= in a =file:=
+  link goes to line /n/. A search that matches nothing is an error; org-mcp
+  never offers to create the heading.
+- A link is resolved, never followed: your windows, narrowing, point and
+  buffer list stay as they were, even when the buffer is narrowed to another
+  subtree.
+- The file an =id:= or =file:= link reaches must be one of the allowed files.
+- =org-add-todo= reads a =file:= link without a search part as the top level of
+  that file. A tool that needs a heading refuses it.
+
+org-mcp refuses:
+
+- every other link type, such as =shell:=, =elisp:=, =https:=, =help:= and
+  =file+sys:=, before any file is opened. org-mcp never runs or opens a link.
+- a link that names no local file by its full path: a relative path
+  (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
+  plain text) and a remote TRAMP path. Send the full path instead.
+- a regexp search (=::/regexp/=), which Org answers by building a sparse tree
+  in your buffer.
+
+The bare formats (a UUID, an absolute path, and =path#Parent/Child= outline
+paths) are accepted as well.
 
 ** Available MCP Tools
 
@@ -379,7 +423,7 @@ Empty configuration returns:
 *** org-update-todo-state
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
@@ -412,7 +456,7 @@ Example:
 *** org-rename-headline
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
 - *Returns:* Success status, =saved= flag, and previous and new titles
@@ -448,8 +492,8 @@ Example:
   - =todoState= (string, required): TODO state from =org-todo-keywords=
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =body= (string, optional): Body text content to add under the heading
-  - =parentUri= (string, required): URI of parent item. Use =org:///path/to/file.org#= for top-level items in a file
-  - =afterUri= (string, optional): URI of sibling to insert after. If not given, append as last child of parent
+  - =parentUri= (string, required): link to the parent item (see [[*Addressing headings with links]]) or its bare URI. Use =file:/path/to/file.org= or =/path/to/file.org#= for top-level items in a file
+  - =afterUri= (string, optional): link to, or bare ID of, the sibling to insert after; it must be a direct child of the parent. If not given, append as last child of parent
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable address from the call that creates it. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
 - *Returns:* Object with success status, =saved= flag, new item URI (built from the =ID= in =properties= when one is given), file name, and title
 
@@ -481,7 +525,7 @@ Example:
 *** org-edit-body
 - *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
-  - =resourceUri= (string, required): URI of the node to edit (=org://= format)
+  - =resourceUri= (string, required): link to the node to edit (see [[*Addressing headings with links]]) or its bare URI
   - =oldBody= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
   - =newBody= (string, required): Replacement or appended text
   - =append= (boolean, optional, default false): When true, append =newBody= to end of body instead of replacing
@@ -522,7 +566,7 @@ Example:
 *** org-set-properties
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
@@ -550,7 +594,7 @@ Example:
 *** org-update-scheduled
 - *Description:* Update the SCHEDULED timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and ID-based URI
 
@@ -572,7 +616,7 @@ Example:
 *** org-update-deadline
 - *Description:* Update the DEADLINE timestamp on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
 - *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and ID-based URI
 
@@ -594,7 +638,7 @@ Example:
 *** org-set-tags
 - *Description:* Set tags on an Org headline, replacing any existing tags
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
 - *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus org:// URI
 
@@ -615,7 +659,7 @@ Example:
 *** org-set-priority
 - *Description:* Set or remove priority on an Org headline
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
 - *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and ID-based URI
 
@@ -637,7 +681,7 @@ Example:
 *** org-add-logbook-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
 - *Returns:* Success status, =saved= flag, and org:// URI
 
@@ -748,7 +792,9 @@ tool-only plain-text variant with no resource-template counterpart.
 *** org-read
 - *Description:* Read Org file or headline with structured JSON output (auto-detects URI format)
 - *Parameters:*
-  - =uri= (string, required): URI string. Formats:
+  - =uri= (string, required): link (see [[*Addressing headings with links]]) or URI string. Formats:
+    - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
+    - =file:/path/to/file.org= - file (returns file with children)
     - =/path/to/file.org= - file path (returns file with children)
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= (8-4-4-4-12 format) - ID-based lookup
@@ -781,7 +827,9 @@ Example response for a headline:
 *** org-read-headline
 - *Description:* Read Org headline or file as plain text (auto-detects URI format)
 - *Parameters:*
-  - =uri= (string, required): URI string. Formats:
+  - =uri= (string, required): link (see [[*Addressing headings with links]]) or URI string. Formats:
+    - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
+    - =file:/path/to/file.org= - returns entire file
     - =/path/to/file.org= - returns entire file
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= - ID-based lookup
@@ -835,7 +883,7 @@ Example responses:
 *** org-clock-in
 - *Description:* Clock in to the specified heading. If another clock is active, it is automatically closed first. Supports continuous clocking and time rounding
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
   - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
@@ -873,7 +921,7 @@ Example:
 *** org-clock-out
 - *Description:* Clock out the currently active clock. Supports optional URI validation and custom end time
 - *Parameters:*
-  - =uri= (string, optional): URI to validate against the active clock. If provided, its file must match the active clock's file
+  - =uri= (string, optional): link (see [[*Addressing headings with links]]) or URI to validate against the active clock, such as =file:/path/to/file.org=. If provided, its file must match the active clock's file
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
 
@@ -895,7 +943,7 @@ Example:
 *** org-clock-add
 - *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
 - *Returns:* JSON object with success status, =saved= flag, and the added clock entry details
@@ -924,7 +972,7 @@ Example:
 *** org-clock-delete
 - *Description:* Delete a clock entry from a heading. Removes the LOGBOOK drawer if it becomes empty after deletion
 - *Parameters:*
-  - =uri= (string, required): URI of the headline (=org://= format)
+  - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
 - *Returns:* JSON object with success status, =saved= flag, and the deleted entry details
 

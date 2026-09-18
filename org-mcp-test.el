@@ -7079,6 +7079,719 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
     (should-error
      (mcp-server-lib-ert-call-tool "query-backlog" nil))))
 
+;;; Native link tests
+
+(defconst org-mcp-test--link-beta-id "8a3c5d2e-4b1f-4c6a-9e7d-0f2b3c4d5e6f"
+  "ID of the Beta heading in `org-mcp-test--content-links'.")
+
+(defconst org-mcp-test--content-links-preamble "#+TITLE: Links\n\n"
+  "Preamble of `org-mcp-test--content-links'.")
+
+(defconst org-mcp-test--content-links-alpha
+  "* Alpha
+:PROPERTIES:
+:CUSTOM_ID: alpha-slug
+:END:
+Alpha body.
+** Review
+Alpha review.
+"
+  "Alpha subtree of `org-mcp-test--content-links'.
+Alpha carries a custom ID and a child titled Review.")
+
+(defconst org-mcp-test--content-links-beta
+  (format
+   "* Beta
+:PROPERTIES:
+:ID:       %s
+:END:
+Beta body.
+** Review
+Beta review.
+"
+   org-mcp-test--link-beta-id)
+  "Beta subtree of `org-mcp-test--content-links'.
+Beta carries an ID and a child titled Review, as Alpha does.")
+
+(defconst org-mcp-test--content-links-gamma "* TODO Gamma\nGamma body.\n"
+  "Gamma subtree of `org-mcp-test--content-links', with no identifier.")
+
+(defconst org-mcp-test--content-links
+  (concat
+   org-mcp-test--content-links-preamble
+   org-mcp-test--content-links-alpha
+   org-mcp-test--content-links-beta
+   org-mcp-test--content-links-gamma)
+  "Org file whose headings are reached by ID, custom ID and title links.
+Line 10 is the Beta heading.")
+
+(defconst org-mcp-test--regex-links-alpha-tagged
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   "\\* Alpha[ \t]+:work:\n"
+   " *:PROPERTIES:\n"
+   " *:CUSTOM_ID: +alpha-slug\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Alpha body\\.\n"
+   "\\*\\* Review\n"
+   "Alpha review\\.\n"
+   (regexp-quote org-mcp-test--content-links-beta)
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after tagging Alpha.")
+
+(defconst org-mcp-test--regex-links-beta-tagged
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   (regexp-quote org-mcp-test--content-links-alpha)
+   "\\* Beta[ \t]+:work:\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--link-beta-id "\n"
+   ":END:\n"
+   "Beta body\\.\n"
+   "\\*\\* Review\n"
+   "Beta review\\.\n"
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after tagging Beta.")
+
+(defconst org-mcp-test--regex-links-gamma-tagged
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha
+     org-mcp-test--content-links-beta))
+   "\\* TODO Gamma[ \t]+:work:\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Gamma body\\.\n"
+   "\\'")
+  "Regex matching the links file after tagging Gamma.")
+
+(defconst org-mcp-test--regex-links-gamma-changed
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha
+     org-mcp-test--content-links-beta))
+   "\\* TODO [^\n]*Gamma\n"
+   "\\(?:.\\|\n\\)*"
+   "Gamma body\\.\n"
+   "\\'")
+  "Regex matching the links file after any change inside Gamma only.")
+
+(defconst org-mcp-test--regex-links-gamma-done
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha
+     org-mcp-test--content-links-beta))
+   "\\* DONE Gamma\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Gamma body\\.\n"
+   "\\'")
+  "Regex matching the links file after marking Gamma DONE.")
+
+(defconst org-mcp-test--regex-links-gamma-clocked
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha
+     org-mcp-test--content-links-beta))
+   "\\* TODO Gamma\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => 2:15\n"
+   ":END:\n"
+   "Gamma body\\.\n"
+   "\\'")
+  "Regex matching the links file after clocking in and out of Gamma.")
+
+(defconst org-mcp-test--regex-links-alpha-body-appended
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   "\\* Alpha\n"
+   " *:PROPERTIES:\n"
+   " *:CUSTOM_ID: +alpha-slug\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Alpha body\\.\n"
+   "Alpha appended\\.\n"
+   "\\*\\* Review\n"
+   "Alpha review\\.\n"
+   (regexp-quote org-mcp-test--content-links-beta)
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after appending to Alpha's body.")
+
+(defconst org-mcp-test--regex-links-alpha-review-renamed
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   "\\* Alpha\n"
+   ":PROPERTIES:\n"
+   ":CUSTOM_ID: alpha-slug\n"
+   ":END:\n"
+   "Alpha body\\.\n"
+   "\\*\\* First Review\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "Alpha review\\.\n"
+   (regexp-quote org-mcp-test--content-links-beta)
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after renaming Alpha's Review.")
+
+(defconst org-mcp-test--regex-links-beta-renamed
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   (regexp-quote org-mcp-test--content-links-alpha)
+   "\\* Beta Renamed\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--link-beta-id "\n"
+   ":END:\n"
+   "Beta body\\.\n"
+   "\\*\\* Review\n"
+   "Beta review\\.\n"
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after renaming Beta.")
+
+(defconst org-mcp-test--regex-links-beta-clocked
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   (regexp-quote org-mcp-test--content-links-alpha)
+   "\\* Beta\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--link-beta-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => 2:15\n"
+   ":END:\n"
+   "Beta body\\.\n"
+   "\\*\\* Review\n"
+   "Beta review\\.\n"
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after adding a clock entry to Beta.")
+
+(defconst org-mcp-test--regex-links-top-level-added
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-links-preamble)
+   "\\* TODO New Task *\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   "\n?"
+   (regexp-quote org-mcp-test--content-links-alpha)
+   (regexp-quote org-mcp-test--content-links-beta)
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after adding a top-level TODO.")
+
+(defconst org-mcp-test--regex-links-added-after-beta-review
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha
+     org-mcp-test--content-links-beta))
+   "\n?"
+   "\\*\\* TODO New Task *\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after adding a TODO after Beta's Review.")
+
+(defvar org-mcp-test--link-canary nil
+  "Set by the `elisp:' link in the refusal tests if it is ever run.")
+
+(defun org-mcp-test--call-tool-expecting-error (test-file tool params)
+  "Call TOOL with PARAMS expecting a tool error and return its message.
+TEST-FILE is the test file path to verify remains unchanged."
+  (let ((original-content (org-mcp-test--read-file test-file))
+        (request
+         (mcp-server-lib-create-tools-call-request tool 1 params)))
+    (prog1 (cadr
+            (should-error
+             (mcp-server-lib-ert-process-tool-response
+              (mcp-server-lib-process-jsonrpc-parsed
+               request mcp-server-lib-ert-server-id))
+             :type 'mcp-server-lib-tool-error))
+      (should
+       (string= (org-mcp-test--read-file test-file) original-content)))))
+
+(ert-deftest org-mcp-test-link-read-accepted-forms ()
+  "Reading tools accept the three link forms, bare and bracketed."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (let ((alpha (string-trim-right org-mcp-test--content-links-alpha))
+          (beta (string-trim-right org-mcp-test--content-links-beta))
+          (gamma (string-trim-right org-mcp-test--content-links-gamma)))
+      (dolist (case
+               `((,(format "id:%s" org-mcp-test--link-beta-id) . ,beta)
+                 (,(format "[[id:%s]]" org-mcp-test--link-beta-id)
+                  . ,beta)
+                 (,(format "[[id:%s][Beta]]" org-mcp-test--link-beta-id)
+                  . ,beta)
+                 (,(format "file:%s::#alpha-slug" test-file) . ,alpha)
+                 (,(format "[[file:%s::#alpha-slug][Alpha]]" test-file)
+                  . ,alpha)
+                 (,(format "file:%s::*Gamma" test-file) . ,gamma)
+                 (,(format "[[file:%s::*Gamma]]" test-file) . ,gamma)))
+        (should
+         (string=
+          (org-mcp-test--call-read-headline (car case)) (cdr case)))))))
+
+(ert-deftest org-mcp-test-link-read-structured ()
+  "org-read resolves a link to a heading and a file link to the file."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (let ((heading
+           (json-read-from-string
+            (org-mcp-test--call-read
+             (format "[[id:%s][Beta]]" org-mcp-test--link-beta-id))))
+          (file
+           (json-read-from-string
+            (org-mcp-test--call-read (format "file:%s" test-file)))))
+      (should (equal (alist-get 'title heading) "Beta"))
+      (should (equal (alist-get 'id heading) org-mcp-test--link-beta-id))
+      (should (= (length (alist-get 'children heading)) 1))
+      (should (equal (alist-get 'file file) test-file))
+      (should (= (length (alist-get 'children file)) 3)))))
+
+(ert-deftest org-mcp-test-link-file-without-search-addresses-file ()
+  "A file link with no search part addresses the whole file.
+Reading returns the file, adding a TODO under it adds a top-level
+heading, and a tool that needs a heading refuses it."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (should
+       (string=
+        (org-mcp-test--call-read-headline (format "file:%s" test-file))
+        org-mcp-test--content-links))
+      (should
+       (string=
+        (org-mcp-test--call-read-headline
+         (format "[[file:%s][Links]]" test-file))
+        org-mcp-test--content-links))
+      (should
+       (string-match-p
+        "does not point to a heading"
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-set-tags"
+         `((uri . ,(format "file:%s" test-file)) (tags . "work")))))
+      (org-mcp-test--add-todo-and-check
+       "New Task" "TODO" nil nil (format "file:%s" test-file) nil
+       (file-name-nondirectory test-file)
+       test-file
+       org-mcp-test--regex-links-top-level-added))))
+
+(ert-deftest org-mcp-test-link-title-search-resolves-to-first-match ()
+  "A title search that matches several headings resolves to the first."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (let ((link (format "file:%s::*Review" test-file)))
+      (should
+       (string=
+        (org-mcp-test--call-read-headline link) "** Review\nAlpha review."))
+      (mcp-server-lib-ert-call-tool
+       "org-rename-headline"
+       `((uri . ,link)
+         (current_title . "Review")
+         (new_title . "First Review")))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-links-alpha-review-renamed))))
+
+(ert-deftest org-mcp-test-link-id-search-stays-in-subtree ()
+  "The search part of an `id:' link runs within the ID's subtree."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (should
+     (string=
+      (org-mcp-test--call-read-headline
+       (format "[[id:%s::*Review]]" org-mcp-test--link-beta-id))
+      "** Review\nBeta review."))
+    (should
+     (string-match-p
+      "Cannot resolve link"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-read-headline"
+       `((uri
+          .
+          ,(format "id:%s::*Gamma" org-mcp-test--link-beta-id))))))))
+
+(ert-deftest org-mcp-test-link-file-line-number ()
+  "A file link's line number search goes to that line, as in Org."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (should
+     (string=
+      (org-mcp-test--call-read-headline (format "file:%s::10" test-file))
+      (string-trim-right org-mcp-test--content-links-beta)))
+    (should
+     (string-match-p
+      "does not point to a heading"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-read-headline"
+       `((uri . ,(format "file:%s::7" test-file))))))))
+
+(ert-deftest org-mcp-test-link-write-id ()
+  "Writing tools accept an `id:' link, bare and bracketed."
+  (dolist (link
+           (list
+            (format "id:%s" org-mcp-test--link-beta-id)
+            (format "[[id:%s][Beta]]" org-mcp-test--link-beta-id)))
+    (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+        (list org-mcp-test--link-beta-id)
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-set-tags" `((uri . ,link) (tags . "work"))))))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-links-beta-tagged)))))
+
+(ert-deftest org-mcp-test-link-write-custom-id ()
+  "Writing tools accept a `file:' link to a custom ID, bare and bracketed."
+  (dolist (form '("file:%s::#alpha-slug" "[[file:%s::#alpha-slug]]"))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-set-tags"
+               `((uri . ,(format form test-file)) (tags . "work"))))))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-links-alpha-tagged)))))
+
+(ert-deftest org-mcp-test-link-write-title ()
+  "Writing tools accept a `file:' link to a title, bare and bracketed."
+  (dolist (form '("file:%s::*Gamma" "[[file:%s::*Gamma][Gamma]]"))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-set-tags"
+               `((uri . ,(format form test-file)) (tags . "work"))))))
+        (should (equal (alist-get 'success result) t))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-links-gamma-tagged)))))
+
+(ert-deftest org-mcp-test-link-update-todo-state ()
+  "org-update-todo-state accepts a title link."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (let ((result
+           (org-mcp-test--call-update-todo-state
+            (format "file:%s::*Gamma" test-file) "DONE" "TODO")))
+      (should (equal (alist-get 'previous_state result) "TODO"))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-links-gamma-done))))
+
+(ert-deftest org-mcp-test-link-edit-body ()
+  "org-edit-body accepts a bracketed custom ID link."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (org-mcp-test--call-edit-body-and-check
+     test-file
+     (format "[[file:%s::#alpha-slug][Alpha]]" test-file)
+     nil
+     "Alpha appended."
+     org-mcp-test--regex-links-alpha-body-appended
+     t)))
+
+(ert-deftest org-mcp-test-link-heading-tools ()
+  "Every other tool that changes a heading accepts a link."
+  (dolist (case
+           '(("org-set-properties" (properties . ((FOO . "bar"))))
+             ("org-update-scheduled" (scheduled . "2026-03-27"))
+             ("org-update-deadline" (deadline . "2026-03-27"))
+             ("org-set-priority" (priority . "A"))
+             ("org-add-logbook-note" (note . "Checked"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               (car case)
+               (cons
+                `(uri . ,(format "[[file:%s::*Gamma][Gamma]]" test-file))
+                (cdr case))))))
+        (should (equal (alist-get 'success result) t))
+        (should-not
+         (string=
+          (org-mcp-test--read-file test-file)
+          org-mcp-test--content-links))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-links-gamma-changed)))))
+
+(ert-deftest org-mcp-test-link-clock-tools ()
+  "Clock tools accept links: add and delete by ID, in and out by file."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (org-mcp-test--call-clock-add
+     (format "id:%s" org-mcp-test--link-beta-id)
+     "2026-03-23T14:30:00"
+     "2026-03-23T16:45:00")
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--regex-links-beta-clocked)
+    (org-mcp-test--call-clock-delete
+     (format "[[id:%s][Beta]]" org-mcp-test--link-beta-id)
+     "2026-03-23T14:30:00")
+    (org-mcp-test--verify-file-matches
+     test-file
+     (concat "\\`" (regexp-quote org-mcp-test--content-links) "\\'"))
+    (org-mcp-test--call-clock-in
+     (format "file:%s::*Gamma" test-file) "2026-03-23T14:30:00")
+    (mcp-server-lib-ert-call-tool
+     "org-clock-out"
+     `((uri . ,(format "file:%s" test-file))
+       (end_time . "2026-03-23T16:45:00")))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--regex-links-gamma-clocked)))
+
+(ert-deftest org-mcp-test-link-add-todo-after-sibling ()
+  "org-add-todo takes its parent and the sibling to follow as links."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+        (list org-mcp-test--link-beta-id)
+      (org-mcp-test--add-todo-and-check
+       "New Task" "TODO" nil nil
+       (format "[[id:%s][Beta]]" org-mcp-test--link-beta-id)
+       (format "id:%s::*Review" org-mcp-test--link-beta-id)
+       (file-name-nondirectory test-file)
+       test-file
+       org-mcp-test--regex-links-added-after-beta-review))))
+
+(ert-deftest org-mcp-test-link-add-todo-after-non-child-refused ()
+  "org-add-todo refuses a sibling link that is not a child of the parent."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+        (list org-mcp-test--link-beta-id)
+      (should
+       (string-match-p
+        "not found under parent"
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-add-todo"
+         `((title . "New Task")
+           (todo_state . "TODO")
+           (tags . nil)
+           (body . nil)
+           (parent_uri . ,(format "id:%s" org-mcp-test--link-beta-id))
+           (after_uri . ,(format "file:%s::*Review" test-file)))))))))
+
+(ert-deftest org-mcp-test-link-refuses-types-that-open-or-run ()
+  "A link type that opens or runs something is refused before any file opens."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (let ((canary
+           (expand-file-name "org-mcp-test-link-canary"
+                             (file-name-directory test-file)))
+          (org-mcp-test--link-canary nil))
+      (unwind-protect
+          (dolist (link
+                   (list
+                    (format "shell:touch %s" canary)
+                    (format "[[shell:touch %s][Gamma]]" canary)
+                    "elisp:(setq org-mcp-test--link-canary t)"
+                    "https://example.com/notes.org"
+                    "help:org-link-open"
+                    (format "file+sys:%s::*Gamma" test-file)))
+            (dolist (call
+                     `(("org-read-headline" (uri . ,link))
+                       ("org-set-tags" (uri . ,link) (tags . "work"))))
+              (should
+               (string-match-p
+                "not supported"
+                (org-mcp-test--call-tool-expecting-error
+                 test-file (car call) (cdr call)))))
+            (should-not (find-buffer-visiting test-file))
+            (should-not org-mcp-test--link-canary)
+            (should-not (file-exists-p canary)))
+        (when (file-exists-p canary)
+          (delete-file canary))))))
+
+(ert-deftest org-mcp-test-link-refuses-link-without-full-path ()
+  "A relative, file-less or remote link is refused with a full-path hint."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (dolist (link
+             (list
+              (format "file:%s::*Gamma" (file-name-nondirectory test-file))
+              (format "[[./%s::*Gamma]]" (file-name-nondirectory test-file))
+              "[[#alpha-slug]]"
+              "#alpha-slug"
+              "[[*Gamma]]"
+              "*Gamma"
+              "[[Gamma]]"
+              "file:/ssh:nonexistent.invalid:/tmp/notes.org::*Gamma"
+              "[[/ssh:nonexistent.invalid:/tmp/notes.org::*Gamma]]"))
+      (dolist (call
+               `(("org-read-headline" (uri . ,link))
+                 ("org-set-tags" (uri . ,link) (tags . "work"))))
+        (should
+         (string-match-p
+          "Send a full path"
+          (org-mcp-test--call-tool-expecting-error
+           test-file (car call) (cdr call))))))
+    (should-not (find-buffer-visiting test-file))))
+
+(ert-deftest org-mcp-test-link-refuses-regexp-search ()
+  "A regexp search is refused, since Org answers it with a sparse tree."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (should
+     (string-match-p
+      "Regexp search is not supported"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-read-headline"
+       `((uri . ,(format "file:%s::/Gam.*/" test-file))))))
+    (should-not (find-buffer-visiting test-file))))
+
+(ert-deftest org-mcp-test-link-file-outside-allowed-files-refused ()
+  "A file link naming a file outside the allowed files is refused."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file "* Allowed\n")
+       (other-file org-mcp-test--content-links))
+    (let ((org-mcp-allowed-files (list allowed-file))
+          (link (format "file:%s::*Gamma" other-file)))
+      (dolist (call
+               `(("org-read-headline" (uri . ,link))
+                 ("org-set-tags" (uri . ,link) (tags . "work"))))
+        (should
+         (string-match-p
+          "not in allowed list"
+          (org-mcp-test--call-tool-expecting-error
+           other-file (car call) (cdr call)))))
+      (should-not (find-buffer-visiting other-file)))))
+
+(ert-deftest org-mcp-test-link-id-outside-allowed-files-refused ()
+  "An ID in a file outside the allowed files is refused without its path."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file "* Allowed\n")
+       (other-file org-mcp-test--content-links))
+    (org-mcp-test--with-id-tracking
+        (list allowed-file)
+        `((,org-mcp-test--link-beta-id . ,other-file))
+      (let ((link (format "id:%s" org-mcp-test--link-beta-id)))
+        (dolist (call
+                 `(("org-read-headline" (uri . ,link))
+                   ("org-set-tags" (uri . ,link) (tags . "work"))))
+          (let ((message
+                 (org-mcp-test--call-tool-expecting-error
+                  other-file (car call) (cdr call))))
+            (should (string-match-p "not in allowed list" message))
+            (should-not
+             (string-match-p
+              (regexp-quote (file-name-nondirectory other-file))
+              message))))
+        (should-not (find-buffer-visiting other-file))))))
+
+(ert-deftest org-mcp-test-link-unknown-id-names-no-file ()
+  "An unknown ID is refused with an error that names no file.
+Each call runs from a buffer visiting an Org file, which Org's ID
+lookup falls back to for an ID it does not know: once an allowed
+file, once a file outside the allowed files."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links)
+       (other-file "* Other\nOther body.\n"))
+    (org-mcp-test--with-id-tracking
+        (list test-file)
+        `((,org-mcp-test--link-beta-id . ,test-file))
+      (let ((org-id-locations-file
+             (make-temp-file "org-mcp-test-id-locations")))
+        (unwind-protect
+            (dolist (current (list test-file other-file))
+              (let ((buf (find-file-noselect current)))
+                (unwind-protect
+                    (with-current-buffer buf
+                      (dolist (call
+                               '(("org-read-headline"
+                                  (uri . "id:no-such-id"))
+                                 ("org-set-tags"
+                                  (uri . "[[id:no-such-id][Gone]]")
+                                  (tags . "work"))))
+                        (should
+                         (string=
+                          (org-mcp-test--call-tool-expecting-error
+                           current (car call) (cdr call))
+                          "Cannot find ID 'no-such-id'"))))
+                  (kill-buffer buf))))
+          (delete-file org-id-locations-file))))))
+
+(ert-deftest org-mcp-test-link-leaves-user-view-unchanged ()
+  "Resolving a link leaves the user's windows, narrowing and point alone.
+The buffer is shown in the selected window and narrowed to Alpha, a
+different subtree from the one each call addresses, and the buffer
+list keeps its order."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (let ((buf (find-file-noselect test-file)))
+      (unwind-protect
+          (save-window-excursion
+            (switch-to-buffer buf)
+            (goto-char (point-min))
+            (re-search-forward "^\\* Alpha")
+            (org-narrow-to-subtree)
+            (forward-line 4)
+            (let ((view (list (point) (point-min) (point-max)))
+                  (windows (window-state-get nil t))
+                  (buffers (buffer-list)))
+              (should
+               (string=
+                (org-mcp-test--call-read-headline
+                 (format "[[id:%s::*Review]]" org-mcp-test--link-beta-id))
+                "** Review\nBeta review."))
+              (should
+               (string=
+                (org-mcp-test--call-read-headline
+                 (format "file:%s::*Gamma" test-file))
+                (string-trim-right org-mcp-test--content-links-gamma)))
+              (mcp-server-lib-ert-call-tool
+               "org-rename-headline"
+               `((uri
+                  .
+                  ,(format "[[id:%s][Beta]]" org-mcp-test--link-beta-id))
+                 (current_title . "Beta")
+                 (new_title . "Beta Renamed")))
+              (should (eq (current-buffer) buf))
+              (should (equal (list (point) (point-min) (point-max)) view))
+              (should (equal (window-state-get nil t) windows))
+              (should (equal (buffer-list) buffers))
+              (org-mcp-test--verify-file-matches
+               test-file org-mcp-test--regex-links-beta-renamed)))
+        (kill-buffer buf)))))
+
 ;;; Script installation tests
 
 (ert-deftest org-mcp-test-install ()

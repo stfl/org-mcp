@@ -919,18 +919,221 @@ Returns the content string or nil if not found."
     (when (org-mcp--navigate-to-headline headline-path)
       (org-mcp--extract-headline-content))))
 
-(defun org-mcp--goto-headline-from-uri (headline-path is-id)
-  "Navigate to headline based on HEADLINE-PATH and IS-ID flag.
-If IS-ID is non-nil, treats HEADLINE-PATH as containing an ID.
-Otherwise, navigates using HEADLINE-PATH as title hierarchy."
-  (if is-id
-      ;; ID case - headline-path contains single ID
-      (if-let* ((pos (org-find-property "ID" (car headline-path))))
-        (goto-char pos)
-        (org-mcp--id-not-found-error (car headline-path)))
-    ;; Path case - headline-path contains title hierarchy
-    (unless (org-mcp--navigate-to-headline headline-path)
-      (org-mcp--headline-not-found-error headline-path))))
+;; Links
+
+(defun org-mcp--link-p (address)
+  "Return non-nil when ADDRESS is written as a native Org link.
+A link is bracketed, starts with a link type such as `id:' or
+`file:', or is a search such as `#custom-id' or `*Title'.  Any other
+string is a bare address: an ID, a path, or a path with an outline
+path after `#'."
+  (let ((address (string-trim address)))
+    (or (string-prefix-p "[[" address)
+        (string-match-p "\\`[#*]" address)
+        (string-match-p org-link-types-re address))))
+
+(defun org-mcp--link-parse (link)
+  "Parse LINK with `org-element-link-parser' and return the link object.
+LINK is bracketed, with or without a description, or bare.  Link
+abbreviations are not expanded, since an abbreviation can call a
+function, and `org-link-translation-function' is not applied."
+  (with-temp-buffer
+    (let ((org-link-abbrev-alist nil)
+          (org-link-abbrev-alist-local nil)
+          (org-link-translation-function nil))
+      (insert
+       (if (string-prefix-p "[[" link)
+           link
+         (org-link-make-string link)))
+      (goto-char (point-min))
+      (let ((object (org-element-link-parser)))
+        (unless (and object
+                     (= (org-element-property :end object)
+                        (point-max)))
+          (org-mcp--tool-validation-error "Not a single Org link: %s"
+                                          link))
+        object))))
+
+(defun org-mcp--link-full-path-error (link)
+  "Throw the error for LINK, which names no local file by its full path."
+  (org-mcp--tool-validation-error
+   "Link names no local file by its full path: %s.  Send a full path, \
+such as file:/home/user/notes.org::*Heading, or an id: link"
+   link))
+
+(defun org-mcp--link-file (object link)
+  "Return the allowed file that the file link OBJECT names.
+LINK is the link as the client sent it, for error messages.  A remote
+path is refused before any file operation that could open a
+connection, and so is a relative path; the file then goes through the
+allowed-files gate, `org-mcp--find-allowed-file'.  No buffer is
+visited."
+  (let ((application (org-element-property :application object))
+        (path (org-element-property :path object)))
+    (unless (member application '(nil "emacs"))
+      (org-mcp--tool-validation-error
+       "Link type 'file+%s' is not supported: %s"
+       application link))
+    (when (or (let ((non-essential t))
+                (file-remote-p path))
+              (not (file-name-absolute-p path)))
+      (org-mcp--link-full-path-error link))
+    (or (org-mcp--find-allowed-file path)
+        (org-mcp--tool-file-access-error link))))
+
+(defun org-mcp--link-id-file (id link)
+  "Return the allowed file that holds ID, which LINK names.
+The lookup is `org-id-find', so org-roam and Org's rescan on a miss
+apply.  It runs in a temporary buffer because `org-id-find-id-file'
+falls back to the current buffer's file for an unknown ID.  Errors
+from the lookup, such as the refusal to rescan when
+`org-id-track-globally' is off, count as an unknown ID.  Neither error
+this function throws names a file."
+  (let ((found
+         (and (org-string-nw-p id)
+              (with-temp-buffer
+                (ignore-errors
+                  (org-id-find id))))))
+    (unless found
+      (org-mcp--id-not-found-error id))
+    (or (org-mcp--find-allowed-file (car found))
+        (org-mcp--tool-file-access-error link))))
+
+(defun org-mcp--link-target (link)
+  "Return the target of native Org LINK, visiting no buffer.
+The value is a plist: `:link' is LINK, `:file' the allowed file it
+names, `:id' the ID of an `id:' link, and `:search' the part after
+`::', if any.  Only `id:' and `file:' links are accepted.  Every other
+link type is refused here, before any file is opened, and so is a link
+that names no file, such as `[[#custom-id]]' or `[[*Title]]'."
+  (let*
+      ((link (string-trim link))
+       (object (org-mcp--link-parse link))
+       (type (org-element-property :type object))
+       (path (org-element-property :path object))
+       (target
+        (pcase type
+          ("id"
+           ;; The parser keeps the search part of an `id:' link in
+           ;; its path; split it off the way `org-id-open' does.
+           (let* ((search
+                   (and (string-match "::\\(.*\\)\\'" path)
+                        (match-string 1 path)))
+                  (id
+                   (if search
+                       (substring path 0 (match-beginning 0))
+                     path)))
+             (list
+              :link link
+              :file (org-mcp--link-id-file id link)
+              :id id
+              :search search)))
+          ("file" (list
+            :link link
+            :file (org-mcp--link-file object link)
+            :search (org-element-property :search-option object)))
+          ((or "custom-id" "fuzzy" "coderef")
+           (org-mcp--link-full-path-error link))
+          (_
+           (org-mcp--tool-validation-error
+            "Link type '%s' is not supported: send an id: or file: link"
+            type)))))
+    ;; `org-link-search' turns a regexp search into a sparse tree,
+    ;; which would refold the user's buffer.
+    (when (string-match-p
+           "\\`/.*/\\'" (or (plist-get target :search) ""))
+      (org-mcp--tool-validation-error
+       "Regexp search is not supported in a link: %s"
+       link))
+    target))
+
+(defun org-mcp--link-goto (target)
+  "Move point to where TARGET points in the current buffer.
+TARGET comes from `org-mcp--link-target', and the current buffer
+visits its file, widened.  This is the lookup `org-id-open' and
+`org-open-file' perform, without their navigation: `org-link-open' is
+never called, because it switches windows, widens the user's buffer,
+pushes the mark ring and unfolds headings.  A search that matches
+several headings goes to the first, as it does in Org, and a search
+that matches nothing is an error rather than an offer to create a
+heading."
+  (let ((id (plist-get target :id))
+        (search (plist-get target :search)))
+    (goto-char (point-min))
+    (when id
+      ;; Locate the ID in this buffer although `org-id-find' already
+      ;; did: org-roam answers from its database, whose position is
+      ;; stale once the buffer holds unsaved edits.
+      (goto-char
+       (or (org-find-entry-with-id id)
+           (org-mcp--id-not-found-error id))))
+    (when search
+      (save-restriction
+        ;; An `id:' link searches the ID's subtree, as `org-id-open'
+        ;; does, and a `file:' link the whole file.
+        (when (and id (not (org-before-first-heading-p)))
+          (org-narrow-to-subtree))
+        (if (and (not id) (string-match-p "\\`[0-9]+\\'" search))
+            ;; A line number, as `org-link-open-as-file' reads it.
+            (org-goto-line (string-to-number search))
+          (let ((org-link-search-must-match-exact-headline t)
+                (org-execute-file-search-functions nil))
+            (condition-case err
+                (org-link-search search nil t)
+              (error
+               (org-mcp--tool-validation-error
+                "Cannot resolve link %s: %s"
+                (plist-get target :link)
+                (error-message-string err))))))))))
+
+(defun org-mcp--address-target (address)
+  "Return the target of ADDRESS, a native Org link or a bare address.
+The value is a plist as from `org-mcp--link-target'.  For a bare
+address it holds `:id' for a bare ID, or `:olp', the outline path of
+titles, for a `file#headline' path."
+  (org-mcp--reject-uri-prefix address)
+  (if (org-mcp--link-p address)
+      (org-mcp--link-target address)
+    (let ((parsed (org-mcp--parse-resource-uri address)))
+      (append
+       (list :link address :file (car parsed))
+       (if (org-mcp--uri-is-id-based address)
+           (list :id (cadr parsed))
+         (list :olp (cdr parsed)))))))
+
+(defun org-mcp--target-heading-p (target)
+  "Return non-nil when TARGET names a heading rather than a whole file."
+  (or (plist-get target :id)
+      (plist-get target :search)
+      (plist-member target :olp)))
+
+(defun org-mcp--goto-heading (target)
+  "Move point to the heading TARGET names, or throw a tool error.
+TARGET comes from `org-mcp--address-target', and the current buffer
+visits its file, widened."
+  (if (plist-member target :olp)
+      (let ((olp (plist-get target :olp)))
+        (unless (org-mcp--navigate-to-headline olp)
+          (org-mcp--headline-not-found-error olp)))
+    (org-mcp--link-goto target)
+    (unless (and (org-mcp--target-heading-p target)
+                 (org-at-heading-p))
+      (org-mcp--tool-validation-error
+       "Link does not point to a heading: %s"
+       (plist-get target :link)))))
+
+(defun org-mcp--read-link (link read-heading read-file)
+  "Read what native Org LINK points to.
+READ-HEADING is called with no arguments and point at the heading
+LINK names.  READ-FILE is called with the file when LINK names a
+whole file, that is a `file:' link with no search part."
+  (let* ((target (org-mcp--link-target link))
+         (file (plist-get target :file)))
+    (if (org-mcp--target-heading-p target)
+        (org-mcp--with-org-file file
+          (org-mcp--goto-heading target)
+          (funcall read-heading))
+      (funcall read-file file))))
 
 (defun org-mcp--get-content-by-id (file-path id)
   "Get content for org node with ID in FILE-PATH.
@@ -1458,16 +1661,15 @@ Throws error for invalid types."
    (t
     (org-mcp--tool-validation-error "Invalid tags format: %s" tags))))
 
-(defun org-mcp--navigate-to-parent-or-top (parent-path parent-id)
-  "Navigate to parent headline or top of file.
-PARENT-PATH is a list of headline titles (or nil for top-level).
-PARENT-ID is an ID string (or nil).
+(defun org-mcp--navigate-to-parent-or-top (parent)
+  "Navigate to the parent headline PARENT names, or to the top of file.
+PARENT is a target plist as from `org-mcp--address-target'; one that
+names a whole file means top level.
 Returns parent level (integer) if parent exists, nil for top-level.
 Assumes point is in an Org buffer."
-  (if (or parent-path parent-id)
+  (if (org-mcp--target-heading-p parent)
       (progn
-        (org-mcp--goto-headline-from-uri
-         (or (and parent-id (list parent-id)) parent-path) parent-id)
+        (org-mcp--goto-heading parent)
         ;; Save parent level before moving point
         ;; Ensure we're at the beginning of headline
         (org-back-to-heading t)
@@ -1484,16 +1686,37 @@ Assumes point is in an Org buffer."
         (forward-line)))
     nil))
 
+(defun org-mcp--goto-after-child (target)
+  "Move point past the child of the heading at point that TARGET names.
+TARGET comes from `org-mcp--link-target'.  Throws a validation error
+unless TARGET names a direct child of the heading at point."
+  (let ((parent
+         (progn
+           (org-back-to-heading t)
+           (point))))
+    (unless (and (org-mcp--paths-equal-p
+                  (plist-get target :file) (buffer-file-name))
+                 (progn
+                   (org-mcp--goto-heading target)
+                   (save-excursion
+                     (and (org-up-heading-safe) (= (point) parent)))))
+      (org-mcp--tool-validation-error
+       "Sibling %s not found under parent"
+       (plist-get target :link)))
+    (org-end-of-subtree t t)))
+
 (defun org-mcp--position-for-new-child (after-uri parent-end)
   "Position point for inserting a new child under current heading.
-AFTER-URI is an optional org:// URI of a sibling to insert after.
+AFTER-URI is an optional link to, or bare ID of, a sibling to insert
+after.
 PARENT-END is the end position of the parent's subtree.
 Assumes point is at parent heading.
 If AFTER-URI is non-nil, positions after that sibling.
 If nil, positions at end of parent's subtree.
 Throws validation error if AFTER-URI is invalid or sibling not found."
   (if (and after-uri (not (string-empty-p after-uri)))
-      (progn
+      (if (org-mcp--link-p after-uri)
+          (org-mcp--goto-after-child (org-mcp--link-target after-uri))
         ;; Parse afterUri to get the ID
         (let ((after-id (org-mcp--extract-id-from-uri after-uri))
               (found nil))
@@ -1724,8 +1947,12 @@ CURRENT_STATE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   new_state - New TODO state (must be in `org-todo-keywords')
@@ -1735,9 +1962,8 @@ MCP Parameters:
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (actual-prev nil))
     (org-mcp--modify-and-save file-path "update"
                               `((previous_state . ,actual-prev)
@@ -1745,8 +1971,7 @@ MCP Parameters:
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (org-mcp--validate-todo-state new_state)
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       ;; Capture actual previous state
       (beginning-of-line)
@@ -1794,12 +2019,22 @@ MCP Parameters:
   body - Optional body text content
   parent_uri - Parent item URI
                Formats:
+                 - id:{id}
+                 - file:{absolute-path}::#{custom-id}
+                 - file:{absolute-path}::*{title} (first match)
+                 - file:{absolute-path} (top level of the file)
+                 - any of these as [[link]] or [[link][description]]
                  - {absolute-path}#{headline-path}
+                 - {absolute-path}# (top level of the file)
                  - {id}
   tags - Tags to add (optional, single string or array of strings)
-  after_uri - Sibling to insert after (optional)
+  after_uri - Sibling to insert after (optional), a direct child of
+              the parent
               Formats:
-                - {absolute-path}#{headline-path}
+                - id:{id}
+                - file:{absolute-path}::#{custom-id}
+                - file:{absolute-path}::*{title} (first match)
+                - any of these as [[link]] or [[link][description]]
                 - {id}
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
@@ -1813,27 +2048,41 @@ MCP Parameters:
           (and properties
                (not (equal properties ""))
                (org-mcp--validate-properties properties)))
-         file-path
-         parent-path
-         parent-id)
+         (parent (list :link parent_uri))
+         file-path)
 
-    ;; Parse parent URI once to extract file-path and parent location
-    (org-mcp--with-uri-dispatch
-        parent_uri
-      ;; Handle org:// URIs
-      (let* ((split-result (org-mcp--split-headline-uri headline))
-             (filename (car split-result))
-             (path-str (cdr split-result))
-             (allowed-file (org-mcp--validate-file-access filename)))
-        (setq file-path (expand-file-name allowed-file))
-        (when (and path-str (> (length path-str) 0))
-          (setq parent-path
-                (mapcar
-                 #'url-unhex-string (split-string path-str "/")))))
-      ;; Handle ID-based URIs
-      (progn
-        (setq file-path (org-mcp--find-allowed-file-with-id id))
-        (setq parent-id id)))
+    ;; Parse parent URI once to extract file-path and parent location.
+    ;; A link that names a whole file means top level.
+    (if (org-mcp--link-p parent_uri)
+        (setq parent (org-mcp--link-target parent_uri))
+      (org-mcp--with-uri-dispatch
+          parent_uri
+        ;; Handle org:// URIs
+        (let* ((split-result (org-mcp--split-headline-uri headline))
+               (filename (car split-result))
+               (path-str (cdr split-result))
+               (allowed-file
+                (org-mcp--validate-file-access filename)))
+          (setq parent
+                (plist-put
+                 parent
+                 :file (expand-file-name allowed-file)))
+          (when (and path-str (> (length path-str) 0))
+            (setq parent
+                  (plist-put
+                   parent
+                   :olp
+                   (mapcar
+                    #'url-unhex-string
+                    (split-string path-str "/"))))))
+        ;; Handle ID-based URIs
+        (setq parent
+              (plist-put
+               (plist-put
+                parent
+                :file (org-mcp--find-allowed-file-with-id id))
+               :id id))))
+    (setq file-path (plist-get parent :file))
 
     ;; Add the TODO item
     (org-mcp--modify-and-save file-path "add TODO"
@@ -1845,11 +2094,10 @@ MCP Parameters:
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (org-mcp--validate-todo-state todo_state)
       (let ((parent-level
-             (org-mcp--navigate-to-parent-or-top
-              parent-path parent-id)))
+             (org-mcp--navigate-to-parent-or-top parent)))
 
         ;; Handle positioning after navigation to parent
-        (when (or parent-path parent-id)
+        (when parent-level
           (let ((parent-end
                  (save-excursion
                    (org-end-of-subtree t t)
@@ -1859,9 +2107,9 @@ MCP Parameters:
         ;; Validate body before inserting heading
         ;; Calculate the target level for validation
         (let ((target-level
-               (if (or parent-path parent-id)
+               (if parent-level
                    ;; Child heading - parent level + 1
-                   (1+ (or parent-level 0))
+                   (1+ parent-level)
                  ;; Top-level heading
                  1)))
 
@@ -1989,25 +2237,27 @@ headline if one doesn't exist.
 Returns the ID-based URI for the renamed headline.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   current_title - Current title without TODO state or tags
   new_title - New title without TODO state or tags"
   (org-mcp--validate-headline-title new_title)
 
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed)))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file)))
 
     ;; Rename the headline in the file
     (org-mcp--modify-and-save file-path "rename"
                               `((previous_title . ,current_title)
                                 (new_title . ,new_title))
       ;; Navigate to the headline
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       ;; Verify current title matches
       (beginning-of-line)
@@ -2029,6 +2279,10 @@ APPEND if non-nil, append NEW_BODY to end of body instead of replacing.
 MCP Parameters:
   resource_uri - URI of the node
                  Formats:
+                   - id:{id}
+                   - file:{absolute-path}::#{custom-id}
+                   - file:{absolute-path}::*{title} (first match)
+                   - any of these as [[link]] or [[link][description]]
                    - {absolute-path}#{headline-path}
                    - {id}
   old_body - Substring to replace within the body (replace mode only).
@@ -2058,13 +2312,11 @@ MCP Parameters:
 
           (org-mcp--validate-body-no-unbalanced-blocks new_body)
 
-          (let* ((parsed (org-mcp--parse-resource-uri resource_uri))
-                 (file-path (car parsed))
-                 (headline-path (cdr parsed)))
+          (let* ((target (org-mcp--address-target resource_uri))
+                 (file-path (plist-get target :file)))
 
             (org-mcp--modify-and-save file-path "append body" nil
-              (org-mcp--goto-headline-from-uri
-               headline-path (org-mcp--uri-is-id-based resource_uri))
+              (org-mcp--goto-heading target)
 
               (org-mcp--validate-body-no-headlines
                new_body (org-current-level))
@@ -2102,13 +2354,11 @@ MCP Parameters:
       ;; Replace mode
       (org-mcp--validate-body-no-unbalanced-blocks new_body)
 
-      (let* ((parsed (org-mcp--parse-resource-uri resource_uri))
-             (file-path (car parsed))
-             (headline-path (cdr parsed)))
+      (let* ((target (org-mcp--address-target resource_uri))
+             (file-path (plist-get target :file)))
 
         (org-mcp--modify-and-save file-path "edit body" nil
-          (org-mcp--goto-headline-from-uri
-           headline-path (org-mcp--uri-is-id-based resource_uri))
+          (org-mcp--goto-heading target)
 
           (org-mcp--validate-body-no-headlines
            new_body (org-current-level))
@@ -2263,8 +2513,12 @@ PROPERTIES is an alist of property name-value pairs.
 String values set the property; null/empty values delete it.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   properties - JSON object of property name-value pairs (required)
@@ -2275,17 +2529,15 @@ MCP Parameters:
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden"
   (setq properties (org-mcp--validate-properties properties))
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (set-props nil)
          (deleted-props nil))
 
     (org-mcp--modify-and-save file-path "set properties"
                               `((properties_set . ,set-props)
                                 (properties_deleted . ,deleted-props))
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       (pcase-dolist (`(,key . ,val) properties)
         (if val
@@ -2302,16 +2554,19 @@ MCP Parameters:
 SCHEDULED is an ISO date string or nil/empty to remove.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   scheduled - ISO date string (optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
               nil or empty string removes the timestamp"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (previous-scheduled nil)
          (new-scheduled nil))
 
@@ -2319,8 +2574,7 @@ MCP Parameters:
                               `((previous_scheduled
                                  . ,previous-scheduled)
                                 (new_scheduled . ,new-scheduled))
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       (setq previous-scheduled
             (or (org-entry-get (point) "SCHEDULED") ""))
@@ -2341,16 +2595,19 @@ MCP Parameters:
 DEADLINE is an ISO date string or nil/empty to remove.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   deadline - ISO date string (optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
              nil or empty string removes the timestamp"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (previous-deadline nil)
          (new-deadline nil))
 
@@ -2358,8 +2615,7 @@ MCP Parameters:
                               `((previous_deadline
                                  . ,previous-deadline)
                                 (new_deadline . ,new-deadline))
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       (setq previous-deadline
             (or (org-entry-get (point) "DEADLINE") ""))
@@ -2380,8 +2636,12 @@ MCP Parameters:
 TAGS can be a string, list of strings, or nil/empty to clear all tags.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   tags - Tags to set (string or array, optional)
@@ -2389,9 +2649,8 @@ MCP Parameters:
          Multiple tags: [\"work\", \"urgent\"]
          nil or empty to clear all tags
          Validated against org-tag-alist if configured"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (previous-tags nil)
          (new-tags nil))
 
@@ -2406,8 +2665,7 @@ MCP Parameters:
                                    .
                                    ,(or previous-tags []))
                                   (new_tags . ,(or new-tags [])))
-        (org-mcp--goto-headline-from-uri
-         headline-path (org-mcp--uri-is-id-based uri))
+        (org-mcp--goto-heading target)
 
         (setq previous-tags (vconcat (org-get-tags nil t)))
 
@@ -2420,8 +2678,12 @@ MCP Parameters:
 PRIORITY is a single-character string or nil/empty to remove.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   priority - Priority character (string, optional)
@@ -2440,9 +2702,8 @@ MCP Parameters:
          "Priority '%s' out of range ('%c' to '%c')"
          priority org-priority-highest org-priority-lowest))))
 
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (previous-priority nil)
          (new-priority nil))
 
@@ -2450,8 +2711,7 @@ MCP Parameters:
                               `((previous_priority
                                  . ,previous-priority)
                                 (new_priority . ,new-priority))
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
 
       (setq previous-priority
             (let ((p
@@ -2475,8 +2735,12 @@ MCP Parameters:
   "Add a timestamped note to the LOGBOOK drawer of headline at URI.
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   note - Note text to add (string, required)
@@ -2488,13 +2752,11 @@ MCP Parameters:
     (org-mcp--tool-validation-error
      "Note cannot be empty or whitespace-only"))
 
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed)))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file)))
 
     (org-mcp--modify-and-save file-path "add logbook note" nil
-      (org-mcp--goto-headline-from-uri
-       headline-path (org-mcp--uri-is-id-based uri))
+      (org-mcp--goto-heading target)
       (org-mcp--insert-log-note note 'note))))
 
 ;; org-ql integration
@@ -2686,17 +2948,32 @@ Returns: Same format as org-ql-query tool, sorted by
 
 (defun org-mcp--tool-read (uri)
   "Tool handler for org-read.
-URI must be a bare identifier — no `org://' prefix.
+URI is a native Org link or a bare address — no `org://'
+prefix.
 Returns structured JSON.
 
 MCP Parameters:
-  uri - URI string (string, required). Accepted forms (no `org://'
-        prefix; the prefix is reserved for the MCP resource layer):
+  uri - Link or address (string, required). Accepted forms (no
+        `org://' prefix; the prefix is reserved for the MCP resource
+        layer):
+        - id:{id} (heading with that ID)
+        - file:/path/to/file.org::#{custom-id} (heading with that
+          CUSTOM_ID)
+        - file:/path/to/file.org::*{title} (first heading with that
+          title)
+        - file:/path/to/file.org (whole file)
+        - any of these bracketed, as [[link]] or [[link][description]]
         - /path/to/file.org (file path)
         - /path/to/file.org#Headline/Subhead (headline path)
         - UUID (8-4-4-4-12 format)"
   (org-mcp--reject-uri-prefix uri)
-  (org-mcp--handle-org-resource `(("uri" . ,uri))))
+  (if (org-mcp--link-p uri)
+      (org-mcp--read-link
+       uri
+       (lambda () (json-encode (org-mcp--extract-structured-heading)))
+       (lambda (file)
+         (json-encode (org-mcp--extract-structured-file file))))
+    (org-mcp--handle-org-resource `(("uri" . ,uri)))))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool wrapper for org-outline://{filename} resource template.
@@ -2708,18 +2985,30 @@ MCP Parameters:
 
 (defun org-mcp--tool-read-headline (uri)
   "Tool handler for org-read-headline.
-URI must be a bare identifier — no `org://' prefix.
+URI is a native Org link or a bare address — no `org://'
+prefix.
 Returns plain text content.
 
 MCP Parameters:
-  uri - URI string (string, required). Accepted forms (no `org://'
-        prefix; the prefix is reserved for the MCP resource layer):
+  uri - Link or address (string, required). Accepted forms (no
+        `org://' prefix; the prefix is reserved for the MCP resource
+        layer):
+        - id:{id} (heading with that ID)
+        - file:/path/to/file.org::#{custom-id} (heading with that
+          CUSTOM_ID)
+        - file:/path/to/file.org::*{title} (first heading with that
+          title)
+        - file:/path/to/file.org (returns entire file)
+        - any of these bracketed, as [[link]] or [[link][description]]
         - /path/to/file.org (returns entire file)
         - /path/to/file.org#Headline/Subhead (headline path)
         - UUID (8-4-4-4-12 format)
         Headline paths use URL encoding for special chars."
   (org-mcp--reject-uri-prefix uri)
-  (org-mcp--handle-headline-resource `(("uri" . ,uri))))
+  (if (org-mcp--link-p uri)
+      (org-mcp--read-link
+       uri #'org-mcp--extract-headline-content #'org-mcp--read-file)
+    (org-mcp--handle-headline-resource `(("uri" . ,uri)))))
 
 ;; Clock tools
 
@@ -2798,16 +3087,18 @@ When RESOLVE is \"true\", dangling (unclosed) CLOCK lines under
 the target heading are deleted before clocking in.
 
 MCP Parameters:
-  uri - URI of the headline to clock in
+  uri - Link or URI of the headline to clock in
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
   resolve - When \"true\", delete dangling clocks before clocking in"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
-         (is-id (org-mcp--uri-is-id-based uri))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (now (current-time))
          (explicit-start
           (when start_time
@@ -2924,7 +3215,7 @@ MCP Parameters:
                                     (when (> resolved-count 0)
                                       `((resolved
                                          . ,resolved-count))))
-          (org-mcp--goto-headline-from-uri headline-path is-id)
+          (org-mcp--goto-heading target)
           (when (equal resolve "true")
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
           (org-mcp--clock-insert-entry clock-start))))))
@@ -2938,6 +3229,11 @@ END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 MCP Parameters:
   uri - Optional URI to validate against active clock
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - file:{absolute-path}
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
@@ -2962,8 +3258,8 @@ MCP Parameters:
          (format "[%s]" start-str)))
       ;; If URI provided, validate it matches
       (when uri
-        (let* ((parsed (org-mcp--parse-resource-uri uri))
-               (uri-file (car parsed)))
+        (let ((uri-file
+               (plist-get (org-mcp--address-target uri) :file)))
           (unless (org-mcp--paths-equal-p uri-file active-file)
             (org-mcp--tool-validation-error
              "URI file does not match active clock file"))))
@@ -3002,16 +3298,18 @@ START is ISO 8601 start time (e.g. 2026-03-23T14:30:00).
 END is ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   start - ISO 8601 start time (e.g. 2026-03-23T14:30:00)
   end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
-         (is-id (org-mcp--uri-is-id-based uri))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time
            (org-mcp--clock-parse-timestamp start)))
@@ -3039,7 +3337,7 @@ MCP Parameters:
                                    (float-time
                                     (time-subtract
                                      end-time start-time)))))
-      (org-mcp--goto-headline-from-uri headline-path is-id)
+      (org-mcp--goto-heading target)
       (org-mcp--clock-insert-entry start-time end-time))))
 
 (defun org-mcp--tool-clock-delete (uri start)
@@ -3048,23 +3346,25 @@ START is the ISO 8601 start time of the clock entry to delete
 \\(e.g., 2026-03-23T14:30:00).
 
 MCP Parameters:
-  uri - URI of the headline
+  uri - Link or URI of the headline
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
   start - ISO 8601 start time of the clock entry to delete
           (e.g. 2026-03-23T14:30:00)"
-  (let* ((parsed (org-mcp--parse-resource-uri uri))
-         (file-path (car parsed))
-         (headline-path (cdr parsed))
-         (is-id (org-mcp--uri-is-id-based uri))
+  (let* ((target (org-mcp--address-target uri))
+         (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time
            (org-mcp--clock-parse-timestamp start)))
          (deleted-info nil))
     (org-mcp--modify-and-save file-path "clock-delete"
                               `((deleted . t) ,@deleted-info)
-      (org-mcp--goto-headline-from-uri headline-path is-id)
+      (org-mcp--goto-heading target)
       (setq deleted-info (org-mcp--clock-delete-entry start-time))
       (unless deleted-info
         (org-mcp--tool-validation-error
@@ -3236,8 +3536,12 @@ while preserving the headline title, tags, and other properties.
 Creates an Org ID property for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline to update (string, required)
+  uri - Link or URI of the headline to update (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   current_state - Expected current TODO state (string, optional)
@@ -3282,14 +3586,20 @@ Parameters:
   body - Body content under the headline (string, optional)
          Cannot contain headlines at same or higher level as new item
          If #+BEGIN/#+END blocks are present, they must be balanced
-  parent_uri - Parent location (string, required). Pass the bare form
-               (no `org://' prefix).
-               For top-level: {absolute-path}
-               For child: {path}#{parent-path}
-                         or {parent-uuid}
-  after_uri - Sibling to insert after (string, optional). Pass the
-              bare form (no `org://' prefix).
-              Must be {uuid} format
+  parent_uri - Parent location (string, required). Pass a link or the
+               bare form (no `org://' prefix).
+               For top-level: file:{absolute-path}
+                              or {absolute-path}#
+               For child: id:{parent-id}
+                          or file:{absolute-path}::#{custom-id}
+                          or file:{absolute-path}::*{title} (first match)
+                          or {path}#{parent-path}
+                          or {parent-uuid}
+               Links may be bracketed: [[link]] or
+               [[link][description]]
+  after_uri - Sibling to insert after (string, optional), a direct
+              child of the parent. Pass a link, in any form
+              parent_uri accepts for a child, or a bare {uuid}.
               If omitted, appends as last child of parent
   properties - Properties for the new headline (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
@@ -3314,7 +3624,8 @@ Positioning behavior:
   - With parent_uri only: Appends as last child of parent
   - With parent_uri + after_uri: Inserts immediately after specified
 sibling
-  - Top-level (parent_uri with no fragment): Adds at end of file."
+  - Top-level (parent_uri naming only the file): Adds after the
+file's header lines."
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -3327,8 +3638,12 @@ tags, properties, and body content.  Creates an Org ID property for
 the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline to rename (string, required)
+  uri - Link or URI of the headline to rename (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   current_title - Expected current title without TODO/tags (string,
@@ -3360,8 +3675,12 @@ existing body content but before any child headlines.  Creates an
 Org ID property for the headline if one doesn't exist.
 
 Parameters:
-  resource_uri - URI of the headline to edit (string, required)
+  resource_uri - Link or URI of the headline to edit (string, required)
                  Formats:
+                   - id:{id}
+                   - file:{absolute-path}::#{custom-id}
+                   - file:{absolute-path}::*{title} (first match)
+                   - any of these as [[link]] or [[link][description]]
                    - {absolute-path}#{url-encoded-path}
                    - {uuid}
   old_body - Substring to find and replace (string, required in
@@ -3399,8 +3718,12 @@ PROPERTIES drawer.  Creates an Org ID for the headline if one
 doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   properties - JSON object of property name-value pairs (required)
@@ -3431,8 +3754,12 @@ Returns JSON object:
 Org ID for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   scheduled - ISO date string (string, optional)
@@ -3457,8 +3784,12 @@ Returns JSON object:
 Org ID for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   deadline - ISO date string (string, optional)
@@ -3483,8 +3814,12 @@ Returns JSON object:
 Creates an Org ID for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   tags - Tags to set (string or array, optional)
@@ -3513,8 +3848,12 @@ Returns JSON object:
 for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   priority - Priority character (string, optional)
@@ -3541,8 +3880,12 @@ Creates the LOGBOOK drawer if it doesn't exist.  Creates an Org ID
 for the headline if one doesn't exist.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{url-encoded-path}
           - {uuid}
   note - Note text to add (string, required)
@@ -3567,9 +3910,16 @@ URI format and returns structured data including children, properties,
 and timestamps.
 
 Parameters:
-  uri - URI (string, required). Pass the bare form (no `org://'
-        prefix; that prefix is reserved for the MCP resource layer).
+  uri - Link or bare URI (string, required), with no `org://' prefix
+        (that prefix is reserved for the MCP resource layer).
         Formats:
+        - id:{id} - heading with that ID
+        - file:/path/to/file.org::#{custom-id} - heading with that
+          CUSTOM_ID
+        - file:/path/to/file.org::*{title} - first heading with that
+          title
+        - file:/path/to/file.org - whole file
+        - any of these as [[link]] or [[link][description]]
         - /path/to/file.org - file path (returns file with children)
         - /path/to/file.org#Headline/Subhead - headline path
         - UUID (8-4-4-4-12 format) - ID-based lookup
@@ -3623,9 +3973,16 @@ Returns headline with TODO state, tags, properties, body text, and all
 nested subheadings.
 
 Parameters:
-  uri - URI (string, required). Pass the bare form (no `org://'
-        prefix; that prefix is reserved for the MCP resource layer).
+  uri - Link or bare URI (string, required), with no `org://' prefix
+        (that prefix is reserved for the MCP resource layer).
         Formats:
+        - id:{id} - heading with that ID
+        - file:/path/to/file.org::#{custom-id} - heading with that
+          CUSTOM_ID
+        - file:/path/to/file.org::*{title} - first heading with that
+          title
+        - file:/path/to/file.org - whole file
+        - any of these as [[link]] or [[link][description]]
         - /path/to/file.org - returns entire file
         - /path/to/file.org#Headline/Subhead - headline path
         - UUID (8-4-4-4-12 format) - ID-based lookup
@@ -3778,8 +4135,12 @@ if it is within the continuous threshold.
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
-  uri - URI of the headline to clock in (string, required)
+  uri - Link or URI of the headline to clock in (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {uuid}
   start_time - ISO 8601 start time (string, optional)
@@ -3814,6 +4175,11 @@ Parameters:
   uri - Optional URI to validate against active clock (string)
         If provided, must match the file of the active clock
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - file:{absolute-path}
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {uuid}
   end_time - ISO 8601 end time (string, optional)
@@ -3844,8 +4210,12 @@ of the LOGBOOK.
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {uuid}
   start - ISO 8601 start time (string, required)
@@ -3876,8 +4246,12 @@ drawer if it becomes empty after deletion.
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
-  uri - URI of the headline (string, required)
+  uri - Link or URI of the headline (string, required)
         Formats:
+          - id:{id}
+          - file:{absolute-path}::#{custom-id}
+          - file:{absolute-path}::*{title} (first match)
+          - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {uuid}
   start - ISO 8601 start time of the clock entry to delete
