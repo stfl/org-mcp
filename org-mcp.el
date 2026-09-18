@@ -2603,7 +2603,6 @@ MCP Parameters:
           (when start_time
             (org-mcp--clock-parse-timestamp start_time)))
          ;; Check for active clock and close it if needed
-         ;; Check for active clock and close it if needed
          (active (org-mcp--clock-find-active))
          ;; Closing the active clock may edit another buffer that
          ;; already had unsaved edits; `saved' covers that edit too.
@@ -2630,6 +2629,9 @@ MCP Parameters:
                      (was-modified
                       (with-current-buffer buf
                         (buffer-modified-p)))
+                     (tick
+                      (with-current-buffer buf
+                        (buffer-chars-modified-tick)))
                      (start-str (alist-get 'start active)))
                 (when start-str
                   (with-current-buffer buf
@@ -2654,7 +2656,13 @@ MCP Parameters:
                                  (org-back-to-heading t)
                                  (point)))
                               (org-clock-out nil t close-at)))))))
-                  (setq org-mcp--unsaved-change-p was-modified)
+                  ;; Only an edit that reached BUF can stay unsaved.
+                  (when (and was-modified
+                             (/=
+                              tick
+                              (with-current-buffer buf
+                                (buffer-chars-modified-tick))))
+                    (setq org-mcp--unsaved-change-p t))
                   (org-mcp--maybe-save-buffer
                    buf active-file was-modified))))
           ;; Non-allowed file: close via org-clock-out
@@ -2662,10 +2670,19 @@ MCP Parameters:
             (when buf
               (let ((was-modified
                      (with-current-buffer buf
-                       (buffer-modified-p))))
+                       (buffer-modified-p)))
+                    (tick
+                     (with-current-buffer buf
+                       (buffer-chars-modified-tick))))
                 (with-current-buffer buf
                   (org-clock-out nil t close-at))
-                (setq org-mcp--unsaved-change-p was-modified)
+                ;; Only an edit that reached BUF can stay unsaved.
+                (when (and was-modified
+                           (/=
+                            tick
+                            (with-current-buffer buf
+                              (buffer-chars-modified-tick))))
+                  (setq org-mcp--unsaved-change-p t))
                 (unless was-modified
                   (with-current-buffer buf
                     (when (buffer-modified-p)
