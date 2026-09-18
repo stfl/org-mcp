@@ -436,6 +436,57 @@ Second child content.
    " *:END:\n\\)?$")
   "Pattern for TODO added via parent ID URI.")
 
+(defconst org-mcp-test--client-id
+  "client-set-id-001"
+  "ID a client writes through a properties parameter.")
+
+(defconst org-mcp-test--pattern-add-todo-with-id-property
+  (concat
+   "\\`#\\+TITLE: My Org Document\n\n"
+   "\\* Parent Task\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-nested-siblings-parent-id "\n"
+   ":END:\n"
+   "Some parent content\\.\n"
+   "\\*\\* First Child 50% Complete\n"
+   "First child content\\.\n"
+   "It spans multiple lines\\.\n"
+   "\\*\\* Second Child\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
+   "Second child content\\.\n"
+   "\\*\\* Third Child #3\n"
+   "\\*\\* TODO Client ID Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +" org-mcp-test--client-id "\n"
+   " *:END:\n\\'")
+  "Pattern for a child TODO created with a client-set ID.
+The new heading carries that ID and no other.")
+
+(defconst org-mcp-test--pattern-add-todo-with-custom-id-property
+  (concat
+   "\\`\\* TODO Custom ID Task\n"
+   " *:PROPERTIES:\n"
+   " *:CUSTOM_ID: +custom-id-task\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n\\'")
+  "Pattern for a TODO created with a client-set CUSTOM_ID.")
+
+(defconst org-mcp-test--pattern-add-todo-with-properties
+  (concat
+   "\\`\\* TODO Task with Properties +:work:\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +1:00\n"
+   " *:OWNER: +alice\n"
+   " *:ID: +[A-Fa-f0-9-]+\n"
+   " *:END:\n"
+   (regexp-quote org-mcp-test--body-text-multiline)
+   "\n\\'")
+  "Pattern for a TODO created with tags, a body and properties.
+The drawer sits between the heading and the body, and a property
+sent as null is not written.")
+
 (defconst org-mcp-test--pattern-renamed-simple-todo
   (concat
    "\\`\\* TODO Updated Task\n"
@@ -980,7 +1031,8 @@ EXPECTED-FILES is a list of expected file paths."
 ;; Helper functions for testing org-add-todo MCP tool
 
 (defun org-mcp-test--call-add-todo-expecting-error
-    (test-file title todoState tags body parentUri &optional afterUri)
+    (test-file title todoState tags body parentUri &optional afterUri
+               properties)
   "Call org-add-todo MCP tool expecting an error and verify file unchanged.
 TEST-FILE is the test file path to verify remains unchanged.
 TITLE is the headline text.
@@ -988,7 +1040,8 @@ TODOSTATE is the TODO state.
 TAGS is a list of tag strings or nil.
 BODY is the body text or nil.
 PARENTURI is the URI of the parent item.
-AFTERURI is optional URI of sibling to insert after."
+AFTERURI is optional URI of sibling to insert after.
+PROPERTIES is an optional alist sent as the properties parameter."
   (org-mcp-test--assert-error-and-file
    test-file
    (let* ((params
@@ -997,7 +1050,8 @@ AFTERURI is optional URI of sibling to insert after."
              (tags . ,tags)
              (body . ,body)
              (parent_uri . ,parentUri)
-             (after_uri . ,afterUri)))
+             (after_uri . ,afterUri)
+             ,@(when properties `((properties . ,properties)))))
           (request
             (mcp-server-lib-create-tools-call-request
              "org-add-todo" nil params))
@@ -1008,8 +1062,8 @@ AFTERURI is optional URI of sibling to insert after."
 
 (defun org-mcp-test--add-todo-and-check
     (title todoState tags body parentUri afterUri
-           basename test-file expected-pattern)
-  "Add TODO item and verify the result.
+           basename test-file expected-pattern &optional properties)
+  "Add TODO item, verify the result and return the parsed response.
 TITLE is the headline text.
 TODOSTATE is the TODO state.
 TAGS is a list of tag strings or nil.
@@ -1018,14 +1072,16 @@ PARENTURI is the URI of the parent item.
 AFTERURI is optional URI of sibling to insert after.
 BASENAME is the expected file basename.
 TEST-FILE is the path to the file to check.
-EXPECTED-PATTERN is a regexp that the file content should match."
+EXPECTED-PATTERN is a regexp that the file content should match.
+PROPERTIES is an optional alist sent as the properties parameter."
   (let* ((params
           `((title . ,title)
             (todo_state . ,todoState)
             (tags . ,tags)
             (body . ,body)
             (parent_uri . ,parentUri)
-            (after_uri . ,afterUri)))
+            (after_uri . ,afterUri)
+            ,@(when properties `((properties . ,properties)))))
          (result-text (mcp-server-lib-ert-call-tool "org-add-todo" params))
          (result (json-read-from-string result-text)))
     ;; Check result structure
@@ -1035,7 +1091,12 @@ EXPECTED-PATTERN is a regexp that the file content should match."
     (should (string-match-p "\\`org://.+" (alist-get 'uri result)))
     (should (equal (alist-get 'file result) basename))
     (should (equal (alist-get 'title result) title))
-    (org-mcp-test--verify-file-matches test-file expected-pattern)))
+    (org-mcp-test--verify-file-matches test-file expected-pattern)
+    result))
+
+(defun org-mcp-test--id-registered-p (id)
+  "Return non-nil when ID has an entry in `org-id-locations'."
+  (and (hash-table-p org-id-locations) (gethash id org-id-locations)))
 
 ;; Helper functions for testing org-update-todo-state MCP tool
 
@@ -2486,6 +2547,17 @@ Task body."
    "Some body\\.\n?\\'")
   "Pattern after deleting EFFORT property.")
 
+(defconst org-mcp-test--pattern-set-properties-id-and-custom-id
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +" org-mcp-test--client-id "\n"
+   " *:CUSTOM_ID: +simple-task\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a client sets ID and CUSTOM_ID on a bare task.
+The heading carries the client's ID and no other.")
+
 (defconst org-mcp-test--pattern-scheduled-set
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -3520,6 +3592,87 @@ This is valid Org-mode syntax and should be allowed."
        (file-name-nondirectory test-file)
        test-file
        org-mcp-test--regex-todo-without-tags))))
+
+(ert-deftest org-mcp-test-add-todo-with-id-property ()
+  "Test a client sets the ID of a new TODO in the create call.
+The heading carries that ID and no other, the response addresses it
+by that ID, and the ID is not added to `org-id-locations'."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-nested-siblings
+   `(,org-mcp-test--content-nested-siblings-parent-id)
+   (let* ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (result
+           (org-mcp-test--add-todo-and-check
+            "Client ID Task"
+            "TODO"
+            nil
+            nil
+            org-mcp-test--content-nested-siblings-parent-id
+            nil
+            (file-name-nondirectory test-file)
+            test-file
+            org-mcp-test--pattern-add-todo-with-id-property
+            `((ID . ,org-mcp-test--client-id)))))
+     (should
+      (equal
+       (alist-get 'uri result) (concat "org://" org-mcp-test--client-id)))
+     (should
+      (org-mcp-test--id-registered-p
+       org-mcp-test--content-nested-siblings-parent-id))
+     (should-not (org-mcp-test--id-registered-p org-mcp-test--client-id)))))
+
+(ert-deftest org-mcp-test-add-todo-with-custom-id-property ()
+  "Test a client sets the CUSTOM_ID of a new TODO in the create call."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--add-todo-and-check
+     "Custom ID Task"
+     "TODO"
+     nil
+     nil
+     (format "%s#" test-file)
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--pattern-add-todo-with-custom-id-property
+     '((CUSTOM_ID . "custom-id-task")))))
+
+(ert-deftest org-mcp-test-add-todo-with-properties ()
+  "Test a new TODO gets arbitrary properties next to tags and a body."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--add-todo-and-check
+     "Task with Properties"
+     "TODO"
+     '("work")
+     org-mcp-test--body-text-multiline
+     (format "%s#" test-file)
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--pattern-add-todo-with-properties
+     '((EFFORT . "1:00") (OWNER . "alice") (SKIPPED)))))
+
+(ert-deftest org-mcp-test-add-todo-properties-forbid-special ()
+  "Test a create call with a special property fails, file unchanged."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-add-todo-expecting-error
+     test-file "Task" "TODO" nil nil (format "%s#" test-file) nil
+     '((SCHEDULED . "<2026-01-01>")))))
+
+(ert-deftest org-mcp-test-add-todo-properties-invalid-name ()
+  "Test a create call with an invalid property name edits nothing.
+The call fails before the heading is inserted, so neither the file
+nor a buffer visiting it changes."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-add-todo-expecting-error
+     test-file "Task" "TODO" nil nil (format "%s#" test-file) nil
+     '(("BAD NAME" . "value")))
+    (let ((buffer (find-buffer-visiting test-file)))
+      (should-not (and buffer (buffer-modified-p buffer))))))
 
 (ert-deftest org-mcp-test-rename-headline-simple ()
   "Test renaming a simple TODO headline."
@@ -5368,6 +5521,35 @@ whitespace-between-markers edge case."
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+
+(ert-deftest org-mcp-test-set-properties-id-and-custom-id ()
+  "Test a client sets ID and CUSTOM_ID on an existing heading.
+The heading carries the client's ID and no other, the response
+addresses it by that ID, and the ID is not added to
+`org-id-locations'."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--with-id-tracking (list test-file) nil
+      (let* ((params
+              `((uri . ,(format "%s#Simple%%20Task" test-file))
+                (properties
+                 .
+                 ((ID . ,org-mcp-test--client-id)
+                  (CUSTOM_ID . "simple-task")))))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-set-properties" params))))
+        (should
+         (equal
+          (alist-get 'uri result)
+          (concat "org://" org-mcp-test--client-id)))
+        (should
+         (equal (alist-get 'properties_set result) ["ID" "CUSTOM_ID"]))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-set-properties-id-and-custom-id)
+        (should-not
+         (org-mcp-test--id-registered-p org-mcp-test--client-id))))))
 
 ;;; Tests for org-update-scheduled
 

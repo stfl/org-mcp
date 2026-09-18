@@ -386,7 +386,8 @@ Example:
   - =body= (string, optional): Body text content to add under the heading
   - =parentUri= (string, required): URI of parent item. Use =org:///path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): URI of sibling to insert after. If not given, append as last child of parent
-- *Returns:* Object with success status, =saved= flag, new item URI, file name, and title
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable address from the call that creates it. Values are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
+- *Returns:* Object with success status, =saved= flag, new item URI (built from the =ID= in =properties= when one is given), file name, and title
 
 Example:
 #+begin_src json
@@ -396,7 +397,11 @@ Example:
   "todoState": "TODO",
   "tags": ["work", "urgent"],
   "body": "This feature needs to be completed by end of week.",
-  "parentUri": "org:///home/user/org/projects.org#"
+  "parentUri": "org:///home/user/org/projects.org#",
+  "properties": {
+    "ID": "550e8400-e29b-41d4-a716-446655440001",
+    "EFFORT": "2:00"
+  }
 }
 
 # Success response:
@@ -454,7 +459,7 @@ Example:
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
-  - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
 Example:

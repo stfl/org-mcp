@@ -1621,15 +1621,19 @@ MCP Parameters:
                                   actual-prev)))))
 
 (defun org-mcp--tool-add-todo
-    (title todo_state body parent_uri &optional tags after_uri)
+    (title
+     todo_state body parent_uri &optional tags after_uri properties)
   "Add a new TODO item to an Org file.
-Creates an Org ID for the new headline and returns its ID-based URI.
+Creates an Org ID for the new headline unless PROPERTIES sets one,
+and returns its ID-based URI.
 TITLE is the headline text.
 TODO_STATE is the TODO state from `org-todo-keywords'.
 BODY is optional body text.
 PARENT_URI is the URI of the parent item.
 TAGS is an optional single tag string or list of tag strings.
 AFTER_URI is optional URI of sibling to insert after.
+PROPERTIES is an optional alist of property names and values, checked
+by `org-mcp--validate-properties' like those of `org-set-properties'.
 
 MCP Parameters:
   title - The headline text
@@ -1643,9 +1647,19 @@ MCP Parameters:
   after_uri - Sibling to insert after (optional)
               Formats:
                 - {absolute-path}#{headline-path}
-                - {id}"
+                - {id}
+  properties - JSON object of properties for the new headline
+               (optional), such as ID or CUSTOM_ID
+               Values are written as given; null or empty values
+               are skipped
+               Special properties (TODO, TAGS, PRIORITY, etc.) are
+               forbidden"
   (org-mcp--validate-headline-title title)
   (let* ((tag-list (org-mcp--validate-and-normalize-tags tags))
+         (property-list
+          (and properties
+               (not (equal properties ""))
+               (org-mcp--validate-properties properties)))
          file-path
          parent-path
          parent-id)
@@ -1724,7 +1738,15 @@ MCP Parameters:
           ;; No body - ensure newline after heading
           (end-of-line)
           (unless (looking-at "\n")
-            (insert "\n")))))))
+            (insert "\n")))
+
+        ;; Set properties once the body is in place; Org puts the
+        ;; drawer between the heading and the body.  A client-set ID
+        ;; is not added to Org's ID locations, as when a user types
+        ;; the property by hand.
+        (pcase-dolist (`(,name . ,value) property-list)
+          (when value
+            (org-set-property name value)))))))
 
 ;; Resource handlers
 
@@ -2028,6 +2050,45 @@ MCP Parameters:
     "TIMESTAMP_IA")
   "Org special properties that cannot be set via `org-set-properties'.")
 
+(defun org-mcp--validate-properties (properties)
+  "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
+PROPERTIES is the alist a JSON object decodes to.  NAME is a string.
+VALUE is a string, or nil for a JSON null or an empty string.  Throws
+a validation error when PROPERTIES is not a non-empty object, or when
+a name is not a valid Org property name or is a special property,
+which has its own tool.  Values are taken as given; `ID' and
+`CUSTOM_ID' are ordinary properties here."
+  (unless (and properties (listp properties))
+    (org-mcp--tool-validation-error
+     "Properties must be a non-empty JSON object"))
+  (mapcar
+   (lambda (pair)
+     (let ((name
+            (if (symbolp (car pair))
+                (symbol-name (car pair))
+              (car pair)))
+           (value (cdr pair)))
+       ;; `org-set-property' makes this check too, but only once the
+       ;; heading is being edited; making it first keeps a refused call
+       ;; from touching the buffer.
+       (unless (org--valid-property-p name)
+         (org-mcp--tool-validation-error "Invalid property name: '%s'"
+                                         name))
+       (when (member (upcase name) org-mcp--special-properties)
+         (org-mcp--tool-validation-error
+          "Cannot set special property '%s' - use the dedicated tool"
+          name))
+       (cons
+        name
+        (cond
+         ((or (null value) (equal value ""))
+          nil)
+         ((stringp value)
+          value)
+         (t
+          (format "%s" value))))))
+   properties))
+
 (defun org-mcp--tool-set-properties (uri properties)
   "Set or delete properties on the headline at URI.
 PROPERTIES is an alist of property name-value pairs.
@@ -2041,22 +2102,10 @@ MCP Parameters:
   properties - JSON object of property name-value pairs (required)
                String value: set property to that value
                null or empty string: delete the property
+               ID and CUSTOM_ID are accepted and written as given
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden"
-  (unless (and properties (listp properties))
-    (org-mcp--tool-validation-error
-     "Properties must be a non-empty JSON object"))
-  ;; Validate no special properties
-  (dolist (pair properties)
-    (let ((key
-           (if (symbolp (car pair))
-               (symbol-name (car pair))
-             (car pair))))
-      (when (member (upcase key) org-mcp--special-properties)
-        (org-mcp--tool-validation-error
-         "Cannot set special property '%s' - use the dedicated tool"
-         key))))
-
+  (setq properties (org-mcp--validate-properties properties))
   (let* ((parsed (org-mcp--parse-resource-uri uri))
          (file-path (car parsed))
          (headline-path (cdr parsed))
@@ -2069,22 +2118,13 @@ MCP Parameters:
       (org-mcp--goto-headline-from-uri
        headline-path (org-mcp--uri-is-id-based uri))
 
-      (dolist (pair properties)
-        (let* ((key
-                (if (symbolp (car pair))
-                    (symbol-name (car pair))
-                  (car pair)))
-               (val (cdr pair)))
-          (if (or (null val) (equal val ""))
-              (progn
-                (org-delete-property key)
-                (push key deleted-props))
-            (org-set-property
-             key
-             (if (stringp val)
-                 val
-               (format "%s" val)))
-            (push key set-props))))
+      (pcase-dolist (`(,key . ,val) properties)
+        (if val
+            (progn
+              (org-set-property key val)
+              (push key set-props))
+          (org-delete-property key)
+          (push key deleted-props)))
       (setq set-props (nreverse set-props))
       (setq deleted-props (nreverse deleted-props)))))
 
@@ -3043,8 +3083,9 @@ Returns JSON object:
    :id "org-add-todo"
    :description
    "Add a new TODO item to an Org file at a specified location.
-Creates the headline with TODO state, optional tags, and optional body content.
-Automatically creates an Org ID property for the new headline.
+Creates the headline with TODO state, optional tags, optional body
+content, and optional properties.  Automatically creates an Org ID
+property for the new headline unless the properties set one.
 
 Parameters:
   title - Headline text without TODO state or tags (string, required)
@@ -3069,6 +3110,15 @@ Parameters:
               bare form (no `org://' prefix).
               Must be {uuid} format
               If omitted, appends as last child of parent
+  properties - Properties for the new headline (object, optional)
+               e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
+                     \"EFFORT\": \"1:00\"}
+               Values are written as given and not checked; an ID
+               is not added to Org's ID index
+               null or empty values are skipped
+               Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
+               DEADLINE, etc.) are forbidden - use the other
+               parameters and dedicated tools
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3174,6 +3224,9 @@ Parameters:
   properties - JSON object of property name-value pairs (required)
                String value: set the property
                null or empty string: delete the property
+               ID and CUSTOM_ID can be set; values are written as
+               given and not checked, and an ID is not added to
+               Org's ID index
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use dedicated tools
 
