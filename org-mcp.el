@@ -308,14 +308,28 @@ Check your Emacs hooks (`before-revert-hook', \
 `after-revert-hook', `revert-buffer-function')"
                   file-path (error-message-string err)))))))))))
 
+(defvar org-mcp--unsaved-change-p nil
+  "Non-nil when the running tool call leaves a change unsaved.
+A change stays unsaved when it lands in a buffer that already had
+unsaved edits, because org-mcp never saves such a buffer.
+`org-mcp--modify-and-save' binds it for the buffer it edits and
+`org-mcp--complete-and-save' reports it as the `saved' response
+field.  A tool that also edits another buffer binds it around
+`org-mcp--modify-and-save' so the response covers both edits.")
+
 (defun org-mcp--complete-and-save (response-alist)
   "Create ID if needed and return JSON.
 Creates or gets an Org ID for the current headline and returns it.
-RESPONSE-ALIST is an alist of response fields."
+RESPONSE-ALIST is an alist of response fields.  The `saved' field
+is false when `org-mcp--unsaved-change-p' is non-nil."
   (let ((id (org-id-get-create)))
     (json-encode
      (append
-      `((success . t))
+      `((success . t)
+        (saved
+         .
+         ,(if org-mcp--unsaved-change-p
+              :json-false t)))
       response-alist
       `((uri . ,(org-mcp--build-org-uri-from-id id)))))))
 
@@ -365,15 +379,17 @@ of re-implementing the filter."
   "Execute BODY to modify Org file at FILE-PATH.
 BODY runs in the canonical visited buffer for FILE-PATH. If the
 buffer was already modified before BODY runs, org-mcp leaves it dirty
-and unsaved. Otherwise it saves the buffer and refreshes other clean
-visiting buffers afterward. OPERATION is retained for call-site
-clarity and compatibility.
+and unsaved, and the response reports `saved' as false. Otherwise it
+saves the buffer and refreshes other clean visiting buffers afterward.
+OPERATION is retained for call-site clarity and compatibility.
 BODY can access FILE-PATH, OPERATION, and RESPONSE-ALIST as
 variables."
   (declare (indent 3) (debug (form form form body)))
   `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
           (buf (plist-get ctx :buffer))
           (preexisting-modified-p (plist-get ctx :modified-p))
+          (org-mcp--unsaved-change-p
+           (or org-mcp--unsaved-change-p preexisting-modified-p))
           (result nil))
      (ignore ,operation)
      (with-current-buffer buf
@@ -2599,7 +2615,10 @@ MCP Parameters:
             (org-mcp--clock-parse-timestamp start_time)))
          ;; Check for active clock and close it if needed
          ;; Check for active clock and close it if needed
-         (active (org-mcp--clock-find-active)))
+         (active (org-mcp--clock-find-active))
+         ;; Closing the active clock may edit another buffer that
+         ;; already had unsaved edits; `saved' covers that edit too.
+         (org-mcp--unsaved-change-p nil))
     ;; Close active clock if exists.  When resolve is requested and the
     ;; active clock is in the same file, skip auto-close — resolve will
     ;; delete the dangling clock in the modify-and-save body instead.
@@ -2646,6 +2665,7 @@ MCP Parameters:
                                  (org-back-to-heading t)
                                  (point)))
                               (org-clock-out nil t close-at)))))))
+                  (setq org-mcp--unsaved-change-p was-modified)
                   (org-mcp--maybe-save-buffer
                    buf active-file was-modified))))
           ;; Non-allowed file: close via org-clock-out
@@ -2656,6 +2676,7 @@ MCP Parameters:
                        (buffer-modified-p))))
                 (with-current-buffer buf
                   (org-clock-out nil t close-at))
+                (setq org-mcp--unsaved-change-p was-modified)
                 (unless was-modified
                   (with-current-buffer buf
                     (when (buffer-modified-p)
@@ -3003,6 +3024,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_state - The previous TODO state (string, empty for none)
   new_state - The new TODO state that was set (string)
   uri - org:// URI (org://{uuid}) for the updated headline"
@@ -3043,6 +3066,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   uri - org:// URI (org://{uuid}) for the new headline
   file - Filename (not full path) where item was added
   title - The headline title that was created
@@ -3078,6 +3103,8 @@ required)
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_title - The previous headline title (string)
   new_title - The new title that was set (string)
   uri - org:// URI (org://{uuid}) for the renamed headline"
@@ -3112,6 +3139,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   uri - org:// URI (org://{uuid}) for the edited headline
 
 Special behavior - Empty old_body (replace mode):
@@ -3144,6 +3173,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   properties_set - Array of property names that were set
   properties_deleted - Array of property names that were deleted
   uri - org:// URI (org://{uuid}) for the headline"
@@ -3168,6 +3199,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_scheduled - Previous SCHEDULED value (string, empty if none)
   new_scheduled - New SCHEDULED value (string, empty if removed)
   uri - org:// URI (org://{uuid}) for the headline"
@@ -3192,6 +3225,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_deadline - Previous DEADLINE value (string, empty if none)
   new_deadline - New DEADLINE value (string, empty if removed)
   uri - org:// URI (org://{uuid}) for the headline"
@@ -3220,6 +3255,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_tags - Array of previous tags
   new_tags - Array of new tags
   uri - org:// URI (org://{uuid}) for the headline"
@@ -3245,6 +3282,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   previous_priority - Previous priority (string, empty if none)
   new_priority - New priority (string, empty if removed)
   uri - org:// URI (org://{uuid}) for the headline"
@@ -3271,6 +3310,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   uri - org:// URI (org://{uuid}) for the headline"
    :read-only nil
    :server-id org-mcp--server-id)
@@ -3503,6 +3544,9 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when a change, including closing the other active
+          clock, is only in the user's open Emacs buffer, not on disk;
+          tell the user it needs saving (boolean)
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
   heading - The heading title (string)
@@ -3532,6 +3576,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   clocked_out - Always true (boolean)
   heading - The heading title (string)
   start - Start timestamp (string)
@@ -3564,6 +3610,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   added - Always true (boolean)
   start - Formatted start timestamp (string)
   end - Formatted end timestamp (string)
@@ -3592,6 +3640,8 @@ Parameters:
 
 Returns JSON object:
   success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
   deleted - Always true (boolean)
   start - Start timestamp of deleted entry (string)
   end - End timestamp of deleted entry (string, present if closed)

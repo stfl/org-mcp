@@ -798,6 +798,13 @@ Second child content.
   "Verify TEST-FILE content matches EXPECTED-PATTERN regexp."
   (should (string-match-p expected-pattern (org-mcp-test--read-file test-file))))
 
+(defun org-mcp-test--verify-buffer-matches (buffer expected-pattern)
+  "Verify the complete contents of BUFFER match EXPECTED-PATTERN regexp."
+  (with-current-buffer buffer
+    (save-restriction
+      (widen)
+      (should (string-match-p expected-pattern (buffer-string))))))
+
 (defmacro org-mcp-test--assert-error-and-file (test-file error-form)
   "Assert that ERROR-FORM throws an error and TEST-FILE remains unchanged."
   (declare (indent 1) (debug t))
@@ -1022,8 +1029,9 @@ EXPECTED-PATTERN is a regexp that the file content should match."
          (result-text (mcp-server-lib-ert-call-tool "org-add-todo" params))
          (result (json-read-from-string result-text)))
     ;; Check result structure
-    (should (= (length result) 4))
+    (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
+    (should (eq (alist-get 'saved result) t))
     (should (string-match-p "\\`org://.+" (alist-get 'uri result)))
     (should (equal (alist-get 'file result) basename))
     (should (equal (alist-get 'title result) title))
@@ -1076,8 +1084,9 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
   (let ((result
          (org-mcp-test--call-update-todo-state
           resource-uri new-state old-state)))
-    (should (= (length result) 4))
+    (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
+    (should (eq (alist-get 'saved result) t))
     (should (equal (alist-get 'previous_state result) old-state))
     (should (equal (alist-get 'new_state result) new-state))
     (should (stringp (alist-get 'uri result)))
@@ -1107,8 +1116,9 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
           (mcp-server-lib-ert-call-tool "org-rename-headline" params))
          (result (json-read-from-string result-text))
          (result-uri (alist-get 'uri result)))
-    (should (= (length result) 4))
+    (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
+    (should (eq (alist-get 'saved result) t))
     (should (equal (alist-get 'previous_title result) current-title))
     (should (equal (alist-get 'new_title result) new-title))
     (should (stringp result-uri))
@@ -1174,8 +1184,9 @@ EXPECTED-ID if provided, check the returned URI has this exact ID."
             (append . ,append)))
          (result-text (mcp-server-lib-ert-call-tool "org-edit-body" params))
          (result (json-read-from-string result-text)))
-    (should (= (length result) 2))
+    (should (= (length result) 3))
     (should (equal (alist-get 'success result) t))
+    (should (eq (alist-get 'saved result) t))
     (let ((uri (alist-get 'uri result)))
       (if expected-id
           (should (equal uri (concat "org://" expected-id)))
@@ -2178,51 +2189,68 @@ When the visited buffer was clean, org-mcp edits it and auto-saves to disk."
             ;; Clean up: kill the buffer
             (kill-buffer buffer)))))))
 
+(defconst org-mcp-test--content-two-todo-tasks
+  "* TODO Task One
+Task description.
+* TODO Task Two
+Another task description."
+  "Org file content with two TODO tasks, used for modified-buffer tests.")
+
+(defconst org-mcp-test--expected-modified-buffer-task-one-in-progress-regex
+  (concat
+   "\\`\\* IN-PROGRESS Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   "Task description\\.\n"
+   "\\* TODO Task Two\n"
+   "Another task description\\.\n"
+   "\\* TODO Task Three\n"
+   "Added in buffer\\."
+   "\\'")
+  "Regex matching the complete buffer after updating Task One to IN-PROGRESS.
+The buffer also keeps the unsaved Task Three edit made before the update.")
+
 (ert-deftest org-mcp-test-update-todo-state-with-modified-buffer ()
   "Test TODO state update succeeds on a pre-modified buffer without auto-saving.
 When the visited buffer was already dirty before org-mcp writes, the
-edit is applied in-buffer only — the file on disk must remain unchanged."
-  (let ((test-content
-         "* TODO Task One
-Task description.
-* TODO Task Two
-Another task description."))
-    (org-mcp-test--with-temp-org-files
-        ((test-file test-content))
-      (let ((org-todo-keywords
-             '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
-        ;; Open the file in a buffer and modify it elsewhere
-        (let ((buffer (find-file-noselect test-file)))
-          (unwind-protect
-              (progn
-                ;; Make a modification at an unrelated location
-                (with-current-buffer buffer
-                  (goto-char (point-max))
-                  (insert "\n* TODO Task Three\nAdded in buffer.")
-                  ;; Buffer is now modified but not saved
-                  (should (buffer-modified-p)))
+edit is applied in-buffer only — the file on disk must remain unchanged
+and the response must report `saved' as false."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-two-todo-tasks))
+    (let ((org-todo-keywords
+           '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
+      ;; Open the file in a buffer and modify it elsewhere
+      (let ((buffer (find-file-noselect test-file)))
+        (unwind-protect
+            (progn
+              ;; Make a modification at an unrelated location
+              (with-current-buffer buffer
+                (goto-char (point-max))
+                (insert "\n* TODO Task Three\nAdded in buffer.")
+                ;; Buffer is now modified but not saved
+                (should (buffer-modified-p)))
 
-                ;; Update TODO state — should succeed without auto-save
-                (let ((resource-uri
-                       (format "%s#Task%%20One"
-                               test-file)))
-                  (let ((result
-                         (org-mcp-test--call-update-todo-state
-                          resource-uri "IN-PROGRESS" "TODO")))
-                    (should (equal (alist-get 'success result) t))
-                    (should (equal (alist-get 'new_state result) "IN-PROGRESS")))
-                  ;; Buffer must still be modified (never auto-saved)
-                  (with-current-buffer buffer
-                    (should (buffer-modified-p))
-                    ;; Buffer content reflects the TODO change
-                    (goto-char (point-min))
-                    (should (re-search-forward "^\\* IN-PROGRESS Task One"
-                                               nil t)))
-                  ;; Disk must still have the *original* content — no auto-save
-                  (should (string= (org-mcp-test--read-file test-file)
-                                   test-content))))
-            ;; Clean up: kill the buffer
-            (kill-buffer buffer)))))))
+              ;; Update TODO state — should succeed without auto-save
+              (let ((resource-uri
+                     (format "%s#Task%%20One"
+                             test-file)))
+                (let ((result
+                       (org-mcp-test--call-update-todo-state
+                        resource-uri "IN-PROGRESS" "TODO")))
+                  (should (equal (alist-get 'success result) t))
+                  (should (eq (alist-get 'saved result) :json-false))
+                  (should (equal (alist-get 'new_state result) "IN-PROGRESS")))
+                ;; Buffer must still be modified (never auto-saved)
+                (with-current-buffer buffer
+                  (should (buffer-modified-p)))
+                ;; Buffer content reflects the TODO change and the user edit
+                (org-mcp-test--verify-buffer-matches
+                 buffer
+                 org-mcp-test--expected-modified-buffer-task-one-in-progress-regex)
+                ;; Disk must still have the *original* content — no auto-save
+                (should (string= (org-mcp-test--read-file test-file)
+                                 org-mcp-test--content-two-todo-tasks))))
+          ;; Clean up: kill the buffer
+          (kill-buffer buffer))))))
 
 (ert-deftest org-mcp-test-update-todo-state-nonexistent-id ()
   "Test TODO state update fails for non-existent UUID."
@@ -2289,7 +2317,7 @@ Another task."))
           (let ((result
                  (org-mcp-test--call-update-todo-state
                   resource-uri "IN-PROGRESS")))
-            (should (= (length result) 4))
+            (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) "TODO"))
             (should (equal (alist-get 'new_state result) "IN-PROGRESS"))
@@ -2310,7 +2338,7 @@ Another task."))
           (let ((result
                  (org-mcp-test--call-update-todo-state
                   resource-uri "TODO")))
-            (should (= (length result) 4))
+            (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) ""))
             (should (equal (alist-get 'new_state result) "TODO"))
@@ -4238,9 +4266,51 @@ Body after everything."))
            (result (org-mcp-test--call-clock-add
                     uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'added result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-add-expected-regex))))
+
+(defconst org-mcp-test--clock-add-modified-buffer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   ":END:\n"
+   "\n"
+   "\\* TODO Task Two\n"
+   "\\'")
+  "Regex matching the complete buffer after clock-add on a modified buffer.
+The buffer also keeps the unsaved Task Two edit made before the call.")
+
+(defconst org-mcp-test--clock-in-modified-buffer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   ":END:\n"
+   "\n"
+   "\\* TODO Task Two\n"
+   "\\'")
+  "Regex matching the complete buffer after clock-in on a modified buffer.
+The buffer also keeps the unsaved Task Two edit made before the call.")
+
+(defconst org-mcp-test--clock-out-modified-buffer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   ":END:\n"
+   "\n"
+   "\\* TODO Task Two\n"
+   "\\'")
+  "Regex matching the complete buffer after clock-out on a modified buffer.
+The buffer also keeps the unsaved Task Two edit made before the call.")
 
 (ert-deftest org-mcp-test-clock-add-modified-buffer-no-auto-save ()
   "Test clock-add on a pre-modified buffer edits in-buffer without auto-save."
@@ -4258,14 +4328,13 @@ Body after everything."))
             (let ((result (org-mcp-test--call-clock-add
                            uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
               (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'added result) t)))
             ;; Buffer must still be modified
             (with-current-buffer buffer
-              (should (buffer-modified-p))
-              (goto-char (point-min))
-              (should (re-search-forward
-                       "CLOCK: \\[2026-01-01.*10:00\\].*11:00\\] =>  *1:00"
-                       nil t)))
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--clock-add-modified-buffer-expected-regex)
             ;; Disk must still equal the original content
             (should (string= (org-mcp-test--read-file test-file)
                              org-mcp-test--clock-task-content)))
@@ -4278,6 +4347,7 @@ Body after everything."))
     (let* ((uri (format "%s#Task%%20One" test-file))
            (result (org-mcp-test--call-clock-in uri "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'clocked_in result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-in-expected-regex))))
@@ -4299,12 +4369,13 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
             (let ((result (org-mcp-test--call-clock-in
                            uri "2026-01-01T10:00:00")))
               (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'clocked_in result) t)))
             ;; Buffer must still be modified
             (with-current-buffer buffer
-              (should (buffer-modified-p))
-              (goto-char (point-min))
-              (should (re-search-forward "CLOCK: \\[2026-01-01" nil t)))
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--clock-in-modified-buffer-expected-regex)
             ;; Disk must still equal the original content
             (should (string= (org-mcp-test--read-file test-file)
                              org-mcp-test--clock-task-content)))
@@ -4437,6 +4508,7 @@ This exercises the write path in org-mcp--complete-and-save."
       ((test-file org-mcp-test--clock-task-with-open-clock))
     (let ((result (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'clocked_out result) t)))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--clock-out-expected-regex)))
@@ -4456,12 +4528,13 @@ This exercises the write path in org-mcp--complete-and-save."
             (let ((result (org-mcp-test--call-clock-out
                            "2026-01-01T11:00:00")))
               (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'clocked_out result) t)))
             ;; Buffer must still be modified
             (with-current-buffer buffer
-              (should (buffer-modified-p))
-              (goto-char (point-min))
-              (should (re-search-forward "CLOCK: \\[2026-01-01.*=>" nil t)))
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--clock-out-modified-buffer-expected-regex)
             ;; Disk must still equal the original content
             (should (string= (org-mcp-test--read-file test-file)
                              org-mcp-test--clock-task-with-open-clock)))
@@ -4607,10 +4680,66 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
       (let ((result-2 (org-mcp-test--call-clock-in
                        uri-2 "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result-2) t))
+        (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
         (org-mcp-test--verify-file-matches
          file-1
          org-mcp-test--clock-in-close-different-file-expected-regex)))))
+
+(defconst org-mcp-test--clock-in-at-eleven-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the complete file after clock-in at 11:00.")
+
+(defconst org-mcp-test--clock-closed-in-modified-buffer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\n"
+   "\\* TODO Task Two\n"
+   "\\'")
+  "Regex matching the complete buffer whose open clock clock-in closed at 11:00.
+The buffer also keeps the unsaved Task Two edit made before the call.")
+
+(ert-deftest org-mcp-test-clock-in-closes-active-in-modified-buffer ()
+  "Test clock-in reports `saved' false when the clock it closes stays unsaved.
+The active clock sits in another allowed file whose buffer already has
+unsaved edits.  The target file reaches disk, but the closed clock only
+lands in that buffer, so the response covers both edits."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-task-with-open-clock)
+       (file-2 org-mcp-test--clock-task-content))
+    (let ((buffer (find-file-noselect file-1)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Task Two\n")
+              (should (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-in
+                           (format "%s#Task%%20One" file-2)
+                           "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) :json-false))
+              (should (equal (alist-get 'clocked_in result) t)))
+            (org-mcp-test--verify-file-matches
+             file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
+            (with-current-buffer buffer
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-buffer-matches
+             buffer
+             org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
+            (should (string= (org-mcp-test--read-file file-1)
+                             org-mcp-test--clock-task-with-open-clock)))
+        (kill-buffer buffer)))))
 
 (ert-deftest org-mcp-test-clock-in-closes-active-explicit-start ()
   "Test clock-in with explicit start closes active clock at that start time."
@@ -4811,6 +4940,37 @@ reports it as active but not in an allowed file."
           (should
            (eq (alist-get 'in_allowed_file result) :json-false)))))))
 
+(ert-deftest org-mcp-test-clock-in-closes-session-clock-in-modified-buffer ()
+  "Test clock-in reports `saved' false for a session clock left unsaved.
+The Emacs clock runs in a non-allowed file whose buffer already has
+unsaved edits.  Closing it only lands in that buffer, so the response
+reports `saved' as false although the target file reaches disk."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file org-mcp-test--clock-task-content)
+       (outside-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-mcp-allowed-files (list allowed-file)))
+      (org-mcp-test--with-session-clock outside-file
+        (let ((outside-buffer (find-buffer-visiting outside-file)))
+          (with-current-buffer outside-buffer
+            (goto-char (point-max))
+            (insert "\n* TODO Task Two\n")
+            (should (buffer-modified-p)))
+          (let ((result (org-mcp-test--call-clock-in
+                         (format "%s#Task%%20One" allowed-file)
+                         "2026-01-01T11:00:00")))
+            (should (equal (alist-get 'success result) t))
+            (should (eq (alist-get 'saved result) :json-false))
+            (should (equal (alist-get 'clocked_in result) t)))
+          (org-mcp-test--verify-file-matches
+           allowed-file org-mcp-test--clock-in-at-eleven-expected-regex)
+          (with-current-buffer outside-buffer
+            (should (buffer-modified-p)))
+          (org-mcp-test--verify-buffer-matches
+           outside-buffer
+           org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
+          (should (string= (org-mcp-test--read-file outside-file)
+                           org-mcp-test--clock-task-with-open-clock)))))))
+
 (ert-deftest org-mcp-test-clock-get-active-dangling-without-session ()
   "Test clock-get-active scans allowed files when no clock is running.
 With the Emacs clock idle, a CLOCK line left unclosed by an earlier
@@ -4901,6 +5061,7 @@ closed clocks."
             (org-mcp-test--call-clock-delete
              uri "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'deleted result) t))
       (org-mcp-test--verify-file-matches
        test-file
@@ -5060,6 +5221,7 @@ whitespace-between-markers edge case."
             (mcp-server-lib-ert-call-tool "org-set-properties" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (string-prefix-p "org://" (alist-get 'uri result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-new))))
@@ -5139,6 +5301,7 @@ whitespace-between-markers edge case."
             (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'previous_scheduled result) ""))
       (should (string-match-p "<2026-03-27"
                               (alist-get 'new_scheduled result)))
@@ -5222,6 +5385,7 @@ whitespace-between-markers edge case."
             (mcp-server-lib-ert-call-tool "org-update-deadline" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'previous_deadline result) ""))
       (should (string-match-p "<2026-03-27"
                               (alist-get 'new_deadline result)))
@@ -5306,6 +5470,7 @@ whitespace-between-markers edge case."
             (mcp-server-lib-ert-call-tool "org-set-tags" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'previous_tags result) []))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-set))))
@@ -5420,6 +5585,7 @@ not membership in the configured alist."
             (mcp-server-lib-ert-call-tool "org-set-priority" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'previous_priority result) ""))
       (should (equal (alist-get 'new_priority result) "A"))
       (org-mcp-test--verify-file-matches
@@ -5625,6 +5791,7 @@ not membership in the configured alist."
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
              (result (json-read-from-string result-text)))
         (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
         (should (string-prefix-p "org://" (alist-get 'uri result)))
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--pattern-logbook-note-new)))))

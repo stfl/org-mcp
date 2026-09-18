@@ -185,6 +185,26 @@ depends on the buffer state:
   auto-save. The user's unsaved changes are preserved, and the file on disk
   remains unchanged. The buffer stays modified.
 
+This is deliberate: saving a dirty buffer would also commit the user's own
+in-progress edits to disk as a side effect of an unrelated MCP write, so the
+editing session is left undisturbed and the decision to persist stays with
+the user. In that case, the change lives only in the buffer and is not on
+disk — another process, a backup, or git will not see it until the buffer is
+saved. To make writes reach disk reliably, enable Emacs' built-in
+=auto-save-visited-mode= (tunable via =auto-save-visited-interval=), which
+saves file-visiting buffers to their own files on an idle timer. Plain
+=auto-save-mode= (=auto-save-default=) does not help here: it writes to a
+separate recovery file, never to the visited file itself.
+
+Every write tool response carries a =saved= boolean next to =success=, so a
+client can tell these outcomes apart. =saved= is =true= when the change reached
+the file on disk (no existing buffer, or a clean buffer that org-mcp saved), and
+=false= when a buffer visiting the file already had unsaved edits, so the change
+sits only in that buffer. A client that receives =false= should tell the user
+that the buffer needs saving. =org-clock-in= also reports =false= when the
+active clock it closes sits in such a buffer, even though the file it clocks in
+to reaches disk.
+
 *** org-get-todo-config
 - *Description:* Get TODO keyword configuration for understanding task states
 - *Parameters:* None
@@ -299,7 +319,7 @@ Empty configuration returns:
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
-- *Returns:* Success status with previous and new states, and ID-based URI of the updated headline
+- *Returns:* Success status, =saved= flag, previous and new states, and ID-based URI of the updated headline
 
 Example:
 #+begin_src json
@@ -313,6 +333,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "previousState": "TODO",
   "newState": "IN-PROGRESS",
   "uri": "org://554A22F6-E29F-4759-8AD2-E7CA225C6397"
@@ -330,7 +351,7 @@ Example:
   - =uri= (string, required): URI of the headline (=org://= format)
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
-- *Returns:* Success status with previous and new titles
+- *Returns:* Success status, =saved= flag, and previous and new titles
 
 Example:
 #+begin_src json
@@ -344,6 +365,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "previousTitle": "Original Task",
   "newTitle": "Updated Task Name",
   "uri": "org://550e8400-e29b-41d4-a716-446655440002"
@@ -364,7 +386,7 @@ Example:
   - =body= (string, optional): Body text content to add under the heading
   - =parentUri= (string, required): URI of parent item. Use =org:///path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): URI of sibling to insert after. If not given, append as last child of parent
-- *Returns:* Object with success status, new item URI, file name, and title
+- *Returns:* Object with success status, =saved= flag, new item URI, file name, and title
 
 Example:
 #+begin_src json
@@ -380,6 +402,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "uri": "org://550e8400-e29b-41d4-a716-446655440001",
   "file": "projects.org",
   "title": "Implement new feature"
@@ -393,7 +416,7 @@ Example:
   - =oldBody= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
   - =newBody= (string, required): Replacement or appended text
   - =append= (boolean, optional, default false): When true, append =newBody= to end of body instead of replacing
-- *Returns:* Success status with org:// URI of the updated node
+- *Returns:* Success status, =saved= flag, and org:// URI of the updated node
 - *Special behavior (replace mode):* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
@@ -408,6 +431,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "uri": "org://abc-123"
 }
 
@@ -431,7 +455,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property; =null= or empty string deletes it. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
-- *Returns:* Success status with arrays of =properties_set= and =properties_deleted=, plus org:// URI
+- *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
 Example:
 #+begin_src json
@@ -447,6 +471,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "properties_set": ["EFFORT"],
   "properties_deleted": ["CATEGORY"],
   "uri": "org://abc-123"
@@ -458,7 +483,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
-- *Returns:* Success status with =previous_scheduled=, =new_scheduled=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and ID-based URI
 
 Example:
 #+begin_src json
@@ -480,7 +505,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
-- *Returns:* Success status with =previous_deadline=, =new_deadline=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and ID-based URI
 
 Example:
 #+begin_src json
@@ -502,7 +527,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
-- *Returns:* Success status with =previous_tags= and =new_tags= arrays, plus org:// URI
+- *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus org:// URI
 
 Example:
 #+begin_src json
@@ -523,7 +548,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
-- *Returns:* Success status with =previous_priority=, =new_priority=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and ID-based URI
 
 Example:
 #+begin_src json
@@ -545,7 +570,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
-- *Returns:* Success status with org:// URI
+- *Returns:* Success status, =saved= flag, and org:// URI
 
 Example:
 #+begin_src json
@@ -558,6 +583,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "uri": "org://abc-123"
 }
 #+end_src
@@ -743,7 +769,7 @@ Example responses:
   - =uri= (string, required): URI of the headline (=org://= format)
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
   - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
-- *Returns:* JSON object with clock-in details
+- *Returns:* JSON object with success status, =saved= flag, and clock-in details
 
 Example:
 #+begin_src json
@@ -756,6 +782,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
@@ -765,6 +792,7 @@ Example:
 # With dangling clocks resolved:
 {
   "success": true,
+  "saved": true,
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
@@ -778,13 +806,14 @@ Example:
 - *Parameters:*
   - =uri= (string, optional): URI to validate against the active clock. If provided, its file must match the active clock's file
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
-- *Returns:* JSON object with clock-out details
+- *Returns:* JSON object with success status, =saved= flag, and clock-out details
 
 Example:
 #+begin_src json
 # Success response:
 {
   "success": true,
+  "saved": true,
   "clocked_out": true,
   "heading": "Implement feature X",
   "start": "[2026-03-23 Mon 14:30]",
@@ -800,7 +829,7 @@ Example:
   - =uri= (string, required): URI of the headline (=org://= format)
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
-- *Returns:* JSON object with the added clock entry details
+- *Returns:* JSON object with success status, =saved= flag, and the added clock entry details
 
 Example:
 #+begin_src json
@@ -814,6 +843,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "added": true,
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
@@ -827,7 +857,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): URI of the headline (=org://= format)
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
-- *Returns:* JSON object with the deleted entry details
+- *Returns:* JSON object with success status, =saved= flag, and the deleted entry details
 
 Example:
 #+begin_src json
@@ -840,6 +870,7 @@ Example:
 # Success response:
 {
   "success": true,
+  "saved": true,
   "deleted": true,
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
