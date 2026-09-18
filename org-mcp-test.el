@@ -7261,22 +7261,6 @@ Line 10 is the Beta heading.")
    "\\'")
   "Regex matching the links file after renaming Alpha's Review.")
 
-(defconst org-mcp-test--regex-links-beta-renamed
-  (concat
-   "\\`"
-   (regexp-quote org-mcp-test--content-links-preamble)
-   (regexp-quote org-mcp-test--content-links-alpha)
-   "\\* Beta Renamed\n"
-   ":PROPERTIES:\n"
-   ":ID: +" org-mcp-test--link-beta-id "\n"
-   ":END:\n"
-   "Beta body\\.\n"
-   "\\*\\* Review\n"
-   "Beta review\\.\n"
-   (regexp-quote org-mcp-test--content-links-gamma)
-   "\\'")
-  "Regex matching the links file after renaming Beta.")
-
 (defconst org-mcp-test--regex-links-beta-clocked
   (concat
    "\\`"
@@ -7749,47 +7733,114 @@ file, once a file outside the allowed files."
                   (kill-buffer buf))))
           (delete-file org-id-locations-file))))))
 
+(defun org-mcp-test--fold-state ()
+  "Return, for each line of the current buffer, whether it is hidden.
+The whole buffer is inspected, whatever its narrowing."
+  (save-restriction
+    (widen)
+    (save-excursion
+      (goto-char (point-min))
+      (let (hidden)
+        (while (not (eobp))
+          (push (and (invisible-p (point)) t) hidden)
+          (forward-line))
+        (nreverse hidden)))))
+
+(defun org-mcp-test--mark-state ()
+  "Return the mark, the mark rings and Org's mark ring as plain data.
+Each marker becomes a (BUFFER . POSITION) pair, since Org moves the
+markers of its ring in place.  `org-mark-ring' is circular, so it is
+read once around, starting at its head."
+  (let ((pairs
+         (lambda (markers)
+           (mapcar
+            (lambda (m) (cons (marker-buffer m) (marker-position m)))
+            markers)))
+        (ring org-mark-ring)
+        (org-ring nil))
+    (dotimes (_ org-mark-ring-length)
+      (push (car ring) org-ring)
+      (setq ring (cdr ring)))
+    (list
+     (mark t)
+     (funcall pairs mark-ring)
+     (funcall pairs global-mark-ring)
+     (funcall pairs (nreverse org-ring)))))
+
+(defun org-mcp-test--view-state ()
+  "Return the user's view of Emacs, as far as a tool call could change it.
+The value covers the current buffer, its point, narrowing and folding,
+the mark and mark rings, the window configuration and the buffer
+list."
+  (list
+   :view (list (current-buffer) (point) (point-min) (point-max))
+   :folds (org-mcp-test--fold-state)
+   :marks (org-mcp-test--mark-state)
+   :windows (window-state-get nil t)
+   :buffers (buffer-list)))
+
 (ert-deftest org-mcp-test-link-leaves-user-view-unchanged ()
-  "Resolving a link leaves the user's windows, narrowing and point alone.
-The buffer is shown in the selected window and narrowed to Alpha, a
-different subtree from the one each call addresses, and the buffer
-list keeps its order."
-  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
-      (list org-mcp-test--link-beta-id)
-    (let ((buf (find-file-noselect test-file)))
+  "Resolving a link leaves the user's view of the buffer alone.
+The buffer is shown in the selected window, folded so that only Parent
+Task shows, narrowed to First Child and given a mark.  Each call
+searches for a heading hidden in the fold, in a subtree other than
+First Child: a write renames Second Child through an `id:' search, then
+an `id:' read and a `file:' title read.  After each call the windows,
+narrowing, point, folding, mark, mark rings and buffer list are as
+they were.  The write lies after First Child, so it moves no position
+the test compares."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--content-nested-siblings
+      (list org-mcp-test--content-nested-siblings-parent-id)
+    (let ((buf (find-file-noselect test-file))
+          (parent org-mcp-test--content-nested-siblings-parent-id))
       (unwind-protect
           (save-window-excursion
             (switch-to-buffer buf)
+            (org-overview)
             (goto-char (point-min))
-            (re-search-forward "^\\* Alpha")
+            (re-search-forward "^\\*\\* First Child")
+            (push-mark (point) t)
             (org-narrow-to-subtree)
-            (forward-line 4)
-            (let ((view (list (point) (point-min) (point-max)))
-                  (windows (window-state-get nil t))
-                  (buffers (buffer-list)))
-              (should
-               (string=
-                (org-mcp-test--call-read-headline
-                 (format "[[id:%s::*Review]]" org-mcp-test--link-beta-id))
-                "** Review\nBeta review."))
-              (should
-               (string=
-                (org-mcp-test--call-read-headline
-                 (format "file:%s::*Gamma" test-file))
-                (string-trim-right org-mcp-test--content-links-gamma)))
-              (mcp-server-lib-ert-call-tool
-               "org-rename-headline"
-               `((uri
-                  .
-                  ,(format "[[id:%s][Beta]]" org-mcp-test--link-beta-id))
-                 (current_title . "Beta")
-                 (new_title . "Beta Renamed")))
-              (should (eq (current-buffer) buf))
-              (should (equal (list (point) (point-min) (point-max)) view))
-              (should (equal (window-state-get nil t) windows))
-              (should (equal (buffer-list) buffers))
+            (forward-line 1)
+            (let ((before (org-mcp-test--view-state)))
+              (should (memq t (plist-get before :folds)))
+              (should (mark t))
+              (dolist (call
+                       `(("org-rename-headline"
+                          ,(format "[[id:%s::*Second Child]]" parent)
+                          ((current_title . "Second Child")
+                           (new_title . "Renamed Second Child")))
+                         ("org-read-headline"
+                          ,(format "id:%s::*Third Child #3" parent)
+                          nil
+                          "** Third Child #3")
+                         ("org-read-headline"
+                          ,(format "file:%s::*Renamed Second Child"
+                                   test-file)
+                          nil
+                          ,(format
+                            (concat
+                             "** Renamed Second Child\n"
+                             ":PROPERTIES:\n"
+                             ":ID:       %s\n"
+                             ":END:\n"
+                             "Second child content.")
+                            org-mcp-test--content-with-id-id))))
+                (let ((uri (nth 1 call))
+                      (expected (nth 3 call)))
+                  (let ((result
+                         (mcp-server-lib-ert-call-tool
+                          (nth 0 call) (cons `(uri . ,uri) (nth 2 call)))))
+                    (when expected
+                      (should (string= result expected))))
+                  (should
+                   (equal
+                    (cons uri (org-mcp-test--view-state))
+                    (cons uri before)))))
               (org-mcp-test--verify-file-matches
-               test-file org-mcp-test--regex-links-beta-renamed)))
+               test-file
+               org-mcp-test--expected-regex-renamed-second-child)))
         (kill-buffer buf)))))
 
 ;;; Script installation tests
