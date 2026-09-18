@@ -319,19 +319,19 @@ field.  A tool that also edits another buffer binds it around
 
 (defun org-mcp--complete-and-save (response-alist)
   "Create ID if needed and return JSON.
-Creates or gets an Org ID for the current headline and returns it.
+Creates an Org ID for the current headline when it has none, and
+returns its address from `org-mcp--link-at-point' as the `uri' field.
 RESPONSE-ALIST is an alist of response fields.  The `saved' field
 is false when `org-mcp--unsaved-change-p' is non-nil."
-  (let ((id (org-id-get-create)))
-    (json-encode
-     (append
-      `((success . t)
-        (saved
-         .
-         ,(if org-mcp--unsaved-change-p
-              :json-false t)))
-      response-alist
-      `((uri . ,(org-mcp--build-org-uri-from-id id)))))))
+  (org-id-get-create)
+  (json-encode
+   (append
+    `((success . t)
+      (saved
+       .
+       ,(if org-mcp--unsaved-change-p
+            :json-false t)))
+    response-alist `((uri . ,(org-mcp--link-at-point))))))
 
 (defun org-mcp--maybe-save-buffer
     (buf file-path preexisting-modified-p)
@@ -607,20 +607,15 @@ Point should be at the headline."
       (backward-char))
     (buffer-substring-no-properties start (point))))
 
-(defun org-mcp--build-org-uri-from-id (id)
-  "Build an org:// URI from ID.
-ID is the UUID string."
-  (concat "org://" id))
-
-(defun org-mcp--build-org-uri-from-position ()
-  "Build an org:// URI for the heading at point.
-Uses ID if available, otherwise builds path-based URI."
+(defun org-mcp--link-at-point ()
+  "Return the address of the heading at point.
+Every response field that carries an address takes it from here.
+The address is an org:// URI: the heading's ID when it has one,
+otherwise its file and outline path."
   (if-let* ((id (org-entry-get (point) "ID")))
-    (org-mcp--build-org-uri-from-id id)
-    ;; Build path-based URI from current position
-    (let* ((file (buffer-file-name))
-           (headline-path (org-mcp--build-headline-path)))
-      (concat "org://" file "#" headline-path))))
+    (concat "org://" id)
+    (concat
+     "org://" (buffer-file-name) "#" (org-mcp--build-headline-path))))
 
 (defun org-mcp--heading-metadata-at-point (&optional inherit-tags)
   "Return canonical heading metadata at point as a plist.
@@ -671,13 +666,7 @@ Point should be at the heading. Does not recurse into children."
          (title (plist-get meta :title))
          (todo (plist-get meta :todo))
          (level (plist-get meta :level))
-         (id (plist-get meta :id))
-         (uri
-          (if id
-              (org-mcp--build-org-uri-from-id id)
-            (let ((file (buffer-file-name))
-                  (headline-path (org-mcp--build-headline-path)))
-              (concat "org://" file "#" headline-path)))))
+         (uri (org-mcp--link-at-point)))
     `((title . ,title)
       ,@
       (when todo
@@ -699,7 +688,7 @@ Returns alist with all heading properties and lightweight children."
        (scheduled (plist-get meta :scheduled))
        (deadline (plist-get meta :deadline))
        (closed (plist-get meta :closed))
-       (uri (org-mcp--build-org-uri-from-position))
+       (uri (org-mcp--link-at-point))
        (children '())
        (content-end
         (save-excursion
@@ -2315,7 +2304,7 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
          (scheduled (plist-get meta :scheduled))
          (deadline (plist-get meta :deadline))
          (closed (plist-get meta :closed))
-         (uri (org-mcp--build-org-uri-from-position))
+         (uri (org-mcp--link-at-point))
          (props
           (cl-remove-if
            (lambda (pair)
