@@ -812,6 +812,14 @@ included."
 Specifically decodes %23 back to #."
   (replace-regexp-in-string "%23" "#" encoded-path))
 
+(defun org-mcp--percent-decode (string)
+  "Return STRING with its percent-encoding undone once.
+The escapes are UTF-8 bytes, as `url-hexify-string' writes them, and
+raw non-ASCII characters in STRING may sit between them.  Every escape
+decodes to its byte, `%0A' and `%0D' included."
+  (decode-coding-string
+   (url-unhex-string (encode-coding-string string 'utf-8) t) 'utf-8))
+
 (defun org-mcp--build-headline-path ()
   "Build URL-encoded slash-separated headline path from point.
 Returns a string suitable for use in org:// URIs."
@@ -870,7 +878,8 @@ Signals error if URI format is invalid."
             :file ,(org-mcp--uri-local-file-name file uri)
             :headline-path
             ,(mapcar
-              #'url-unhex-string (split-string headline-str "/"))))))
+              #'org-mcp--percent-decode
+              (split-string headline-str "/"))))))
      ;; Starts with / → file path
      ((string-prefix-p "/" uri)
       `(:type file :file ,(org-mcp--uri-local-file-name uri uri)))
@@ -895,7 +904,7 @@ Validates file access and returns expanded file path."
         (setq headline-path
               (when headline-path-str
                 (mapcar
-                 #'url-unhex-string
+                 #'org-mcp--percent-decode
                  (split-string headline-path-str "/")))))
       ;; Handle ID-based URIs
       (progn
@@ -2268,7 +2277,7 @@ MCP Parameters:
                    parent
                    :olp
                    (mapcar
-                    #'url-unhex-string
+                    #'org-mcp--percent-decode
                     (split-string path-str "/"))))))
         ;; Handle ID-based URIs
         (setq parent
@@ -2395,20 +2404,16 @@ read through here, so they resolve an address the same way."
   "Handler for the org://{link} template.
 PARAMS holds `link', the rest of the URI after `org://' as the client
 sent it: mcp-server-lib does not decode template variables.  Its
-percent-encoding is undone here, exactly once.  The bytes are decoded
-as UTF-8 afterwards, so a URI that mixes raw non-ASCII characters with
-encoded ones decodes to the same link.
+percent-encoding is undone here, exactly once, by
+`org-mcp--percent-decode', so a URI that mixes raw non-ASCII
+characters with encoded ones decodes to the same link.
 
 A native Org link is then read as the org-read tool reads it, and a
 tool error, such as the refusal of a link, becomes a resource error
 with the same message.  A bare address is read as sent, because its
 outline path decodes its own titles."
   (let* ((raw (alist-get "link" params nil nil #'string=))
-         (link
-          (decode-coding-string
-           (url-unhex-string
-            (encode-coding-string raw 'utf-8))
-           'utf-8)))
+         (link (org-mcp--percent-decode raw)))
     (condition-case err
         (org-mcp--read-structured
          (if (org-mcp--link-p link)

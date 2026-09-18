@@ -2766,7 +2766,7 @@ BODY-WITH-HEADLINE is the body containing invalid headline."
        test-file "Test Task" "TODO" '("work") body-with-headline parent-uri))))
 
 (ert-deftest org-mcp-test-file-resource-template-in-list ()
-  "The only resource template is org://{link}; org-outline:// is gone."
+  "The only resource template is org://{link}; an org-outline:// URI is not found."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
     (should
@@ -8448,7 +8448,9 @@ second decoding would turn into `A' and `%'.  Every spelling of
 `org-mcp-test--resource-uris' reads the heading org-read reads for the
 same link.  Sent without encoding, `%41' and `%25' are percent
 escapes, so the URI names another file, and the resource refuses it as
-org-read refuses that file."
+org-read refuses that file.  `%0A' and `%0D' decode to a line feed and
+a carriage return, so the resource refuses a title holding them as
+org-read refuses the decoded link."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-encoded-titles "org-mcp-test ä#%41"))
     (dolist (title org-mcp-test--encoded-titles)
@@ -8461,16 +8463,90 @@ org-read refuses that file."
            (equal
             (cons uri (org-mcp-test--read-resource uri))
             (cons uri expected))))))
-    (let ((decoded
-           (format "file:%s::*Literal A and %%"
-                   (string-replace "%41" "A" test-file))))
+    (dolist (case
+             `((,(format "org://file:%s::*%s"
+                         test-file (nth 1 org-mcp-test--encoded-titles))
+                .
+                ,(format "file:%s::*Literal A and %%"
+                         (string-replace "%41" "A" test-file)))
+               (,(format "org://file:%s::*Budget%%0Aline%%0Dfeed"
+                         (url-hexify-string test-file))
+                .
+                ,(format "file:%s::*Budget\nline\rfeed" test-file))))
       (should
        (equal
-        (org-mcp-test--resource-error
-         (format "org://file:%s::*%s"
-                 test-file (nth 1 org-mcp-test--encoded-titles)))
+        (org-mcp-test--resource-error (car case))
         (org-mcp-test--call-tool-expecting-error
-         test-file "org-read" `((uri . ,decoded))))))))
+         test-file "org-read" `((uri . ,(cdr case)))))))))
+
+(defconst org-mcp-test--content-non-ascii-titles
+  "* Ärger
+Ärger body.
+** TODO Größe #3
+Größe body.
+"
+  "Org file whose headings have non-ASCII titles and no identifiers.")
+
+(defconst org-mcp-test--regex-non-ascii-titles-done
+  (concat
+   "\\`\\* Ärger\n"
+   "Ärger body\\.\n"
+   "\\*\\* DONE Größe #3\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
+   "Größe body\\.\n"
+   "\\'")
+  "Regex matching `org-mcp-test--content-non-ascii-titles' after DONE.")
+
+(defconst org-mcp-test--regex-non-ascii-titles-added
+  (concat
+   "\\`\\* Ärger\n"
+   "Ärger body\\.\n"
+   "\\*\\* DONE Größe #3\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
+   "Größe body\\.\n"
+   "\\*\\* TODO New Task *\n"
+   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
+   "\\'")
+  "Regex matching the DONE file after adding a TODO under Ärger.")
+
+(ert-deftest org-mcp-test-bare-outline-path-non-ascii-titles ()
+  "A bare outline path decodes non-ASCII titles as UTF-8.
+The titles are percent-encoded as org-mcp encodes them in the org://
+URIs it returns.  org-read, the resource with the URI as returned,
+org-read-headline, org-update-todo-state and org-add-todo's parent
+all reach the heading, and the resource also reads the titles sent
+raw."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-non-ascii-titles))
+      (let* ((parent
+              (format "%s#%s" test-file (url-hexify-string "Ärger")))
+             (child
+              (format "%s/%s" parent (url-hexify-string "Größe #3")))
+             (expected (org-mcp-test--call-read child)))
+        (should
+         (equal
+          (alist-get 'title (json-read-from-string expected)) "Größe #3"))
+        (dolist (uri
+                 (list
+                  (concat "org://" child)
+                  (format "org://%s#Ärger/Größe%%20%%233" test-file)))
+          (should
+           (equal
+            (cons uri (org-mcp-test--read-resource uri))
+            (cons uri expected))))
+        (should
+         (string=
+          (org-mcp-test--call-read-headline child)
+          "** TODO Größe #3\nGröße body."))
+        (org-mcp-test--call-update-todo-state child "DONE" "TODO")
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-non-ascii-titles-done)
+        (org-mcp-test--add-todo-and-check
+         "New Task" "TODO" nil nil parent nil
+         (file-name-nondirectory test-file)
+         test-file
+         org-mcp-test--regex-non-ascii-titles-added)))))
 
 (ert-deftest org-mcp-test-resource-bare-outline-path-decoded-once ()
   "A bare outline path on the resource decodes each title once, as org-read does.

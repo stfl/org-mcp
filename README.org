@@ -244,20 +244,22 @@ The resource also takes the bare forms the tools take:
 =org:///home/user/org/projects.org=,
 =org:///home/user/org/projects.org#Project%20Alpha= and
 =org://550e8400-e29b-41d4-a716-446655440000=. A bare form is not decoded as a
-whole; only the titles of its outline path are, and a =#= in its file name is
-sent as =%23=. Avoid =%= in the names of files addressed this way.
+whole; only the titles of its outline path are, as UTF-8, and a =#= in its file
+name is sent as =%23=. Avoid =%= in the names of files addressed this way.
 
 *Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
 the MCP /resource/ layer — it is the URI scheme of the =org://{link}=
 resource template above. Tool calls (e.g. =org-read=,
 =org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
-take their =uri= parameter as a native Org link (see
-[[*Addressing headings with links]]) or in *bare* form — a UUID, file
-path, or =file#headline= descriptor — *without* the =org://= prefix
-and without percent-encoding. A prefixed input is rejected with a
-validation error. Tool /responses/ emit =org://= URIs in their =uri=
-fields, which the resource reads as they are (strip the prefix to feed
-one back into another tool).
+take their =uri= parameter *without* the =org://= prefix, either as a
+native Org link (see [[*Addressing headings with links]]), passed as is
+with no percent-encoding, or in *bare* form — a UUID, file path, or
+=file#headline= descriptor, whose outline path percent-encodes its
+titles. A prefixed input is rejected with a validation error. Tool
+/responses/ emit =org://= URIs in their =uri= fields (strip the prefix
+to feed one back into another tool). The resource reads such a URI as
+it is, unless its file name contains =#=: a returned URI leaves that
+=#= unencoded, so bare forms do not support it.
 
 Example response for a headline:
 #+begin_src json
