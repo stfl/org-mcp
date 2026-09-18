@@ -1192,13 +1192,47 @@ this function throws names a file."
     (or (org-mcp--find-allowed-file (car found))
         (org-mcp--tool-file-access-error link))))
 
-(defun org-mcp--link-target (link)
+(defun org-mcp--link-id-in-files (id files)
+  "Return the first of the files FILES names that holds ID.
+FILES is the call's `files' parameter.  `org-mcp--named-file-set'
+checks and expands it, so it reaches as far as
+`org-mcp-file-scope-override' permits, and its files are searched in
+the order that function returns them.  Each is searched with
+`org-id-find-id-in-file', which reads the file, or the buffer visiting
+it, and consults no ID index: an ID in a file Emacs never indexed is
+found, Org's rescan never runs, and nothing is added to
+`org-id-locations'.  An ID none of them holds is an error naming FILES
+as the call sent them."
+  (let ((set (org-mcp--named-file-set files)))
+    (or (and (org-string-nw-p id)
+             (cl-find-if
+              (lambda (file) (org-id-find-id-in-file id file)) set))
+        (org-mcp--tool-validation-error
+         "Cannot find ID '%s' in files: %s"
+         id
+         (if (stringp files)
+             files
+           (mapconcat #'identity files ", "))))))
+
+(defun org-mcp--files-not-applicable-error (address)
+  "Throw the error for a `files' parameter sent with ADDRESS.
+ADDRESS names its file, or is a bare address rather than a link."
+  (org-mcp--tool-validation-error
+   "files applies only to a link that names no file, such as id:{id}: %s"
+   address))
+
+(defun org-mcp--link-target (link &optional files)
   "Return the target of native Org LINK, visiting no buffer.
 The value is a plist: `:link' is LINK, `:file' the allowed file it
 names, `:id' the ID of an `id:' link, and `:search' the part after
 `::', if any.  Only `id:' and `file:' links are accepted.  Every other
 link type is refused here, before any file is opened, and so is a link
-that names no file, such as `[[#custom-id]]' or `[[*Title]]'."
+that names no file, such as `[[#custom-id]]' or `[[*Title]]'.
+
+FILES is the call's `files' parameter.  When it is non-nil, the ID of
+an `id:' link is looked up in those files by
+`org-mcp--link-id-in-files' rather than through Org's ID index, and a
+`file:' link, which names its file already, is refused."
   (let*
       ((link (string-trim link))
        (object (org-mcp--link-parse link))
@@ -1218,10 +1252,16 @@ that names no file, such as `[[#custom-id]]' or `[[*Title]]'."
                      path)))
              (list
               :link link
-              :file (org-mcp--link-id-file id link)
+              :file
+              (if files
+                  (org-mcp--link-id-in-files id files)
+                (org-mcp--link-id-file id link))
               :id id
               :search search)))
-          ("file" (list
+          ("file"
+           (when files
+             (org-mcp--files-not-applicable-error link))
+           (list
             :link link
             :file (org-mcp--link-file object link)
             :search (org-element-property :search-option object)))
@@ -1279,20 +1319,26 @@ heading."
                 (plist-get target :link)
                 (error-message-string err))))))))))
 
-(defun org-mcp--address-target (address)
+(defun org-mcp--address-target (address &optional files)
   "Return the target of ADDRESS, a native Org link or a bare address.
 The value is a plist as from `org-mcp--link-target'.  For a bare
 address it holds `:id' for a bare ID, or `:olp', the outline path of
-titles, for a `file#headline' path."
+titles, for a `file#headline' path.  FILES is the call's `files'
+parameter, which `org-mcp--link-target' applies to a link; a bare
+address with FILES is refused."
   (org-mcp--reject-uri-prefix address)
-  (if (org-mcp--link-p address)
-      (org-mcp--link-target address)
+  (cond
+   ((org-mcp--link-p address)
+    (org-mcp--link-target address files))
+   (files
+    (org-mcp--files-not-applicable-error address))
+   (t
     (let ((parsed (org-mcp--parse-resource-uri address)))
       (append
        (list :link address :file (car parsed))
        (if (org-mcp--uri-is-id-based address)
            (list :id (cadr parsed))
-         (list :olp (cdr parsed)))))))
+         (list :olp (cdr parsed))))))))
 
 (defun org-mcp--target-heading-p (target)
   "Return non-nil when TARGET names a heading rather than a whole file."
@@ -1315,12 +1361,14 @@ visits its file, widened."
        "Link does not point to a heading: %s"
        (plist-get target :link)))))
 
-(defun org-mcp--read-link (link read-heading read-file)
+(defun org-mcp--read-link
+    (link read-heading read-file &optional files)
   "Read what native Org LINK points to.
 READ-HEADING is called with no arguments and point at the heading
 LINK names.  READ-FILE is called with the file when LINK names a
-whole file, that is a `file:' link with no search part."
-  (let* ((target (org-mcp--link-target link))
+whole file, that is a `file:' link with no search part.  FILES is
+the call's `files' parameter; see `org-mcp--link-target'."
+  (let* ((target (org-mcp--link-target link files))
          (file (plist-get target :file)))
     (if (org-mcp--target-heading-p target)
         (org-mcp--with-org-file file
@@ -1898,18 +1946,25 @@ unless TARGET names a direct child of the heading at point."
        (plist-get target :link)))
     (org-end-of-subtree t t)))
 
-(defun org-mcp--position-for-new-child (after-uri parent-end)
+(defun org-mcp--position-for-new-child
+    (after-uri parent-end &optional files)
   "Position point for inserting a new child under current heading.
 AFTER-URI is an optional link to, or bare ID of, a sibling to insert
 after.
 PARENT-END is the end position of the parent's subtree.
+FILES is the call's `files' parameter, applied to an AFTER-URI link
+as `org-mcp--link-target' applies it; a bare AFTER-URI with FILES is
+refused.
 Assumes point is at parent heading.
 If AFTER-URI is non-nil, positions after that sibling.
 If nil, positions at end of parent's subtree.
 Throws validation error if AFTER-URI is invalid or sibling not found."
   (if (and after-uri (not (string-empty-p after-uri)))
       (if (org-mcp--link-p after-uri)
-          (org-mcp--goto-after-child (org-mcp--link-target after-uri))
+          (org-mcp--goto-after-child
+           (org-mcp--link-target after-uri files))
+        (when files
+          (org-mcp--files-not-applicable-error after-uri))
         ;; Parse afterUri to get the ID
         (let ((after-id (org-mcp--extract-id-from-uri after-uri))
               (found nil))
@@ -2142,13 +2197,15 @@ lists those roots as absolute paths."
          `((override_roots . ,(vconcat roots))))))))
 
 (defun org-mcp--tool-update-todo-state
-    (uri new_state &optional current_state note)
+    (uri new_state &optional current_state note files)
   "Update the TODO state of a headline at URI.
 Creates an Org ID for the headline if one doesn't exist.
 Returns the ID-based URI for the updated headline.
 NEW_STATE is the new TODO state to set.
 CURRENT_STATE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2165,8 +2222,11 @@ MCP Parameters:
                   Omit to skip the state check
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
-         Empty or whitespace-only values are ignored"
-  (let* ((target (org-mcp--address-target uri))
+         Empty or whitespace-only values are ignored
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (actual-prev nil))
     (org-mcp--modify-and-save file-path "update"
@@ -2204,7 +2264,14 @@ MCP Parameters:
 
 (defun org-mcp--tool-add-todo
     (title
-     todo_state body parent_uri &optional tags after_uri properties)
+     todo_state
+     body
+     parent_uri
+     &optional
+     tags
+     after_uri
+     properties
+     files)
   "Add a new TODO item to an Org file.
 Creates an Org ID for the new headline unless PROPERTIES sets one,
 and returns its ID-based URI.
@@ -2216,6 +2283,8 @@ TAGS is an optional single tag string or list of tag strings.
 AFTER_URI is optional URI of sibling to insert after.
 PROPERTIES is an optional alist of property names and values, checked
 by `org-mcp--validate-properties' like those of `org-set-properties'.
+FILES, when non-nil, names the files an `id:' link in PARENT_URI or
+AFTER_URI is looked up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   title - The headline text
@@ -2245,7 +2314,10 @@ MCP Parameters:
                Values are single-line strings or numbers, written as
                given; null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, etc.) are
-               forbidden"
+               forbidden
+  files - Files and directories to look up an id: link of parent_uri
+          or after_uri in, in order, instead of Emacs's ID index
+          (array of strings, optional); refused with any other address"
   (org-mcp--validate-headline-title title)
   (let* ((tag-list (org-mcp--validate-and-normalize-tags tags))
          (property-list
@@ -2258,7 +2330,9 @@ MCP Parameters:
     ;; Parse parent URI once to extract file-path and parent location.
     ;; A link that names a whole file means top level.
     (if (org-mcp--link-p parent_uri)
-        (setq parent (org-mcp--link-target parent_uri))
+        (setq parent (org-mcp--link-target parent_uri files))
+      (when files
+        (org-mcp--files-not-applicable-error parent_uri))
       (org-mcp--with-uri-dispatch
           parent_uri
         ;; Handle org:// URIs
@@ -2306,7 +2380,8 @@ MCP Parameters:
                  (save-excursion
                    (org-end-of-subtree t t)
                    (point))))
-            (org-mcp--position-for-new-child after_uri parent-end)))
+            (org-mcp--position-for-new-child after_uri parent-end
+                                             files)))
 
         ;; Validate body before inserting heading
         ;; Calculate the target level for validation
@@ -2355,18 +2430,26 @@ MCP Parameters:
 
 ;; Resource handlers
 
-(defun org-mcp--read-structured (address)
+(defun org-mcp--read-structured (address &optional files)
   "Return structured JSON for what ADDRESS points to.
 ADDRESS is a native Org link, read through `org-mcp--read-link', or a
 bare address: an absolute path, a path with an outline path after
 `#', or an ID.  The org-read tool and the org://{link} resource both
-read through here, so they resolve an address the same way."
+read through here, so they resolve an address the same way.  FILES is
+the org-read tool's `files' parameter, which `org-mcp--link-target'
+applies to a link; a bare address with FILES is refused.  The
+resource passes none."
   (if (org-mcp--link-p address)
-      (org-mcp--read-link
-       address
-       (lambda () (json-encode (org-mcp--extract-structured-heading)))
-       (lambda (file)
-         (json-encode (org-mcp--extract-structured-file file))))
+      (org-mcp--read-link address
+                          (lambda ()
+                            (json-encode
+                             (org-mcp--extract-structured-heading)))
+                          (lambda (file)
+                            (json-encode
+                             (org-mcp--extract-structured-file file)))
+                          files)
+    (when files
+      (org-mcp--files-not-applicable-error address))
     (let ((parsed (org-mcp--detect-uri-type address)))
       (pcase (plist-get parsed :type)
         (`id
@@ -2456,11 +2539,14 @@ Returns plain text content."
                (plist-get parsed :file))))
          (org-mcp--read-file allowed-file))))))
 
-(defun org-mcp--tool-rename-headline (uri current_title new_title)
+(defun org-mcp--tool-rename-headline
+    (uri current_title new_title &optional files)
   "Rename headline title at URI from CURRENT_TITLE to NEW_TITLE.
 Preserves the current TODO state and tags, creates an Org ID for the
 headline if one doesn't exist.
 Returns the ID-based URI for the renamed headline.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2472,10 +2558,13 @@ MCP Parameters:
           - {absolute-path}#{headline-path}
           - {id}
   current_title - Current title without TODO state or tags
-  new_title - New title without TODO state or tags"
+  new_title - New title without TODO state or tags
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (org-mcp--validate-headline-title new_title)
 
-  (let* ((target (org-mcp--address-target uri))
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file)))
 
     ;; Rename the headline in the file
@@ -2495,12 +2584,14 @@ MCP Parameters:
       (org-edit-headline new_title))))
 
 (defun org-mcp--tool-edit-body
-    (resource_uri old_body new_body &optional append)
+    (resource_uri old_body new_body &optional append files)
   "Edit or append to body content of an Org node.
 RESOURCE_URI is the URI of the node to edit.
 OLD_BODY is the substring to search for (replace mode only).
 NEW_BODY is the replacement or appended text.
 APPEND if non-nil, append NEW_BODY to end of body instead of replacing.
+FILES, when non-nil, names the files an `id:' link in RESOURCE_URI is
+looked up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   resource_uri - URI of the node
@@ -2516,7 +2607,10 @@ MCP Parameters:
              Ignored when append is true.
   new_body - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
-           default false)"
+           default false)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   ;; Normalize JSON false to nil for proper boolean handling
   ;; JSON false can arrive as :false (keyword) or "false" (string)
   (let ((append
@@ -2538,7 +2632,7 @@ MCP Parameters:
 
           (org-mcp--validate-body-no-unbalanced-blocks new_body)
 
-          (let* ((target (org-mcp--address-target resource_uri))
+          (let* ((target (org-mcp--address-target resource_uri files))
                  (file-path (plist-get target :file)))
 
             (org-mcp--modify-and-save file-path "append body" nil
@@ -2580,7 +2674,7 @@ MCP Parameters:
       ;; Replace mode
       (org-mcp--validate-body-no-unbalanced-blocks new_body)
 
-      (let* ((target (org-mcp--address-target resource_uri))
+      (let* ((target (org-mcp--address-target resource_uri files))
              (file-path (plist-get target :file)))
 
         (org-mcp--modify-and-save file-path "edit body" nil
@@ -2733,10 +2827,12 @@ as given; `ID' and `CUSTOM_ID' are ordinary properties here."
           value)))))
    properties))
 
-(defun org-mcp--tool-set-properties (uri properties)
+(defun org-mcp--tool-set-properties (uri properties &optional files)
   "Set or delete properties on the headline at URI.
 PROPERTIES is an alist of property name-value pairs.
 String values set the property; null/empty values delete it.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2753,9 +2849,12 @@ MCP Parameters:
                null or empty string: delete the property
                ID and CUSTOM_ID are accepted and written as given
                Special properties (TODO, TAGS, PRIORITY, etc.) are
-               forbidden"
+               forbidden
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (setq properties (org-mcp--validate-properties properties))
-  (let* ((target (org-mcp--address-target uri))
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (set-props nil)
          (deleted-props nil))
@@ -2775,9 +2874,11 @@ MCP Parameters:
       (setq set-props (nreverse set-props))
       (setq deleted-props (nreverse deleted-props)))))
 
-(defun org-mcp--tool-update-scheduled (uri &optional scheduled)
+(defun org-mcp--tool-update-scheduled (uri &optional scheduled files)
   "Update SCHEDULED timestamp on headline at URI.
 SCHEDULED is an ISO date string or nil/empty to remove.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2790,8 +2891,11 @@ MCP Parameters:
           - {id}
   scheduled - ISO date string (optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-              nil or empty string removes the timestamp"
-  (let* ((target (org-mcp--address-target uri))
+              nil or empty string removes the timestamp
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (previous-scheduled nil)
          (new-scheduled nil))
@@ -2816,9 +2920,11 @@ MCP Parameters:
         (setq new-scheduled
               (or (org-entry-get (point) "SCHEDULED") ""))))))
 
-(defun org-mcp--tool-update-deadline (uri &optional deadline)
+(defun org-mcp--tool-update-deadline (uri &optional deadline files)
   "Update DEADLINE timestamp on headline at URI.
 DEADLINE is an ISO date string or nil/empty to remove.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2831,8 +2937,11 @@ MCP Parameters:
           - {id}
   deadline - ISO date string (optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-             nil or empty string removes the timestamp"
-  (let* ((target (org-mcp--address-target uri))
+             nil or empty string removes the timestamp
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (previous-deadline nil)
          (new-deadline nil))
@@ -2857,9 +2966,11 @@ MCP Parameters:
         (setq new-deadline
               (or (org-entry-get (point) "DEADLINE") ""))))))
 
-(defun org-mcp--tool-set-tags (uri &optional tags)
+(defun org-mcp--tool-set-tags (uri &optional tags files)
   "Set tags on headline at URI.
 TAGS can be a string, list of strings, or nil/empty to clear all tags.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2874,8 +2985,11 @@ MCP Parameters:
          Single tag: \"work\"
          Multiple tags: [\"work\", \"urgent\"]
          nil or empty to clear all tags
-         Validated against org-tag-alist if configured"
-  (let* ((target (org-mcp--address-target uri))
+         Validated against org-tag-alist if configured
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (previous-tags nil)
          (new-tags nil))
@@ -2899,9 +3013,11 @@ MCP Parameters:
 
         (setq new-tags (vconcat (org-get-tags nil t)))))))
 
-(defun org-mcp--tool-set-priority (uri &optional priority)
+(defun org-mcp--tool-set-priority (uri &optional priority files)
   "Set priority on headline at URI.
 PRIORITY is a single-character string or nil/empty to remove.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2914,7 +3030,10 @@ MCP Parameters:
           - {id}
   priority - Priority character (string, optional)
              Must be within org-priority-highest to org-priority-lowest
-             nil or empty string removes the priority"
+             nil or empty string removes the priority
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   ;; Validate priority if provided
   (when (and priority (not (equal priority "")))
     (unless (= (length priority) 1)
@@ -2928,7 +3047,7 @@ MCP Parameters:
          "Priority '%s' out of range ('%c' to '%c')"
          priority org-priority-highest org-priority-lowest))))
 
-  (let* ((target (org-mcp--address-target uri))
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (previous-priority nil)
          (new-priority nil))
@@ -2957,8 +3076,10 @@ MCP Parameters:
         (setq new-priority priority)))))
 
 
-(defun org-mcp--tool-add-logbook-note (uri note)
+(defun org-mcp--tool-add-logbook-note (uri note &optional files)
   "Add a timestamped note to the LOGBOOK drawer of headline at URI.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -2971,14 +3092,17 @@ MCP Parameters:
           - {id}
   note - Note text to add (string, required)
          Cannot be empty or whitespace-only
-         Multi-line notes are indented properly in the LOGBOOK"
+         Multi-line notes are indented properly in the LOGBOOK
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (when (or (null note)
             (string-empty-p note)
             (string-match-p "\\`[[:space:]]*\\'" note))
     (org-mcp--tool-validation-error
      "Note cannot be empty or whitespace-only"))
 
-  (let* ((target (org-mcp--address-target uri))
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file)))
 
     (org-mcp--modify-and-save file-path "add logbook note" nil
@@ -3176,10 +3300,12 @@ Returns: Same format as org-ql-query tool, sorted by
 
 ;; Read tools
 
-(defun org-mcp--tool-read (uri)
+(defun org-mcp--tool-read (uri &optional files)
   "Tool handler for org-read.
 URI is a native Org link or a bare address — no `org://'
 prefix.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 Returns structured JSON.
 
 MCP Parameters:
@@ -3195,9 +3321,12 @@ MCP Parameters:
         - any of these bracketed, as [[link]] or [[link][description]]
         - /path/to/file.org (file path)
         - /path/to/file.org#Headline/Subhead (headline path)
-        - UUID (8-4-4-4-12 format)"
+        - UUID (8-4-4-4-12 format)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (org-mcp--reject-uri-prefix uri)
-  (org-mcp--read-structured uri))
+  (org-mcp--read-structured uri files))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
@@ -3209,10 +3338,12 @@ MCP Parameters:
    (org-mcp--generate-outline
     (expand-file-name (org-mcp--validate-file-access file)))))
 
-(defun org-mcp--tool-read-headline (uri)
+(defun org-mcp--tool-read-headline (uri &optional files)
   "Tool handler for org-read-headline.
 URI is a native Org link or a bare address — no `org://'
 prefix.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 Returns plain text content.
 
 MCP Parameters:
@@ -3229,11 +3360,17 @@ MCP Parameters:
         - /path/to/file.org (returns entire file)
         - /path/to/file.org#Headline/Subhead (headline path)
         - UUID (8-4-4-4-12 format)
-        Headline paths use URL encoding for special chars."
+        Headline paths use URL encoding for special chars.
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (org-mcp--reject-uri-prefix uri)
   (if (org-mcp--link-p uri)
       (org-mcp--read-link
-       uri #'org-mcp--extract-headline-content #'org-mcp--read-file)
+       uri #'org-mcp--extract-headline-content #'org-mcp--read-file
+       files)
+    (when files
+      (org-mcp--files-not-applicable-error uri))
     (org-mcp--handle-headline-resource `(("uri" . ,uri)))))
 
 ;; Clock tools
@@ -3307,7 +3444,7 @@ MCP Parameters: None"
              (start . ,(alist-get 'start active)))))
       (json-encode '((active . :json-false))))))
 
-(defun org-mcp--tool-clock-in (uri &optional start_time resolve)
+(defun org-mcp--tool-clock-in (uri &optional start_time resolve files)
   "Clock in to the heading at URI.
 If another clock is active, it is closed first.
 When `org-clock-continuously' is non-nil and no explicit START_TIME
@@ -3315,6 +3452,8 @@ is given, the new clock may start at the previous clock's end time
 if it is within `org-mcp-clock-continuous-threshold' minutes.
 When RESOLVE is \"true\", dangling (unclosed) CLOCK lines under
 the target heading are deleted before clocking in.
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline to clock in
@@ -3326,8 +3465,11 @@ MCP Parameters:
           - {absolute-path}#{headline-path}
           - {id}
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
-  resolve - When \"true\", delete dangling clocks before clocking in"
-  (let* ((target (org-mcp--address-target uri))
+  resolve - When \"true\", delete dangling clocks before clocking in
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (now (current-time))
          (explicit-start
@@ -3450,11 +3592,13 @@ MCP Parameters:
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
           (org-mcp--clock-insert-entry clock-start))))))
 
-(defun org-mcp--tool-clock-out (&optional uri end_time)
+(defun org-mcp--tool-clock-out (&optional uri end_time files)
   "Clock out the currently active clock.
 If URI is provided, validates it matches the active clock's heading.
 URI is an optional URI to validate against active clock.
 END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.  Without URI it is not used.
 
 MCP Parameters:
   uri - Optional URI to validate against active clock
@@ -3466,7 +3610,10 @@ MCP Parameters:
           - any of these as [[link]] or [[link][description]]
           - {absolute-path}#{headline-path}
           - {id}
-  end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
+  end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
   (let ((active (org-mcp--clock-find-active)))
     (unless active
       (org-mcp--tool-validation-error "No active clock to stop"))
@@ -3489,7 +3636,7 @@ MCP Parameters:
       ;; If URI provided, validate it matches
       (when uri
         (let ((uri-file
-               (plist-get (org-mcp--address-target uri) :file)))
+               (plist-get (org-mcp--address-target uri files) :file)))
           (unless (org-mcp--paths-equal-p uri-file active-file)
             (org-mcp--tool-validation-error
              "URI file does not match active clock file"))))
@@ -3522,10 +3669,12 @@ MCP Parameters:
             ;; Navigate to heading for complete-and-save
             (org-back-to-heading t)))))))
 
-(defun org-mcp--tool-clock-add (uri start end)
+(defun org-mcp--tool-clock-add (uri start end &optional files)
   "Add a completed clock entry to the heading at URI.
 START is ISO 8601 start time (e.g. 2026-03-23T14:30:00).
 END is ISO 8601 end time (e.g. 2026-03-23T16:45:00).
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -3537,8 +3686,11 @@ MCP Parameters:
           - {absolute-path}#{headline-path}
           - {id}
   start - ISO 8601 start time (e.g. 2026-03-23T14:30:00)
-  end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)"
-  (let* ((target (org-mcp--address-target uri))
+  end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time
@@ -3570,10 +3722,12 @@ MCP Parameters:
       (org-mcp--goto-heading target)
       (org-mcp--clock-insert-entry start-time end-time))))
 
-(defun org-mcp--tool-clock-delete (uri start)
+(defun org-mcp--tool-clock-delete (uri start &optional files)
   "Delete a clock entry from the heading at URI.
 START is the ISO 8601 start time of the clock entry to delete
 \\(e.g., 2026-03-23T14:30:00).
+FILES, when non-nil, names the files an `id:' link in URI is looked
+up in; see `org-mcp--link-target'.
 
 MCP Parameters:
   uri - Link or URI of the headline
@@ -3585,8 +3739,11 @@ MCP Parameters:
           - {absolute-path}#{headline-path}
           - {id}
   start - ISO 8601 start time of the clock entry to delete
-          (e.g. 2026-03-23T14:30:00)"
-  (let* ((target (org-mcp--address-target uri))
+          (e.g. 2026-03-23T14:30:00)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other address"
+  (let* ((target (org-mcp--address-target uri files))
          (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time
@@ -3798,6 +3955,8 @@ Parameters:
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3857,6 +4016,8 @@ Parameters:
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
                parameters and dedicated tools
+  files - Files and directories to look up an id: link of parent_uri
+          or after_uri in (array of strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3899,6 +4060,8 @@ required)
   new_title - New title without TODO state or tags (string, required)
               Cannot be empty or whitespace-only
               Cannot contain newlines
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3939,6 +4102,8 @@ Parameters:
   append - Append new_body to end of body instead of replacing
            (boolean, optional, default false)
            When true, old_body is ignored
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3981,6 +4146,8 @@ Parameters:
                added to Org's ID index
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use dedicated tools
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4011,6 +4178,8 @@ Parameters:
   scheduled - ISO date string (string, optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
               Omit or empty string to remove the timestamp
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4041,6 +4210,8 @@ Parameters:
   deadline - ISO date string (string, optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
              Omit or empty string to remove the timestamp
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4075,6 +4246,8 @@ Parameters:
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4106,6 +4279,8 @@ Parameters:
              Must be in the configured range (default \"A\" to \"C\")
              Use org-get-priority-config to check the valid range
              Omit or empty string to remove priority
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4138,6 +4313,8 @@ Parameters:
          Cannot be empty or whitespace-only
          Multi-line notes are properly indented in the LOGBOOK
          Note is inserted at the top of the LOGBOOK drawer
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4169,6 +4346,20 @@ Parameters:
         - /path/to/file.org - file path (returns file with children)
         - /path/to/file.org#Headline/Subhead - headline path
         - UUID (8-4-4-4-12 format) - ID-based lookup
+  files - Files and directories to look up an id: link in (array of
+          strings, optional)
+          An id: link names no file, so without files it resolves
+          only within the allowed files.  With files, the ID is
+          looked up in these files instead, in the order given,
+          rather than in Emacs's ID index: a heading in a file Emacs
+          never indexed is found, and no index rescan runs.  Entries
+          are checked as for org-ql-query, so a file outside the
+          allowed files is reached only as far as
+          org-mcp-file-scope-override permits, and a directory is
+          searched as that tool searches it.  An ID none of the files
+          holds is an error.  Refused with a file: link, which names
+          its file already, and with a bare address.  Every tool that
+          names a heading takes files in the same way.
 
 Returns: JSON object with structured data:
   For files:
@@ -4236,6 +4427,8 @@ Parameters:
         - /path/to/file.org#Headline/Subhead - headline path
         - UUID (8-4-4-4-12 format) - ID-based lookup
         Headline paths use URL encoding for special chars.
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns: Plain text content of the headline and its subtree (or file)"
    :read-only t
@@ -4411,6 +4604,8 @@ Parameters:
                If omitted, uses current time (or continuous time)
   resolve - When 'true', delete dangling (unclosed) CLOCK lines
             under the heading before clocking in (string, optional)
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4448,6 +4643,8 @@ Parameters:
   end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
              If omitted, uses current time
+  files - Files and directories to look up an id: link in uri in
+          (array of strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4486,6 +4683,8 @@ Parameters:
   end - ISO 8601 end time (string, required)
         Example: 2026-03-23T16:45:00
         Must be after start time
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4520,6 +4719,8 @@ Parameters:
   start - ISO 8601 start time of the clock entry to delete
           (string, required)
           Example: 2026-03-23T14:30:00
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-read
 
 Returns JSON object:
   success - Always true on success (boolean)

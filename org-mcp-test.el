@@ -948,11 +948,13 @@ BODY is executed with org-mcp enabled."
 ALLOWED-FILES is the list of files to bind to `org-mcp-allowed-files'.
 ID-LOCATIONS is a list of (ID . FILE) cons cells to register.
 Sets up `org-id-track-globally' and `org-id-locations-file',
-then registers each ID location."
+then registers each ID location.  `org-id-locations' and
+`org-id-files' are bound, so no registration outlives BODY."
   (declare (indent 2) (debug t))
   `(let ((org-id-track-globally t)
          (org-id-locations-file nil) ; Prevent saving to disk
          (org-id-locations nil)
+         (org-id-files nil)
          (org-mcp-allowed-files ,allowed-files))
      (dolist (id-loc ,id-locations)
        (org-id-add-location (car id-loc) (cdr id-loc)))
@@ -1161,16 +1163,19 @@ alist sent as the properties parameter."
 
 ;; Helper functions for testing org-update-todo-state MCP tool
 
-(defun org-mcp-test--call-update-todo-state (uri new-state &optional current-state note)
+(defun org-mcp-test--call-update-todo-state
+    (uri new-state &optional current-state note files)
   "Call org-update-todo-state tool via JSON-RPC and return the result.
 URI is the headline URI, NEW-STATE is the new TODO state to set.
 CURRENT-STATE, when provided, is the expected current TODO state.
-NOTE, when provided, is a note to attach to the state transition."
+NOTE, when provided, is a note to attach to the state transition.
+FILES, when provided, is sent as the `files' parameter."
   (let* ((params
           `((uri . ,uri)
             (new_state . ,new-state)
             ,@(when current-state `((current_state . ,current-state)))
-            ,@(when note `((note . ,note)))))
+            ,@(when note `((note . ,note)))
+            ,@(when files `((files . ,files)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-update-todo-state" params)))
     (json-read-from-string result-text)))
@@ -1356,10 +1361,11 @@ FILE is the file path to read the outline from."
 
 ;; Helper functions for testing org-read-headline MCP tool
 
-(defun org-mcp-test--call-read-headline (uri)
+(defun org-mcp-test--call-read-headline (uri &optional files)
   "Call org-read-headline tool via JSON-RPC and return the result.
-URI must be a bare {path}, {path}#{headline}, or {uuid} (no `org://' prefix)."
-  (let ((params `((uri . ,uri))))
+URI must be a bare {path}, {path}#{headline}, or {uuid} (no `org://' prefix).
+FILES, when provided, is sent as the `files' parameter."
+  (let ((params `((uri . ,uri) ,@(when files `((files . ,files))))))
     (mcp-server-lib-ert-call-tool "org-read-headline" params)))
 
 ;; Helper functions for testing clock MCP tools
@@ -8622,6 +8628,378 @@ opened or changed, and the remote path opens no connection."
         (should-not (find-buffer-visiting other-file))
         (should
          (string= (org-mcp-test--read-file-raw other-file) other-before))))))
+
+;; Heading tools taking a file set
+
+(defconst org-mcp-test--scope-id-link
+  (format "id:%s" org-mcp-test--content-with-id-id)
+  "Link to Task in `org-mcp-test--scope-task-with-id-content'.")
+
+(defconst org-mcp-test--scope-task-with-id-done-regex
+  (concat
+   "\\`\\* DONE Task\n"
+   ":PROPERTIES:\n"
+   ":ID:       " (regexp-quote org-mcp-test--content-with-id-id) "\n"
+   ":END:\n"
+   "Body\n"
+   "\\'")
+  "Regex matching the whole ID scope-test file after Task becomes DONE.")
+
+(defconst org-mcp-test--regex-links-beta-changed
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha))
+   "\\* [^\n]*Beta[^\n]*\n"
+   "\\(?:.\\|\n\\)*"
+   ":ID: +" org-mcp-test--link-beta-id "\n"
+   "\\(?:.\\|\n\\)*"
+   (regexp-quote org-mcp-test--content-links-gamma)
+   "\\'")
+  "Regex matching the links file after any change inside Beta only.")
+
+(defun org-mcp-test--id-locations ()
+  "Return the entries of `org-id-locations' as an alist of files and IDs."
+  (and (hash-table-p org-id-locations)
+       (org-id-hash-to-alist org-id-locations)))
+
+(defmacro org-mcp-test--without-id-index (&rest body)
+  "Run BODY and assert that it never used Org's ID index.
+While BODY runs, `org-id-find', `org-id-find-id-file' and
+`org-id-update-id-locations', which consult or rescan the index,
+record each call and fail loudly; no call may be recorded.
+`org-id-locations' must hold the same entries afterwards as before."
+  (declare (indent 0) (debug t))
+  (let ((calls (make-symbol "calls"))
+        (before (make-symbol "before")))
+    `(let ((,calls nil)
+           (,before (org-mcp-test--id-locations)))
+       (cl-letf ,(mapcar
+                  (lambda (fn)
+                    `((symbol-function ',fn)
+                      (lambda (&rest _)
+                        (push ',fn ,calls)
+                        (error "%s ran" ',fn))))
+                  '(org-id-find
+                    org-id-find-id-file org-id-update-id-locations))
+         ,@body)
+       (should (null ,calls))
+       (should (equal (org-mcp-test--id-locations) ,before)))))
+
+(defun org-mcp-test--assert-id-task-permitted (file files)
+  "Assert that Task in FILE is read and then made DONE by its `id:' link.
+FILE holds `org-mcp-test--scope-task-with-id-content'.  FILES, when
+non-nil, is sent as the `files' parameter, and the calls must then
+leave Org's ID index alone."
+  (let ((read-and-write
+         (lambda ()
+           (should
+            (string=
+             (org-mcp-test--call-read-headline
+              org-mcp-test--scope-id-link files)
+             (string-trim-right org-mcp-test--scope-task-with-id-content)))
+           (should
+            (equal
+             (alist-get
+              'new_state
+              (org-mcp-test--call-update-todo-state
+               org-mcp-test--scope-id-link "DONE" "TODO" nil files))
+             "DONE")))))
+    (if files
+        (org-mcp-test--without-id-index
+          (funcall read-and-write))
+      (funcall read-and-write))
+    (org-mcp-test--verify-file-matches
+     file org-mcp-test--scope-task-with-id-done-regex)))
+
+(defun org-mcp-test--assert-id-task-refused (file files refusal)
+  "Assert that reading and writing Task in FILE by its `id:' link is refused.
+FILE holds `org-mcp-test--scope-task-with-id-content' and stays
+unchanged.  FILES, when non-nil, is sent as the `files' parameter.
+Each refusal must match the regexp REFUSAL."
+  (let ((params
+         `((uri . ,org-mcp-test--scope-id-link)
+           ,@(when files `((files . ,files))))))
+    (org-mcp-test--call-tool-refused "org-read-headline" params refusal)
+    (org-mcp-test--call-tool-refused
+     "org-update-todo-state"
+     (append params '((current_state . "TODO") (new_state . "DONE")))
+     refusal file)))
+
+(ert-deftest org-mcp-test-file-set-id-in-allowed-file ()
+  "An ID in an allowed file resolves whether or not the call names its file.
+This holds for a read and a write under every override setting.  The
+file lies outside every root, so only being allowed makes it
+reachable."
+  (dolist (kind '(nil roots t))
+    (dolist (named '(nil t))
+      (org-mcp-test--with-scope-dirs (if (eq kind 'roots)
+                                         (list root)
+                                       kind)
+        (let ((file (org-mcp-test--write-file
+                     outside "task.org"
+                     org-mcp-test--scope-task-with-id-content)))
+          (org-mcp-test--with-id-tracking
+              (list file)
+              `((,org-mcp-test--content-with-id-id . ,file))
+            (org-mcp-test--assert-id-task-permitted
+             file (and named (vector file)))))))))
+
+(ert-deftest org-mcp-test-file-set-id-outside-allowed-files ()
+  "An ID outside the allowed files resolves only once the call names its file.
+The ID is in Emacs's index.  Without `files' it is refused under every
+override setting, by an error naming the link, not the file, and so is
+the org://{link} resource, which takes no `files'.  With
+`files' naming its file, it is refused under nil and for a file
+outside every root, by an error naming the file as the call sent it,
+and it resolves for a file under a root and under t."
+  (pcase-dolist (`(,kind ,under-root ,permitted)
+                 '((nil t nil) (roots t t) (roots nil nil) (t nil t)))
+    (dolist (named '(nil t))
+      (org-mcp-test--with-scope-dirs (if (eq kind 'roots)
+                                         (list root)
+                                       kind)
+        (let ((file (org-mcp-test--write-file
+                     (if under-root
+                         root
+                       outside)
+                     "task.org" org-mcp-test--scope-task-with-id-content)))
+          (org-mcp-test--with-id-tracking
+              (list allowed)
+              `((,org-mcp-test--content-with-id-id . ,file))
+            (cond
+             ((not named)
+              (org-mcp-test--assert-id-task-refused
+               file nil
+               (org-mcp-test--refused-path-regexp
+                org-mcp-test--scope-id-link))
+              ;; A resource URI names no file set, so the resource
+              ;; refuses the ID under every setting.
+              (should
+               (string-match-p
+                (org-mcp-test--refused-path-regexp
+                 org-mcp-test--scope-id-link)
+                (org-mcp-test--resource-error
+                 (concat "org://" org-mcp-test--scope-id-link)))))
+             (permitted
+              (org-mcp-test--assert-id-task-permitted file (vector file)))
+             (t
+              (org-mcp-test--assert-id-task-refused
+               file (vector file)
+               (org-mcp-test--refused-path-regexp file))))))))))
+
+(ert-deftest org-mcp-test-file-set-id-in-unindexed-file ()
+  "An ID in a file Emacs never indexed resolves once the call names its file.
+The index holds no entry for the ID, before or after.  The file is
+named directly or through its directory, which t lets the call
+search, and it is an allowed file or lies outside the allowed files."
+  (dolist (via-directory '(nil t))
+    (dolist (in-allowed '(nil t))
+      (org-mcp-test--with-scope-dirs t
+        (let ((file (org-mcp-test--write-file
+                     outside "task.org"
+                     org-mcp-test--scope-task-with-id-content)))
+          (org-mcp-test--with-id-tracking
+              (list
+               (if in-allowed
+                   file
+                 allowed))
+              nil
+            (org-mcp-test--assert-id-task-permitted
+             file
+             (vector
+              (if via-directory
+                  outside
+                file)))
+            (should-not
+             (org-mcp-test--id-registered-p
+              org-mcp-test--content-with-id-id))))))))
+
+(ert-deftest org-mcp-test-file-set-id-first-match-in-order ()
+  "An ID held by several named files resolves in the first of them.
+The order is that of `files', not that of the allowed files."
+  (org-mcp-test--with-scope-dirs nil
+    (let ((a-file (org-mcp-test--write-file
+                   root "a.org" org-mcp-test--scope-task-with-id-content))
+          (b-file (org-mcp-test--write-file
+                   outside "b.org" org-mcp-test--scope-task-with-id-content)))
+      (org-mcp-test--with-id-tracking (list a-file b-file) nil
+        (org-mcp-test--without-id-index
+          (org-mcp-test--call-update-todo-state
+           org-mcp-test--scope-id-link "DONE" "TODO" nil
+           (vector b-file a-file)))
+        (org-mcp-test--verify-file-matches
+         b-file org-mcp-test--scope-task-with-id-done-regex)
+        (should
+         (string=
+          (org-mcp-test--read-file a-file)
+          org-mcp-test--scope-task-with-id-content))))))
+
+(ert-deftest org-mcp-test-file-set-id-not-in-named-files ()
+  "A named set without the ID is an error naming the ID and the set as sent.
+The set is a file and a directory, as an array or a single path, and
+the error never names a file found under the directory.  The ID is in
+Emacs's index, in an allowed file, and is not looked up there."
+  (org-mcp-test--with-scope-dirs t
+    (let ((holder (org-mcp-test--write-file
+                   root "holder.org"
+                   org-mcp-test--scope-task-with-id-content))
+          (other (org-mcp-test--write-file
+                  outside "other.org" org-mcp-test--scope-task-content))
+          (dir (file-name-as-directory (expand-file-name "dir" outside)))
+          (refusal
+           (lambda (&rest entries)
+             (concat
+              "\\`Cannot find ID '"
+              (regexp-quote org-mcp-test--content-with-id-id)
+              "' in files: "
+              (regexp-quote (string-join entries ", "))
+              "\\'"))))
+      (org-mcp-test--write-file dir "inner.org" org-mcp-test--scope-task-content)
+      (org-mcp-test--with-id-tracking
+          (list holder)
+          `((,org-mcp-test--content-with-id-id . ,holder))
+        (org-mcp-test--without-id-index
+          (org-mcp-test--assert-id-task-refused
+           other (vector other dir) (funcall refusal other dir))
+          (org-mcp-test--assert-id-task-refused
+           other other (funcall refusal other)))
+        (should
+         (string=
+          (org-mcp-test--read-file holder)
+          org-mcp-test--scope-task-with-id-content))))))
+
+(ert-deftest org-mcp-test-file-set-refused-with-address-naming-file ()
+  "`files' applies only to an `id:' link; any other address refuses it.
+A `file:' link and a bare path name their file already, and a bare ID
+is not a link.  Each is refused for a read, a write, and as the parent
+of org-add-todo before its file is opened, and as the sibling once the
+parent is found.  The file stays unchanged."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-scope-dirs t
+      (let* ((file (org-mcp-test--write-file
+                    outside "task.org"
+                    org-mcp-test--scope-task-with-id-content))
+             (files (vector file))
+             (refusal "\\`files applies only to a link that names no file"))
+        (org-mcp-test--with-id-tracking
+            (list file)
+            `((,org-mcp-test--content-with-id-id . ,file))
+          (dolist (address
+                   (list
+                    (format "file:%s::*Task" file)
+                    (format "[[file:%s::*Task][Task]]" file)
+                    (format "file:%s" file)
+                    (format "%s#Task" file)
+                    org-mcp-test--content-with-id-id))
+            (dolist (call
+                     `(("org-read-headline" (uri . ,address))
+                       ("org-update-todo-state"
+                        (uri . ,address) (new_state . "DONE"))
+                       ("org-add-todo"
+                        (title . "New Task")
+                        (todo_state . "TODO")
+                        (body . nil)
+                        (parent_uri . ,address))))
+              (org-mcp-test--call-tool-refused
+               (car call)
+               (append (cdr call) `((files . ,files)))
+               refusal
+               file)))
+          (should-not (find-buffer-visiting file))
+          (dolist (after
+                   (list
+                    (format "file:%s::*Task" file)
+                    org-mcp-test--content-with-id-id))
+            (org-mcp-test--call-tool-refused
+             "org-add-todo"
+             `((title . "New Task")
+               (todo_state . "TODO")
+               (body . nil)
+               (parent_uri . ,org-mcp-test--scope-id-link)
+               (after_uri . ,after)
+               (files . ,files))
+             refusal
+             file)))))))
+
+(ert-deftest org-mcp-test-file-set-every-heading-tool ()
+  "Every tool that names a heading looks an `id:' link up in the files named.
+Beta's ID is not in Emacs's index, so only the named file finds it.
+The reads return Beta, and each write changes Beta alone.  The set
+serves org-add-todo's parent and the sibling it inserts after."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (org-mcp-test--with-id-tracking (list test-file) nil
+        (let* ((link (format "id:%s" org-mcp-test--link-beta-id))
+               (files (vector test-file))
+               (call
+                (lambda (tool &rest params)
+                  (mcp-server-lib-ert-call-tool
+                   tool (append params `((files . ,files)))))))
+          (org-mcp-test--without-id-index
+            (should
+             (string=
+              (funcall call "org-read-headline" `(uri . ,link))
+              (string-trim-right org-mcp-test--content-links-beta)))
+            (should
+             (equal
+              (alist-get
+               'title
+               (json-read-from-string
+                (funcall call "org-read" `(uri . ,link))))
+              "Beta"))
+            (dolist (write
+                     `(("org-update-todo-state"
+                        (uri . ,link) (new_state . "TODO"))
+                       ("org-rename-headline"
+                        (uri . ,link)
+                        (current_title . "Beta")
+                        (new_title . "Beta Renamed"))
+                       ("org-edit-body"
+                        (resource_uri . ,link)
+                        (old_body . nil)
+                        (new_body . "Beta appended.")
+                        (append . t))
+                       ("org-set-properties"
+                        (uri . ,link) (properties . ((EFFORT . "1:00"))))
+                       ("org-update-scheduled"
+                        (uri . ,link) (scheduled . "2026-03-27"))
+                       ("org-update-deadline"
+                        (uri . ,link) (deadline . "2026-03-28"))
+                       ("org-set-tags" (uri . ,link) (tags . "work"))
+                       ("org-set-priority" (uri . ,link) (priority . "A"))
+                       ("org-add-logbook-note" (uri . ,link) (note . "Checked"))
+                       ("org-clock-add"
+                        (uri . ,link)
+                        (start . "2026-03-23T10:00:00")
+                        (end . "2026-03-23T11:00:00"))
+                       ("org-clock-in"
+                        (uri . ,link) (start_time . "2026-03-23T14:30:00"))
+                       ("org-clock-out"
+                        (uri . ,link) (end_time . "2026-03-23T16:45:00"))
+                       ("org-clock-delete"
+                        (uri . ,link) (start . "2026-03-23T10:00:00"))
+                       ("org-add-todo"
+                        (title . "New Task")
+                        (todo_state . "TODO")
+                        (tags . nil)
+                        (body . nil)
+                        (parent_uri . ,link)
+                        (after_uri . ,(concat link "::*Review"))
+                        (properties . ((ID . "new-task-id"))))))
+              (let ((before (org-mcp-test--read-file test-file)))
+                (should
+                 (equal
+                  (alist-get
+                   'success (json-read-from-string (apply call write)))
+                  t))
+                (should-not
+                 (string= (org-mcp-test--read-file test-file) before))
+                (org-mcp-test--verify-file-matches
+                 test-file org-mcp-test--regex-links-beta-changed)))))))))
 
 ;;; Script installation tests
 

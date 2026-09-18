@@ -116,10 +116,12 @@ A call can name an Org file outside the allowed files by passing its path.
 
 The setting governs reading and writing alike.  The permission lasts for the
 one call that names the file; nothing carries over to later calls.
-A call names a file through a path or a =file:= link (see
-[[*Addressing headings with links]]).  A bare ID names none, so it resolves
-only within the allowed files, and the file of the running clock is not named
-either, so the setting does not change what the clock tools reach.
+A call names a file through a path, a =file:= link (see
+[[*Addressing headings with links]]) or a =files= parameter (see
+[[*Naming the file of an ID]] and [[*Querying other files]]).  A bare ID names
+none, so without =files= it resolves only within the allowed files, and the
+file of the running clock is not named either, so the setting does not change
+what the clock tools reach.
 
 A named file outside the allowed files must also meet these conditions:
 
@@ -222,7 +224,10 @@ To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 - *URI Pattern:* =org://{link}=, where link is a native Org link (see
   [[*Addressing headings with links]]), bare or bracketed, with or without a
   description. The link resolves, and is refused, exactly as it is in
-  =org-read=, and a refusal carries the same message.
+  =org-read=, and a refusal carries the same message. A resource URI carries
+  no =files= parameter, so an =id:= link resolves only within the allowed
+  files; to reach an ID in another file, call =org-read= with =files= (see
+  [[*Naming the file of an ID]]).
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* Structured JSON with file or headline data including metadata
 
@@ -296,19 +301,21 @@ resolves inside =[[…]]=, so a link copied out of Emacs works unchanged:
   heading.
 - org-mcp resolves a link with Org's own lookup: =org-id-find= for an ID,
   which includes the org-roam database and Org's rescan when the ID is not in
-  the index, and =org-link-search= for the part after =::=. The search part of
-  an =id:= link, as in =id:<id>::*Review=, runs within that heading's subtree;
-  a =file:= link searches the whole file. A title that matches several
-  headings resolves to the first, as it does in Org, and =::<n>= in a =file:=
-  link goes to line /n/. A search that matches nothing is an error; org-mcp
-  never offers to create the heading.
+  the index, or =org-id-find-id-in-file= in each file a call names in =files=
+  (see [[*Naming the file of an ID]]), and =org-link-search= for the part after
+  =::=. The search part of an =id:= link, as in =id:<id>::*Review=, runs
+  within that heading's subtree; a =file:= link searches the whole file. A
+  title that matches several headings resolves to the first, as it does in
+  Org, and =::<n>= in a =file:= link goes to line /n/. A search that matches
+  nothing is an error; org-mcp never offers to create the heading.
 - A link is resolved, never followed: your windows, narrowing, point, folding,
   marks and buffer list stay as they were, even when the buffer is narrowed to
   another subtree.
 - A =file:= link names its file, so it reaches the allowed files and any Org
   file =org-mcp-file-scope-override= permits (see
   [[*Configuring the scope override]]). An =id:= link names no file and
-  resolves only within the allowed files.
+  resolves only within the allowed files, unless the call names its file in
+  =files=.
 - =org-add-todo= reads a =file:= link without a search part as the top level of
   that file. A tool that needs a heading refuses it.
 
@@ -326,6 +333,37 @@ org-mcp refuses:
 
 The bare formats (a UUID, an absolute path, and =path#Parent/Child= outline
 paths) are accepted as well.
+
+** Naming the file of an ID
+
+An =id:= link names no file, so org-mcp finds the ID through Emacs's ID index
+and reaches it only in the allowed files.  An ID in a file Emacs has not
+indexed is not found that way, and looking up an ID the index lacks makes Org
+rescan every file it knows, which can freeze Emacs for seconds.
+
+Every tool that names a heading takes a =files= parameter for this: an array
+of absolute paths to Org files and directories.  With it, the ID of an =id:=
+link is looked up in the named files instead, in the order given, with
+=org-id-find-id-in-file=, which reads each file, or the buffer visiting it.
+The ID index is neither consulted nor rescanned, and nothing is added to it,
+so a heading in a file Emacs never indexed is reachable once its file is
+named.
+
+- Entries are checked, and directories searched, as for the query tools (see
+  [[*Querying other files]]): a file outside the allowed files is reached only
+  as far as =org-mcp-file-scope-override= permits, for that call alone.
+- The first file that holds the ID wins.  An ID none of them holds is an
+  error naming the ID and the entries as sent.
+- =files= applies only to an =id:= link.  A call sending it with a =file:=
+  link, which names its file already, or with a bare address is refused.
+
+#+begin_src json
+{
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
+  "files": ["/home/user/decisions/loop.org"],
+  "new_state": "DONE"
+}
+#+end_src
 
 ** Available MCP Tools
 
@@ -497,6 +535,7 @@ Empty configuration returns:
   - =currentState= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, previous and new states, and ID-based URI of the updated headline
 
 Example:
@@ -529,6 +568,7 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and previous and new titles
 
 Example:
@@ -565,6 +605,7 @@ Example:
   - =parentUri= (string, required): link to the parent item (see [[*Addressing headings with links]]) or its bare URI. Use =file:/path/to/file.org= or =/path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): link to, or bare ID of, the sibling to insert after; it must be a direct child of the parent. If not given, append as last child of parent
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable address from the call that creates it. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parentUri= or =afterUri= in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Object with success status, =saved= flag, new item URI (built from the =ID= in =properties= when one is given), file name, and title
 
 Example:
@@ -599,6 +640,7 @@ Example:
   - =oldBody= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
   - =newBody= (string, required): Replacement or appended text
   - =append= (boolean, optional, default false): When true, append =newBody= to end of body instead of replacing
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and org:// URI of the updated node
 - *Special behavior (replace mode):* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
@@ -638,6 +680,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus org:// URI
 
 Example:
@@ -666,6 +709,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and ID-based URI
 
 Example:
@@ -688,6 +732,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and ID-based URI
 
 Example:
@@ -710,6 +755,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus org:// URI
 
 Example:
@@ -731,6 +777,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and ID-based URI
 
 Example:
@@ -753,6 +800,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and org:// URI
 
 Example:
@@ -870,6 +918,7 @@ the same data as the resource for the same link; =org-read-outline= and
     - =/path/to/file.org= - file path (returns file with children)
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= (8-4-4-4-12 format) - ID-based lookup
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Structured JSON with file or headline data including metadata
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
@@ -906,6 +955,7 @@ Example response for a headline:
     - =/path/to/file.org= - returns entire file
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= - ID-based lookup
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Plain text content of the file or headline subtree
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 - *Note:* Use this when you need plain text instead of structured JSON
@@ -959,6 +1009,7 @@ Example responses:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
   - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
 
 Example:
@@ -996,6 +1047,7 @@ Example:
 - *Parameters:*
   - =uri= (string, optional): link (see [[*Addressing headings with links]]) or URI to validate against the active clock, such as =file:/path/to/file.org=. If provided, its file must match the active clock's file
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =uri= in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
 
 Example:
@@ -1019,6 +1071,7 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and the added clock entry details
 
 Example:
@@ -1047,6 +1100,7 @@ Example:
 - *Parameters:*
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and the deleted entry details
 
 Example:
