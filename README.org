@@ -38,6 +38,9 @@ Then configure in =config.el=:
   ;; relative; relative paths resolve against `org-directory'.
   ;; :custom
   ;; (org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+  ;; Optional: let a call name Org files under these directories too
+  ;; (default nil refuses; t permits every Org file Emacs can reach)
+  ;; (org-mcp-file-scope-override '("~/decisions"))
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
   :config
@@ -79,6 +82,52 @@ different (or narrower) set:
 
 Absolute and relative entries are interchangeable: a file allowed via a
 relative entry can be referenced through an absolute-path URI, and vice versa.
+
+Every entry names a file.  A directory listed in =org-mcp-allowed-files= is
+ignored and makes none of the files under it reachable.  Directories in
+=org-agenda-files= work as they do for the agenda: Org expands each one into
+the Org files directly inside it, and those files are allowed.
+
+** Configuring the scope override
+
+A call can name an Org file outside the allowed files by passing its path.
+=org-mcp-file-scope-override= decides whether that is permitted:
+
+- =nil= (the default) :: refuse.  Only the allowed files are reachable.
+- a list of directories :: permit any Org file under one of these directories.
+  Relative entries resolve against =org-directory=.
+- =t= :: permit any Org file.  *Every Org file the Emacs process can read and
+  write becomes readable and writable by MCP clients.*  Prefer a list of
+  directories.
+
+#+begin_src emacs-lisp
+;; Default: refuse files outside the allowed files
+(setq org-mcp-file-scope-override nil)
+
+;; Permit Org files under these directories
+(setq org-mcp-file-scope-override '("~/decisions" "~/src"))
+
+;; Permit every Org file Emacs can read and write
+(setq org-mcp-file-scope-override t)
+#+end_src
+
+The setting governs reading and writing alike.  The permission lasts for the
+one call that names the file; nothing carries over to later calls.
+A call names a file only through a path.  A bare ID names none, so it resolves
+only within the allowed files, and the file of the running clock is not named
+either, so the setting does not change what the clock tools reach.
+
+A named file must also meet these conditions:
+
+- it is an existing =.org= or =.org_archive= file; encrypted =.org.gpg= files
+  and files with other extensions are refused;
+- it is local: remote (TRAMP) paths are refused before Emacs touches them, so a
+  path cannot make Emacs open a network connection;
+- symlinks are resolved, for the file and for each directory in the list, and
+  the resolved file must lie under a resolved directory, so a symlink pointing
+  out of a permitted directory is refused.
+
+=org-get-allowed-files= reports the policy to clients.
 
 ** Registering with an MCP Client
 
@@ -132,7 +181,7 @@ To remove the installed wrapper, run =M-x org-mcp-uninstall=.
   - Absolute file path (e.g., =/home/user/org/projects.org=)
   - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=)
   - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=)
-- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=)
+- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* Structured JSON with file or headline data including metadata
 
 *Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
@@ -284,9 +333,17 @@ Example response:
 #+end_src
 
 *** org-get-allowed-files
-- *Description:* Get the list of Org files accessible through the org-mcp server
+- *Description:* Get the list of Org files accessible through the org-mcp
+  server, and whether a call may name Org files outside them
 - *Parameters:* None
-- *Returns:* JSON object with =files= array containing absolute paths of allowed Org files
+- *Returns:* JSON object with:
+  - =files=: array of absolute paths of the allowed Org files
+  - =override_allowed=: whether =org-mcp-file-scope-override= permits a call
+    to name an Org file outside the allowed files
+  - =override_roots=: absolute paths of the directories under which a named
+    Org file is permitted; present only when the setting is a list of
+    directories.  When =override_allowed= is true and =override_roots= is
+    absent, any Org file is permitted
 
 Use cases:
 - Discovery: "What Org files can I access through MCP?"
@@ -301,14 +358,17 @@ Example response:
     "/home/user/org/tasks.org",
     "/home/user/org/projects.org",
     "/home/user/notes/daily.org"
-  ]
+  ],
+  "override_allowed": true,
+  "override_roots": ["/home/user/decisions"]
 }
 #+end_src
 
 Empty configuration returns:
 #+begin_src json
 {
-  "files": []
+  "files": [],
+  "override_allowed": false
 }
 #+end_src
 
@@ -597,7 +657,7 @@ Example:
 - *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
-  - =files= (array of strings, optional): Subset of allowed files to search. Defaults to all =org-mcp-allowed-files=
+  - =files= (array of strings, optional): Files to search, each an allowed file or an Org file permitted by =org-mcp-file-scope-override=. Defaults to all =org-mcp-allowed-files=
 - *Returns:* JSON object with =matches= array, =total= count, and =files_searched= count
 
 Example:
@@ -689,7 +749,7 @@ tool-only plain-text variant with no resource-template counterpart.
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= (8-4-4-4-12 format) - ID-based lookup
 - *Returns:* Structured JSON with file or headline data including metadata
-- *Configuration:* File must be in =org-mcp-allowed-files=
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 Example response for a headline:
 #+begin_src json
@@ -712,7 +772,7 @@ Example response for a headline:
 - *Parameters:*
   - =file= (string, required): Absolute path to an Org file
 - *Returns:* JSON object with hierarchical outline structure
-- *Configuration:* File must be in =org-mcp-allowed-files=
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 *** org-read-headline
 - *Description:* Read Org headline or file as plain text (auto-detects URI format)
@@ -722,7 +782,7 @@ Example response for a headline:
     - =/path/to/file.org#Headline/Subhead= - headline path
     - =UUID= - ID-based lookup
 - *Returns:* Plain text content of the file or headline subtree
-- *Configuration:* File must be in =org-mcp-allowed-files=
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 - *Note:* Use this when you need plain text instead of structured JSON
 
 ** Clock Tracking Tools

@@ -51,8 +51,46 @@ unchanged, so absolute and relative entries are interchangeable.
 When nil (the default), org-mcp falls back to `org-agenda-files',
 so an existing Org-mode configuration works out of the box.  Set
 this variable explicitly to expose a different (or narrower) set
-of files to MCP."
+of files to MCP.
+
+Each entry names a file.  A directory entry is ignored: it does not
+make the files under it reachable.  To let calls reach files under a
+directory, see `org-mcp-file-scope-override'."
   :type '(repeat file)
+  :group 'org-mcp)
+
+(defcustom org-mcp-file-scope-override nil
+  "Whether a call may reach an Org file outside the allowed files.
+The allowed files are the ones `org-mcp-allowed-files' resolves to.
+A call names another file by passing its path, and this setting
+decides whether that is permitted:
+
+  nil          Refuse.  Only the allowed files are reachable.  This
+               is the default.
+
+  A list of    Permit a file under one of these directories, the
+  directories  override roots.  Relative roots resolve against
+               `org-directory'.
+
+  t            Permit any Org file.  Every Org file the Emacs
+               process can read and write becomes readable and
+               writable by MCP clients.  Prefer a list of roots.
+
+The permission covers reading and writing alike and applies only to
+the call that names the file; nothing carries over to later calls.
+A file an ID resolves to, or the file of the running clock, is not
+named by the call and stays within the allowed files.
+
+A file reachable this way is an existing local file ending in
+`.org' or `.org_archive'; an encrypted `.org.gpg' file is not.
+Remote (TRAMP) paths are refused before any filesystem access.
+Symlinks, including roots that are symlinks, are resolved before
+the root check, so a symlink pointing out of a root is refused."
+  :type
+  '(choice
+    (const :tag "Refuse" nil)
+    (const :tag "Permit any Org file" t)
+    (repeat :tag "Permit under these directories" directory))
   :group 'org-mcp)
 
 (defcustom org-mcp-clock-continuous-threshold 30
@@ -245,28 +283,78 @@ and yields fully absolute paths."
     (org-agenda-files t)))
 
 (defun org-mcp--expanded-allowed-files ()
-  "Return the effective allowed-files list with each entry made absolute.
+  "Return the allowed files, each made absolute.
 Pulls the source list from the function `org-mcp-allowed-files'
 (which falls back to `org-agenda-files' when the variable
 `org-mcp-allowed-files' is nil), then resolves relative entries
 against `org-directory' exactly as `org-agenda-files' does.
 Absolute entries pass through after tilde and environment variable
-expansion."
-  (mapcar
-   (lambda (f) (expand-file-name f org-directory))
-   (org-mcp-allowed-files)))
+expansion.
 
-(defun org-mcp--find-allowed-file (filename)
-  "Find FILENAME in `org-mcp-allowed-files'.
-Compares against the absolute form of each allowed entry (relative
-entries resolved against `org-directory').
-Returns the expanded path if found, nil if not in the allowed list."
-  (when-let* ((found
-               (cl-find
-                (file-truename filename)
-                (org-mcp--expanded-allowed-files)
-                :test #'org-mcp--paths-equal-p)))
-    (expand-file-name found)))
+The result holds files only.  A directory entry is dropped, so it
+never makes the files under it reachable, neither through
+`org-mcp--find-allowed-file' nor when the set is bound to
+`org-agenda-files', where Org would expand it.  Directory entries of
+`org-agenda-files' arrive here already expanded into their files by
+the function `org-agenda-files'."
+  (cl-remove-if
+   #'file-directory-p
+   (mapcar
+    (lambda (f)
+      (expand-file-name f org-directory))
+    (org-mcp-allowed-files))))
+
+(defun org-mcp--override-roots ()
+  "Return the roots of `org-mcp-file-scope-override', each made absolute.
+Relative roots resolve against `org-directory'.  Returns nil unless
+the setting is a list of directories."
+  (when (consp org-mcp-file-scope-override)
+    (mapcar
+     (lambda (root) (expand-file-name root org-directory))
+     org-mcp-file-scope-override)))
+
+(defun org-mcp--find-allowed-file (filename &optional named)
+  "Return the absolute path of FILENAME when a call may reach it, else nil.
+This is the one place that decides whether a path is reachable.
+
+A remote (TRAMP) FILENAME is refused first, before any filesystem
+call that could open a connection.  A FILENAME in the allowed files
+is reachable, and the expanded allowed-files entry is returned.
+
+NAMED non-nil means the call itself names FILENAME, which makes it
+a scope override when FILENAME lies outside the allowed files.
+`org-mcp-file-scope-override' then decides: FILENAME must be
+absolute, its truename must end in `.org' or `.org_archive' and be
+an existing regular file, and under a list of roots that truename
+must lie inside one of the roots, which are resolved as well.  A
+permitted FILENAME is returned as its truename.  Without NAMED, as
+for a file an ID resolves to, only the allowed files are reachable."
+  (unless (or (file-remote-p filename)
+              ;; A relative name resolves against `default-directory'.
+              (and (not (file-name-absolute-p filename))
+                   (file-remote-p default-directory)))
+    (let ((truename (file-truename filename)))
+      (if-let* ((found
+                 (cl-find
+                  truename
+                  (org-mcp--expanded-allowed-files)
+                  :test #'org-mcp--paths-equal-p)))
+        (expand-file-name found)
+        (when (and named
+                   org-mcp-file-scope-override
+                   (file-name-absolute-p filename)
+                   (let ((case-fold-search nil))
+                     (string-match-p
+                      "\\.org\\(?:_archive\\)?\\'" truename))
+                   (file-regular-p truename)
+                   (or (eq org-mcp-file-scope-override t)
+                       ;; `file-in-directory-p' resolves the root
+                       ;; with `file-truename' at every call.
+                       (cl-some
+                        (lambda (root)
+                          (file-in-directory-p truename root))
+                        (org-mcp--override-roots))))
+          truename)))))
 
 (defun org-mcp--refresh-file-buffers
     (file-path &optional except-buffer)
@@ -455,13 +543,14 @@ type is not recognized."
         ,uri)))))
 
 (defun org-mcp--validate-file-access (filename)
-  "Validate that FILENAME is in the allowed list.
-FILENAME must be an absolute path.
+  "Validate that the call may reach FILENAME, a path the call names.
+FILENAME must be an absolute path.  It is reachable when it is in
+the allowed files or `org-mcp-file-scope-override' permits it.
 Returns the full path if allowed, signals an error otherwise."
   (unless (file-name-absolute-p filename)
     (org-mcp--resource-validation-error "Path must be absolute: %s"
                                         filename))
-  (let ((allowed-file (org-mcp--find-allowed-file filename)))
+  (let ((allowed-file (org-mcp--find-allowed-file filename t)))
     (unless allowed-file
       (org-mcp--resource-file-access-error filename))
     allowed-file))
@@ -535,6 +624,12 @@ Signals error if URI format is invalid."
        "\\`[0-9a-fA-F]\\{8\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{12\\}\\'"
        uri)
       `(:type id :uuid ,uri))
+     ;; Remote name → refused before `expand-file-name' below, which
+     ;; opens a TRAMP connection to expand a remote `~'.
+     ((file-remote-p uri)
+      (org-mcp--resource-validation-error
+       "Remote paths are not supported: %s"
+       uri))
      ;; Contains # → headline path (file#headline)
      ((string-match "#" uri)
       (let* ((hash-pos (string-match "#" uri))
@@ -1555,11 +1650,23 @@ are filtered out.  Tags are returned sorted and deduplicated."
      (default . ,(char-to-string org-priority-default)))))
 
 (defun org-mcp--tool-get-allowed-files ()
-  "Return the list of allowed Org files.
-Each entry is returned as an absolute path; relative entries in
-`org-mcp-allowed-files' are resolved against `org-directory'."
+  "Return the allowed Org files and the scope override policy.
+Each file is returned as an absolute path; relative entries in
+`org-mcp-allowed-files' are resolved against `org-directory'.
+`override_allowed' reports whether `org-mcp-file-scope-override'
+permits naming files outside them, and `override_roots', present
+only when the setting is a list of directories, lists its roots as
+absolute paths."
   (json-encode
-   `((files . ,(vconcat (org-mcp--expanded-allowed-files))))))
+   `((files . ,(vconcat (org-mcp--expanded-allowed-files)))
+     (override_allowed
+      .
+      ,(if org-mcp-file-scope-override
+           t
+         :json-false))
+     ,@
+     (when-let* ((roots (org-mcp--override-roots)))
+       `((override_roots . ,(vconcat roots)))))))
 
 (defun org-mcp--tool-update-todo-state
     (uri new_state &optional current_state note)
@@ -2409,8 +2516,9 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
 (defun org-mcp--tool-ql-query (query &optional files)
   "Search Org files using an org-ql QUERY expression.
 QUERY is a string containing an org-ql query sexp.
-FILES is an optional list of file paths to search (must be in
-`org-mcp-allowed-files'); defaults to all allowed files.
+FILES is an optional list of file paths to search, each in the
+allowed files or permitted by `org-mcp-file-scope-override';
+defaults to all allowed files.
 
 MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
@@ -2433,7 +2541,7 @@ MCP Parameters:
               (if files
                   (mapcar
                    (lambda (f)
-                     (or (org-mcp--find-allowed-file f)
+                     (or (org-mcp--find-allowed-file f t)
                          (org-mcp--tool-file-access-error f)))
                    (append files nil))
                 org-agenda-files))
@@ -3030,13 +3138,21 @@ or interpreting priorities on TODO items."
    :id "org-get-allowed-files"
    :description
    "Get the list of Org files accessible through the org-mcp
-server.  Returns the configured allowed files exactly as specified in
-org-mcp-allowed-files.
+server, and whether a call may name Org files outside them.  Returns
+the allowed files as configured in org-mcp-allowed-files (the agenda
+files when unset), and the policy of org-mcp-file-scope-override.
 
 Parameters: None
 
 Returns JSON object containing:
   files (array of strings): Absolute paths of allowed Org files
+  override_allowed (boolean): Whether a call may name an Org file
+    outside the allowed files.  The permission lasts for that one
+    call only.
+  override_roots (array of strings, present only when overriding is
+    limited to directories): Absolute paths of the directories under
+    which a named Org file is permitted.  When override_allowed is
+    true and override_roots is absent, any Org file is permitted.
 
 Example response:
   {
@@ -3044,12 +3160,15 @@ Example response:
       \"/home/user/org/tasks.org\",
       \"/home/user/org/projects.org\",
       \"/home/user/notes/daily.org\"
-    ]
+    ],
+    \"override_allowed\": true,
+    \"override_roots\": [\"/home/user/decisions\"]
   }
 
 Empty configuration returns:
   {
-    \"files\": []
+    \"files\": [],
+    \"override_allowed\": false
   }
 
 Use cases:
@@ -3428,7 +3547,8 @@ Returns: JSON object with structured data:
     content - Body text (if present)
     children - Array of direct children (title, todo, level, uri)
 
-File must be in org-mcp-allowed-files."
+File must be in the allowed files, or permitted by
+org-mcp-file-scope-override."
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -3438,7 +3558,8 @@ File must be in org-mcp-allowed-files."
    :description
    "Get hierarchical structure of Org file as JSON outline. Returns
    all headline titles and nesting relationships at full depth. File
-   must be in org-mcp-allowed-files.
+   must be in the allowed files, or permitted by
+   org-mcp-file-scope-override.
 
 Parameters:
   file - Absolute path to Org file (string, required)
@@ -3483,7 +3604,9 @@ Parameters:
             (tags \"work\")
             (and (todo \"TODO\") (priority \"A\"))
             (deadline :to today)
-  files - Subset of allowed files to search (array of strings, optional)
+  files - Files to search (array of strings, optional)
+          Each must be an allowed file, or an Org file permitted by
+          org-mcp-file-scope-override.
           Defaults to all org-mcp-allowed-files
 
 Returns JSON object:
@@ -3779,7 +3902,8 @@ Returns: JSON object with structured data:
     content - Body text (if present)
     children - Array of direct children (title, todo, level, uri)
 
-File must be in org-mcp-allowed-files."
+File must be in the allowed files, or permitted by
+org-mcp-file-scope-override."
    :mime-type "application/json"
    :server-id org-mcp--server-id)
 

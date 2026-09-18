@@ -838,6 +838,30 @@ as its text, and a property sent as null is not written.")
   "* Headline\n\nOriginal body\n"
   "Initial org file content for before-save-hook tests.")
 
+(defconst org-mcp-test--scope-task-content "* TODO Task\nBody\n"
+  "File holding one TODO heading, the before image for scope tests.")
+
+(defconst org-mcp-test--scope-task-done-regex
+  (concat
+   "\\`\\* DONE Task\n"
+   ":PROPERTIES:\n"
+   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
+   ":END:\n"
+   "Body\n"
+   "\\'")
+  "Regex matching the complete scope-test file after Task becomes DONE.")
+
+(defconst org-mcp-test--scope-task-with-id-content
+  (format "* TODO Task\n:PROPERTIES:\n:ID:       %s\n:END:\nBody\n"
+          org-mcp-test--content-with-id-id)
+  "Scope-test file whose heading carries an ID.")
+
+(defconst org-mcp-test--scope-tagged-content "* TODO Inner :innertag:\n"
+  "File holding one heading with a tag no other scope-test file uses.")
+
+(defconst org-mcp-test--remote-prefix "/org-mcp-remote:host:"
+  "Prefix of the file names the fake remote method claims.")
+
 ;; Test helpers
 
 (defun org-mcp-test--read-file (file)
@@ -1013,16 +1037,22 @@ org-tags-exclude-from-inheritance (string)."
 
 ;; Helper functions for testing org-get-allowed-files MCP tool
 
+(defun org-mcp-test--call-get-allowed-files ()
+  "Call org-get-allowed-files tool and return the parsed result."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool "org-get-allowed-files" nil)))
+
 (defun org-mcp-test--get-allowed-files-and-check (allowed-files expected-files)
   "Call org-get-allowed-files tool and verify the result.
 ALLOWED-FILES is the value to bind to org-mcp-allowed-files.
-EXPECTED-FILES is a list of expected file paths."
-  (let ((org-mcp-allowed-files allowed-files))
+EXPECTED-FILES is a list of expected file paths.
+The scope override stays at its default, refusal."
+  (let ((org-mcp-allowed-files allowed-files)
+        (org-mcp-file-scope-override nil))
     (org-mcp-test--with-enabled
-     (let* ((result-text
-             (mcp-server-lib-ert-call-tool "org-get-allowed-files" nil))
-            (result (json-read-from-string result-text)))
-       (should (= (length result) 1))
+     (let ((result (org-mcp-test--call-get-allowed-files)))
+       (should (= (length result) 2))
+       (should (eq (alist-get 'override_allowed result) :json-false))
        (let ((files (cdr (assoc 'files result))))
          (should (vectorp files))
          (should (= (length files) (length expected-files)))
@@ -1867,6 +1897,323 @@ clock entry to delete."
       ;; A file only in `org-agenda-files' must NOT be reachable.
       (let ((uri (format "%s#AgendaOnly" agenda-only)))
         (should-error (org-mcp-test--call-read-headline uri))))))
+
+;; Scope override
+
+(defun org-mcp-test--write-file (dir name content)
+  "Write CONTENT to file NAME in DIR and return the file's path.
+File name handlers are bypassed, so a `.gpg' name is written as
+plain text rather than encrypted."
+  (let ((file (expand-file-name name dir))
+        (file-name-handler-alist nil))
+    (make-directory (file-name-directory file) t)
+    (write-region content nil file nil 'silent)
+    file))
+
+(defun org-mcp-test--read-file-raw (file)
+  "Return the contents of FILE, bypassing file name handlers.
+A `.gpg' file is read as written, without an attempt to decrypt it."
+  (let ((file-name-handler-alist nil))
+    (org-mcp-test--read-file file)))
+
+(defmacro org-mcp-test--with-scope-dirs (override &rest body)
+  "Run BODY with org-mcp enabled, two temporary directories and OVERRIDE.
+Binds `root' and `outside' to fresh directories, as directory
+names, and `allowed' to an Org file in neither of them, which is
+the only allowed file.  OVERRIDE is evaluated with these bindings
+in place and becomes `org-mcp-file-scope-override'.  Everything is
+deleted afterwards."
+  (declare (indent 1) (debug t))
+  `(let* ((root
+           (file-name-as-directory
+            (make-temp-file "org-mcp-root-" t)))
+          (outside
+           (file-name-as-directory
+            (make-temp-file "org-mcp-outside-" t)))
+          (allowed
+           (make-temp-file "org-mcp-allowed-" nil ".org" "* Allowed\n")))
+     (unwind-protect
+         (let ((org-mcp-allowed-files (list allowed))
+               (org-mcp-file-scope-override ,override))
+           (org-mcp-test--with-enabled
+             ,@body))
+       (let ((file-name-handler-alist nil))
+         (delete-directory root t)
+         (delete-directory outside t)
+         (delete-file allowed)))))
+
+(defmacro org-mcp-test--with-remote-probe (ops-var &rest body)
+  "Run BODY with a fake remote method, collecting file operations in OPS-VAR.
+File names starting with `org-mcp-test--remote-prefix' are remote:
+the handler answers `file-remote-p' and records every other
+operation in OPS-VAR before failing it, since that is where a TRAMP
+method could open a connection.  Like TRAMP, it expands an absolute
+local name itself, which Emacs routes to it only because
+`default-directory' is remote."
+  (declare (indent 1) (debug t))
+  `(let* ((,ops-var nil)
+          (file-name-handler-alist
+           (cons
+            (cons
+             (concat "\\`" (regexp-quote org-mcp-test--remote-prefix))
+             (lambda (operation &rest args)
+               (cond
+                ((eq operation 'file-remote-p)
+                 org-mcp-test--remote-prefix)
+                ((and (eq operation 'expand-file-name)
+                      (file-name-absolute-p (car args))
+                      (not
+                       (string-prefix-p
+                        org-mcp-test--remote-prefix (car args))))
+                 (let ((default-directory "/"))
+                   (expand-file-name (car args) "/")))
+                (t
+                 (push operation ,ops-var)
+                 (error "Remote file operation: %s" operation)))))
+            file-name-handler-alist)))
+     ,@body))
+
+(defun org-mcp-test--call-tool-refused
+    (tool-name params expected-message &optional file)
+  "Call TOOL-NAME with PARAMS and assert it is refused.
+The refusal arrives as a tool error or, from the resource-style
+validation, as a JSON-RPC error; either way its message must match
+the regexp EXPECTED-MESSAGE.  When FILE is non-nil, it must be
+byte-for-byte unchanged afterwards."
+  (let* ((before (and file (org-mcp-test--read-file-raw file)))
+         (response
+          (mcp-server-lib-process-jsonrpc-parsed
+           (mcp-server-lib-create-tools-call-request tool-name 1 params)
+           mcp-server-lib-ert-server-id))
+         (result (alist-get 'result response))
+         (message
+          (if (eq (alist-get 'isError result) t)
+              (alist-get 'text (aref (alist-get 'content result) 0))
+            (alist-get 'message (alist-get 'error response)))))
+    (should (stringp message))
+    (should (string-match-p expected-message message))
+    (when file
+      (should (string= (org-mcp-test--read-file-raw file) before)))))
+
+(defun org-mcp-test--assert-scope-refused (file)
+  "Assert that reading and writing the Task heading in FILE is refused.
+FILE holds `org-mcp-test--scope-task-content' and stays unchanged."
+  (let ((uri (format "%s#Task" file)))
+    (org-mcp-test--call-tool-refused
+     "org-read-headline" `((uri . ,uri)) "not in allowed list")
+    (org-mcp-test--call-tool-refused
+     "org-update-todo-state"
+     `((uri . ,uri) (current_state . "TODO") (new_state . "DONE"))
+     "not in allowed list"
+     file)))
+
+(defun org-mcp-test--assert-scope-permitted (file)
+  "Assert that the Task heading in FILE can be read and then written.
+FILE holds `org-mcp-test--scope-task-content'; afterwards its Task
+is DONE."
+  (let ((uri (format "%s#Task" file)))
+    (should
+     (string= (org-mcp-test--call-read-headline uri) "* TODO Task\nBody"))
+    (let ((result
+           (org-mcp-test--call-update-todo-state uri "DONE" "TODO")))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'new_state result) "DONE")))
+    (org-mcp-test--verify-file-matches
+     file org-mcp-test--scope-task-done-regex)))
+
+(ert-deftest org-mcp-test-scope-override-nil-refuses-read-and-write ()
+  "With the default refusal, a file outside the allowed files is unreachable."
+  (org-mcp-test--with-scope-dirs nil
+    (let ((out (org-mcp-test--write-file
+                outside "out.org" org-mcp-test--scope-task-content))
+          (in (org-mcp-test--write-file
+               root "in.org" org-mcp-test--scope-task-content)))
+      (org-mcp-test--assert-scope-refused out)
+      (org-mcp-test--assert-scope-refused in)
+      (org-mcp-test--call-tool-refused
+       "org-ql-query" `((query . "(todo)") (files . ,(vector out)))
+       "not in allowed list"))))
+
+(ert-deftest org-mcp-test-scope-override-roots-permits-under-root ()
+  "Under a root list, a file below a root is readable and writable."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((in (org-mcp-test--write-file
+               root "sub/in.org" org-mcp-test--scope-task-content)))
+      (org-mcp-test--assert-scope-permitted in)
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-ql-query"
+               `((query . "(done)") (files . ,(vector in)))))))
+        (should (= (alist-get 'files_searched result) 1))
+        (should (= (alist-get 'total result) 1)))
+      ;; Nothing carries over: the allowed files are as configured.
+      (should
+       (equal
+        (alist-get 'files (org-mcp-test--call-get-allowed-files))
+        (vector allowed)))
+      (should
+       (= (alist-get
+           'files_searched (org-mcp-test--call-ql-query "(todo)"))
+          1)))))
+
+(ert-deftest org-mcp-test-scope-override-roots-refuses-outside-root ()
+  "Under a root list, a file outside every root is refused."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((out (org-mcp-test--write-file
+                outside "out.org" org-mcp-test--scope-task-content)))
+      (org-mcp-test--assert-scope-refused out)
+      (org-mcp-test--call-tool-refused
+       "org-ql-query" `((query . "(todo)") (files . ,(vector out)))
+       "not in allowed list"))))
+
+(ert-deftest org-mcp-test-scope-override-roots-refuses-symlink-out-of-root ()
+  "A symlink below a root that points outside every root is refused."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((out (org-mcp-test--write-file
+                outside "out.org" org-mcp-test--scope-task-content))
+          (escape (expand-file-name "escape.org" root)))
+      (make-symbolic-link out escape)
+      (org-mcp-test--assert-scope-refused escape)
+      (should
+       (string= (org-mcp-test--read-file out)
+                org-mcp-test--scope-task-content)))))
+
+(ert-deftest org-mcp-test-scope-override-roots-resolves-symlinked-root ()
+  "A root that is itself a symlink permits the files of its target."
+  (let ((link-root
+         (make-temp-name
+          (expand-file-name "org-mcp-link-root-"
+                            temporary-file-directory))))
+    (unwind-protect
+        (org-mcp-test--with-scope-dirs (list link-root)
+          (make-symbolic-link (directory-file-name root) link-root)
+          (org-mcp-test--assert-scope-permitted
+           (org-mcp-test--write-file
+            root "in.org" org-mcp-test--scope-task-content)))
+      (delete-file link-root))))
+
+(ert-deftest org-mcp-test-scope-override-t-permits-any-org-file ()
+  "With t, an Org file anywhere is readable and writable."
+  (org-mcp-test--with-scope-dirs t
+    (org-mcp-test--assert-scope-permitted
+     (org-mcp-test--write-file
+      outside "out.org" org-mcp-test--scope-task-content))))
+
+(ert-deftest org-mcp-test-scope-override-t-extensions ()
+  "With t, `.org_archive' is reachable; `.txt', `.org.gpg' and directories not."
+  (org-mcp-test--with-scope-dirs t
+    (let ((archive (org-mcp-test--write-file
+                    outside "old.org_archive"
+                    org-mcp-test--scope-task-content))
+          (txt (org-mcp-test--write-file
+                outside "notes.txt" org-mcp-test--scope-task-content))
+          (gpg (org-mcp-test--write-file
+                outside "secret.org.gpg"
+                org-mcp-test--scope-task-content))
+          (dir (expand-file-name "dir.org" outside)))
+      (make-directory dir)
+      (should
+       (string= (org-mcp-test--call-read-headline archive)
+                org-mcp-test--scope-task-content))
+      (org-mcp-test--assert-scope-refused txt)
+      (org-mcp-test--assert-scope-refused gpg)
+      (org-mcp-test--call-tool-refused
+       "org-read-headline" `((uri . ,dir)) "not in allowed list"))))
+
+(ert-deftest org-mcp-test-scope-override-refuses-remote-path ()
+  "A remote path is refused before any operation on it, even with t."
+  (org-mcp-test--with-scope-dirs t
+    (org-mcp-test--with-remote-probe ops
+      (let ((remote (concat org-mcp-test--remote-prefix "~/x.org")))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((uri . ,(concat remote "#Task")))
+         "Remote paths are not supported")
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((uri . ,remote))
+         "Remote paths are not supported")
+        (org-mcp-test--call-tool-refused
+         "org-update-todo-state"
+         `((uri . ,(concat remote "#Task")) (new_state . "DONE"))
+         "Remote paths are not supported")
+        (org-mcp-test--call-tool-refused
+         "org-read-outline" `((file . ,remote)) "not in allowed list")
+        (org-mcp-test--call-tool-refused
+         "org-ql-query" `((query . "(todo)") (files . ,(vector remote)))
+         "not in allowed list")
+        ;; A relative name inherits a remote `default-directory'.
+        (let ((default-directory
+               (concat org-mcp-test--remote-prefix "/dir/")))
+          (org-mcp-test--call-tool-refused
+           "org-ql-query" `((query . "(todo)") (files . ["x.org"]))
+           "not in allowed list")))
+      (should (null ops)))))
+
+(ert-deftest org-mcp-test-scope-override-bare-id-stays-in-allowed-files ()
+  "An ID alone never takes the override; naming its file does."
+  (org-mcp-test--with-scope-dirs t
+    (let ((out (org-mcp-test--write-file
+                outside "out.org"
+                org-mcp-test--scope-task-with-id-content)))
+      (org-mcp-test--with-id-tracking
+          (list allowed)
+          `((,org-mcp-test--content-with-id-id . ,out))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((uri . ,org-mcp-test--content-with-id-id))
+         "not in allowed list")
+        (should
+         (string-prefix-p
+          "* TODO Task"
+          (org-mcp-test--call-read-headline (format "%s#Task" out))))))))
+
+(ert-deftest org-mcp-test-allowed-files-directory-entry-does-not-widen ()
+  "A directory among the allowed files makes no file under it reachable."
+  (org-mcp-test--with-scope-dirs nil
+    (let* ((inner (org-mcp-test--write-file
+                   root "inner.org" org-mcp-test--scope-tagged-content))
+           (org-mcp-allowed-files (list allowed root))
+           (org-tag-alist nil)
+           (org-tag-persistent-alist nil))
+      (should
+       (equal
+        (alist-get 'files (org-mcp-test--call-get-allowed-files))
+        (vector allowed)))
+      (should-not
+       (member "innertag"
+               (append (org-mcp-test--call-get-tag-candidates) nil)))
+      (let ((result (org-mcp-test--call-ql-query "(todo)")))
+        (should (= (alist-get 'files_searched result) 1))
+        (should (= (alist-get 'total result) 0)))
+      (org-mcp-test--call-tool-refused
+       "org-read-headline" `((uri . ,inner)) "not in allowed list")
+      (org-mcp-test--call-tool-refused
+       "org-read-headline" `((uri . ,root)) "not in allowed list"))))
+
+(ert-deftest org-mcp-test-tool-get-allowed-files-reports-override-policy ()
+  "org-get-allowed-files reports whether overriding is permitted and where."
+  (let ((org-mcp-allowed-files nil)
+        (org-agenda-files nil)
+        (org-directory "/home/user/org/"))
+    (org-mcp-test--with-enabled
+      (let ((org-mcp-file-scope-override nil))
+        (should
+         (equal
+          (org-mcp-test--call-get-allowed-files)
+          '((files . []) (override_allowed . :json-false)))))
+      (let ((org-mcp-file-scope-override t))
+        (should
+         (equal
+          (org-mcp-test--call-get-allowed-files)
+          '((files . []) (override_allowed . t)))))
+      (let ((org-mcp-file-scope-override '("/srv/decisions" "notes")))
+        (should
+         (equal
+          (org-mcp-test--call-get-allowed-files)
+          '((files . [])
+            (override_allowed . t)
+            (override_roots
+             .
+             ["/srv/decisions" "/home/user/org/notes"]))))))))
 
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)
