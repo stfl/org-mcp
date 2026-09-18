@@ -83,9 +83,11 @@ named by the call and stays within the allowed files.
 
 A file reachable this way is an existing local file ending in
 `.org' or `.org_archive'; an encrypted `.org.gpg' file is not.
-Remote (TRAMP) paths are refused before any filesystem access.
-Symlinks, including roots that are symlinks, are resolved before
-the root check, so a symlink pointing out of a root is refused."
+A path that is remote (TRAMP) as written, once `.', `..' and `~'
+are expanded, or at the end of a symlink is refused before TRAMP
+can open a connection for it, and a remote root is ignored.  Symlinks,
+including roots that are symlinks, are resolved before the root
+check, so a symlink pointing out of a root is refused."
   :type
   '(choice
     (const :tag "Refuse" nil)
@@ -304,57 +306,87 @@ the function `org-agenda-files'."
       (expand-file-name f org-directory))
     (org-mcp-allowed-files))))
 
+(defun org-mcp--local-file-name (name &optional dir)
+  "Return NAME as an absolute local file name, or nil when it is remote.
+NAME is expanded against DIR, or `default-directory' when DIR is
+nil, with file name handlers disabled, so TRAMP takes no part.
+Expansion collapses `.', `..', `~' and a relative name the way
+every later file operation would, and `file-remote-p' checks the
+result: `/tmp/../ssh:host:/x.org' is remote only once collapsed.
+Callers use the returned name from here on, never NAME itself."
+  (let ((expanded
+         (let ((file-name-handler-alist nil))
+           (expand-file-name name dir))))
+    (unless (file-remote-p expanded)
+      expanded)))
+
+(defun org-mcp--local-truename (name &optional dir)
+  "Return the truename of NAME, or nil when NAME or its target is remote.
+NAME is made absolute by `org-mcp--local-file-name' against DIR.
+Symlinks are then followed with file name handlers disabled, so a
+local link whose target is a TRAMP name is never handed to TRAMP,
+and the resolved name is checked with `file-remote-p' again."
+  (when-let* ((local (org-mcp--local-file-name name dir))
+              (truename
+               (let ((file-name-handler-alist nil))
+                 (file-truename local))))
+    (unless (file-remote-p truename)
+      truename)))
+
 (defun org-mcp--override-roots ()
   "Return the roots of `org-mcp-file-scope-override', each made absolute.
-Relative roots resolve against `org-directory'.  Returns nil unless
-the setting is a list of directories."
+Relative roots resolve against `org-directory'.  A remote root is
+dropped before any file operation on it; it never permits anything.
+Returns nil unless the setting is a list of directories."
   (when (consp org-mcp-file-scope-override)
-    (mapcar
-     (lambda (root) (expand-file-name root org-directory))
-     org-mcp-file-scope-override)))
+    (delq
+     nil
+     (mapcar
+      (lambda (root)
+        (org-mcp--local-file-name root org-directory))
+      org-mcp-file-scope-override))))
 
 (defun org-mcp--find-allowed-file (filename &optional named)
   "Return the absolute path of FILENAME when a call may reach it, else nil.
 This is the one place that decides whether a path is reachable.
 
-A remote (TRAMP) FILENAME is refused first, before any filesystem
-call that could open a connection.  A FILENAME in the allowed files
-is reachable, and the expanded allowed-files entry is returned.
+FILENAME is resolved by `org-mcp--local-truename' first, and refused
+when it, or what it points to, is remote (TRAMP), before TRAMP can
+open a connection for it.  A FILENAME in the allowed files is
+reachable, and the expanded allowed-files entry is returned.
 
 NAMED non-nil means the call itself names FILENAME, which makes it
 a scope override when FILENAME lies outside the allowed files.
 `org-mcp-file-scope-override' then decides: FILENAME must be
 absolute, its truename must end in `.org' or `.org_archive' and be
 an existing regular file, and under a list of roots that truename
-must lie inside one of the roots, which are resolved as well.  A
-permitted FILENAME is returned as its truename.  Without NAMED, as
-for a file an ID resolves to, only the allowed files are reachable."
-  (unless (or (file-remote-p filename)
-              ;; A relative name resolves against `default-directory'.
-              (and (not (file-name-absolute-p filename))
-                   (file-remote-p default-directory)))
-    (let ((truename (file-truename filename)))
-      (if-let* ((found
-                 (cl-find
-                  truename
-                  (org-mcp--expanded-allowed-files)
-                  :test #'org-mcp--paths-equal-p)))
-        (expand-file-name found)
-        (when (and named
-                   org-mcp-file-scope-override
-                   (file-name-absolute-p filename)
-                   (let ((case-fold-search nil))
-                     (string-match-p
-                      "\\.org\\(?:_archive\\)?\\'" truename))
-                   (file-regular-p truename)
-                   (or (eq org-mcp-file-scope-override t)
-                       ;; `file-in-directory-p' resolves the root
-                       ;; with `file-truename' at every call.
-                       (cl-some
-                        (lambda (root)
-                          (file-in-directory-p truename root))
-                        (org-mcp--override-roots))))
-          truename)))))
+must lie inside one of the roots, resolved the same way at every
+call.  A permitted FILENAME is returned as its truename.  Without
+NAMED, as for a file an ID resolves to, only the allowed files are
+reachable."
+  (when-let* ((truename (org-mcp--local-truename filename)))
+    (if-let* ((found
+               (cl-find
+                truename
+                (org-mcp--expanded-allowed-files)
+                :test #'org-mcp--paths-equal-p)))
+      (expand-file-name found)
+      (when (and named
+                 org-mcp-file-scope-override
+                 (file-name-absolute-p filename)
+                 (let ((case-fold-search nil))
+                   (string-match-p
+                    "\\.org\\(?:_archive\\)?\\'" truename))
+                 (file-regular-p truename)
+                 (or (eq org-mcp-file-scope-override t)
+                     (cl-some
+                      (lambda (root)
+                        (when-let* ((root-truename
+                                     (org-mcp--local-truename root)))
+                          (file-in-directory-p
+                           truename root-truename)))
+                      (org-mcp--override-roots))))
+        truename))))
 
 (defun org-mcp--refresh-file-buffers
     (file-path &optional except-buffer)
@@ -609,6 +641,15 @@ File paths with # characters should be encoded as %23."
      (substring path-after-protocol (1+ hash-pos)))
     (cons (org-mcp--decode-file-path path-after-protocol) nil)))
 
+(defun org-mcp--uri-local-file-name (file uri)
+  "Return FILE, the file part of URI, as an absolute local file name.
+Signals a validation error naming URI when FILE is remote, before
+TRAMP can open a connection for it; see `org-mcp--local-file-name'."
+  (or (org-mcp--local-file-name file)
+      (org-mcp--resource-validation-error
+       "Remote paths are not supported: %s"
+       uri)))
+
 (defun org-mcp--detect-uri-type (uri)
   "Detect URI type and return plist with parsed components.
 URI is a string that can be:
@@ -624,12 +665,6 @@ Signals error if URI format is invalid."
        "\\`[0-9a-fA-F]\\{8\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{12\\}\\'"
        uri)
       `(:type id :uuid ,uri))
-     ;; Remote name → refused before `expand-file-name' below, which
-     ;; opens a TRAMP connection to expand a remote `~'.
-     ((file-remote-p uri)
-      (org-mcp--resource-validation-error
-       "Remote paths are not supported: %s"
-       uri))
      ;; Contains # → headline path (file#headline)
      ((string-match "#" uri)
       (let* ((hash-pos (string-match "#" uri))
@@ -642,13 +677,13 @@ Signals error if URI format is invalid."
              uri)
           `(:type
             headline
-            :file ,(expand-file-name file)
+            :file ,(org-mcp--uri-local-file-name file uri)
             :headline-path
             ,(mapcar
               #'url-unhex-string (split-string headline-str "/"))))))
      ;; Starts with / → file path
      ((string-prefix-p "/" uri)
-      `(:type file :file ,(expand-file-name uri)))
+      `(:type file :file ,(org-mcp--uri-local-file-name uri uri)))
      ;; Any other string → treat as ID (e.g., "test-id-123", "my-custom-id")
      ;; This allows org-id to validate and provide meaningful error messages
      (t
@@ -1654,19 +1689,20 @@ are filtered out.  Tags are returned sorted and deduplicated."
 Each file is returned as an absolute path; relative entries in
 `org-mcp-allowed-files' are resolved against `org-directory'.
 `override_allowed' reports whether `org-mcp-file-scope-override'
-permits naming files outside them, and `override_roots', present
-only when the setting is a list of directories, lists its roots as
-absolute paths."
-  (json-encode
-   `((files . ,(vconcat (org-mcp--expanded-allowed-files)))
-     (override_allowed
-      .
-      ,(if org-mcp-file-scope-override
-           t
-         :json-false))
-     ,@
-     (when-let* ((roots (org-mcp--override-roots)))
-       `((override_roots . ,(vconcat roots)))))))
+permits naming files outside them: it is t, or a list with at least
+one local root.  `override_roots', present only in the second case,
+lists those roots as absolute paths."
+  (let ((roots (org-mcp--override-roots)))
+    (json-encode
+     `((files . ,(vconcat (org-mcp--expanded-allowed-files)))
+       (override_allowed
+        .
+        ,(if (or (eq org-mcp-file-scope-override t) roots)
+             t
+           :json-false))
+       ,@
+       (when roots
+         `((override_roots . ,(vconcat roots))))))))
 
 (defun org-mcp--tool-update-todo-state
     (uri new_state &optional current_state note)

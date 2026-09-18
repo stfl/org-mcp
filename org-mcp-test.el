@@ -2121,33 +2121,97 @@ is DONE."
       (org-mcp-test--call-tool-refused
        "org-read-headline" `((uri . ,dir)) "not in allowed list"))))
 
+(defun org-mcp-test--remote-spellings ()
+  "Return names of one remote file under the fake remote method.
+The first is remote as written; the others become remote only once
+`..', `.' or `~' are expanded."
+  (let ((method-and-host (substring org-mcp-test--remote-prefix 1))
+        (home-depth
+         (length (split-string (expand-file-name "~") "/" t))))
+    (list
+     (concat org-mcp-test--remote-prefix "~/x.org")
+     (concat "/tmp/../" method-and-host "/x.org")
+     (concat "/./" method-and-host "/x.org")
+     (concat
+      "~/" (apply #'concat (make-list home-depth "../"))
+      method-and-host "/x.org"))))
+
 (ert-deftest org-mcp-test-scope-override-refuses-remote-path ()
-  "A remote path is refused before any operation on it, even with t."
-  (org-mcp-test--with-scope-dirs t
-    (org-mcp-test--with-remote-probe ops
-      (let ((remote (concat org-mcp-test--remote-prefix "~/x.org")))
-        (org-mcp-test--call-tool-refused
-         "org-read-headline" `((uri . ,(concat remote "#Task")))
-         "Remote paths are not supported")
-        (org-mcp-test--call-tool-refused
-         "org-read-headline" `((uri . ,remote))
-         "Remote paths are not supported")
-        (org-mcp-test--call-tool-refused
-         "org-update-todo-state"
-         `((uri . ,(concat remote "#Task")) (new_state . "DONE"))
-         "Remote paths are not supported")
-        (org-mcp-test--call-tool-refused
-         "org-read-outline" `((file . ,remote)) "not in allowed list")
-        (org-mcp-test--call-tool-refused
-         "org-ql-query" `((query . "(todo)") (files . ,(vector remote)))
-         "not in allowed list")
+  "A remote path is refused before any operation on it, whatever the setting.
+This holds for every spelling in `org-mcp-test--remote-spellings',
+through a read, a write, the path#outline form and a query."
+  (dolist (override '(nil t))
+    (org-mcp-test--with-scope-dirs override
+      (org-mcp-test--with-remote-probe ops
+        (dolist (remote (org-mcp-test--remote-spellings))
+          (let ((outline (concat remote "#Task")))
+            (when (string-prefix-p "/" remote)
+              (org-mcp-test--call-tool-refused
+               "org-read-headline" `((uri . ,remote))
+               "Remote paths are not supported"))
+            (org-mcp-test--call-tool-refused
+             "org-read-headline" `((uri . ,outline))
+             "Remote paths are not supported")
+            (org-mcp-test--call-tool-refused
+             "org-update-todo-state"
+             `((uri . ,outline) (new_state . "DONE"))
+             "Remote paths are not supported")
+            (org-mcp-test--call-tool-refused
+             "org-read-outline" `((file . ,remote)) "not in allowed list")
+            (org-mcp-test--call-tool-refused
+             "org-ql-query"
+             `((query . "(todo)") (files . ,(vector remote)))
+             "not in allowed list")))
         ;; A relative name inherits a remote `default-directory'.
         (let ((default-directory
                (concat org-mcp-test--remote-prefix "/dir/")))
           (org-mcp-test--call-tool-refused
            "org-ql-query" `((query . "(todo)") (files . ["x.org"]))
-           "not in allowed list")))
-      (should (null ops)))))
+           "not in allowed list"))
+        (should (null ops))))))
+
+(ert-deftest org-mcp-test-scope-override-refuses-symlink-to-remote ()
+  "A local symlink whose target is remote is refused without following it."
+  (dolist (kind '(nil roots t))
+    (org-mcp-test--with-scope-dirs (if (eq kind 'roots)
+                                       (list root)
+                                     kind)
+      (let ((link (expand-file-name "link.org" root)))
+        (let ((file-name-handler-alist nil))
+          (make-symbolic-link
+           (concat org-mcp-test--remote-prefix "/x.org") link))
+        (org-mcp-test--with-remote-probe ops
+          (org-mcp-test--call-tool-refused
+           "org-read-headline" `((uri . ,link)) "not in allowed list")
+          (org-mcp-test--call-tool-refused
+           "org-update-todo-state"
+           `((uri . ,(concat link "#Task")) (new_state . "DONE"))
+           "not in allowed list")
+          (org-mcp-test--call-tool-refused
+           "org-ql-query" `((query . "(todo)") (files . ,(vector link)))
+           "not in allowed list")
+          (should (null ops)))))))
+
+(ert-deftest org-mcp-test-scope-override-ignores-remote-roots ()
+  "A remote root, or a relative one under a remote `org-directory', permits nothing."
+  (org-mcp-test--with-scope-dirs (list
+                                  (concat
+                                   org-mcp-test--remote-prefix "/srv/")
+                                  "notes")
+    (let ((out (org-mcp-test--write-file
+                outside "out.org" org-mcp-test--scope-task-content)))
+      (org-mcp-test--with-remote-probe ops
+        (let ((org-directory
+               (concat org-mcp-test--remote-prefix "/org/")))
+          (should
+           (equal
+            (org-mcp-test--call-get-allowed-files)
+            `((files . ,(vector allowed))
+              (override_allowed . :json-false))))
+          (org-mcp-test--call-tool-refused
+           "org-read-headline" `((uri . ,(concat out "#Task")))
+           "not in allowed list"))
+        (should (null ops))))))
 
 (ert-deftest org-mcp-test-scope-override-bare-id-stays-in-allowed-files ()
   "An ID alone never takes the override; naming its file does."
@@ -2205,6 +2269,12 @@ is DONE."
          (equal
           (org-mcp-test--call-get-allowed-files)
           '((files . []) (override_allowed . t)))))
+      ;; Neither t nor a list: the gate refuses, and so does the report.
+      (let ((org-mcp-file-scope-override "~/decisions"))
+        (should
+         (equal
+          (org-mcp-test--call-get-allowed-files)
+          '((files . []) (override_allowed . :json-false)))))
       (let ((org-mcp-file-scope-override '("/srv/decisions" "notes")))
         (should
          (equal

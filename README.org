@@ -117,15 +117,19 @@ A call names a file only through a path.  A bare ID names none, so it resolves
 only within the allowed files, and the file of the running clock is not named
 either, so the setting does not change what the clock tools reach.
 
-A named file must also meet these conditions:
+A named file outside the allowed files must also meet these conditions:
 
 - it is an existing =.org= or =.org_archive= file; encrypted =.org.gpg= files
   and files with other extensions are refused;
-- it is local: remote (TRAMP) paths are refused before Emacs touches them, so a
-  path cannot make Emacs open a network connection;
 - symlinks are resolved, for the file and for each directory in the list, and
   the resolved file must lie under a resolved directory, so a symlink pointing
   out of a permitted directory is refused.
+
+Whatever the setting, a path that names a remote (TRAMP) file is refused before
+TRAMP can open a connection for it.  That covers a path that is remote as
+written, one that becomes remote once =.=, =..= or =~= is expanded, and a
+symlink whose target is remote.  A remote file cannot be named even when it is
+among the allowed files, and a remote directory in the list permits nothing.
 
 =org-get-allowed-files= reports the policy to clients.
 
