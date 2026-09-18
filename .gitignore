@@ -10,8 +10,3 @@ dist/
 .lint-output.txt
 .test-output.txt
 /.pre-commit-config.yaml
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
