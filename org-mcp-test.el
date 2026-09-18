@@ -4271,6 +4271,29 @@ Body after everything."))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-add-expected-regex))))
 
+(ert-deftest org-mcp-test-clock-add-clean-buffer-saves ()
+  "Test clock-add on a clean visiting buffer edits it and saves to disk."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let* ((uri (format "%s#Task%%20One" test-file))
+           (buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (should-not (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-add
+                           uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) t))
+              (should (equal (alist-get 'added result) t)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--clock-add-expected-regex)
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--clock-add-expected-regex)
+            (with-current-buffer buffer
+              (should-not (buffer-modified-p))))
+        (kill-buffer buffer)))))
+
 (defconst org-mcp-test--clock-add-modified-buffer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
@@ -4660,10 +4683,68 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
       (let ((result-2 (org-mcp-test--call-clock-in
                        uri-2 "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result-2) t))
+        (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
         (org-mcp-test--verify-file-matches
          file-1
          org-mcp-test--clock-in-close-same-file-expected-regex)))))
+
+(defconst org-mcp-test--clock-in-close-same-file-open-clock-content
+  (concat
+   "* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n"
+   "* TODO Task Two\n")
+  "File with an open clock on Task One and an unclocked Task Two.")
+
+(defconst org-mcp-test--clock-in-close-same-modified-buffer-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\* TODO Task Three\n"
+   "\\'")
+  "Regex matching the complete buffer after clock-in to Task Two at 11:00.
+The buffer holds Task One's closed clock, Task Two's new clock, and the
+unsaved Task Three edit made before the call.")
+
+(ert-deftest org-mcp-test-clock-in-closes-active-same-modified-buffer ()
+  "Test clock-in when the active clock and the target share a dirty buffer.
+Both edits land in a buffer that already has unsaved edits, so the file
+on disk stays unchanged and the response reports `saved' as false."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "* TODO Task Three\n")
+              (should (buffer-modified-p)))
+            (let ((result (org-mcp-test--call-clock-in
+                           (format "%s#Task%%20Two" test-file)
+                           "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'success result) t))
+              (should (eq (alist-get 'saved result) :json-false))
+              (should (equal (alist-get 'clocked_in result) t)))
+            (with-current-buffer buffer
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-buffer-matches
+             buffer
+             org-mcp-test--clock-in-close-same-modified-buffer-expected-regex)
+            (should
+             (string=
+              (org-mcp-test--read-file test-file)
+              org-mcp-test--clock-in-close-same-file-open-clock-content)))
+        (kill-buffer buffer)))))
 
 (ert-deftest org-mcp-test-clock-in-closes-active-different-file ()
   "Test clock-in closes an active clock in a different file."
