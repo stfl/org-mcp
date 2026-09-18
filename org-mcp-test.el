@@ -859,6 +859,12 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--scope-tagged-content "* TODO Inner :innertag:\n"
   "File holding one heading with a tag no other scope-test file uses.")
 
+(defconst org-mcp-test--file-set-template
+  "* TODO %s :%s:\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 10:00]\n:END:\n"
+  "Content of a file-set test file, formatted with its title twice.
+The title doubles as the heading's tag, and the heading holds an open
+clock, so each tool taking `files' reports the file by that title.")
+
 (defconst org-mcp-test--remote-prefix "/org-mcp-remote:host:"
   "Prefix of the file names the fake remote method claims.")
 
@@ -2159,16 +2165,18 @@ through a read, a write, the path#outline form and a query."
              "Remote or quoted paths are not supported")
             (org-mcp-test--call-tool-refused
              "org-read-outline" `((file . ,remote)) "not in allowed list")
-            (org-mcp-test--call-tool-refused
-             "org-ql-query"
-             `((query . "(todo)") (files . ,(vector remote)))
-             "not in allowed list")))
+            (org-mcp-test--assert-files-refused
+             (vector remote) "not in allowed list")))
+        ;; A remote directory is never walked.
+        (org-mcp-test--assert-files-refused
+         (vector (concat org-mcp-test--remote-prefix "/dir/"))
+         "not in allowed list")
         ;; A relative name inherits a remote `default-directory'.
         (let ((default-directory
                (concat org-mcp-test--remote-prefix "/dir/")))
-          (org-mcp-test--call-tool-refused
-           "org-ql-query" `((query . "(todo)") (files . ["x.org"]))
-           "not in allowed list"))
+          (org-mcp-test--assert-files-refused
+           ["x.org"] "not in allowed list")
+          (org-mcp-test--assert-files-refused ["."] "not in allowed list"))
         (should (null ops))))))
 
 (ert-deftest org-mcp-test-scope-override-refuses-symlink-to-remote ()
@@ -2328,6 +2336,300 @@ file stays reachable."
             (override_roots
              .
              ["/srv/decisions" "/home/user/org/notes"]))))))))
+
+;; Query tools taking a file set
+
+(defun org-mcp-test--write-set-file (dir name title)
+  "Write file NAME in DIR from `org-mcp-test--file-set-template'.
+TITLE is the heading's title and tag.  Returns the file's path."
+  (org-mcp-test--write-file
+   dir name (format org-mcp-test--file-set-template title title)))
+
+(defun org-mcp-test--call-with-files (tool params files)
+  "Call TOOL with PARAMS and return the parsed result.
+FILES, when non-nil, is added to PARAMS as the `files' parameter."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    tool (append params (and files `((files . ,files)))))))
+
+(defun org-mcp-test--scan-files (&optional files)
+  "Return the sorted titles the tools taking `files' find in FILES.
+FILES, when non-nil, is the `files' parameter of org-ql-query,
+org-get-tag-candidates and org-clock-find-dangling.  Every file
+searched holds one `org-mcp-test--file-set-template' heading, so the
+three tools must agree: the titles the query matches, one per file
+searched, the tags beyond the configured ones, and the headings
+holding an open clock."
+  (let* ((org-tag-alist nil)
+         (org-tag-persistent-alist nil)
+         (query
+          (org-mcp-test--call-with-files
+           "org-ql-query" '((query . "(todo)")) files))
+         (titles
+          (sort (mapcar (lambda (match) (alist-get 'title match))
+                        (alist-get 'matches query))
+                #'string<))
+         (tags
+          (org-mcp-test--call-with-files
+           "org-get-tag-candidates" nil files))
+         (clocks
+          (org-mcp-test--call-with-files
+           "org-clock-find-dangling" nil files)))
+    (should (= (alist-get 'files_searched query) (length titles)))
+    (should (equal (append (alist-get 'tags tags) nil) titles))
+    (should
+     (equal (sort (mapcar (lambda (clock) (alist-get 'heading clock))
+                          (alist-get 'open_clocks clocks))
+                  #'string<)
+            titles))
+    titles))
+
+(defun org-mcp-test--assert-files-refused (files message)
+  "Assert that each tool taking `files' refuses FILES.
+The refusal of org-ql-query, org-get-tag-candidates and
+org-clock-find-dangling must match the regexp MESSAGE."
+  (pcase-dolist (`(,tool . ,params)
+                 '(("org-ql-query" (query . "(todo)"))
+                   ("org-get-tag-candidates")
+                   ("org-clock-find-dangling")))
+    (org-mcp-test--call-tool-refused
+     tool (append params `((files . ,files))) message)))
+
+(defun org-mcp-test--refused-path-regexp (path)
+  "Return a regexp matching the whole refusal message naming PATH."
+  (concat "\\`'" (regexp-quote path)
+          "': the referenced file not in allowed list\\'"))
+
+(defmacro org-mcp-test--with-scope-dirs-and-gtd (override &rest body)
+  "Run BODY as `org-mcp-test--with-scope-dirs' does, OVERRIDE included.
+The GTD query tools are registered as well, each matching every
+TODO heading."
+  (declare (indent 1) (debug t))
+  `(let ((org-mcp-query-inbox-fn (lambda () '(todo)))
+         (org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
+         (org-mcp-query-backlog-fn
+          (lambda (&optional _tag-filter) '(todo)))
+         (org-mcp-query-sort-fn nil))
+     (org-mcp-test--with-scope-dirs ,override
+       ,@body)))
+
+(defun org-mcp-test--gtd-titles ()
+  "Return the sorted titles each GTD query tool matches.
+The three tools match every TODO heading, so they must agree."
+  (let ((results
+         (mapcar
+          (lambda (tool)
+            (sort (mapcar
+                   (lambda (match) (alist-get 'title match))
+                   (alist-get
+                    'matches
+                    (json-read-from-string
+                     (mcp-server-lib-ert-call-tool tool nil))))
+                  #'string<))
+          '("query-inbox" "query-next" "query-backlog"))))
+    (should (equal (nth 1 results) (car results)))
+    (should (equal (nth 2 results) (car results)))
+    (car results)))
+
+(ert-deftest org-mcp-test-file-set-narrows-allowed-files ()
+  "A named set inside the allowed files narrows each tool to it."
+  (org-mcp-test--with-scope-dirs nil
+    (let* ((alpha (org-mcp-test--write-set-file outside "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha beta)))
+      (should (equal (org-mcp-test--scan-files) '("alpha" "beta")))
+      (should (equal (org-mcp-test--scan-files (vector alpha)) '("alpha")))
+      (should (equal (org-mcp-test--scan-files (vector beta)) '("beta"))))))
+
+(ert-deftest org-mcp-test-file-set-replaces-allowed-files ()
+  "A named set replaces the allowed files rather than adding to them."
+  (org-mcp-test--with-scope-dirs t
+    (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha)))
+      (should (equal (org-mcp-test--scan-files) '("alpha")))
+      (should (equal (org-mcp-test--scan-files (vector beta)) '("beta")))
+      (should
+       (equal (org-mcp-test--scan-files (vector beta alpha))
+              '("alpha" "beta")))
+      ;; Named directly and through its directory, a file counts once.
+      (should
+       (equal (org-mcp-test--scan-files (vector beta outside))
+              '("beta"))))))
+
+(ert-deftest org-mcp-test-file-set-override-nil-refuses-outside ()
+  "With the default refusal, a named set reaches nothing outside the allowed files."
+  (org-mcp-test--with-scope-dirs nil
+    (let ((in (org-mcp-test--write-set-file root "in.org" "in"))
+          (out (org-mcp-test--write-set-file outside "out.org" "out")))
+      (org-mcp-test--assert-files-refused (vector out) "not in allowed list")
+      (org-mcp-test--assert-files-refused (vector in) "not in allowed list")
+      ;; One refused entry refuses the whole set.
+      (org-mcp-test--assert-files-refused
+       (vector allowed out) (org-mcp-test--refused-path-regexp out))
+      ;; A directory is refused before it is walked, even one holding
+      ;; nothing but an allowed file.
+      (let ((org-mcp-allowed-files (list in)))
+        (should (equal (org-mcp-test--scan-files (vector in)) '("in")))
+        (org-mcp-test--assert-files-refused
+         (vector root) (org-mcp-test--refused-path-regexp root))))))
+
+(ert-deftest org-mcp-test-file-set-override-roots ()
+  "Under a root list, a named file or directory must lie under a root."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((in (org-mcp-test--write-set-file root "sub/in.org" "in"))
+          (out (org-mcp-test--write-set-file outside "out.org" "out")))
+      (should (equal (org-mcp-test--scan-files (vector in)) '("in")))
+      (should (equal (org-mcp-test--scan-files (vector root)) '("in")))
+      (should
+       (equal (org-mcp-test--scan-files (vector (file-name-directory in)))
+              '("in")))
+      (org-mcp-test--assert-files-refused
+       (vector out) (org-mcp-test--refused-path-regexp out))
+      ;; A directory outside every root is refused before it is walked.
+      (org-mcp-test--assert-files-refused
+       (vector outside) (org-mcp-test--refused-path-regexp outside))
+      ;; So is a directory holding a root, which does not lie under it.
+      (let ((parent (file-name-directory (directory-file-name root))))
+        (org-mcp-test--assert-files-refused
+         (vector parent) (org-mcp-test--refused-path-regexp parent)))
+      ;; A file found under a root that links out of every root
+      ;; refuses the walk.
+      (let ((escape (expand-file-name "escape.org" root)))
+        (make-symbolic-link out escape)
+        (org-mcp-test--assert-files-refused
+         (vector root) (org-mcp-test--refused-path-regexp escape))))))
+
+(ert-deftest org-mcp-test-file-set-walks-directory-recursively ()
+  "A named directory is searched recursively for Org files.
+Hidden files and directories are skipped, and so are an archive and
+other files, as Org skips them in a directory of `org-agenda-files'.
+A directory named like an Org file is searched, not read as a file.
+Symlinks to directories, one of them forming a cycle, are not
+followed."
+  (org-mcp-test--with-scope-dirs t
+    (let ((tree (file-name-as-directory (expand-file-name "tree" outside))))
+      (org-mcp-test--write-set-file tree "top.org" "top")
+      (org-mcp-test--write-set-file tree "a/b/deep.org" "deep")
+      (org-mcp-test--write-set-file tree "old.org_archive" "archive")
+      (org-mcp-test--write-set-file tree "dir.org/inner.org" "inner")
+      (org-mcp-test--write-set-file tree ".hidden/secret.org" "secret")
+      (org-mcp-test--write-set-file tree "notes.txt" "notes")
+      (org-mcp-test--write-set-file root "elsewhere.org" "elsewhere")
+      (let ((file-name-handler-alist nil))
+        ;; An Emacs lock file: hidden, and a dangling symlink.
+        (make-symbolic-link
+         "user@host.1234:1" (expand-file-name "a/.#deep.org" tree))
+        (make-symbolic-link
+         (directory-file-name tree) (expand-file-name "a/loop" tree))
+        (make-symbolic-link
+         (directory-file-name root) (expand-file-name "linked" tree)))
+      (should
+       (equal (org-mcp-test--scan-files (vector tree))
+              '("deep" "inner" "top"))))))
+
+(ert-deftest org-mcp-test-file-set-cap-is-an-error ()
+  "A named set over `org-mcp-max-files' is an error, never a partial result.
+The walk stops once the count passes the cap, so an unreadable
+directory sorting after the files that pass it is never opened."
+  (org-mcp-test--with-scope-dirs t
+    (let ((a (org-mcp-test--write-set-file outside "a.org" "a"))
+          (sub (file-name-as-directory (expand-file-name "sub" outside)))
+          (locked (expand-file-name "z-locked" outside)))
+      (org-mcp-test--write-set-file sub "b.org" "b")
+      (org-mcp-test--write-set-file sub "c.org" "c")
+      (let ((org-mcp-max-files 3))
+        (should
+         (equal (org-mcp-test--scan-files (vector outside)) '("a" "b" "c")))
+        ;; However often it is named, a file counts once.
+        (should
+         (equal (org-mcp-test--scan-files (vector a sub a))
+                '("a" "b" "c"))))
+      (make-directory locked)
+      (set-file-modes locked #o000)
+      (unwind-protect
+          (let ((org-mcp-max-files 2))
+            (org-mcp-test--assert-files-refused
+             (vector outside) "more than 2 Org files.*org-mcp-max-files")
+            ;; The count runs across entries.
+            (org-mcp-test--assert-files-refused
+             (vector a sub) "more than 2 Org files.*org-mcp-max-files"))
+        (set-file-modes locked #o700)))))
+
+(ert-deftest org-mcp-test-file-set-does-not-carry-over ()
+  "A named set lasts for its call only, also when the call fails.
+Later calls naming no files, GTD queries included, run over the
+allowed files, and org-get-allowed-files reports them unchanged."
+  (org-mcp-test--with-scope-dirs-and-gtd t
+    (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha))
+           (check
+            (lambda ()
+              ;; First the tool that binds no set of its own.
+              (should
+               (equal
+                (alist-get 'files (org-mcp-test--call-get-allowed-files))
+                (vector alpha)))
+              (should (equal (org-mcp-test--gtd-titles) '("alpha")))
+              (should (equal (org-mcp-test--scan-files) '("alpha"))))))
+      (should (equal (org-mcp-test--scan-files (vector beta)) '("beta")))
+      (funcall check)
+      ;; A call failing while its set is in force.
+      (org-mcp-test--call-tool-refused
+       "org-ql-query"
+       `((query . "(no-such-predicate)") (files . ,(vector beta)))
+       "Org-ql query error")
+      (funcall check)
+      ;; A call failing while its set is built.
+      (let ((org-mcp-max-files 0))
+        (org-mcp-test--assert-files-refused
+         (vector beta) "org-mcp-max-files"))
+      (funcall check))))
+
+(ert-deftest org-mcp-test-gtd-queries-refuse-files ()
+  "The GTD queries and the clock state tool refuse a `files' parameter.
+They declare none, and mcp-server-lib refuses a parameter a tool does
+not declare before the tool runs."
+  (org-mcp-test--with-scope-dirs-and-gtd t
+    (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha)))
+      (dolist (tool '("query-inbox" "query-next" "query-backlog"
+                      "org-clock-get-active"))
+        (org-mcp-test--call-tool-refused
+         tool `((files . ,(vector beta))) "Unexpected parameter: files"))
+      (should (equal (org-mcp-test--gtd-titles) '("alpha"))))))
+
+(ert-deftest org-mcp-test-query-tools-never-search-current-buffer ()
+  "An empty set of files searches nothing, not the current buffer.
+Given no files, `org-ql-select' searches the current buffer.  This
+covers a named directory holding no Org file, and allowed files of
+which none exists, for the GTD queries too."
+  (org-mcp-test--with-scope-dirs-and-gtd t
+    (let ((buffer (get-buffer-create "org-mcp-test-current")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (org-mode)
+            (insert (format org-mcp-test--file-set-template "here" "here"))
+            (should (equal (org-mcp-test--scan-files (vector outside)) nil))
+            (let ((org-mcp-allowed-files
+                   (list (expand-file-name "missing.org" outside))))
+              (should (equal (org-mcp-test--scan-files) nil))
+              (should (equal (org-mcp-test--gtd-titles) nil))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-file-set-validates-parameter ()
+  "`files' is a non-empty array of absolute paths, or a single path."
+  (org-mcp-test--with-scope-dirs t
+    (let ((beta (org-mcp-test--write-set-file outside "beta.org" "beta")))
+      (should (equal (org-mcp-test--scan-files beta) '("beta")))
+      (org-mcp-test--assert-files-refused [] "non-empty array of paths")
+      (org-mcp-test--assert-files-refused [1] "non-empty array of paths")
+      (let ((default-directory outside))
+        (org-mcp-test--assert-files-refused
+         ["beta.org"] "not in allowed list")
+        (org-mcp-test--assert-files-refused ["."] "not in allowed list")))))
 
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)

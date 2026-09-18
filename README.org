@@ -41,6 +41,8 @@ Then configure in =config.el=:
   ;; Optional: let a call name Org files under these directories too
   ;; (default nil refuses; t permits every Org file Emacs can reach)
   ;; (org-mcp-file-scope-override '("~/decisions"))
+  ;; Optional: most Org files a query may name in `files' (default 1000)
+  ;; (org-mcp-max-files 2000)
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
   :config
@@ -133,6 +135,35 @@ symlink whose target is remote.  A remote file cannot be named even when it is
 among the allowed files, and a remote directory in the list permits nothing.
 
 =org-get-allowed-files= reports the policy to clients.
+
+** Querying other files
+
+=org-ql-query=, =org-get-tag-candidates= and =org-clock-find-dangling= take a
+=files= parameter naming the files to work on.  The named set replaces the
+allowed files for that call; without it, the call works on the allowed files.
+Each entry is an absolute path to an Org file or to a directory:
+
+- a file is checked like any file a call names: one outside the allowed files
+  is accepted only as far as =org-mcp-file-scope-override= permits;
+- a directory is checked first, so under =nil= every directory is refused, and
+  under a list of directories it must lie in one of them.  It is then searched
+  recursively for the Org files Org takes from a directory in
+  =org-agenda-files=: names matching =org-agenda-file-regexp=, by default
+  every =.org= file and no archive.  Hidden files and directories, whose names
+  start with =.=, are skipped, and a symlink to a directory is not followed.
+  Every file found is checked like a named file.
+
+One refused entry or found file makes the whole call fail.  So does a set of
+more than =org-mcp-max-files= files, 1000 by default: the call never searches
+only part of the set.
+
+#+begin_src emacs-lisp
+;; Let a query name up to 2000 Org files
+(setq org-mcp-max-files 2000)
+#+end_src
+
+The GTD queries (=query-inbox=, =query-next=, =query-backlog=) always run over
+the allowed files and refuse a =files= parameter.
 
 ** Registering with an MCP Client
 
@@ -349,14 +380,18 @@ Example return value:
 *** org-get-tag-candidates
 - *Description:* Get every tag a user might want to set on a headline,
   combining configured tags with the tags actually present in allowed
-  files.  Mirrors what Org's interactive tag completion (=C-c C-q=) offers.
-- *Parameters:* None
+  files, or in the files named in =files=.  Mirrors what Org's interactive
+  tag completion (=C-c C-q=) offers.
+- *Parameters:*
+  - =files= (array of strings, optional): Files and directories to collect
+    tags from, replacing the allowed files for this call.  Directories are
+    searched recursively.  See [[*Querying other files][Querying other files]]
 - *Returns:* JSON object with =tags= array (sorted, deduplicated).
 
 The union covers:
 - =org-tag-alist= and =org-tag-persistent-alist=
 - Per-file =#+TAGS:= / =#+FILETAGS:=
-- Every tag present on any headline across =org-mcp-allowed-files=
+- Every tag present on any headline across those files
 
 Group keywords (=:startgroup=, =:endgroup=, =:startgrouptag=,
 =:grouptags=, =:endgrouptag=) are filtered out.
@@ -711,7 +746,7 @@ Example:
 - *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
-  - =files= (array of strings, optional): Files to search, each an allowed file or an Org file permitted by =org-mcp-file-scope-override=. Defaults to all =org-mcp-allowed-files=
+  - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[*Querying other files][Querying other files]]
 - *Returns:* JSON object with =matches= array, =total= count, and =files_searched= count
 
 Example:
@@ -744,6 +779,7 @@ Example:
 - *Parameters:* None
 - *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
 *** query-next
 - *Description:* Query next action items using the configured GTD workflow
@@ -751,6 +787,7 @@ Example:
   - =tag= (string, optional): Tag string to filter results
 - *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
 *** query-backlog
 - *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
@@ -758,6 +795,7 @@ Example:
   - =tag= (string, optional): Tag string to filter results
 - *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
 ** Configuring GTD Query Tools
 
@@ -1003,8 +1041,9 @@ Example:
 #+end_src
 
 *** org-clock-find-dangling
-- *Description:* Find all open (unclosed) clock entries in allowed Org files
-- *Parameters:* None
+- *Description:* Find all open (unclosed) clock entries in allowed Org files, or in the files named in =files=
+- *Parameters:*
+  - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. See [[*Querying other files][Querying other files]]
 - *Returns:* JSON object with array of open clock entries
 
 Example response:

@@ -95,6 +95,15 @@ check, so a symlink pointing out of a root is refused."
     (repeat :tag "Permit under these directories" directory))
   :group 'org-mcp)
 
+(defcustom org-mcp-max-files 1000
+  "Most Org files a call may name in its `files' parameter.
+The query tools that take `files' search the files it names, and a
+directory there counts as every Org file found under it.  A call
+naming more files is refused with an error that names this limit;
+it never searches only some of them."
+  :type 'natnum
+  :group 'org-mcp)
+
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
@@ -284,8 +293,22 @@ and yields fully absolute paths."
       org-mcp-allowed-files
     (org-agenda-files t)))
 
+(defvar org-mcp--file-set 'allowed
+  "The files the running call works on.
+The symbol `allowed' stands for the allowed files, where every call
+works unless it names a set of files itself.  For a call that does,
+`org-mcp--with-file-set' binds that set here as a list of files, and
+`org-mcp--expanded-allowed-files' returns it in place of the allowed
+files.  That macro is the only place binding this variable, and it
+binds it with `let', so the set ends with the call, even when the
+call fails, and no later call sees it.")
+
 (defun org-mcp--expanded-allowed-files ()
   "Return the allowed files, each made absolute.
+While a call runs over a set of files it names, this returns that
+set instead, from `org-mcp--file-set': the named set replaces the
+allowed files for that call.
+
 Pulls the source list from the function `org-mcp-allowed-files'
 (which falls back to `org-agenda-files' when the variable
 `org-mcp-allowed-files' is nil), then resolves relative entries
@@ -299,12 +322,14 @@ never makes the files under it reachable, neither through
 `org-agenda-files', where Org would expand it.  Directory entries of
 `org-agenda-files' arrive here already expanded into their files by
 the function `org-agenda-files'."
-  (cl-remove-if
-   #'file-directory-p
-   (mapcar
-    (lambda (f)
-      (expand-file-name f org-directory))
-    (org-mcp-allowed-files))))
+  (if (listp org-mcp--file-set)
+      org-mcp--file-set
+    (cl-remove-if
+     #'file-directory-p
+     (mapcar
+      (lambda (f)
+        (expand-file-name f org-directory))
+      (org-mcp-allowed-files)))))
 
 (defun org-mcp--local-file-name (name &optional dir)
   "Return NAME as an absolute local file name, or nil when it is remote.
@@ -355,6 +380,29 @@ Returns nil unless the setting is a list of directories."
         (org-mcp--local-file-name root org-directory))
       org-mcp-file-scope-override))))
 
+(defun org-mcp--org-file-name-p (name)
+  "Return non-nil when NAME ends in `.org' or `.org_archive'.
+These are the Org files a scope override reaches.  Case matters."
+  (let ((case-fold-search nil))
+    (string-match-p "\\.org\\(?:_archive\\)?\\'" name)))
+
+(defun org-mcp--override-permits-p (name truename)
+  "Return non-nil when `org-mcp-file-scope-override' permits TRUENAME.
+TRUENAME is the local truename, from `org-mcp--local-truename', of
+the file or directory a call names as NAME.  NAME must be absolute.
+Under a list of roots TRUENAME must lie inside one of them, each
+resolved the same way at every call; under t any TRUENAME is
+permitted, and under nil none is."
+  (and org-mcp-file-scope-override
+       (file-name-absolute-p name)
+       (or (eq org-mcp-file-scope-override t)
+           (cl-some
+            (lambda (root)
+              (when-let* ((root-truename
+                           (org-mcp--local-truename root)))
+                (file-in-directory-p truename root-truename)))
+            (org-mcp--override-roots)))))
+
 (defun org-mcp--find-allowed-file (filename &optional named)
   "Return the absolute path of FILENAME when a call may reach it, else nil.
 This is the one place that decides whether a path is reachable.
@@ -366,13 +414,11 @@ reachable, and the expanded allowed-files entry is returned.
 
 NAMED non-nil means the call itself names FILENAME, which makes it
 a scope override when FILENAME lies outside the allowed files.
-`org-mcp-file-scope-override' then decides: FILENAME must be
-absolute, its truename must end in `.org' or `.org_archive' and be
-an existing regular file, and under a list of roots that truename
-must lie inside one of the roots, resolved the same way at every
-call.  A permitted FILENAME is returned as its truename.  Without
-NAMED, as for a file an ID resolves to, only the allowed files are
-reachable."
+`org-mcp-file-scope-override' then decides: its truename must end
+in `.org' or `.org_archive' and be an existing regular file, and
+`org-mcp--override-permits-p' must permit it.  A permitted FILENAME
+is returned as its truename.  Without NAMED, as for a file an ID
+resolves to, only the allowed files are reachable."
   (when-let* ((truename (org-mcp--local-truename filename)))
     (if-let* ((found
                (cl-find
@@ -381,21 +427,83 @@ reachable."
                 :test #'org-mcp--paths-equal-p)))
       (expand-file-name found)
       (when (and named
-                 org-mcp-file-scope-override
-                 (file-name-absolute-p filename)
-                 (let ((case-fold-search nil))
-                   (string-match-p
-                    "\\.org\\(?:_archive\\)?\\'" truename))
-                 (file-regular-p truename)
-                 (or (eq org-mcp-file-scope-override t)
-                     (cl-some
-                      (lambda (root)
-                        (when-let* ((root-truename
-                                     (org-mcp--local-truename root)))
-                          (file-in-directory-p
-                           truename root-truename)))
-                      (org-mcp--override-roots))))
+                 (org-mcp--org-file-name-p truename)
+                 (org-mcp--override-permits-p filename truename)
+                 (file-regular-p truename))
         truename))))
+
+(defun org-mcp--named-file-set (files)
+  "Return the Org files FILES names, each one reachable by the call.
+FILES is the `files' parameter of a call: an array of paths, or a
+single path.  An entry naming a file must pass the gate,
+`org-mcp--find-allowed-file', as a file the call names.  An entry
+naming a directory must itself be permitted, by
+`org-mcp--override-permits-p' on its local truename, so a remote,
+relative or out-of-root directory is refused before anything is
+read from it.  The directory is then walked for Org files, each of
+which must pass the gate as well.  A refused entry or found file
+fails the whole call.
+
+The walk descends into every subdirectory except hidden ones, whose
+names start with `.', and never follows a symlink to a directory, so
+it cannot loop or leave the directory that way.  Hidden files, such
+as Emacs lock files, are skipped too.  In each directory it takes
+the files Org takes from a directory in `org-agenda-files': names
+matching `org-agenda-file-regexp', by default every `.org' file and
+no archive, and of those the ones `org-mcp--org-file-name-p' accepts.
+
+Each file is returned once.  More files than `org-mcp-max-files' is
+an error, raised as soon as the count passes it, so a large tree is
+never walked to its end first.  That is why the walk is written out
+here: `directory-files-recursively' returns only once it has walked
+the whole tree."
+  (let ((entries
+         (cond
+          ((stringp files)
+           (list files))
+          ((sequencep files)
+           (append files nil))))
+        (found nil)
+        (count 0))
+    (unless (and entries (cl-every #'stringp entries))
+      (org-mcp--tool-validation-error
+       "files must be a non-empty array of paths"))
+    (cl-labels
+     ((add
+       (file)
+       (let ((allowed
+              (or (org-mcp--find-allowed-file file t)
+                  (org-mcp--tool-file-access-error file))))
+         (unless (member allowed found)
+           (when (> (cl-incf count) org-mcp-max-files)
+             (org-mcp--tool-validation-error
+              "files names more than %d Org files, the limit set by \
+org-mcp-max-files; name fewer files or smaller directories"
+              org-mcp-max-files))
+           (push allowed found))))
+      (walk
+       (dir)
+       (dolist (name (directory-files dir))
+         (unless (string-prefix-p "." name)
+           ;; Joined, not expanded: `expand-file-name' would
+           ;; read an entry named `~' as the home directory.
+           (let ((path (concat (file-name-as-directory dir) name)))
+             (cond
+              ((file-directory-p path)
+               (unless (file-symlink-p path)
+                 (walk path)))
+              ((and (org-mcp--org-file-name-p name)
+                    (let ((case-fold-search nil))
+                      (string-match-p org-agenda-file-regexp name)))
+               (add path))))))))
+     (dolist (entry entries)
+       (let ((truename (org-mcp--local-truename entry)))
+         (if (and truename (file-directory-p truename))
+             (if (org-mcp--override-permits-p entry truename)
+                 (walk truename)
+               (org-mcp--tool-file-access-error entry))
+           (add entry)))))
+    (nreverse found)))
 
 (defun org-mcp--refresh-file-buffers
     (file-path &optional except-buffer)
@@ -502,6 +610,23 @@ of re-implementing the filter."
           (cl-remove-if-not
            #'file-exists-p (org-mcp--expanded-allowed-files))))
      ,@body))
+
+(defmacro org-mcp--with-file-set (files &rest body)
+  "Run BODY over the files a call names in FILES, or the allowed files.
+FILES is the call's `files' parameter.  When it is non-nil,
+`org-mcp--named-file-set' checks and expands it, and the resulting
+set replaces the allowed files for BODY through `org-mcp--file-set'.
+When it is nil, BODY runs over the allowed files.  Either way BODY
+runs inside `org-mcp--with-allowed-agenda-files', so
+`org-agenda-files' holds the existing files it works on."
+  (declare (indent 1) (debug (form body)))
+  (macroexp-let2 nil files files
+    `(let ((org-mcp--file-set
+            (if ,files
+                (org-mcp--named-file-set ,files)
+              'allowed)))
+       (org-mcp--with-allowed-agenda-files
+         ,@body))))
 
 (defmacro org-mcp--modify-and-save
     (file-path operation response-alist &rest body)
@@ -1886,15 +2011,21 @@ fields, and the parsed siblings discard them."
      (org-tag-persistent-alist
       . ,(prin1-to-string org-tag-persistent-alist)))))
 
-(defun org-mcp--tool-get-tag-candidates ()
-  "Return the union of all candidate tags across `org-mcp-allowed-files'.
+(defun org-mcp--tool-get-tag-candidates (&optional files)
+  "Return the union of all candidate tags across a set of files.
+The files are the ones FILES names, see `org-mcp--with-file-set',
+or the allowed files when FILES is nil.
 Mirrors the set Org's interactive tag completion offers via
 `org-global-tags-completion-table': configured tags from
 `org-tag-alist' / `org-tag-persistent-alist', any per-file
 `#+TAGS:' / `#+FILETAGS:', plus every tag actually present on
 headlines in those files.  Group keywords (`:startgroup' etc.)
-are filtered out.  Tags are returned sorted and deduplicated."
-  (org-mcp--with-allowed-agenda-files
+are filtered out.  Tags are returned sorted and deduplicated.
+
+MCP Parameters:
+  files - Files and directories to collect tags from, replacing the
+          allowed files (array of strings, optional)"
+  (org-mcp--with-file-set files
     (let* ((table
             (append
              (org-global-tags-completion-table)
@@ -2828,13 +2959,14 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
 (defun org-mcp--tool-ql-query (query &optional files)
   "Search Org files using an org-ql QUERY expression.
 QUERY is a string containing an org-ql query sexp.
-FILES is an optional list of file paths to search, each in the
-allowed files or permitted by `org-mcp-file-scope-override';
-defaults to all allowed files.
+FILES names the files and directories to search, replacing the
+allowed files, see `org-mcp--with-file-set'; defaults to all
+allowed files.
 
 MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
-  files - Array of file paths to search (optional)"
+  files - Files and directories to search, replacing the allowed
+          files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
     (org-mcp--tool-validation-error
      "Query must be a non-empty string"))
@@ -2848,26 +2980,22 @@ MCP Parameters:
     (unless (consp query-sexp)
       (org-mcp--tool-validation-error "Query must be a list, got: %s"
                                       (type-of query-sexp)))
-    (org-mcp--with-allowed-agenda-files
-      (let* ((target-files
-              (if files
-                  (mapcar
-                   (lambda (f)
-                     (or (org-mcp--find-allowed-file f t)
-                         (org-mcp--tool-file-access-error f)))
-                   (append files nil))
-                org-agenda-files))
+    (org-mcp--with-file-set files
+      (let* ((target-files org-agenda-files)
              (action #'org-mcp--ql-extract-match)
              (matches
-              (condition-case err
-                  (org-ql-select
-                   target-files
-                   query-sexp
-                   :action action)
-                (error
-                 (org-mcp--tool-validation-error
-                  "Org-ql query error: %s"
-                  (error-message-string err))))))
+              ;; Given no files, `org-ql-select' would search the
+              ;; current buffer, which no call names.
+              (when target-files
+                (condition-case err
+                    (org-ql-select
+                     target-files
+                     query-sexp
+                     :action action)
+                  (error
+                   (org-mcp--tool-validation-error
+                    "Org-ql query error: %s"
+                    (error-message-string err)))))))
         (json-encode
          `((matches . ,(vconcat matches))
            (total . ,(length matches))
@@ -2877,35 +3005,42 @@ MCP Parameters:
 
 (defun org-mcp--run-gtd-query (query-sexp)
   "Run QUERY-SEXP via `org-ql-select' with optional sorting.
+A GTD query always runs over the allowed files: its tools take no
+`files' parameter, and mcp-server-lib refuses a call passing one
+with an \"Unexpected parameter\" error before any handler runs.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-ql-query."
-  (org-mcp--with-allowed-agenda-files
+  (org-mcp--with-file-set nil
     (let* ((target-files org-agenda-files)
            (matches
-            (condition-case err
-                ;; Collect org-elements with the default action, then
-                ;; sort.  We map `org-mcp--ql-extract-match' in a
-                ;; second pass because `org-ql-select' applies :action
-                ;; before :sort — custom actions that return
-                ;; non-element data would break sort functions
-                ;; expecting org-elements.
-                (let ((elements
-                       (org-ql-select
-                        target-files
-                        query-sexp
-                        :sort org-mcp-query-sort-fn)))
-                  (mapcar
-                   (lambda (el)
-                     (with-current-buffer (org-element-property
-                                           :buffer el)
-                       (save-excursion
-                         (goto-char (org-element-property :begin el))
-                         (org-mcp--ql-extract-match))))
-                   elements))
-              (error
-               (org-mcp--tool-validation-error
-                "Org-ql query error: %s"
-                (error-message-string err))))))
+            ;; Given no files, `org-ql-select' would search the
+            ;; current buffer, which is not among the allowed files.
+            (when target-files
+              (condition-case err
+                  ;; Collect org-elements with the default action,
+                  ;; then sort.  We map `org-mcp--ql-extract-match'
+                  ;; in a second pass because `org-ql-select' applies
+                  ;; :action before :sort — custom actions that
+                  ;; return non-element data would break sort
+                  ;; functions expecting org-elements.
+                  (let ((elements
+                         (org-ql-select
+                          target-files
+                          query-sexp
+                          :sort org-mcp-query-sort-fn)))
+                    (mapcar
+                     (lambda (el)
+                       (with-current-buffer (org-element-property
+                                             :buffer el)
+                         (save-excursion
+                           (goto-char
+                            (org-element-property :begin el))
+                           (org-mcp--ql-extract-match))))
+                     elements))
+                (error
+                 (org-mcp--tool-validation-error
+                  "Org-ql query error: %s"
+                  (error-message-string err)))))))
       (json-encode
        `((matches . ,(vconcat matches))
          (total . ,(length matches))
@@ -3032,13 +3167,17 @@ MCP Parameters: None"
      (org_mcp_clock_continuous_threshold
       . ,org-mcp-clock-continuous-threshold))))
 
-(defun org-mcp--tool-clock-find-dangling ()
-  "Find all open (unclosed) clocks in allowed Org files.
-Uses `org-find-open-clocks' on each file in `org-mcp-allowed-files'.
+(defun org-mcp--tool-clock-find-dangling (&optional files)
+  "Find all open (unclosed) clocks in a set of Org files.
+The files are the ones FILES names, see `org-mcp--with-file-set',
+or the allowed files when FILES is nil.
+Uses `org-find-open-clocks' on each of them.
 Reads each clock's timestamp via the Org element API.
 
-MCP Parameters: None"
-  (org-mcp--with-allowed-agenda-files
+MCP Parameters:
+  files - Files and directories to search, replacing the allowed
+          files (array of strings, optional)"
+  (org-mcp--with-file-set files
     (let ((all-clocks nil))
       (dolist (file org-agenda-files)
         (let ((open (org-find-open-clocks file)))
@@ -3445,15 +3584,27 @@ adding or modifying tags on TODO items."
    :id "org-get-tag-candidates"
    :description
    "Return all candidate tags the user might want to use across the
-files in `org-mcp-allowed-files'.
+allowed files, or across the files named in `files'.
 
 Mirrors Org's interactive tag completion (C-c C-q): the result is
 the union of configured tags from `org-tag-alist' /
 `org-tag-persistent-alist', any per-file `#+TAGS:' / `#+FILETAGS:'
-keywords, and every tag actually present on a headline in any
-allowed file.  Group keywords like `:startgroup' are filtered out.
+keywords, and every tag actually present on a headline in any of
+those files.  Group keywords like `:startgroup' are filtered out.
 
-Parameters: None
+Parameters:
+  files - Files and directories to collect tags from (array of
+          strings, optional)
+          Replaces the allowed files for this call; when omitted, all
+          allowed files are used.  Each entry is an absolute path to
+          an Org file, or to a directory, which is searched
+          recursively for the Org files Org takes from a directory
+          in org-agenda-files (by default every .org file, no
+          archive), skipping hidden files and directories and not
+          following symlinked directories.  An entry outside the allowed files is
+          accepted only as far as org-mcp-file-scope-override
+          permits; see org-get-allowed-files.  Naming more than
+          org-mcp-max-files files in total is an error.
 
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
@@ -4011,10 +4162,18 @@ Parameters:
             (tags \"work\")
             (and (todo \"TODO\") (priority \"A\"))
             (deadline :to today)
-  files - Files to search (array of strings, optional)
-          Each must be an allowed file, or an Org file permitted by
-          org-mcp-file-scope-override.
-          Defaults to all org-mcp-allowed-files
+  files - Files and directories to search (array of strings, optional)
+          Replaces the allowed files for this call; when omitted, all
+          allowed files are searched.  Each entry is an absolute path
+          to an Org file, or to a directory, which is searched
+          recursively for the Org files Org takes from a directory
+          in org-agenda-files (by default every .org file, no
+          archive), skipping hidden files and directories and not
+          following symlinked directories.  An entry outside the allowed files is
+          accepted only as far as org-mcp-file-scope-override
+          permits; see org-get-allowed-files.  Naming more than
+          org-mcp-max-files files in total is an error, never a
+          partial search.
 
 Returns JSON object:
   matches - Array of matched entries, each with:
@@ -4040,7 +4199,8 @@ Returns JSON object:
      :description
      "Query inbox items using the configured GTD workflow.
 Returns items matching the inbox query, sorted by rank when
-a sort function is configured.
+a sort function is configured.  Always runs over the allowed files;
+naming files is an error.  Use org-ql-query to search other files.
 
 Parameters: None
 
@@ -4055,7 +4215,8 @@ Returns: Same format as org-ql-query tool"
      :description
      "Query next action items using the configured GTD workflow.
 Returns actionable items sorted by rank when a sort function
-is configured.
+is configured.  Always runs over the allowed files; naming files is
+an error.  Use org-ql-query to search other files.
 
 Parameters:
   tag - Tag string to filter results (string, optional)
@@ -4071,7 +4232,8 @@ Returns: Same format as org-ql-query tool"
      :description
      "Query backlog items (projects and standalone actions) using
 the configured GTD workflow.  Returns items sorted by rank when
-a sort function is configured.
+a sort function is configured.  Always runs over the allowed files;
+naming files is an error.  Use org-ql-query to search other files.
 
 Parameters:
   tag - Tag string to filter results (string, optional)
@@ -4278,11 +4440,23 @@ Returns JSON object:
    #'org-mcp--tool-clock-find-dangling
    :id "org-clock-find-dangling"
    :description
-   "Find all open (unclosed) clocks in allowed Org files.
-Searches for dangling CLOCK entries that were never closed.
-Uses Emacs native `org-find-open-clocks' on each allowed file.
+   "Find all open (unclosed) clocks in allowed Org files, or in the
+files named in `files'.  Searches for dangling CLOCK entries that
+were never closed.  Uses Emacs native `org-find-open-clocks' on
+each of those files.
 
-Parameters: None
+Parameters:
+  files - Files and directories to search (array of strings, optional)
+          Replaces the allowed files for this call; when omitted, all
+          allowed files are searched.  Each entry is an absolute path
+          to an Org file, or to a directory, which is searched
+          recursively for the Org files Org takes from a directory
+          in org-agenda-files (by default every .org file, no
+          archive), skipping hidden files and directories and not
+          following symlinked directories.  An entry outside the allowed files is
+          accepted only as far as org-mcp-file-scope-override
+          permits; see org-get-allowed-files.  Naming more than
+          org-mcp-max-files files in total is an error.
 
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
