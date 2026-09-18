@@ -962,24 +962,28 @@ such as file:/home/user/notes.org::*Heading, or an id: link"
    link))
 
 (defun org-mcp--link-file (object link)
-  "Return the allowed file that the file link OBJECT names.
-LINK is the link as the client sent it, for error messages.  A remote
-path is refused before any file operation that could open a
-connection, and so is a relative path; the file then goes through the
-allowed-files gate, `org-mcp--find-allowed-file'.  No buffer is
-visited."
+  "Return the file that the file link OBJECT names, if the call may reach it.
+LINK is the link as the client sent it, for error messages.  The
+path must be absolute and local.  `org-mcp--local-file-name' expands
+it with file name handlers disabled, so a path that is remote as
+written, or only once `.', `..' or `~' are expanded, is refused
+before TRAMP can open a connection for it.  The expanded name then
+goes through the scope gate, `org-mcp--find-allowed-file', as a file
+the call names, so `org-mcp-file-scope-override' applies.  No buffer
+is visited."
   (let ((application (org-element-property :application object))
         (path (org-element-property :path object)))
     (unless (member application '(nil "emacs"))
       (org-mcp--tool-validation-error
        "Link type 'file+%s' is not supported: %s"
        application link))
-    (when (or (let ((non-essential t))
-                (file-remote-p path))
-              (not (file-name-absolute-p path)))
-      (org-mcp--link-full-path-error link))
-    (or (org-mcp--find-allowed-file path)
-        (org-mcp--tool-file-access-error link))))
+    (let ((local
+           (and (file-name-absolute-p path)
+                (org-mcp--local-file-name path))))
+      (unless local
+        (org-mcp--link-full-path-error link))
+      (or (org-mcp--find-allowed-file local t)
+          (org-mcp--tool-file-access-error link)))))
 
 (defun org-mcp--link-id-file (id link)
   "Return the allowed file that holds ID, which LINK names.

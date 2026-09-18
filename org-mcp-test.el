@@ -7650,6 +7650,105 @@ heading, and a tool that needs a heading refuses it."
            test-file (car call) (cdr call))))))
     (should-not (find-buffer-visiting test-file))))
 
+(ert-deftest org-mcp-test-link-file-scope-override ()
+  "A `file:' link names its file, so the scope override applies to it.
+Under a root list, a `file:' link to a file below the root is readable
+and writable, and one to a file outside every root is refused.  An
+`id:' link names no file, so an ID in the file below the root stays
+out of reach until a `file:' link names that file."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((in (org-mcp-test--write-file
+               root "in.org" org-mcp-test--scope-task-content))
+          (out (org-mcp-test--write-file
+                outside "out.org" org-mcp-test--scope-task-content))
+          (with-id (org-mcp-test--write-file
+                    root "with-id.org"
+                    org-mcp-test--scope-task-with-id-content)))
+      (should
+       (string=
+        (org-mcp-test--call-read-headline (format "file:%s::*Task" in))
+        "* TODO Task\nBody"))
+      (should
+       (equal
+        (alist-get
+         'new_state
+         (org-mcp-test--call-update-todo-state
+          (format "[[file:%s::*Task][Task]]" in) "DONE" "TODO"))
+        "DONE"))
+      (org-mcp-test--verify-file-matches
+       in org-mcp-test--scope-task-done-regex)
+      (dolist (link
+               (list
+                (format "file:%s::*Task" out)
+                (format "[[file:%s::*Task][Task]]" out)))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((uri . ,link)) "not in allowed list")
+        (org-mcp-test--call-tool-refused
+         "org-update-todo-state" `((uri . ,link) (new_state . "DONE"))
+         "not in allowed list"
+         out))
+      (org-mcp-test--with-id-tracking
+          (list allowed)
+          `((,org-mcp-test--content-with-id-id . ,with-id))
+        (let ((link (format "id:%s" org-mcp-test--content-with-id-id)))
+          (org-mcp-test--call-tool-refused
+           "org-read-headline" `((uri . ,link)) "not in allowed list")
+          (org-mcp-test--call-tool-refused
+           "org-update-todo-state" `((uri . ,link) (new_state . "DONE"))
+           "not in allowed list"
+           with-id))
+        (should
+         (string=
+          (org-mcp-test--call-read-headline
+           (format "file:%s::*Task" with-id))
+          (string-trim-right
+           org-mcp-test--scope-task-with-id-content)))))))
+
+(ert-deftest org-mcp-test-link-remote-path-opens-no-connection ()
+  "A link to a remote path is refused before any operation on the path.
+The path is each spelling in `org-mcp-test--remote-spellings', which
+are remote as written or only once expanded, and one more that `//'
+makes remote.  Each is written as a `file:', a `file+emacs:' and a
+bracketed link, with and without a description, and sent to a read,
+a write, and as the parent and the sibling of `org-add-todo'.  Every
+call asks for a full path, leaves the file unchanged, and the fake
+remote method records no operation."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (paths
+         (cons
+          (concat
+           "/tmp/..//" (substring org-mcp-test--remote-prefix 1) "/x.org")
+          (org-mcp-test--remote-spellings))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (org-mcp-test--with-remote-probe ops
+        (dolist (path paths)
+          (dolist (link
+                   (list
+                    (format "file:%s::*Task" path)
+                    (format "file+emacs:%s::*Task" path)
+                    (format "[[%s::*Task]]" path)
+                    (format "[[file:%s::*Task][Task]]" path)))
+            (dolist (call
+                     `(("org-read-headline" (uri . ,link))
+                       ("org-set-tags" (uri . ,link) (tags . "work"))
+                       ("org-add-todo"
+                        (title . "New Task")
+                        (todo_state . "TODO")
+                        (tags . nil)
+                        (body . nil)
+                        (parent_uri . ,link))
+                       ("org-add-todo"
+                        (title . "New Task")
+                        (todo_state . "TODO")
+                        (tags . nil)
+                        (body . nil)
+                        (parent_uri . ,(format "file:%s::*Gamma" test-file))
+                        (after_uri . ,link))))
+              (org-mcp-test--call-tool-refused
+               (car call) (cdr call) "Send a full path" test-file))))
+        (should (null ops))))))
+
 (ert-deftest org-mcp-test-link-refuses-regexp-search ()
   "A regexp search is refused, since Org answers it with a sparse tree."
   (org-mcp-test--with-temp-org-files

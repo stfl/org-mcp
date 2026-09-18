@@ -113,7 +113,8 @@ A call can name an Org file outside the allowed files by passing its path.
 
 The setting governs reading and writing alike.  The permission lasts for the
 one call that names the file; nothing carries over to later calls.
-A call names a file only through a path.  A bare ID names none, so it resolves
+A call names a file through a path or a =file:= link (see
+[[*Addressing headings with links]]).  A bare ID names none, so it resolves
 only within the allowed files, and the file of the running clock is not named
 either, so the setting does not change what the clock tools reach.
 
@@ -241,10 +242,13 @@ resolves inside =[[…]]=, so a link copied out of Emacs works unchanged:
   headings resolves to the first, as it does in Org, and =::<n>= in a =file:=
   link goes to line /n/. A search that matches nothing is an error; org-mcp
   never offers to create the heading.
-- A link is resolved, never followed: your windows, narrowing, point and
-  buffer list stay as they were, even when the buffer is narrowed to another
-  subtree.
-- The file an =id:= or =file:= link reaches must be one of the allowed files.
+- A link is resolved, never followed: your windows, narrowing, point, folding,
+  marks and buffer list stay as they were, even when the buffer is narrowed to
+  another subtree.
+- A =file:= link names its file, so it reaches the allowed files and any Org
+  file =org-mcp-file-scope-override= permits (see
+  [[*Configuring the scope override]]). An =id:= link names no file and
+  resolves only within the allowed files.
 - =org-add-todo= reads a =file:= link without a search part as the top level of
   that file. A tool that needs a heading refuses it.
 
@@ -254,7 +258,9 @@ org-mcp refuses:
   =file+sys:=, before any file is opened. org-mcp never runs or opens a link.
 - a link that names no local file by its full path: a relative path
   (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
-  plain text) and a remote TRAMP path. Send the full path instead.
+  plain text) and a remote TRAMP path, including one that becomes remote only
+  once =.=, =..= or =~= is expanded. Send the full local path instead. No
+  connection is opened for a remote path.
 - a regexp search (=::/regexp/=), which Org answers by building a sparse tree
   in your buffer.
 
