@@ -41,7 +41,8 @@ Then configure in =config.el=:
   ;; Optional: let a call name Org files under these directories too
   ;; (default nil refuses; t permits every Org file Emacs can reach)
   ;; (org-mcp-file-scope-override '("~/decisions"))
-  ;; Optional: most Org files a query may name in `files' (default 1000)
+  ;; Optional: most files and directories a query's `files' may reach
+  ;; (default 1000)
   ;; (org-mcp-max-files 2000)
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
   ;; (org-mcp-clock-continuous-threshold 15)
@@ -145,20 +146,26 @@ Each entry is an absolute path to an Org file or to a directory:
 
 - a file is checked like any file a call names: one outside the allowed files
   is accepted only as far as =org-mcp-file-scope-override= permits;
-- a directory is checked first, so under =nil= every directory is refused, and
-  under a list of directories it must lie in one of them.  It is then searched
-  recursively for the Org files Org takes from a directory in
-  =org-agenda-files=: names matching =org-agenda-file-regexp=, by default
-  every =.org= file and no archive.  Hidden files and directories, whose names
-  start with =.=, are skipped, and a symlink to a directory is not followed.
-  Every file found is checked like a named file.
+- a directory the setting permits, anywhere under =t= or inside a listed
+  directory, is searched recursively for the Org files Org takes from a
+  directory in =org-agenda-files=: names matching =org-agenda-file-regexp=, by
+  default every =.org= file and no archive.  Hidden files and directories,
+  whose names start with =.=, are skipped, and so are subdirectories that
+  cannot be read, symlinks to directories, and anything that is not a regular
+  file, such as a dangling symlink.  Every file found is checked like a named
+  file;
+- any other directory, as every directory under =nil=, is not read at all.  It
+  stands for the allowed files under it, so naming =~/org= narrows a query to
+  the allowed files there, and it is refused when none of them is.
 
-One refused entry or found file makes the whole call fail.  So does a set of
-more than =org-mcp-max-files= files, 1000 by default: the call never searches
-only part of the set.
+A refused entry or found file makes the whole call fail, and so does a named
+directory that cannot be read.  So does going over =org-mcp-max-files=, 1000
+by default, which counts every file in the set and every directory searched
+for it: the call never searches only part of the set, and it reads no more
+directories than that.
 
 #+begin_src emacs-lisp
-;; Let a query name up to 2000 Org files
+;; Let a query reach up to 2000 files and directories
 (setq org-mcp-max-files 2000)
 #+end_src
 

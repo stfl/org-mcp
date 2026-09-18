@@ -2467,18 +2467,19 @@ The three tools match every TODO heading, so they must agree."
       ;; One refused entry refuses the whole set.
       (org-mcp-test--assert-files-refused
        (vector allowed out) (org-mcp-test--refused-path-regexp out))
-      ;; A directory is refused before it is walked, even one holding
-      ;; nothing but an allowed file.
-      (let ((org-mcp-allowed-files (list in)))
-        (should (equal (org-mcp-test--scan-files (vector in)) '("in")))
-        (org-mcp-test--assert-files-refused
-         (vector root) (org-mcp-test--refused-path-regexp root))))))
+      ;; A directory holding no allowed file is refused unread.
+      (org-mcp-test--assert-files-refused
+       (vector root) (org-mcp-test--refused-path-regexp root)))))
 
 (ert-deftest org-mcp-test-file-set-override-roots ()
-  "Under a root list, a named file or directory must lie under a root."
+  "Under a root list, a named file or directory must lie under a root.
+A file found under a root that links out of every root fails the
+call, and the refusal names it by the path the call reaches it by,
+not by the file it resolves to."
   (org-mcp-test--with-scope-dirs (list root)
     (let ((in (org-mcp-test--write-set-file root "sub/in.org" "in"))
-          (out (org-mcp-test--write-set-file outside "out.org" "out")))
+          (out (org-mcp-test--write-set-file outside "out.org" "out"))
+          (link (expand-file-name "link" outside)))
       (should (equal (org-mcp-test--scan-files (vector in)) '("in")))
       (should (equal (org-mcp-test--scan-files (vector root)) '("in")))
       (should
@@ -2486,19 +2487,55 @@ The three tools match every TODO heading, so they must agree."
               '("in")))
       (org-mcp-test--assert-files-refused
        (vector out) (org-mcp-test--refused-path-regexp out))
-      ;; A directory outside every root is refused before it is walked.
+      ;; A directory outside every root holding no allowed file.
       (org-mcp-test--assert-files-refused
        (vector outside) (org-mcp-test--refused-path-regexp outside))
-      ;; So is a directory holding a root, which does not lie under it.
-      (let ((parent (file-name-directory (directory-file-name root))))
+      ;; A directory holding a root does not lie under it, so it
+      ;; stands for the allowed files under it and is not walked.
+      (let ((result
+             (org-mcp-test--call-with-files
+              "org-ql-query" '((query . "(todo)"))
+              (vector (file-name-directory (directory-file-name root))))))
+        (should (= (alist-get 'files_searched result) 1))
+        (should (= (alist-get 'total result) 0)))
+      ;; A symlink to a root is walked as that root.
+      (make-symbolic-link (directory-file-name root) link)
+      (should (equal (org-mcp-test--scan-files (vector link)) '("in")))
+      (make-symbolic-link out (expand-file-name "sub/escape.org" root))
+      (org-mcp-test--assert-files-refused
+       (vector link)
+       (org-mcp-test--refused-path-regexp (concat link "/sub/escape.org"))))))
+
+(ert-deftest org-mcp-test-file-set-directory-without-override ()
+  "A directory the setting does not permit stands for its allowed files.
+It is not read, so an Org file under it that is not allowed stays
+out of the set, and it is refused when no allowed file lies under
+it.  This holds under nil and, for a directory outside every root,
+under a root list."
+  (dolist (override '(nil roots))
+    (org-mcp-test--with-scope-dirs (and (eq override 'roots)
+                                        (list root))
+      (let* ((alpha (org-mcp-test--write-set-file outside "alpha.org" "alpha"))
+             (beta (org-mcp-test--write-set-file outside "sub/beta.org" "beta"))
+             (gamma (org-mcp-test--write-set-file root "gamma.org" "gamma"))
+             (org-mcp-allowed-files (list alpha beta gamma))
+             (empty (file-name-as-directory
+                     (expand-file-name "empty" outside))))
+        (org-mcp-test--write-set-file outside "stray.org" "stray")
+        (make-directory empty)
+        (should (equal (org-mcp-test--scan-files (vector outside))
+                       '("alpha" "beta")))
+        (should (equal (org-mcp-test--scan-files
+                        (vector (file-name-directory beta)))
+                       '("beta")))
         (org-mcp-test--assert-files-refused
-         (vector parent) (org-mcp-test--refused-path-regexp parent)))
-      ;; A file found under a root that links out of every root
-      ;; refuses the walk.
-      (let ((escape (expand-file-name "escape.org" root)))
-        (make-symbolic-link out escape)
-        (org-mcp-test--assert-files-refused
-         (vector root) (org-mcp-test--refused-path-regexp escape))))))
+         (vector empty) (org-mcp-test--refused-path-regexp empty))
+        ;; An unreadable directory is not read either.
+        (set-file-modes outside #o300)
+        (unwind-protect
+            (should (equal (org-mcp-test--scan-files (vector outside))
+                           '("alpha" "beta")))
+          (set-file-modes outside #o700))))))
 
 (ert-deftest org-mcp-test-file-set-walks-directory-recursively ()
   "A named directory is searched recursively for Org files.
@@ -2506,55 +2543,126 @@ Hidden files and directories are skipped, and so are an archive and
 other files, as Org skips them in a directory of `org-agenda-files'.
 A directory named like an Org file is searched, not read as a file.
 Symlinks to directories, one of them forming a cycle, are not
-followed."
+followed.  A subdirectory that cannot be read is skipped, and so is
+an Org name that is no regular file: a dangling symlink, a FIFO."
   (org-mcp-test--with-scope-dirs t
-    (let ((tree (file-name-as-directory (expand-file-name "tree" outside))))
+    (let ((tree (file-name-as-directory (expand-file-name "tree" outside)))
+          (locked (expand-file-name "locked" outside)))
       (org-mcp-test--write-set-file tree "top.org" "top")
       (org-mcp-test--write-set-file tree "a/b/deep.org" "deep")
       (org-mcp-test--write-set-file tree "old.org_archive" "archive")
       (org-mcp-test--write-set-file tree "dir.org/inner.org" "inner")
       (org-mcp-test--write-set-file tree ".hidden/secret.org" "secret")
       (org-mcp-test--write-set-file tree "notes.txt" "notes")
+      (org-mcp-test--write-set-file tree "locked/shut.org" "shut")
       (org-mcp-test--write-set-file root "elsewhere.org" "elsewhere")
       (let ((file-name-handler-alist nil))
         ;; An Emacs lock file: hidden, and a dangling symlink.
         (make-symbolic-link
          "user@host.1234:1" (expand-file-name "a/.#deep.org" tree))
         (make-symbolic-link
+         "missing.org" (expand-file-name "dangling.org" tree))
+        (make-symbolic-link
          (directory-file-name tree) (expand-file-name "a/loop" tree))
         (make-symbolic-link
          (directory-file-name root) (expand-file-name "linked" tree)))
       (should
-       (equal (org-mcp-test--scan-files (vector tree))
-              '("deep" "inner" "top"))))))
-
-(ert-deftest org-mcp-test-file-set-cap-is-an-error ()
-  "A named set over `org-mcp-max-files' is an error, never a partial result.
-The walk stops once the count passes the cap, so an unreadable
-directory sorting after the files that pass it is never opened."
-  (org-mcp-test--with-scope-dirs t
-    (let ((a (org-mcp-test--write-set-file outside "a.org" "a"))
-          (sub (file-name-as-directory (expand-file-name "sub" outside)))
-          (locked (expand-file-name "z-locked" outside)))
-      (org-mcp-test--write-set-file sub "b.org" "b")
-      (org-mcp-test--write-set-file sub "c.org" "c")
-      (let ((org-mcp-max-files 3))
-        (should
-         (equal (org-mcp-test--scan-files (vector outside)) '("a" "b" "c")))
-        ;; However often it is named, a file counts once.
-        (should
-         (equal (org-mcp-test--scan-files (vector a sub a))
-                '("a" "b" "c"))))
+       (= 0
+          (call-process
+           "mkfifo" nil nil nil (expand-file-name "pipe.org" tree))))
+      (set-file-modes (expand-file-name "locked" tree) #o000)
+      (unwind-protect
+          (should
+           (equal (org-mcp-test--scan-files (vector tree))
+                  '("deep" "inner" "top")))
+        (set-file-modes (expand-file-name "locked" tree) #o700))
+      ;; A named directory that cannot be read is refused by the name
+      ;; the call gave it.
       (make-directory locked)
       (set-file-modes locked #o000)
       (unwind-protect
-          (let ((org-mcp-max-files 2))
-            (org-mcp-test--assert-files-refused
-             (vector outside) "more than 2 Org files.*org-mcp-max-files")
-            ;; The count runs across entries.
-            (org-mcp-test--assert-files-refused
-             (vector a sub) "more than 2 Org files.*org-mcp-max-files"))
+          (org-mcp-test--assert-files-refused
+           (vector locked)
+           (concat "\\`Cannot read directory: " (regexp-quote locked) "\\'"))
         (set-file-modes locked #o700)))))
+
+(defun org-mcp-test--cap-regexp (cap)
+  "Return a regexp matching the refusal of a set over CAP."
+  (format "more than %d files and directories.*org-mcp-max-files" cap))
+
+(ert-deftest org-mcp-test-file-set-cap-is-an-error ()
+  "A named set over `org-mcp-max-files' is an error, never a partial result.
+The limit counts every file in the set and every directory searched
+for it, the named ones included."
+  (org-mcp-test--with-scope-dirs t
+    (let* ((tree (file-name-as-directory (expand-file-name "tree" outside)))
+           (a (org-mcp-test--write-set-file tree "a.org" "a"))
+           (sub (file-name-as-directory (expand-file-name "sub" tree))))
+      (org-mcp-test--write-set-file sub "b.org" "b")
+      (org-mcp-test--write-set-file sub "c.org" "c")
+      ;; tree, a.org, sub, b.org and c.org.
+      (let ((org-mcp-max-files 5))
+        (should
+         (equal (org-mcp-test--scan-files (vector tree)) '("a" "b" "c")))
+        ;; However often it is named, a file counts once.
+        (should
+         (equal (org-mcp-test--scan-files (vector a tree a))
+                '("a" "b" "c"))))
+      (let ((org-mcp-max-files 4))
+        (org-mcp-test--assert-files-refused
+         (vector tree) (org-mcp-test--cap-regexp 4)))
+      ;; sub, b.org and c.org; the count runs across entries.
+      (let ((org-mcp-max-files 3))
+        (should (equal (org-mcp-test--scan-files (vector sub)) '("b" "c")))
+        (org-mcp-test--assert-files-refused
+         (vector a sub) (org-mcp-test--cap-regexp 3))))))
+
+(ert-deftest org-mcp-test-file-set-cap-counts-empty-directories ()
+  "Directories count toward `org-mcp-max-files' even when they hold no file.
+The walk stops as soon as the count passes the limit: a file it would
+refuse, sorting after the directories, is then never reached."
+  (org-mcp-test--with-scope-dirs (list root)
+    (let ((out (org-mcp-test--write-set-file outside "out.org" "out"))
+          (escape (expand-file-name "zz-escape.org" root)))
+      (dotimes (i 30)
+        (make-directory (expand-file-name (format "d%02d" i) root)))
+      ;; root and its 30 subdirectories.
+      (let ((org-mcp-max-files 31))
+        (should (equal (org-mcp-test--scan-files (vector root)) nil)))
+      (let ((org-mcp-max-files 30))
+        (org-mcp-test--assert-files-refused
+         (vector root) (org-mcp-test--cap-regexp 30)))
+      (make-symbolic-link out escape)
+      (let ((org-mcp-max-files 31))
+        (org-mcp-test--assert-files-refused
+         (vector root) (org-mcp-test--refused-path-regexp escape)))
+      (let ((org-mcp-max-files 30))
+        (org-mcp-test--assert-files-refused
+         (vector root) (org-mcp-test--cap-regexp 30))))))
+
+(ert-deftest org-mcp-test-file-set-ignores-agenda-restriction ()
+  "An agenda restriction never widens what the set-scanning tools reach.
+While the agenda is restricted, as by `C-c a <', the function
+`org-agenda-files' returns the file of the restriction.  No tool
+working on a set of files reaches it, whether the call names files,
+names an empty set or names none, and no GTD query does."
+  (org-mcp-test--with-scope-dirs-and-gtd t
+    (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file root "beta.org" "beta"))
+           (out (org-mcp-test--write-set-file outside "out.org" "out"))
+           (empty (file-name-as-directory (expand-file-name "empty" root)))
+           (org-mcp-allowed-files (list alpha))
+           (restriction (get 'org-agenda-files 'org-restrict)))
+      (make-directory empty)
+      (unwind-protect
+          (progn
+            (put 'org-agenda-files 'org-restrict (list out))
+            (should (equal (org-mcp-test--scan-files) '("alpha")))
+            (should
+             (equal (org-mcp-test--scan-files (vector beta)) '("beta")))
+            (should (equal (org-mcp-test--scan-files (vector empty)) nil))
+            (should (equal (org-mcp-test--gtd-titles) '("alpha"))))
+        (put 'org-agenda-files 'org-restrict restriction)))))
 
 (ert-deftest org-mcp-test-file-set-does-not-carry-over ()
   "A named set lasts for its call only, also when the call fails.

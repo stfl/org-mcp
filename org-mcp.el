@@ -96,11 +96,13 @@ check, so a symlink pointing out of a root is refused."
   :group 'org-mcp)
 
 (defcustom org-mcp-max-files 1000
-  "Most Org files a call may name in its `files' parameter.
-The query tools that take `files' search the files it names, and a
-directory there counts as every Org file found under it.  A call
-naming more files is refused with an error that names this limit;
-it never searches only some of them."
+  "Most files and directories a call's `files' parameter may reach.
+The query tools that take `files' search the Org files it names.
+Each of those files counts once, and so does every directory
+searched for them, a named one included.  A call reaching more is
+refused with an error that names this limit, as soon as the count
+passes it; it never searches only some of the files, and it reads
+no more directories than this limit."
   :type 'natnum
   :group 'org-mcp)
 
@@ -299,9 +301,11 @@ The symbol `allowed' stands for the allowed files, where every call
 works unless it names a set of files itself.  For a call that does,
 `org-mcp--with-file-set' binds that set here as a list of files, and
 `org-mcp--expanded-allowed-files' returns it in place of the allowed
-files.  That macro is the only place binding this variable, and it
-binds it with `let', so the set ends with the call, even when the
-call fails, and no later call sees it.")
+files.  While `org-mcp--named-file-set', which that macro calls,
+builds the set, it binds the allowed files here instead, computed
+once.  Nothing else binds this variable, and both bind it with
+`let', so the set ends with the call, even when the call fails, and
+no later call sees it.")
 
 (defun org-mcp--expanded-allowed-files ()
   "Return the allowed files, each made absolute.
@@ -436,27 +440,38 @@ resolves to, only the allowed files are reachable."
   "Return the Org files FILES names, each one reachable by the call.
 FILES is the `files' parameter of a call: an array of paths, or a
 single path.  An entry naming a file must pass the gate,
-`org-mcp--find-allowed-file', as a file the call names.  An entry
-naming a directory must itself be permitted, by
-`org-mcp--override-permits-p' on its local truename, so a remote,
-relative or out-of-root directory is refused before anything is
-read from it.  The directory is then walked for Org files, each of
-which must pass the gate as well.  A refused entry or found file
-fails the whole call.
+`org-mcp--find-allowed-file', as a file the call names.
+
+An entry naming a directory is walked for Org files when
+`org-mcp--override-permits-p' permits the directory's local
+truename.  Otherwise, as under nil or outside every root, the
+directory is not read at all: the entry stands for the allowed files
+under it, and is refused when there are none.  A remote directory is
+never read either, since it has no local truename.
 
 The walk descends into every subdirectory except hidden ones, whose
 names start with `.', and never follows a symlink to a directory, so
-it cannot loop or leave the directory that way.  Hidden files, such
-as Emacs lock files, are skipped too.  In each directory it takes
-the files Org takes from a directory in `org-agenda-files': names
-matching `org-agenda-file-regexp', by default every `.org' file and
-no archive, and of those the ones `org-mcp--org-file-name-p' accepts.
+it cannot loop or leave the directory that way.  A subdirectory it
+cannot read is skipped; a named directory it cannot read is an
+error.  In each directory it takes the files Org takes from a
+directory in `org-agenda-files': names matching
+`org-agenda-file-regexp', by default every `.org' file and no
+archive, and of those the ones `org-mcp--org-file-name-p' accepts.
+Of those it skips what is not a regular file, such as a dangling
+symlink.  Every file it takes must pass the gate; one that does not,
+such as a symlink out of every root, fails the call with an error
+naming it as the call reaches it, the entry followed by the path
+below it, never the file the symlink resolves to.
 
-Each file is returned once.  More files than `org-mcp-max-files' is
-an error, raised as soon as the count passes it, so a large tree is
-never walked to its end first.  That is why the walk is written out
-here: `directory-files-recursively' returns only once it has walked
-the whole tree."
+The walk runs with file name handlers disabled: every name it builds
+is local, and no handler should take part in reading it.
+
+Each file is returned once.  Every directory the walk visits and
+every file returned counts toward `org-mcp-max-files', and passing
+the limit is an error raised at once, so the walk reads no more than
+that many directories.  That is why the walk is written out here:
+`directory-files-recursively' returns only once it has walked the
+whole tree."
   (let ((entries
          (cond
           ((stringp files)
@@ -464,45 +479,80 @@ the whole tree."
           ((sequencep files)
            (append files nil))))
         (found nil)
-        (count 0))
+        (count 0)
+        ;; The allowed files, computed once for the whole set, and
+        ;; never the set of an enclosing call.  The gate reads them
+        ;; from here.
+        (org-mcp--file-set
+         (let ((org-mcp--file-set 'allowed))
+           (org-mcp--expanded-allowed-files))))
     (unless (and entries (cl-every #'stringp entries))
       (org-mcp--tool-validation-error
        "files must be a non-empty array of paths"))
     (cl-labels
-     ((add
-       (file)
+     ((count-one
+       ()
+       (when (> (cl-incf count) org-mcp-max-files)
+         (org-mcp--tool-validation-error
+          "files reaches more than %d files and directories, the \
+limit set by org-mcp-max-files; name fewer files or smaller directories"
+          org-mcp-max-files)))
+      (add
+       (file locator)
+       ;; LOCATOR is FILE as the call reaches it, for the refusal.
        (let ((allowed
               (or (org-mcp--find-allowed-file file t)
-                  (org-mcp--tool-file-access-error file))))
+                  (org-mcp--tool-file-access-error locator))))
          (unless (member allowed found)
-           (when (> (cl-incf count) org-mcp-max-files)
-             (org-mcp--tool-validation-error
-              "files names more than %d Org files, the limit set by \
-org-mcp-max-files; name fewer files or smaller directories"
-              org-mcp-max-files))
+           (count-one)
            (push allowed found))))
       (walk
-       (dir)
-       (dolist (name (directory-files dir))
-         (unless (string-prefix-p "." name)
-           ;; Joined, not expanded: `expand-file-name' would
-           ;; read an entry named `~' as the home directory.
-           (let ((path (concat (file-name-as-directory dir) name)))
-             (cond
-              ((file-directory-p path)
-               (unless (file-symlink-p path)
-                 (walk path)))
-              ((and (org-mcp--org-file-name-p name)
-                    (let ((case-fold-search nil))
-                      (string-match-p org-agenda-file-regexp name)))
-               (add path))))))))
+       (dir locator named)
+       ;; DIR is local; LOCATOR is DIR as the call reaches it.
+       (count-one)
+       (let ((file-name-handler-alist nil))
+         (dolist (name
+                  (condition-case nil
+                      (directory-files dir)
+                    (file-error
+                     (when named
+                       (org-mcp--tool-validation-error
+                        "Cannot read directory: %s"
+                        locator)))))
+           (unless (string-prefix-p "." name)
+             ;; Joined, not expanded: `expand-file-name' would
+             ;; read an entry named `~' as the home directory.
+             (let ((path (concat (file-name-as-directory dir) name))
+                   (child
+                    (concat (file-name-as-directory locator) name)))
+               (cond
+                ((file-directory-p path)
+                 (unless (file-symlink-p path)
+                   (walk path child nil)))
+                ((and (org-mcp--org-file-name-p name)
+                      (let ((case-fold-search nil))
+                        (string-match-p org-agenda-file-regexp name))
+                      (file-regular-p path))
+                 (add path child)))))))))
      (dolist (entry entries)
        (let ((truename (org-mcp--local-truename entry)))
-         (if (and truename (file-directory-p truename))
-             (if (org-mcp--override-permits-p entry truename)
-                 (walk truename)
+         (cond
+          ((not (and truename (file-directory-p truename)))
+           (add entry entry))
+          ((org-mcp--override-permits-p entry truename)
+           (walk truename entry t))
+          (t
+           (let ((under
+                  (cl-remove-if-not
+                   (lambda (file)
+                     (when-let* ((file-truename
+                                  (org-mcp--local-truename file)))
+                       (file-in-directory-p file-truename truename)))
+                   org-mcp--file-set)))
+             (unless under
                (org-mcp--tool-file-access-error entry))
-           (add entry)))))
+             (dolist (file under)
+               (add file entry))))))))
     (nreverse found)))
 
 (defun org-mcp--refresh-file-buffers
@@ -604,7 +654,12 @@ disk, with each entry expanded to an absolute path (relative entries
 resolved against `org-directory').  This is the single ingress point
 that maps the org-mcp security boundary onto Org's multi-file
 convention, so tool handlers can rely on `org-agenda-files' instead
-of re-implementing the filter."
+of re-implementing the filter.
+
+BODY passes the variable to Org explicitly and never lets Org read
+it through the function `org-agenda-files': while the agenda is
+restricted, as by `org-agenda-set-restriction-lock', that function
+returns the file of the restriction, not the binding."
   (declare (indent 0) (debug (body)))
   `(let ((org-agenda-files
           (cl-remove-if-not
@@ -2028,9 +2083,14 @@ MCP Parameters:
   (org-mcp--with-file-set files
     (let* ((table
             (append
-             (org-global-tags-completion-table)
-             org-tag-alist
-             org-tag-persistent-alist))
+             ;; The files are passed explicitly, and none means no
+             ;; call: given none, Org takes them from the function
+             ;; `org-agenda-files', which while the agenda is
+             ;; restricted returns the file it is restricted to,
+             ;; whether or not the call may reach it.
+             (and org-agenda-files
+                  (org-global-tags-completion-table org-agenda-files))
+             org-tag-alist org-tag-persistent-alist))
            (tags
             (delete-dups
              (delq
@@ -3597,14 +3657,18 @@ Parameters:
           strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are used.  Each entry is an absolute path to
-          an Org file, or to a directory, which is searched
-          recursively for the Org files Org takes from a directory
-          in org-agenda-files (by default every .org file, no
-          archive), skipping hidden files and directories and not
-          following symlinked directories.  An entry outside the allowed files is
-          accepted only as far as org-mcp-file-scope-override
-          permits; see org-get-allowed-files.  Naming more than
-          org-mcp-max-files files in total is an error.
+          an Org file or a directory.  A file outside the allowed
+          files is accepted only as far as
+          org-mcp-file-scope-override permits; see
+          org-get-allowed-files.  A directory the setting permits is
+          searched recursively for the Org files Org takes from a
+          directory in org-agenda-files (by default every .org file,
+          no archive), skipping hidden and unreadable directories,
+          symlinked directories and anything not a regular file.
+          Any other directory is not read: it stands for the allowed
+          files under it, and is refused when there are none.  More
+          than org-mcp-max-files files and searched directories in
+          total is an error, never a partial result.
 
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
@@ -4165,15 +4229,18 @@ Parameters:
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.  Each entry is an absolute path
-          to an Org file, or to a directory, which is searched
-          recursively for the Org files Org takes from a directory
-          in org-agenda-files (by default every .org file, no
-          archive), skipping hidden files and directories and not
-          following symlinked directories.  An entry outside the allowed files is
-          accepted only as far as org-mcp-file-scope-override
-          permits; see org-get-allowed-files.  Naming more than
-          org-mcp-max-files files in total is an error, never a
-          partial search.
+          to an Org file or a directory.  A file outside the allowed
+          files is accepted only as far as
+          org-mcp-file-scope-override permits; see
+          org-get-allowed-files.  A directory the setting permits is
+          searched recursively for the Org files Org takes from a
+          directory in org-agenda-files (by default every .org file,
+          no archive), skipping hidden and unreadable directories,
+          symlinked directories and anything not a regular file.
+          Any other directory is not read: it stands for the allowed
+          files under it, and is refused when there are none.  More
+          than org-mcp-max-files files and searched directories in
+          total is an error, never a partial search.
 
 Returns JSON object:
   matches - Array of matched entries, each with:
@@ -4449,14 +4516,18 @@ Parameters:
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.  Each entry is an absolute path
-          to an Org file, or to a directory, which is searched
-          recursively for the Org files Org takes from a directory
-          in org-agenda-files (by default every .org file, no
-          archive), skipping hidden files and directories and not
-          following symlinked directories.  An entry outside the allowed files is
-          accepted only as far as org-mcp-file-scope-override
-          permits; see org-get-allowed-files.  Naming more than
-          org-mcp-max-files files in total is an error.
+          to an Org file or a directory.  A file outside the allowed
+          files is accepted only as far as
+          org-mcp-file-scope-override permits; see
+          org-get-allowed-files.  A directory the setting permits is
+          searched recursively for the Org files Org takes from a
+          directory in org-agenda-files (by default every .org file,
+          no archive), skipping hidden and unreadable directories,
+          symlinked directories and anything not a regular file.
+          Any other directory is not read: it stands for the allowed
+          files under it, and is refused when there are none.  More
+          than org-mcp-max-files files and searched directories in
+          total is an error, never a partial search.
 
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
