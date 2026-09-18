@@ -2346,51 +2346,77 @@ MCP Parameters:
 
 ;; Resource handlers
 
-(defun org-mcp--handle-outline-resource (params)
-  "Handler for org-outline://{filename} template.
-PARAMS is an alist containing the filename parameter."
-  (let* ((filename (alist-get "filename" params nil nil #'string=))
-         (allowed-file (org-mcp--validate-file-access filename))
-         (outline
-          (org-mcp--generate-outline
-           (expand-file-name allowed-file))))
-    (json-encode outline)))
+(defun org-mcp--read-structured (address)
+  "Return structured JSON for what ADDRESS points to.
+ADDRESS is a native Org link, read through `org-mcp--read-link', or a
+bare address: an absolute path, a path with an outline path after
+`#', or an ID.  The org-read tool and the org://{link} resource both
+read through here, so they resolve an address the same way."
+  (if (org-mcp--link-p address)
+      (org-mcp--read-link
+       address
+       (lambda () (json-encode (org-mcp--extract-structured-heading)))
+       (lambda (file)
+         (json-encode (org-mcp--extract-structured-file file))))
+    (let ((parsed (org-mcp--detect-uri-type address)))
+      (pcase (plist-get parsed :type)
+        (`id
+         (let* ((uuid (plist-get parsed :uuid))
+                (file-path (org-id-find-id-file uuid)))
+           (unless file-path
+             (org-mcp--resource-not-found-error "ID" uuid))
+           (let ((allowed-file
+                  (org-mcp--find-allowed-file file-path)))
+             (unless allowed-file
+               (org-mcp--resource-file-access-error uuid))
+             (org-mcp--with-org-file allowed-file
+               (when-let* ((pos (org-find-property "ID" uuid)))
+                 (goto-char pos)
+                 (json-encode
+                  (org-mcp--extract-structured-heading)))))))
+        (`headline
+         (let* ((file (plist-get parsed :file))
+                (headline-path (plist-get parsed :headline-path))
+                (allowed-file (org-mcp--validate-file-access file)))
+           (org-mcp--with-org-file allowed-file
+             (if (org-mcp--navigate-to-headline headline-path)
+                 (json-encode (org-mcp--extract-structured-heading))
+               (org-mcp--resource-not-found-error
+                "Headline"
+                (mapconcat #'identity headline-path "/"))))))
+        (`file
+         (let ((allowed-file
+                (org-mcp--validate-file-access
+                 (plist-get parsed :file))))
+           (json-encode
+            (org-mcp--extract-structured-file allowed-file))))))))
 
 (defun org-mcp--handle-org-resource (params)
-  "Handler for org://{uri} template with auto-detection.
-PARAMS is an alist containing the uri parameter.
-Returns structured JSON for files and headlines."
-  (let* ((uri (alist-get "uri" params nil nil #'string=))
-         (parsed (org-mcp--detect-uri-type uri)))
-    (pcase (plist-get parsed :type)
-      (`id
-       (let* ((uuid (plist-get parsed :uuid))
-              (file-path (org-id-find-id-file uuid)))
-         (unless file-path
-           (org-mcp--resource-not-found-error "ID" uuid))
-         (let ((allowed-file (org-mcp--find-allowed-file file-path)))
-           (unless allowed-file
-             (org-mcp--resource-file-access-error uuid))
-           (org-mcp--with-org-file allowed-file
-             (when-let* ((pos (org-find-property "ID" uuid)))
-               (goto-char pos)
-               (json-encode
-                (org-mcp--extract-structured-heading)))))))
-      (`headline
-       (let* ((file (plist-get parsed :file))
-              (headline-path (plist-get parsed :headline-path))
-              (allowed-file (org-mcp--validate-file-access file)))
-         (org-mcp--with-org-file allowed-file
-           (if (org-mcp--navigate-to-headline headline-path)
-               (json-encode (org-mcp--extract-structured-heading))
-             (org-mcp--resource-not-found-error
-              "Headline" (mapconcat #'identity headline-path "/"))))))
-      (`file
-       (let ((allowed-file
-              (org-mcp--validate-file-access
-               (plist-get parsed :file))))
-         (json-encode
-          (org-mcp--extract-structured-file allowed-file)))))))
+  "Handler for the org://{link} template.
+PARAMS holds `link', the rest of the URI after `org://' as the client
+sent it: mcp-server-lib does not decode template variables.  Its
+percent-encoding is undone here, exactly once.  The bytes are decoded
+as UTF-8 afterwards, so a URI that mixes raw non-ASCII characters with
+encoded ones decodes to the same link.
+
+A native Org link is then read as the org-read tool reads it, and a
+tool error, such as the refusal of a link, becomes a resource error
+with the same message.  A bare address is read as sent, because its
+outline path decodes its own titles."
+  (let* ((raw (alist-get "link" params nil nil #'string=))
+         (link
+          (decode-coding-string
+           (url-unhex-string
+            (encode-coding-string raw 'utf-8))
+           'utf-8)))
+    (condition-case err
+        (org-mcp--read-structured
+         (if (org-mcp--link-p link)
+             link
+           raw))
+      (mcp-server-lib-tool-error
+       (mcp-server-lib-resource-signal-error
+        mcp-server-lib-jsonrpc-error-invalid-params (cadr err))))))
 
 (defun org-mcp--handle-headline-resource (params)
   "Handler for org-read-headline tool with auto-detection.
@@ -3143,7 +3169,7 @@ Returns: Same format as org-ql-query tool, sorted by
     (org-mcp--run-gtd-query
      (funcall org-mcp-query-backlog-fn tag-filter))))
 
-;; Tools duplicating resource templates
+;; Read tools
 
 (defun org-mcp--tool-read (uri)
   "Tool handler for org-read.
@@ -3166,21 +3192,17 @@ MCP Parameters:
         - /path/to/file.org#Headline/Subhead (headline path)
         - UUID (8-4-4-4-12 format)"
   (org-mcp--reject-uri-prefix uri)
-  (if (org-mcp--link-p uri)
-      (org-mcp--read-link
-       uri
-       (lambda () (json-encode (org-mcp--extract-structured-heading)))
-       (lambda (file)
-         (json-encode (org-mcp--extract-structured-file file))))
-    (org-mcp--handle-org-resource `(("uri" . ,uri)))))
+  (org-mcp--read-structured uri))
 
 (defun org-mcp--tool-read-outline (file)
-  "Tool wrapper for org-outline://{filename} resource template.
+  "Tool handler for org-read-outline.
 FILE is the absolute path to an Org file.
 
 MCP Parameters:
   file - Absolute path to an Org file"
-  (org-mcp--handle-outline-resource `(("filename" . ,file))))
+  (json-encode
+   (org-mcp--generate-outline
+    (expand-file-name (org-mcp--validate-file-access file)))))
 
 (defun org-mcp--tool-read-headline (uri)
   "Tool handler for org-read-headline.
@@ -4172,14 +4194,17 @@ org-mcp-file-scope-override."
    :id "org-read-outline"
    :description
    "Get hierarchical structure of Org file as JSON outline. Returns
-   all headline titles and nesting relationships at full depth. File
-   must be in the allowed files, or permitted by
-   org-mcp-file-scope-override.
+   the titles of the top-level headlines and of their direct
+   children; deeper headlines are left out. File must be in the
+   allowed files, or permitted by org-mcp-file-scope-override.
 
 Parameters:
   file - Absolute path to Org file (string, required)
 
-Returns: JSON object with hierarchical outline structure"
+Returns: JSON object with hierarchical outline structure:
+  headings - Array of top-level headlines, each with title, level
+             and children (its level-2 headlines, whose children
+             arrays are empty)"
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4538,19 +4563,35 @@ Returns JSON object:
    :read-only t
    :server-id org-mcp--server-id)
 
-  ;; Register template resources for org files
+  ;; Register the template resource for org files
   (mcp-server-lib-register-resource
-   "org://{uri}" #'org-mcp--handle-org-resource
+   "org://{link}" #'org-mcp--handle-org-resource
    :name "Org resource (structured JSON)"
    :description
-   "Access Org file or headline with structured JSON output.
-Auto-detects URI format and returns structured data.
+   "Read an Org file or heading as structured JSON.  The URI is
+org:// followed by a native Org link, the same address the org-read
+tool takes, percent-encoded as in any URI.
 
-URI format: org://{uri}
-  uri - Can be one of:
-    - /path/to/file.org - file path
-    - /path/to/file.org#Headline/Subhead - headline path
-    - UUID (8-4-4-4-12 format) - ID-based lookup
+URI format: org://{link}
+  link - A native Org link, bare or as [[link]] or
+         [[link][description]]:
+    - id:{id} - heading with that ID
+    - file:/path/to/file.org::#{custom-id} - heading with that
+      CUSTOM_ID
+    - file:/path/to/file.org::*{title} - first heading with that
+      title
+    - file:/path/to/file.org - whole file
+    Encode at least % as %25, # as %23, ? as %3F, spaces, [ and ].
+    The link is decoded exactly once, so a literal % in a title is
+    sent as %25: *50%25%20Done reads the heading \"50% Done\".
+  The bare forms /path/to/file.org, /path/to/file.org#Headline/Sub
+  and a UUID are accepted as well; they are not decoded as a whole,
+  only the titles of an outline path are.
+
+Examples:
+  org://id:550e8400-e29b-41d4-a716-446655440000
+  org://file:/home/user/org/projects.org::%23alpha
+  org://file:/home/user/org/projects.org::*Project%20Alpha
 
 Returns: JSON object with structured data:
   For files:
@@ -4571,51 +4612,9 @@ Returns: JSON object with structured data:
     content - Body text (if present)
     children - Array of direct children (title, todo, level, uri)
 
-File must be in the allowed files, or permitted by
+A link resolves, and is refused, exactly as in the org-read tool.
+The file must be in the allowed files, or permitted by
 org-mcp-file-scope-override."
-   :mime-type "application/json"
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-resource
-   "org-outline://{filename}" #'org-mcp--handle-outline-resource
-   :name "Org file outline"
-   :description
-   "Get the hierarchical structure of an Org file as a JSON
-outline.  Extracts headline titles and their nesting relationships up
-to 2 levels deep.
-
-URI format: org-outline://{filename}
-  filename - Absolute path to the Org file (required)
-
-Returns: JSON object with structure:
-  {
-    \"headings\": [
-      {
-        \"title\": \"Top-level heading\",
-        \"level\": 1,
-        \"children\": [
-          {
-            \"title\": \"Subheading\",
-            \"level\": 2,
-            \"children\": []
-          }
-        ]
-      }
-    ]
-  }
-
-Depth limitation:
-  - Level 1 headings (top-level) are extracted
-  - Level 2 headings (direct children) are included
-  - Deeper levels are not included (children arrays are empty)
-
-Example URIs:
-  org-outline:///home/user/notes/tasks.org
-  org-outline:///Users/name/Documents/projects.org
-
-Use this resource to:
-  - Get document structure overview
-  - Understand file organization without reading full content"
    :mime-type "application/json"
    :server-id org-mcp--server-id))
 
@@ -4676,11 +4675,9 @@ Use this resource to:
    "org-clock-delete" org-mcp--server-id)
   (mcp-server-lib-unregister-tool
    "org-clock-find-dangling" org-mcp--server-id)
-  ;; Unregister template resources
+  ;; Unregister the template resource
   (mcp-server-lib-unregister-resource
-   "org://{uri}" org-mcp--server-id)
-  (mcp-server-lib-unregister-resource
-   "org-outline://{filename}" org-mcp--server-id))
+   "org://{link}" org-mcp--server-id))
 
 ;;; Script Installation
 

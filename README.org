@@ -216,28 +216,48 @@ To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 
 ** Available MCP Resources
 
-*Note:* File paths in URIs use minimal encoding (only =#= characters are encoded). Avoid using =%= characters in Org file names.
-
-*** org://{uri}
-- *Description:* Access Org files or headlines with structured JSON (auto-detects URI type)
-- *URI Pattern:* =org://{uri}= where uri can be:
-  - Absolute file path (e.g., =/home/user/org/projects.org=)
-  - File path with headline path (e.g., =/home/user/org/projects.org#Project%20Alpha=)
-  - UUID (e.g., =550e8400-e29b-41d4-a716-446655440000=)
+*** org://{link}
+- *Description:* Read an Org file or heading as structured JSON, the same data
+  =org-read= returns for the same link
+- *URI Pattern:* =org://{link}=, where link is a native Org link (see
+  [[*Addressing headings with links]]), bare or bracketed, with or without a
+  description. The link resolves, and is refused, exactly as it is in
+  =org-read=, and a refusal carries the same message.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* Structured JSON with file or headline data including metadata
 
+The link is percent-encoded like any URI path, and org-mcp decodes it exactly
+once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
+=%3F=, spaces, =[= and =]=; encoding more, as =encodeURIComponent= does, works
+as well. Non-ASCII characters may be sent encoded as UTF-8 or raw. A literal
+=%= in a title is sent as =%25=, so =%41= in a title is sent as =%2541=.
+
+| Link                                                         | Resource URI                                                                     |
+|--------------------------------------------------------------+----------------------------------------------------------------------------------|
+| =id:550e8400-e29b-41d4-a716-446655440000=                    | =org://id:550e8400-e29b-41d4-a716-446655440000=                                  |
+| =file:/home/user/org/projects.org::#alpha=                   | =org://file:/home/user/org/projects.org::%23alpha=                               |
+| =file:/home/user/org/projects.org::*50% Done=                | =org://file:/home/user/org/projects.org::*50%25%20Done=                          |
+| =[[id:550e8400-e29b-41d4-a716-446655440000][Project Alpha]]= | =org://%5B%5Bid:550e8400-e29b-41d4-a716-446655440000%5D%5BProject%20Alpha%5D%5D= |
+| =file:/home/user/org/Ärger.org::*Größe=                      | =org://file:/home/user/org/%C3%84rger.org::*Gr%C3%B6%C3%9Fe=                     |
+
+The resource also takes the bare forms the tools take:
+=org:///home/user/org/projects.org=,
+=org:///home/user/org/projects.org#Project%20Alpha= and
+=org://550e8400-e29b-41d4-a716-446655440000=. A bare form is not decoded as a
+whole; only the titles of its outline path are, and a =#= in its file name is
+sent as =%23=. Avoid =%= in the names of files addressed this way.
+
 *Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
-the MCP /resource/ layer — it is the URI scheme used by the
-=org://{uri}= resource template above. Tool calls (e.g. =org-read=,
+the MCP /resource/ layer — it is the URI scheme of the =org://{link}=
+resource template above. Tool calls (e.g. =org-read=,
 =org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
 take their =uri= parameter as a native Org link (see
 [[*Addressing headings with links]]) or in *bare* form — a UUID, file
-path, or =file#headline= descriptor — *without* the =org://= prefix.
-A prefixed input is rejected with a validation error. Tool /responses/
-still emit fully-qualified =org://{uri}= URIs in their =uri= fields,
-so a returned URI is directly usable as a resource identifier (just
-strip the prefix if you want to feed it back into another tool).
+path, or =file#headline= descriptor — *without* the =org://= prefix
+and without percent-encoding. A prefixed input is rejected with a
+validation error. Tool /responses/ emit =org://= URIs in their =uri=
+fields, which the resource reads as they are (strip the prefix to feed
+one back into another tool).
 
 Example response for a headline:
 #+begin_src json
@@ -831,14 +851,13 @@ Each function is called at point with no arguments during result extraction.  No
 
 ** Read Tools
 
-These read-only tools mirror the resource templates above as model-invokable
-tools. Resource templates (=org://{uri}=, =org-outline://{filename}=) are
-/application-controlled/: they are surfaced through the MCP client's
-@-mention / resource picker UI and require the user (or client heuristics) to
-select them. Tools, by contrast, are /model-controlled/: the LLM can invoke
-them directly without user mediation. =org-read= and =org-read-outline= cover
-the same data as their matching resource templates; =org-read-headline= is a
-tool-only plain-text variant with no resource-template counterpart.
+These read-only tools let the model read what the resource above serves. The
+=org://{link}= resource is /application-controlled/: it is surfaced through
+the MCP client's @-mention / resource picker UI and requires the user (or
+client heuristics) to select it. Tools, by contrast, are /model-controlled/:
+the LLM can invoke them directly without user mediation. =org-read= returns
+the same data as the resource for the same link; =org-read-outline= and
+=org-read-headline= are tool-only variants with no resource counterpart.
 
 *** org-read
 - *Description:* Read Org file or headline with structured JSON output (auto-detects URI format)
@@ -872,7 +891,8 @@ Example response for a headline:
 - *Description:* Get hierarchical structure of an Org file as JSON outline
 - *Parameters:*
   - =file= (string, required): Absolute path to an Org file
-- *Returns:* JSON object with hierarchical outline structure
+- *Returns:* JSON object with hierarchical outline structure: the titles of the
+  top-level headings and of their direct children; deeper headings are left out
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 *** org-read-headline

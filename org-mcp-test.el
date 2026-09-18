@@ -2766,21 +2766,18 @@ BODY-WITH-HEADLINE is the body containing invalid headline."
        test-file "Test Task" "TODO" '("work") body-with-headline parent-uri))))
 
 (ert-deftest org-mcp-test-file-resource-template-in-list ()
-  "Test that file template appears in resources/templates/list."
-  (let ((org-mcp-allowed-files '("test.org")))
-    (org-mcp-test--with-enabled
-      (let ((templates
-             (mcp-server-lib-ert-get-resource-templates-list)))
-        ;; Check that we have two templates now (org://, org-outline://)
-        (should (= (length templates) 2))
-        ;; Check that we have all templates
-        (let ((template-uris
-               (mapcar
-                (lambda (template)
-                  (alist-get 'uriTemplate template))
-                (append templates nil))))
-          (should (member "org://{uri}" template-uris))
-          (should (member "org-outline://{filename}" template-uris)))))))
+  "The only resource template is org://{link}; org-outline:// is gone."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-nested-siblings))
+    (should
+     (equal
+      (mapcar
+       (lambda (template) (alist-get 'uriTemplate template))
+       (append (mcp-server-lib-ert-get-resource-templates-list) nil))
+      '("org://{link}")))
+    (let ((uri (concat "org-outline://" test-file)))
+      (org-mcp-test--read-resource-expecting-error
+       uri (format "Resource not found: %s" uri)))))
 
 (defun org-mcp-test--assert-add-todo-invalid-title (invalid-title)
   "Assert that adding TODO with INVALID-TITLE throws an error.
@@ -2844,10 +2841,8 @@ NEW-TITLE is the invalid new title that should be rejected."
             (should (equal (alist-get 'title child) "Test Heading"))
             (should (= (alist-get 'level child) 1))))))))
 
-(ert-deftest org-mcp-test-outline-resource-returns-structure ()
-  "Test that outline resource returns document structure."
-  (let ((test-content
-         "* First Section
+(defconst org-mcp-test--content-outline-depth
+  "* First Section
 Some content here.
 ** Subsection 1.1
 More content.
@@ -2856,55 +2851,36 @@ Even more content.
 * Second Section
 Content of second section.
 *** Deep subsection
-Very deep content."))
-    (org-mcp-test--with-temp-org-files
-        ((test-file test-content))
-      (let* ((uri (format "org-outline://%s" test-file))
-             (request
-              (mcp-server-lib-create-resources-read-request uri))
-             (response-json
-              (mcp-server-lib-process-jsonrpc request mcp-server-lib-ert-server-id))
-             (response
-              (json-parse-string response-json
-                                 :object-type 'alist))
-             (result (alist-get 'result response))
-             (contents (alist-get 'contents result)))
-        ;; Check if we have an error instead of result
-        (when (alist-get 'error response)
-          (error
-           "Resource request failed: %s"
-           (alist-get 'message (alist-get 'error response))))
-        (let* ((outline-json (alist-get 'text (aref contents 0)))
-               (outline
-                (json-parse-string outline-json
-                                   :object-type 'alist))
-               (headings (alist-get 'headings outline)))
-          ;; Check we have the right number of top-level headings
-          (should (= (length headings) 2))
-          ;; Check first heading
-          (let ((first (aref headings 0)))
-            (should
-             (equal (alist-get 'title first) "First Section"))
-            (should (= (alist-get 'level first) 1))
-            ;; Check children of first heading
-            (let ((children (alist-get 'children first)))
-              (should (= (length children) 2))
-              (should
-               (equal
-                (alist-get 'title (aref children 0))
-                "Subsection 1.1"))
-              (should
-               (equal
-                (alist-get 'title (aref children 1))
-                "Subsection 1.2"))))
-          ;; Check second heading
-          (let ((second (aref headings 1)))
-            (should
-             (equal (alist-get 'title second) "Second Section"))
-            (should (= (alist-get 'level second) 1))
-            ;; Deep subsection is empty (level 3 under level 1)
-            (should
-             (= (length (alist-get 'children second)) 0))))))))
+Very deep content."
+  "Two top-level sections, one with level-2 children, one with a level 3.")
+
+(ert-deftest org-mcp-test-tool-read-outline-depth ()
+  "org-read-outline returns top-level headings and their level-2 children."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-outline-depth))
+    (let ((headings
+           (alist-get
+            'headings (org-mcp-test--call-read-outline test-file))))
+      ;; Check we have the right number of top-level headings
+      (should (= (length headings) 2))
+      ;; Check first heading
+      (let ((first (aref headings 0)))
+        (should (equal (alist-get 'title first) "First Section"))
+        (should (= (alist-get 'level first) 1))
+        ;; Check children of first heading
+        (let ((children (alist-get 'children first)))
+          (should (= (length children) 2))
+          (should
+           (equal (alist-get 'title (aref children 0)) "Subsection 1.1"))
+          (should
+           (equal
+            (alist-get 'title (aref children 1)) "Subsection 1.2"))))
+      ;; Check second heading
+      (let ((second (aref headings 1)))
+        (should (equal (alist-get 'title second) "Second Section"))
+        (should (= (alist-get 'level second) 1))
+        ;; Deep subsection is left out (level 3 under level 1)
+        (should (= (length (alist-get 'children second)) 0))))))
 
 (ert-deftest org-mcp-test-file-not-in-allowed-list-returns-error ()
   "Test that reading a file not in allowed list returns an error."
@@ -8351,6 +8327,225 @@ the test compares."
                test-file
                org-mcp-test--expected-regex-renamed-second-child)))
         (kill-buffer buf)))))
+
+;;; Resource tests
+
+(defconst org-mcp-test--encoded-titles
+  '("Budget? 50% of Q1 [draft] :: Ärger/Größe #3" "Literal %41 and %25")
+  "Titles holding characters a URI must percent-encode.
+The second holds `%41' and `%25', which a second decoding would turn
+into `A' and `%'.")
+
+(defconst org-mcp-test--content-encoded-titles
+  (format "* %s\nBudget body.\n* %s\nLiteral body.\n"
+          (nth 0 org-mcp-test--encoded-titles)
+          (nth 1 org-mcp-test--encoded-titles))
+  "Org file whose headings carry `org-mcp-test--encoded-titles'.")
+
+(defun org-mcp-test--resource-uris (link)
+  "Return org:// URIs for LINK, spelled as different clients spell them.
+The first encodes only what a URI path may not hold, and `%'.  The
+second encodes all but the unreserved characters, as JavaScript's
+encodeURIComponent does.  The third is the first with its non-ASCII
+characters left raw."
+  (let ((path-chars (copy-sequence url-path-allowed-chars)))
+    (aset path-chars ?% nil)
+    (list
+     (concat "org://" (url-hexify-string link path-chars))
+     (concat "org://" (url-hexify-string link))
+     (concat
+      "org://"
+      (mapconcat
+       (lambda (char)
+         (if (> char 127)
+             (string char)
+           (url-hexify-string (string char) path-chars)))
+       link "")))))
+
+(defun org-mcp-test--read-resource (uri)
+  "Read the resource at URI and return its text, failing on an error."
+  (let ((response
+         (mcp-server-lib-process-jsonrpc-parsed
+          (mcp-server-lib-create-resources-read-request uri)
+          mcp-server-lib-ert-server-id)))
+    (should-not (alist-get 'error response))
+    (alist-get 'text (aref (alist-get 'contents (alist-get 'result response)) 0))))
+
+(defun org-mcp-test--resource-error (uri)
+  "Read the resource at URI expecting an invalid-params error.
+Return the error message."
+  (let ((error-object
+         (alist-get
+          'error
+          (mcp-server-lib-process-jsonrpc-parsed
+           (mcp-server-lib-create-resources-read-request uri)
+           mcp-server-lib-ert-server-id))))
+    (should error-object)
+    (should
+     (equal (alist-get 'code error-object) mcp-server-lib-jsonrpc-error-invalid-params))
+    (alist-get 'message error-object)))
+
+(ert-deftest org-mcp-test-resource-reads-every-link-form ()
+  "The resource reads every address org-read takes and changes nothing.
+Each native link is sent raw and in each spelling of
+`org-mcp-test--resource-uris', each bare address raw, and every read
+returns what org-read returns for the same address.  The reads run
+once with no buffer on the file and once with one; the file stays
+byte-for-byte unchanged and the buffer unmodified."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+      (list org-mcp-test--link-beta-id)
+    (let ((before (org-mcp-test--read-file-raw test-file))
+          (links
+           (list
+            (format "id:%s" org-mcp-test--link-beta-id)
+            (format "[[id:%s]]" org-mcp-test--link-beta-id)
+            (format "[[id:%s][Beta]]" org-mcp-test--link-beta-id)
+            (format "id:%s::*Review" org-mcp-test--link-beta-id)
+            (format "file:%s::#alpha-slug" test-file)
+            (format "[[file:%s::#alpha-slug][Alpha]]" test-file)
+            (format "file:%s::*Gamma" test-file)
+            (format "[[file:%s::*Gamma]]" test-file)
+            (format "file:%s::10" test-file)
+            (format "file:%s" test-file)
+            (format "[[file:%s][Links]]" test-file)))
+          (bare
+           (list
+            org-mcp-test--link-beta-id
+            test-file
+            (format "%s#Alpha/Review" test-file))))
+      (dolist (visiting '(nil t))
+        (let ((buf (and visiting (find-file-noselect test-file))))
+          (unwind-protect
+              (progn
+                (dolist (link links)
+                  (let ((expected (org-mcp-test--call-read link)))
+                    (dolist (uri
+                             (cons
+                              (concat "org://" link)
+                              (org-mcp-test--resource-uris link)))
+                      (should
+                       (equal
+                        (cons uri (org-mcp-test--read-resource uri))
+                        (cons uri expected))))))
+                (dolist (address bare)
+                  (should
+                   (equal
+                    (org-mcp-test--read-resource (concat "org://" address))
+                    (org-mcp-test--call-read address))))
+                (should
+                 (string= (org-mcp-test--read-file-raw test-file) before))
+                (when buf
+                  (should-not (buffer-modified-p buf))))
+            (when buf
+              (kill-buffer buf))))))))
+
+(ert-deftest org-mcp-test-resource-decodes-link-once ()
+  "The resource undoes the URI's percent-encoding exactly once.
+The file name and the titles hold characters a URI must encode: a
+space, `?', `#', `%', `[', `]', `::', `/' and non-ASCII letters.  The
+file name and the second title also hold `%41' and `%25', which a
+second decoding would turn into `A' and `%'.  Every spelling of
+`org-mcp-test--resource-uris' reads the heading org-read reads for the
+same link.  Sent without encoding, `%41' and `%25' are percent
+escapes, so the URI names another file, and the resource refuses it as
+org-read refuses that file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-encoded-titles "org-mcp-test ä#%41"))
+    (dolist (title org-mcp-test--encoded-titles)
+      (let* ((link (format "file:%s::*%s" test-file title))
+             (expected (org-mcp-test--call-read link)))
+        (should
+         (equal (alist-get 'title (json-read-from-string expected)) title))
+        (dolist (uri (org-mcp-test--resource-uris link))
+          (should
+           (equal
+            (cons uri (org-mcp-test--read-resource uri))
+            (cons uri expected))))))
+    (let ((decoded
+           (format "file:%s::*Literal A and %%"
+                   (string-replace "%41" "A" test-file))))
+      (should
+       (equal
+        (org-mcp-test--resource-error
+         (format "org://file:%s::*%s"
+                 test-file (nth 1 org-mcp-test--encoded-titles)))
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-read" `((uri . ,decoded))))))))
+
+(ert-deftest org-mcp-test-resource-bare-outline-path-decoded-once ()
+  "A bare outline path on the resource decodes each title once, as org-read does.
+`%2F' is a slash inside the title Parent/Child, not a separator
+between Parent and Child."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-slash-not-nested-before))
+    (let* ((address (format "%s#Parent%%2FChild" test-file))
+           (expected (org-mcp-test--call-read address)))
+      (should
+       (equal (alist-get 'title (json-read-from-string expected)) "Parent/Child"))
+      (should
+       (equal (org-mcp-test--read-resource (concat "org://" address)) expected)))))
+
+(ert-deftest org-mcp-test-resource-refuses-as-tools-do ()
+  "The resource refuses a link with the message the read tools give.
+The links run code or open something, name no local file by its full
+path, search by regexp, or name what the call may not reach: a file
+outside the allowed files, a missing file, an ID in a file outside
+them and an unknown ID.  Each goes to org-read and org-read-headline,
+which refuse it with the same message, and in each spelling of
+`org-mcp-test--resource-uris' to the resource, which answers with an
+invalid-params error carrying that message.  Nothing runs, no file is
+opened or changed, and the remote path opens no connection."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links)
+       (other-file org-mcp-test--content-links))
+    (org-mcp-test--with-id-tracking
+        (list test-file)
+        `((,org-mcp-test--link-beta-id . ,other-file))
+      (let ((canary
+             (expand-file-name "org-mcp-test-link-canary"
+                               (file-name-directory test-file)))
+            (org-mcp-test--link-canary nil)
+            (other-before (org-mcp-test--read-file-raw other-file)))
+        (unwind-protect
+            (org-mcp-test--with-remote-probe ops
+              (dolist (link
+                       (list
+                        (format "shell:touch %s" canary)
+                        (format "[[shell:touch %s][Gamma]]" canary)
+                        "elisp:(setq org-mcp-test--link-canary t)"
+                        "https://example.com/notes.org"
+                        "help:org-link-open"
+                        (format "file+sys:%s::*Gamma" test-file)
+                        (format "file:%s::*Gamma" (file-name-nondirectory test-file))
+                        "[[#alpha-slug]]"
+                        "*Gamma"
+                        (format "file:%s::*Task" (car (org-mcp-test--remote-spellings)))
+                        (format "file:%s::/Gam.*/" test-file)
+                        (format "file:%s::*Gamma" other-file)
+                        (format "file:%s.missing.org::*Gamma" test-file)
+                        (format "id:%s" org-mcp-test--link-beta-id)
+                        "id:no-such-id"))
+                (let ((message
+                       (org-mcp-test--call-tool-expecting-error
+                        test-file "org-read" `((uri . ,link)))))
+                  (should
+                   (equal
+                    (org-mcp-test--call-tool-expecting-error
+                     test-file "org-read-headline" `((uri . ,link)))
+                    message))
+                  (dolist (uri (org-mcp-test--resource-uris link))
+                    (should
+                     (equal
+                      (cons uri (org-mcp-test--resource-error uri))
+                      (cons uri message))))))
+              (should (null ops)))
+          (when (file-exists-p canary)
+            (delete-file canary)))
+        (should-not org-mcp-test--link-canary)
+        (should-not (file-exists-p canary))
+        (should-not (find-buffer-visiting other-file))
+        (should
+         (string= (org-mcp-test--read-file-raw other-file) other-before))))))
 
 ;;; Script installation tests
 
