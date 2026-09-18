@@ -313,24 +313,33 @@ nil, with file name handlers disabled, so TRAMP takes no part.
 Expansion collapses `.', `..', `~' and a relative name the way
 every later file operation would, and `file-remote-p' checks the
 result: `/tmp/../ssh:host:/x.org' is remote only once collapsed.
+
+A `/:' quote on NAME is removed first.  Without handlers `/:' would
+be an ordinary directory, while every later operation, handlers
+enabled, removes it and reaches another file.  A name still quoted
+after expansion is refused, as NAME is then no plain file name.
 Callers use the returned name from here on, never NAME itself."
   (let ((expanded
          (let ((file-name-handler-alist nil))
-           (expand-file-name name dir))))
-    (unless (file-remote-p expanded)
+           (expand-file-name (file-name-unquote name) dir))))
+    (unless (or (file-name-quoted-p expanded t)
+                (file-remote-p expanded))
       expanded)))
 
 (defun org-mcp--local-truename (name &optional dir)
   "Return the truename of NAME, or nil when NAME or its target is remote.
 NAME is made absolute by `org-mcp--local-file-name' against DIR.
 Symlinks are then followed with file name handlers disabled, so a
-local link whose target is a TRAMP name is never handed to TRAMP,
-and the resolved name is checked with `file-remote-p' again."
+local link whose target is a TRAMP name is never handed to TRAMP.
+The resolved name is refused when it is remote, or quoted with
+`/:', since a quoted link target is followed no further here but
+would be once handlers are back."
   (when-let* ((local (org-mcp--local-file-name name dir))
               (truename
                (let ((file-name-handler-alist nil))
                  (file-truename local))))
-    (unless (file-remote-p truename)
+    (unless (or (file-name-quoted-p truename t)
+                (file-remote-p truename))
       truename)))
 
 (defun org-mcp--override-roots ()
@@ -644,10 +653,11 @@ File paths with # characters should be encoded as %23."
 (defun org-mcp--uri-local-file-name (file uri)
   "Return FILE, the file part of URI, as an absolute local file name.
 Signals a validation error naming URI when FILE is remote, before
-TRAMP can open a connection for it; see `org-mcp--local-file-name'."
+TRAMP can open a connection for it, or still quoted with `/:' once
+expanded; see `org-mcp--local-file-name'."
   (or (org-mcp--local-file-name file)
       (org-mcp--resource-validation-error
-       "Remote paths are not supported: %s"
+       "Remote or quoted paths are not supported: %s"
        uri)))
 
 (defun org-mcp--detect-uri-type (uri)

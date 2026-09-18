@@ -2124,7 +2124,7 @@ is DONE."
 (defun org-mcp-test--remote-spellings ()
   "Return names of one remote file under the fake remote method.
 The first is remote as written; the others become remote only once
-`..', `.' or `~' are expanded."
+`..', `.' or `~' are expanded, or once the `/:' quote is removed."
   (let ((method-and-host (substring org-mcp-test--remote-prefix 1))
         (home-depth
          (length (split-string (expand-file-name "~") "/" t))))
@@ -2132,6 +2132,7 @@ The first is remote as written; the others become remote only once
      (concat org-mcp-test--remote-prefix "~/x.org")
      (concat "/tmp/../" method-and-host "/x.org")
      (concat "/./" method-and-host "/x.org")
+     (concat "/:" org-mcp-test--remote-prefix "/x.org")
      (concat
       "~/" (apply #'concat (make-list home-depth "../"))
       method-and-host "/x.org"))))
@@ -2148,14 +2149,14 @@ through a read, a write, the path#outline form and a query."
             (when (string-prefix-p "/" remote)
               (org-mcp-test--call-tool-refused
                "org-read-headline" `((uri . ,remote))
-               "Remote paths are not supported"))
+               "Remote or quoted paths are not supported"))
             (org-mcp-test--call-tool-refused
              "org-read-headline" `((uri . ,outline))
-             "Remote paths are not supported")
+             "Remote or quoted paths are not supported")
             (org-mcp-test--call-tool-refused
              "org-update-todo-state"
              `((uri . ,outline) (new_state . "DONE"))
-             "Remote paths are not supported")
+             "Remote or quoted paths are not supported")
             (org-mcp-test--call-tool-refused
              "org-read-outline" `((file . ,remote)) "not in allowed list")
             (org-mcp-test--call-tool-refused
@@ -2191,6 +2192,49 @@ through a read, a write, the path#outline form and a query."
            "org-ql-query" `((query . "(todo)") (files . ,(vector link)))
            "not in allowed list")
           (should (null ops)))))))
+
+(ert-deftest org-mcp-test-scope-override-checks-quoted-name-as-visited ()
+  "A `/:'-quoted name is checked as the file it opens.
+With t, a `.org' symlink to a `.txt' or an `.org.gpg' file is
+refused for a read and for writes when its name is quoted, when it
+becomes quoted only once `..' is expanded, and when another link
+reaches it through a quoted target.  A quoted name of a real `.org'
+file stays reachable."
+  (org-mcp-test--with-scope-dirs t
+    (dolist (name '("rc.txt" "secret.org.gpg"))
+      (let* ((target
+              (org-mcp-test--write-file
+               outside name org-mcp-test--scope-task-content))
+             (link (expand-file-name (concat name ".org") root))
+             (via (expand-file-name (concat "via-" name ".org") root)))
+        (let ((file-name-handler-alist nil))
+          (make-symbolic-link target link)
+          (make-symbolic-link (concat "/:" link) via))
+        (pcase-dolist (`(,path . ,message)
+                       `((,(concat "/:" link) . "not in allowed list")
+                         (,(concat "/tmp/../:" link)
+                          . "Remote or quoted paths are not supported")
+                         (,via . "not in allowed list")))
+          (org-mcp-test--call-tool-refused
+           "org-read-headline" `((uri . ,path)) message target)
+          (org-mcp-test--call-tool-refused
+           "org-update-todo-state"
+           `((uri . ,(concat path "#Task"))
+             (current_state . "TODO")
+             (new_state . "DONE"))
+           message target)
+          (org-mcp-test--call-tool-refused
+           "org-add-todo"
+           `((title . "New")
+             (todo_state . "TODO")
+             (body . nil)
+             (parent_uri . ,(concat path "#")))
+           message target))))
+    (org-mcp-test--assert-scope-permitted
+     (concat
+      "/:"
+      (org-mcp-test--write-file
+       root "real.org" org-mcp-test--scope-task-content)))))
 
 (ert-deftest org-mcp-test-scope-override-ignores-remote-roots ()
   "A remote root, or a relative one under a remote `org-directory', permits nothing."
