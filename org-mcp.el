@@ -605,20 +605,31 @@ field.  A tool that also edits another buffer binds it around
 `org-mcp--modify-and-save' so the response covers both edits.")
 
 (defun org-mcp--complete-and-save (response-alist)
-  "Create ID if needed and return JSON.
-Creates an Org ID for the current headline when it has none, and
-returns its address from `org-mcp--link-at-point' as the `uri' field.
-RESPONSE-ALIST is an alist of response fields.  The `saved' field
-is false when `org-mcp--unsaved-change-p' is non-nil."
-  (org-id-get-create)
-  (json-encode
-   (append
-    `((success . t)
-      (saved
-       .
-       ,(if org-mcp--unsaved-change-p
-            :json-false t)))
-    response-alist `((uri . ,(org-mcp--link-at-point))))))
+  "Return the JSON response for a change to the heading at point.
+RESPONSE-ALIST is an alist of response fields.  The `uri' field is
+the heading's link from `org-mcp--link-at-point'; no identifier is
+created for it.  The `saved' field is false when
+`org-mcp--unsaved-change-p' is non-nil.  When no link can be made,
+the tool error says that the change itself was made."
+  (let
+      ((link
+        (condition-case err
+            (org-mcp--link-at-point)
+          (mcp-server-lib-tool-error
+           (org-mcp--tool-validation-error
+            "The change was made%s, but no link to it could be made: %s"
+            (if org-mcp--unsaved-change-p
+                " and left unsaved"
+              "")
+            (cadr err))))))
+    (json-encode
+     (append
+      `((success . t)
+        (saved
+         .
+         ,(if org-mcp--unsaved-change-p
+              :json-false t)))
+      response-alist `((uri . ,link))))))
 
 (defun org-mcp--maybe-save-buffer
     (buf file-path preexisting-modified-p)
@@ -695,33 +706,43 @@ existing files it works on."
 (defmacro org-mcp--modify-and-save
     (file-path operation response-alist &rest body)
   "Execute BODY to modify Org file at FILE-PATH.
-BODY runs in the canonical visited buffer for FILE-PATH. If the
-buffer was already modified before BODY runs, org-mcp leaves it dirty
-and unsaved, and the response reports `saved' as false. Otherwise it
-saves the buffer and refreshes other clean visiting buffers afterward.
+BODY runs in the canonical visited buffer for FILE-PATH and leaves
+point in the entry of the heading it changed; the response's `uri'
+links to that heading.  If the buffer was already modified before
+BODY runs, org-mcp leaves it dirty and unsaved, and the response
+reports `saved' as false.  Otherwise it saves the buffer and
+refreshes other clean visiting buffers afterward.  RESPONSE-ALIST is
+evaluated after the save, with point where BODY left it, so a link
+that cannot be made never keeps the change from being saved.
 OPERATION is retained for call-site clarity and compatibility.
 BODY can access FILE-PATH, OPERATION, and RESPONSE-ALIST as
 variables."
   (declare (indent 3) (debug (form form form body)))
-  `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
-          (buf (plist-get ctx :buffer))
-          (preexisting-modified-p (plist-get ctx :modified-p))
-          (org-mcp--unsaved-change-p
-           (or org-mcp--unsaved-change-p preexisting-modified-p))
-          (result nil))
-     (ignore ,operation)
-     (with-current-buffer buf
-       (save-restriction
-         (widen)
-         (setq result
-               (save-mark-and-excursion
-                 (save-match-data
-                   (goto-char (point-min))
-                   ,@body
-                   (org-mcp--complete-and-save ,response-alist))))))
-     (org-mcp--maybe-save-buffer
-      buf ,file-path preexisting-modified-p)
-     result))
+  (let ((position (make-symbol "position")))
+    `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
+            (buf (plist-get ctx :buffer))
+            (preexisting-modified-p (plist-get ctx :modified-p))
+            (org-mcp--unsaved-change-p
+             (or org-mcp--unsaved-change-p preexisting-modified-p))
+            (,position nil))
+       (ignore ,operation)
+       (with-current-buffer buf
+         (save-restriction
+           (widen)
+           (save-mark-and-excursion
+             (save-match-data
+               (goto-char (point-min))
+               ,@body
+               (setq ,position (point-marker))))))
+       (unwind-protect
+           (progn
+             (org-mcp--maybe-save-buffer
+              buf ,file-path preexisting-modified-p)
+             (with-current-buffer buf
+               (org-with-wide-buffer
+                (goto-char ,position)
+                (org-mcp--complete-and-save ,response-alist))))
+         (set-marker ,position nil)))))
 
 (defun org-mcp--find-allowed-file-with-id (id)
   "Find an allowed file containing the Org ID.
@@ -789,26 +810,36 @@ Returns the full path if allowed, signals an error otherwise."
   "Extract heading structure from current org buffer.
 Returns a vector of level-1 heading alists.  Each level-1 heading
 includes its immediate level-2 children; deeper levels are not
-included."
-  (vconcat
-   (org-element-map
-    (org-element-parse-buffer 'headline) 'headline
-    (lambda (h)
-      (when (= (org-element-property :level h) 1)
-        `((title . ,(org-element-property :raw-value h))
-          (level . 1)
-          (children
-           .
-           ,(vconcat
-             (org-element-map
-              (org-element-contents h) 'headline
-              (lambda (child)
-                (when (= (org-element-property :level child) 2)
-                  `((title . ,(org-element-property :raw-value child))
-                    (level . 2)
-                    (children . []))))
-              nil nil 'headline))))))
-    nil nil 'headline)))
+included.  Each heading carries its link as `uri'."
+  (cl-flet
+   ((link
+     (headline)
+     ;; The parse tree is walked without moving point, and the link
+     ;; is made at point.
+     (save-excursion
+       (goto-char (org-element-property :begin headline))
+       (org-mcp--link-at-point))))
+   (vconcat
+    (org-element-map
+     (org-element-parse-buffer 'headline) 'headline
+     (lambda (h)
+       (when (= (org-element-property :level h) 1)
+         `((title . ,(org-element-property :raw-value h))
+           (level . 1) (uri . ,(link h))
+           (children
+            .
+            ,(vconcat
+              (org-element-map
+               (org-element-contents h) 'headline
+               (lambda (child)
+                 (when (= (org-element-property :level child) 2)
+                   `((title
+                      . ,(org-element-property :raw-value child))
+                     (level . 2)
+                     (uri . ,(link child))
+                     (children . []))))
+               nil nil 'headline))))))
+     nil nil 'headline))))
 
 (defun org-mcp--generate-outline (file-path)
   "Generate JSON outline structure for FILE-PATH."
@@ -828,11 +859,6 @@ raw non-ASCII characters in STRING may sit between them.  Every escape
 decodes to its byte, `%0A' and `%0D' included."
   (decode-coding-string
    (url-unhex-string (encode-coding-string string 'utf-8) t) 'utf-8))
-
-(defun org-mcp--build-headline-path ()
-  "Build URL-encoded slash-separated headline path from point.
-Returns a string suitable for use in org:// URIs."
-  (mapconcat #'url-hexify-string (org-get-outline-path t) "/"))
 
 (defun org-mcp--split-headline-uri (path-after-protocol)
   "Split PATH-AFTER-PROTOCOL into (file-path . headline-path).
@@ -946,14 +972,88 @@ Point should be at the headline."
     (buffer-substring-no-properties start (point))))
 
 (defun org-mcp--link-at-point ()
-  "Return the address of the heading at point.
+  "Return the native Org link to the heading at point.
 Every response field that carries an address takes it from here.
-The address is an org:// URI: the heading's ID when it has one,
-otherwise its file and outline path."
-  (if-let* ((id (org-entry-get (point) "ID")))
-    (concat "org://" id)
-    (concat
-     "org://" (buffer-file-name) "#" (org-mcp--build-headline-path))))
+The link is the one a non-interactive `org-store-link' makes when it
+may use existing identifiers only, in this order:
+
+  heading with an :ID:        id:ID
+  heading with a :CUSTOM_ID:  file:PATH::#CUSTOM_ID
+  any other heading           file:PATH::*TITLE
+  before the first heading    file:PATH::LINE, or file:PATH
+
+PATH is the file name as `abbreviate-file-name' writes it.  The link
+is returned as its text, without brackets or description.  Point may
+be anywhere in the heading's entry and is not moved; the buffer is
+read widened.  No identifier is created.
+
+Throws a tool error when `org-store-link' changes the buffer or makes
+anything but an `id:' or `file:' link.  Neither happens in stock Org;
+advice on `org-store-link' can cause both."
+  (org-with-wide-buffer
+   (unless (org-before-first-heading-p)
+     (org-back-to-heading t))
+   (let*
+       ((tick (buffer-chars-modified-tick))
+        (stored
+         ;; Each binding stops a user setting from changing the form
+         ;; of the link or from creating an identifier.  They are made
+         ;; with this buffer current, so they also override a
+         ;; buffer-local value, such as the `org-id-link-to-org-use-id'
+         ;; that Doom's org-roam module sets from `find-file-hook'.
+         (let ( ;; Link by an existing :ID:, never create one.
+               (org-id-link-to-org-use-id 'use-existing)
+               ;; A heading without its own :ID: gets its own link,
+               ;; not `id:PARENT::*Title' through an ancestor's :ID:.
+               (org-id-link-consider-parent-id nil)
+               ;; No `::' search after an `id:' link.
+               (org-id-link-use-context nil)
+               ;; A `file:' link names the heading, not the bare file.
+               (org-link-context-for-files t)
+               ;; An active region is no search string.
+               (org-ignore-region t)
+               ;; No package's search string replaces the heading's.
+               (org-create-file-search-functions nil)
+               ;; Only the `id:' link type stores links.  Another
+               ;; store function that claims Org buffers would take
+               ;; the link over (Org 9.8 keeps the last one that
+               ;; matches) or, matching together with `id:', prompt
+               ;; for a choice (Org 9.7).
+               (org-link-parameters
+                (mapcar
+                 (lambda (entry)
+                   (if (equal (car entry) "id")
+                       entry
+                     (cons
+                      (car entry)
+                      (org-plist-delete (cdr entry) :store))))
+                 org-link-parameters))
+               ;; `org-store-link' sets this global with `setq'; keep
+               ;; the user's value, such as a pending capture's.
+               (org-store-link-plist nil)
+               ;; A prompt signals instead of waiting for input.
+               (inhibit-interaction t))
+           (org-store-link nil nil)))
+        (link
+         ;; A non-interactive `org-store-link' returns a bracket link,
+         ;; and Org has no function returning the bare one, so take
+         ;; it apart with Org's own regexp and unescaping.
+         (and stored
+              (string-match org-link-bracket-re stored)
+              (org-link-unescape
+               (match-string-no-properties 1 stored)))))
+     (unless (= tick (buffer-chars-modified-tick))
+       (org-mcp--tool-validation-error
+        "org-store-link changed %s while linking to it; org-mcp \
+creates no identifiers, so advice on org-store-link must leave \
+non-interactive calls alone"
+        (buffer-name)))
+     (unless (and link (string-match-p "\\`\\(?:id\\|file\\):" link))
+       (org-mcp--tool-validation-error
+        "org-store-link made %s, not an id: or file: link, in %s; \
+advice on org-store-link changes the link"
+        (or stored "no link") (buffer-name)))
+     link)))
 
 (defun org-mcp--heading-metadata-at-point (&optional inherit-tags)
   "Return canonical heading metadata at point as a plist.
@@ -967,7 +1067,6 @@ Returned plist keys:
   :priority   one-character string or nil
   :tags       list of strings (heading-local by default)
   :level      integer
-  :id         string or nil
   :scheduled  Org timestamp string or nil
   :deadline   Org timestamp string or nil
   :closed     Org timestamp string or nil
@@ -991,7 +1090,6 @@ locale-dependent reformatting)."
          (org-get-tags)
        (org-element-property :tags el))
      :level (org-element-property :level el)
-     :id (org-element-property :ID el)
      :scheduled (and sched (org-element-property :raw-value sched))
      :deadline (and deadl (org-element-property :raw-value deadl))
      :closed (and clsd (org-element-property :raw-value clsd)))))
@@ -1022,11 +1120,13 @@ Returns alist with all heading properties and lightweight children."
        (priority (plist-get meta :priority))
        (tags (plist-get meta :tags))
        (level (plist-get meta :level))
-       (id (plist-get meta :id))
        (scheduled (plist-get meta :scheduled))
        (deadline (plist-get meta :deadline))
        (closed (plist-get meta :closed))
        (uri (org-mcp--link-at-point))
+       ;; The ID the link names, so `id' and `uri' always agree; a
+       ;; blank :ID: gives neither.
+       (id (and (string-prefix-p "id:" uri) (substring uri 3)))
        (children '())
        (content-end
         (save-excursion
@@ -1493,22 +1593,21 @@ element API."
              (file (buffer-file-name buf)))
         (when file
           (with-current-buffer buf
-            (save-excursion
-              (goto-char org-clock-marker)
-              (let ((el (org-element-at-point)))
-                (when (eq (org-element-type el) 'clock)
-                  (list
-                   (cons 'file (expand-file-name file))
-                   (cons
-                    'heading
-                    (save-excursion
-                      (org-back-to-heading t)
-                      (org-get-heading t t t t)))
-                   (cons 'start (org-mcp--clock-element-start-str el))
-                   (cons
-                    'allowed
-                    (and (org-mcp--find-allowed-file file) t))
-                   (cons 'marker org-clock-marker))))))))
+            (org-with-wide-buffer
+             (goto-char org-clock-marker)
+             (let ((el (org-element-at-point)))
+               (when (eq (org-element-type el) 'clock)
+                 (list
+                  (cons 'file (expand-file-name file))
+                  (cons
+                   'heading
+                   (save-excursion
+                     (org-back-to-heading t)
+                     (org-get-heading t t t t)))
+                  (cons 'start (org-mcp--clock-element-start-str el))
+                  (cons
+                   'allowed (and (org-mcp--find-allowed-file file) t))
+                  (cons 'marker org-clock-marker))))))))
     (catch 'found
       (dolist (file (org-mcp--expanded-allowed-files))
         (when (file-exists-p file)
@@ -2221,8 +2320,7 @@ lists those roots as absolute paths."
 (defun org-mcp--tool-update-todo-state
     (uri new_state &optional current_state note files)
   "Update the TODO state of a headline at URI.
-Creates an Org ID for the headline if one doesn't exist.
-Returns the ID-based URI for the updated headline.
+Returns the link to the updated headline.
 NEW_STATE is the new TODO state to set.
 CURRENT_STATE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
@@ -2295,8 +2393,8 @@ MCP Parameters:
      properties
      files)
   "Add a new TODO item to an Org file.
-Creates an Org ID for the new headline unless PROPERTIES sets one,
-and returns its ID-based URI.
+Returns the new headline's link; no identifier is created, so the
+link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
 TODO_STATE is the TODO state from `org-todo-keywords'.
 BODY is optional body text.
@@ -2439,8 +2537,7 @@ MCP Parameters:
               (insert "\n" body)
               (unless (string-suffix-p "\n" body)
                 (insert "\n"))
-              ;; Move back to the heading for org-id-get-create
-              ;; org-id-get-create requires point to be on a heading
+              ;; Move back to the heading, where the properties go
               (org-back-to-heading t))
           ;; No body - ensure newline after heading
           (end-of-line)
@@ -2568,9 +2665,8 @@ Returns plain text content."
 (defun org-mcp--tool-rename-headline
     (uri current_title new_title &optional files)
   "Rename headline title at URI from CURRENT_TITLE to NEW_TITLE.
-Preserves the current TODO state and tags, creates an Org ID for the
-headline if one doesn't exist.
-Returns the ID-based URI for the renamed headline.
+Preserves the current TODO state and tags.
+Returns the link to the renamed headline.
 FILES, when non-nil, names the files an `id:' link in URI is looked
 up in; see `org-mcp--link-target'.
 
@@ -2667,7 +2763,7 @@ MCP Parameters:
               (org-mcp--validate-body-no-headlines
                new_body (org-current-level))
 
-              ;; Save heading position for org-id-get-create later
+              ;; Save the heading position for the response's link
               (let ((heading-pos (point)))
 
                 ;; Skip past headline and properties/planning
@@ -2694,17 +2790,23 @@ MCP Parameters:
                   (unless (= (char-before (point)) ?\n)
                     (insert "\n")))
 
-                ;; Return to heading for org-id-get-create
+                ;; Return to the heading for the response's link
                 (goto-char heading-pos)))))
 
       ;; Replace mode
       (org-mcp--validate-body-no-unbalanced-blocks new_body)
 
-      (let* ((target (org-mcp--address-target resource_uri files))
-             (file-path (plist-get target :file)))
+      (let*
+          ((target (org-mcp--address-target resource_uri files))
+           (file-path (plist-get target :file))
+           ;; The replacement leaves point at the end of the new body,
+           ;; which is the first child's heading when there is one; the
+           ;; response links to the heading whose body changed.
+           (heading nil))
 
         (org-mcp--modify-and-save file-path "edit body" nil
           (org-mcp--goto-heading target)
+          (setq heading (point-marker))
 
           (org-mcp--validate-body-no-headlines
            new_body (org-current-level))
@@ -2779,7 +2881,10 @@ MCP Parameters:
 
             ;; Perform replacement
             (org-mcp--replace-body-content
-             old_body new_body body-content body-begin body-end)))))))
+             old_body new_body body-content body-begin body-end))
+
+          (goto-char heading)
+          (set-marker heading nil))))))
 
 (defconst org-mcp--special-properties
   '("TODO"
@@ -3252,36 +3357,38 @@ with an \"Unexpected parameter\" error before any handler runs.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-ql-query."
   (org-mcp--with-file-set nil
-    (let* ((target-files org-agenda-files)
-           (matches
-            ;; Given no files, `org-ql-select' would search the
-            ;; current buffer, which is not among the allowed files.
-            (when target-files
-              (condition-case err
-                  ;; Collect org-elements with the default action,
-                  ;; then sort.  We map `org-mcp--ql-extract-match'
-                  ;; in a second pass because `org-ql-select' applies
-                  ;; :action before :sort — custom actions that
-                  ;; return non-element data would break sort
-                  ;; functions expecting org-elements.
-                  (let ((elements
-                         (org-ql-select
-                          target-files
-                          query-sexp
-                          :sort org-mcp-query-sort-fn)))
-                    (mapcar
-                     (lambda (el)
-                       (with-current-buffer (org-element-property
-                                             :buffer el)
-                         (save-excursion
-                           (goto-char
-                            (org-element-property :begin el))
-                           (org-mcp--ql-extract-match))))
-                     elements))
-                (error
-                 (org-mcp--tool-validation-error
-                  "Org-ql query error: %s"
-                  (error-message-string err)))))))
+    (let*
+        ((target-files org-agenda-files)
+         (matches
+          ;; Given no files, `org-ql-select' would search the
+          ;; current buffer, which is not among the allowed files.
+          (when target-files
+            (condition-case err
+                ;; Collect org-elements with the default action,
+                ;; then sort.  We map `org-mcp--ql-extract-match'
+                ;; in a second pass because `org-ql-select' applies
+                ;; :action before :sort — custom actions that
+                ;; return non-element data would break sort
+                ;; functions expecting org-elements.
+                (let ((elements
+                       (org-ql-select
+                        target-files
+                        query-sexp
+                        :sort org-mcp-query-sort-fn)))
+                  (mapcar
+                   (lambda (el)
+                     (with-current-buffer (org-element-property
+                                           :buffer el)
+                       ;; Widen: a heading outside the user's
+                       ;; narrowing would be read at the wrong place.
+                       (org-with-wide-buffer
+                        (goto-char (org-element-property :begin el))
+                        (org-mcp--ql-extract-match))))
+                   elements))
+              (error
+               (org-mcp--tool-validation-error
+                "Org-ql query error: %s"
+                (error-message-string err)))))))
       (json-encode
        `((matches . ,(vconcat matches))
          (total . ,(length matches))
@@ -3446,7 +3553,8 @@ MCP Parameters:
                             (org-get-heading t t t t))))
                     (push `((file . ,clock-file)
                             (heading . ,heading)
-                            (start . ,start-str))
+                            (start . ,start-str)
+                            (uri . ,(org-mcp--link-at-point)))
                           all-clocks))))))))
       (let ((total (length all-clocks)))
         (json-encode
@@ -3462,11 +3570,17 @@ MCP Parameters: None"
         (if (eq (alist-get 'allowed active) nil)
             (json-encode
              '((active . t) (in_allowed_file . :json-false)))
-          (json-encode
-           `((active . t)
-             (file . ,(alist-get 'file active))
-             (heading . ,(alist-get 'heading active))
-             (start . ,(alist-get 'start active)))))
+          (let ((marker (alist-get 'marker active)))
+            (json-encode
+             `((active . t)
+               (file . ,(alist-get 'file active))
+               (heading . ,(alist-get 'heading active))
+               (start . ,(alist-get 'start active))
+               (uri
+                .
+                ,(with-current-buffer (marker-buffer marker)
+                   (org-with-wide-buffer
+                    (goto-char marker) (org-mcp--link-at-point))))))))
       (json-encode '((active . :json-false))))))
 
 (defun org-mcp--tool-clock-in (uri &optional start_time resolve files)
@@ -3948,7 +4062,7 @@ Empty configuration returns:
 
 Use cases:
   - Discovery: What Org files can I access through MCP?
-  - URI Construction: I need to build an org:// URI - what's
+  - Link Construction: I need to build a file: link - what's
     the exact path?
   - Access Troubleshooting: Why is my file access failing?
   - Configuration Verification: Did my org-mcp-allowed-files setting
@@ -3962,7 +4076,6 @@ Use cases:
    :description
    "Update the TODO state of an Org headline.  Changes the task state
 while preserving the headline title, tags, and other properties.
-Creates an Org ID property for the headline if one doesn't exist.
 
 Parameters:
   uri - Link or URI of the headline to update (string, required)
@@ -3990,7 +4103,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_state - The previous TODO state (string, empty for none)
   new_state - The new TODO state that was set (string)
-  uri - org:// URI (org://{uuid}) for the updated headline"
+  uri - Link to the updated headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4000,8 +4115,8 @@ Returns JSON object:
    :description
    "Add a new TODO item to an Org file at a specified location.
 Creates the headline with TODO state, optional tags, optional body
-content, and optional properties.  Automatically creates an Org ID
-property for the new headline unless the properties set one.
+content, and optional properties.  No ID or CUSTOM_ID is created:
+set one in properties to give the headline a stable link.
 
 Parameters:
   title - Headline text without TODO state or tags (string, required)
@@ -4050,7 +4165,9 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  uri - org:// URI (org://{uuid}) for the new headline
+  uri - Link to the new headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}
   file - Filename (not full path) where item was added
   title - The headline title that was created
 
@@ -4068,8 +4185,7 @@ file's header lines."
    :id "org-rename-headline"
    :description
    "Rename an Org headline's title while preserving its TODO state,
-tags, properties, and body content.  Creates an Org ID property for
-the headline if one doesn't exist.
+tags, properties, and body content.
 
 Parameters:
   uri - Link or URI of the headline to rename (string, required)
@@ -4096,7 +4212,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_title - The previous headline title (string)
   new_title - The new title that was set (string)
-  uri - org:// URI (org://{uuid}) for the renamed headline"
+  uri - Link to the renamed headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4107,8 +4225,7 @@ Returns JSON object:
    "Edit or append to the body content of an Org headline.  In replace
 mode (default), finds and replaces a unique substring within the
 headline's body text.  In append mode, inserts new content after
-existing body content but before any child headlines.  Creates an
-Org ID property for the headline if one doesn't exist.
+existing body content but before any child headlines.
 
 Parameters:
   resource_uri - Link or URI of the headline to edit (string, required)
@@ -4136,7 +4253,9 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  uri - org:// URI (org://{uuid}) for the edited headline
+  uri - Link to the edited headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}
 
 Special behavior - Empty old_body (replace mode):
   When old_body is \"\", the tool adds content to empty nodes:
@@ -4152,8 +4271,8 @@ Special behavior - Empty old_body (replace mode):
    :id "org-set-properties"
    :description
    "Set or delete properties on an Org headline.  Updates the
-PROPERTIES drawer.  Creates an Org ID for the headline if one
-doesn't exist.
+PROPERTIES drawer.  Setting ID or CUSTOM_ID gives the headline a
+stable link; org-mcp creates neither itself.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4182,7 +4301,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   properties_set - Array of property names that were set
   properties_deleted - Array of property names that were deleted
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4190,8 +4311,7 @@ Returns JSON object:
    #'org-mcp--tool-update-scheduled
    :id "org-update-scheduled"
    :description
-   "Update the SCHEDULED timestamp on an Org headline.  Creates an
-Org ID for the headline if one doesn't exist.
+   "Update the SCHEDULED timestamp on an Org headline.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4214,7 +4334,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_scheduled - Previous SCHEDULED value (string, empty if none)
   new_scheduled - New SCHEDULED value (string, empty if removed)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4222,8 +4344,7 @@ Returns JSON object:
    #'org-mcp--tool-update-deadline
    :id "org-update-deadline"
    :description
-   "Update the DEADLINE timestamp on an Org headline.  Creates an
-Org ID for the headline if one doesn't exist.
+   "Update the DEADLINE timestamp on an Org headline.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4246,7 +4367,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_deadline - Previous DEADLINE value (string, empty if none)
   new_deadline - New DEADLINE value (string, empty if removed)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4255,7 +4378,6 @@ Returns JSON object:
    :id "org-set-tags"
    :description
    "Set tags on an Org headline, replacing any existing tags.
-Creates an Org ID for the headline if one doesn't exist.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4282,7 +4404,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_tags - Array of previous tags
   new_tags - Array of new tags
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4290,8 +4414,7 @@ Returns JSON object:
    #'org-mcp--tool-set-priority
    :id "org-set-priority"
    :description
-   "Set or remove priority on an Org headline.  Creates an Org ID
-for the headline if one doesn't exist.
+   "Set or remove priority on an Org headline.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4315,7 +4438,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   previous_priority - Previous priority (string, empty if none)
   new_priority - New priority (string, empty if removed)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4324,8 +4449,7 @@ Returns JSON object:
    :id "org-add-logbook-note"
    :description
    "Add a timestamped note to the LOGBOOK drawer of an Org headline.
-Creates the LOGBOOK drawer if it doesn't exist.  Creates an Org ID
-for the headline if one doesn't exist.
+Creates the LOGBOOK drawer if it doesn't exist.
 
 Parameters:
   uri - Link or URI of the headline (string, required)
@@ -4347,7 +4471,9 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4403,9 +4529,11 @@ Returns: JSON object with structured data:
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
     closed - Closed timestamp (if present)
-    id - Org ID (if present)
+    id - The ID the uri names (if the heading has an ID)
     level - Heading level
-    uri - org:// URI for this heading
+    uri - Link to this heading: id:{id} when it has an ID, else
+          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
+          file:{path}::*{title}
     content - Body text (if present)
     children - Array of direct children (title, todo, level, uri)
 
@@ -4427,9 +4555,12 @@ Parameters:
   file - Absolute path to Org file (string, required)
 
 Returns: JSON object with hierarchical outline structure:
-  headings - Array of top-level headlines, each with title, level
-             and children (its level-2 headlines, whose children
-             arrays are empty)"
+  headings - Array of top-level headlines, each with title, level,
+             uri and children (its level-2 headlines, whose children
+             arrays are empty)
+  uri - Link to the headline: id:{id} when it has an ID, else
+        file:{path}::#{custom-id} when it has a CUSTOM_ID, else
+        file:{path}::*{title}"
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4469,7 +4600,8 @@ Returns: Plain text content of the headline and its subtree (or file)"
    :description
    "Search Org files using org-ql query expressions.  Supports
 querying by TODO state, tags, priority, deadlines, properties, and
-more.  Returns matched entries as JSON with URIs for follow-up access.
+more.  Returns matched entries as JSON with Org links for follow-up
+access.
 
 Parameters:
   query - org-ql query sexp as string (string, required)
@@ -4504,7 +4636,9 @@ Returns JSON object:
     priority - Priority letter (string, omitted if none)
     tags - Local tags (array, omitted if none)
     id - Org ID (string, omitted if none)
-    uri - org:// URI (string)
+    uri - Link to the heading (string): id:{id} when it has an ID,
+          else file:{path}::#{custom-id} when it has a CUSTOM_ID,
+          else file:{path}::*{title}
     properties - Standard properties (object, omitted if none)
   total - Number of matches (number)
   files_searched - Number of files searched (number)"
@@ -4597,13 +4731,17 @@ Parameters: None
 Returns JSON object:
   active - Whether a clock is active (boolean)
   in_allowed_file - false when clock is in a non-allowed file
-    (only present in that case; file/heading/start are omitted)
+    (only present in that case; file/heading/start/uri are omitted)
   file - File path of active clock (string, only if active
     in allowed file)
   heading - Heading title with active clock (string, only if active
     in allowed file)
   start - Start timestamp string (string, only if active
-    in allowed file)"
+    in allowed file)
+  uri - Link to the heading with the active clock (string, only if
+    active in allowed file): id:{id} when it has an ID, else
+    file:{path}::#{custom-id} when it has a CUSTOM_ID, else
+    file:{path}::*{title}"
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4645,7 +4783,9 @@ Returns JSON object:
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
   heading - The heading title (string)
-  uri - org:// URI (org://{uuid}) for the headline
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}
   resolved - Number of dangling clocks deleted (integer, only if
              resolve was requested and dangling clocks were found)"
    :read-only nil
@@ -4685,7 +4825,9 @@ Returns JSON object:
   start - Start timestamp (string)
   end - End timestamp (string)
   duration - Duration as H:MM (string)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4724,7 +4866,9 @@ Returns JSON object:
   start - Formatted start timestamp (string)
   end - Formatted end timestamp (string)
   duration - Duration as H:MM (string)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4760,7 +4904,9 @@ Returns JSON object:
   start - Start timestamp of deleted entry (string)
   end - End timestamp of deleted entry (string, present if closed)
   duration - Duration as H:MM (string, present if closed)
-  uri - org:// URI (org://{uuid}) for the headline"
+  uri - Link to the headline (string): id:{id} when it has
+        an ID, else file:{path}::#{custom-id} when it has a
+        CUSTOM_ID, else file:{path}::*{title}"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4796,6 +4942,9 @@ Returns JSON object:
     file - File path (string)
     heading - Heading title (string)
     start - Start timestamp (string)
+    uri - Link to the heading (string): id:{id} when it has an ID,
+          else file:{path}::#{custom-id} when it has a CUSTOM_ID,
+          else file:{path}::*{title}
   total - Number of open clocks found (number)"
    :read-only t
    :server-id org-mcp--server-id)
@@ -4843,9 +4992,11 @@ Returns: JSON object with structured data:
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
     closed - Closed timestamp (if present)
-    id - Org ID (if present)
+    id - The ID the uri names (if the heading has an ID)
     level - Heading level
-    uri - org:// URI for this heading
+    uri - Link to this heading: id:{id} when it has an ID, else
+          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
+          file:{path}::*{title}
     content - Body text (if present)
     children - Array of direct children (title, todo, level, uri)
 

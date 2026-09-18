@@ -262,11 +262,10 @@ take their =uri= parameter *without* the =org://= prefix, either as a
 native Org link (see [[*Addressing headings with links]]), passed as is
 with no percent-encoding, or in *bare* form — a UUID, file path, or
 =file#headline= descriptor, whose outline path percent-encodes its
-titles. A prefixed input is rejected with a validation error. Tool
-/responses/ emit =org://= URIs in their =uri= fields (strip the prefix
-to feed one back into another tool). The resource reads such a URI as
-it is, unless its file name contains =#=: a returned URI leaves that
-=#= unencoded, so bare forms do not support it.
+titles. A prefixed input is rejected with a validation error. The
+=uri= fields of tool and resource /responses/ carry native Org links
+(see [[*Links org-mcp returns]]): a tool takes one back as it is, and
+the resource takes it percent-encoded, as in the table above.
 
 Example response for a headline:
 #+begin_src json
@@ -277,11 +276,13 @@ Example response for a headline:
   "tags": ["work", "urgent"],
   "scheduled": "<2026-03-26 Thu>",
   "deadline": "<2026-04-01 Mon>",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "level": 1,
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "content": "Body text here...",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "children": [
-    {"title": "Subtask", "todo": "NEXT", "level": 2, "uri": "org://..."}
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "uri": "file:~/org/projects.org::*Subtask"}
   ]
 }
 #+end_src
@@ -372,10 +373,44 @@ named.
 }
 #+end_src
 
+** Links org-mcp returns
+
+Every =uri= field org-mcp returns is a native Org link: a write returns the link
+to the heading it changed, and every heading in a read result, a query result
+or an outline carries its own. The link is the one =org-store-link= makes when
+it may only use the identifiers a heading already has, chosen in this order:
+
+| Heading                              | Returned link               |
+|--------------------------------------+-----------------------------|
+| has an =ID=                          | =id:<id>=                   |
+| has a =CUSTOM_ID= and no =ID=        | =file:<path>::#<custom-id>= |
+| has neither                          | =file:<path>::*<title>=     |
+
+=<path>= is the file name as Org writes it, with =~= for your home directory. A
+title link leaves out the TODO keyword, the priority, statistics cookies and the
+tags. Every returned link reaches the same heading when it is sent back to a
+tool. A title link stops resolving once the heading is renamed, and a title that
+several headings share resolves to the first of them.
+
+org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
+heading, and a read leaves the file byte-for-byte unchanged, whether or not a
+buffer visits it. A client that wants a stable link sets the identifier itself:
+through the =properties= parameter of =org-add-todo= when it creates the
+heading, or through =org-set-properties= afterwards.
+
+Your link settings do not change the returned link. org-mcp calls
+=org-store-link= non-interactively and, for that call only, binds
+=org-id-link-to-org-use-id= to =use-existing=, keeps =id:= links free of an
+inherited ID and a search part, keeps the heading's search on =file:= links, and
+ignores the active region, file search functions and other packages' link store
+functions. Advice on =org-store-link= still runs. When it makes a link of
+another type or edits the buffer, the call fails with an error that says so; a
+write then reports that its change was made.
+
 ** Available MCP Tools
 
-Note: All write tools will create Org IDs for any touched nodes that did not have
-them originally. The IDs will be returned in the tool response.
+Write tools create no identifiers. Each write response carries, as =uri=, the
+link to the heading it changed (see [[*Links org-mcp returns]]).
 
 Write tools (e.g. =org-update-todo-state=, =org-edit-body=, =org-clock-in=,
 =org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-set-tags=,
@@ -510,7 +545,7 @@ Example response:
 
 Use cases:
 - Discovery: "What Org files can I access through MCP?"
-- URI Construction: "I need to build an org:// URI - what's the exact path?"
+- Link Construction: "I need to build a =file:= link - what's the exact path?"
 - Access Troubleshooting: "Why is my file access failing?"
 - Configuration Verification: "Did my org-mcp-allowed-files setting work correctly?"
 
@@ -543,13 +578,13 @@ Empty configuration returns:
   - =newState= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, previous and new states, and ID-based URI of the updated headline
+- *Returns:* Success status, =saved= flag, previous and new states, and the link to the updated headline
 
 Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org:///home/user/org/projects.org#Project%20Alpha",
+  "uri": "file:/home/user/org/projects.org::*Project Alpha",
   "currentState": "TODO",
   "newState": "IN-PROGRESS"
 }
@@ -560,7 +595,7 @@ Example:
   "saved": true,
   "previousState": "TODO",
   "newState": "IN-PROGRESS",
-  "uri": "org://554A22F6-E29F-4759-8AD2-E7CA225C6397"
+  "uri": "file:~/org/projects.org::*Project Alpha"
 }
 
 # State mismatch error:
@@ -576,13 +611,13 @@ Example:
   - =currentTitle= (string, required): Current headline title (without TODO state or tags) - must match actual title
   - =newTitle= (string, required): New headline title (without TODO state or tags)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and previous and new titles
+- *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
 
 Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org:///home/user/org/projects.org#Original%20Task",
+  "uri": "file:/home/user/org/projects.org::*Original Task",
   "currentTitle": "Original Task",
   "newTitle": "Updated Task Name"
 }
@@ -593,7 +628,7 @@ Example:
   "saved": true,
   "previousTitle": "Original Task",
   "newTitle": "Updated Task Name",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440002"
+  "uri": "file:~/org/projects.org::*Updated Task Name"
 }
 
 # Title mismatch error:
@@ -611,9 +646,9 @@ Example:
   - =body= (string, optional): Body text content to add under the heading
   - =parentUri= (string, required): link to the parent item (see [[*Addressing headings with links]]) or its bare URI. Use =file:/path/to/file.org= or =/path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): link to, or bare ID of, the sibling to insert after; it must be a direct child of the parent. If not given, append as last child of parent
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable address from the call that creates it. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parentUri= in, instead of the ID index; an =id:= link in =afterUri= is then looked up in the parent's file. See [[*Naming the file of an ID]]
-- *Returns:* Object with success status, =saved= flag, new item URI (built from the =ID= in =properties= when one is given), file name, and title
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
+- *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
 
 Example:
 #+begin_src json
@@ -623,7 +658,7 @@ Example:
   "todoState": "TODO",
   "tags": ["work", "urgent"],
   "body": "This feature needs to be completed by end of week.",
-  "parentUri": "org:///home/user/org/projects.org#",
+  "parentUri": "file:/home/user/org/projects.org",
   "properties": {
     "ID": "550e8400-e29b-41d4-a716-446655440001",
     "EFFORT": "2:00"
@@ -634,7 +669,7 @@ Example:
 {
   "success": true,
   "saved": true,
-  "uri": "org://550e8400-e29b-41d4-a716-446655440001",
+  "uri": "id:550e8400-e29b-41d4-a716-446655440001",
   "file": "projects.org",
   "title": "Implement new feature"
 }
@@ -648,14 +683,14 @@ Example:
   - =newBody= (string, required): Replacement or appended text
   - =append= (boolean, optional, default false): When true, append =newBody= to end of body instead of replacing
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and org:// URI of the updated node
+- *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Special behavior (replace mode):* When =oldBody= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
 #+begin_src json
 # Replace mode:
 {
-  "resourceUri": "org://abc-123",
+  "resourceUri": "id:abc-123",
   "oldBody": "This is a placeholder.",
   "newBody": "Implementation started - using Strategy pattern."
 }
@@ -664,19 +699,19 @@ Example:
 {
   "success": true,
   "saved": true,
-  "uri": "org://abc-123"
+  "uri": "id:abc-123"
 }
 
 # Append mode:
 {
-  "resourceUri": "org://abc-123",
+  "resourceUri": "id:abc-123",
   "newBody": "Additional notes from meeting.",
   "append": true
 }
 
 # Adding content to empty node (replace mode):
 {
-  "resourceUri": "org://new-task",
+  "resourceUri": "file:/home/user/org/projects.org::*New task",
   "oldBody": "",
   "newBody": "Initial task description."
 }
@@ -688,13 +723,13 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus org:// URI
+- *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus the headline's link
 
 Example:
 #+begin_src json
 # Set and delete properties:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "properties": {
     "EFFORT": "2:00",
     "CATEGORY": null
@@ -707,7 +742,7 @@ Example:
   "saved": true,
   "properties_set": ["EFFORT"],
   "properties_deleted": ["CATEGORY"],
-  "uri": "org://abc-123"
+  "uri": "id:abc-123"
 }
 #+end_src
 
@@ -717,19 +752,19 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and the headline's link
 
 Example:
 #+begin_src json
 # Set scheduled:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "scheduled": "2026-03-27"
 }
 
 # Remove scheduled:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "scheduled": ""
 }
 #+end_src
@@ -740,19 +775,19 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and the headline's link
 
 Example:
 #+begin_src json
 # Set deadline:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "deadline": "2026-04-15"
 }
 
 # Remove deadline:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "deadline": ""
 }
 #+end_src
@@ -763,19 +798,19 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus org:// URI
+- *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
 
 Example:
 #+begin_src json
 # Set tags:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "tags": ["work", "urgent"]
 }
 
 # Clear all tags:
 {
-  "uri": "org://abc-123"
+  "uri": "id:abc-123"
 }
 #+end_src
 
@@ -785,19 +820,19 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and ID-based URI
+- *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and the headline's link
 
 Example:
 #+begin_src json
 # Set priority:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "priority": "A"
 }
 
 # Remove priority:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "priority": ""
 }
 #+end_src
@@ -808,13 +843,13 @@ Example:
   - =uri= (string, required): link to the headline (see [[*Addressing headings with links]]) or its bare URI
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and org:// URI
+- *Returns:* Success status, =saved= flag, and the headline's link
 
 Example:
 #+begin_src json
 # Add a note:
 {
-  "uri": "org://abc-123",
+  "uri": "id:abc-123",
   "note": "Discussed with team - approved approach B."
 }
 
@@ -822,7 +857,7 @@ Example:
 {
   "success": true,
   "saved": true,
-  "uri": "org://abc-123"
+  "uri": "id:abc-123"
 }
 #+end_src
 
@@ -831,7 +866,7 @@ Example:
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[*Querying other files][Querying other files]]
-- *Returns:* JSON object with =matches= array, =total= count, and =files_searched= count
+- *Returns:* JSON object with a =matches= array, each match carrying its heading's link as =uri=, the =total= count, and the =files_searched= count
 
 Example:
 #+begin_src json
@@ -850,7 +885,7 @@ Example:
       "todo": "TODO",
       "priority": "C",
       "parent-priority": "A",
-      "uri": "org://550e8400-e29b-41d4-a716-446655440000"
+      "uri": "file:~/org/tasks.org::*Urgent task"
     }
   ],
   "total": 1,
@@ -936,22 +971,44 @@ Example response for a headline:
   "todo": "TODO",
   "priority": "A",
   "tags": ["work"],
+  "id": "550e8400-e29b-41d4-a716-446655440000",
   "level": 1,
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "content": "Body text...",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
   "children": [
-    {"title": "Subtask", "todo": "NEXT", "level": 2, "uri": "org://..."}
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "uri": "file:~/org/projects.org::*Subtask"}
   ]
 }
 #+end_src
+
+=id= is the ID the heading's =uri= names, so it is absent when =uri= is a
+=file:= link.
 
 *** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline
 - *Parameters:*
   - =file= (string, required): Absolute path to an Org file
-- *Returns:* JSON object with hierarchical outline structure: the titles of the
-  top-level headings and of their direct children; deeper headings are left out
+- *Returns:* JSON object with hierarchical outline structure: the top-level
+  headings and their direct children, each with its =title=, =level=, =uri= (its
+  link, see [[*Links org-mcp returns]]) and =children=; deeper headings are left
+  out
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+
+Example response:
+#+begin_src json
+{
+  "headings": [
+    {"title": "Projects", "level": 1,
+     "uri": "file:~/org/projects.org::*Projects",
+     "children": [
+       {"title": "Project Alpha", "level": 2,
+        "uri": "id:550e8400-e29b-41d4-a716-446655440000",
+        "children": []}
+     ]}
+  ]
+}
+#+end_src
 
 *** org-read-headline
 - *Description:* Read Org headline or file as plain text (auto-detects URI format)
@@ -988,7 +1045,7 @@ Use this tool to understand clock settings before clocking in or out.
 *** org-clock-get-active
 - *Description:* Get the currently active clock, if any. The clock running in the Emacs session takes precedence, including one in a non-allowed file. With no clock running, allowed files are searched for an unclosed CLOCK entry left behind by an earlier session
 - *Parameters:* None
-- *Returns:* JSON object describing the active clock
+- *Returns:* JSON object describing the active clock, with the link to the clocked heading as =uri= when the clock is in an allowed file
 
 Example responses:
 #+begin_src json
@@ -1000,7 +1057,8 @@ Example responses:
   "active": true,
   "file": "/home/user/org/tasks.org",
   "heading": "Implement feature X",
-  "start": "[2026-03-23 Mon 14:30]"
+  "start": "[2026-03-23 Mon 14:30]",
+  "uri": "file:~/org/tasks.org::*Implement feature X"
 }
 
 # Active clock in a non-allowed file:
@@ -1023,7 +1081,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "start_time": "2026-03-23T14:30:00"
 }
 
@@ -1034,7 +1092,7 @@ Example:
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000"
 }
 
 # With dangling clocks resolved:
@@ -1044,7 +1102,7 @@ Example:
   "clocked_in": true,
   "start": "[2026-03-23 Mon 14:30]",
   "heading": "Implement feature X",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "resolved": 1
 }
 #+end_src
@@ -1068,7 +1126,7 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 
@@ -1085,7 +1143,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "start": "2026-03-23T14:30:00",
   "end": "2026-03-23T16:45:00"
 }
@@ -1098,7 +1156,7 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 
@@ -1114,7 +1172,7 @@ Example:
 #+begin_src json
 # Request:
 {
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000",
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000",
   "start": "2026-03-23T14:30:00"
 }
 
@@ -1126,7 +1184,7 @@ Example:
   "start": "[2026-03-23 Mon 14:30]",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
-  "uri": "org://550e8400-e29b-41d4-a716-446655440000"
+  "uri": "id:550e8400-e29b-41d4-a716-446655440000"
 }
 #+end_src
 
@@ -1134,7 +1192,7 @@ Example:
 - *Description:* Find all open (unclosed) clock entries in allowed Org files, or in the files named in =files=
 - *Parameters:*
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. See [[*Querying other files][Querying other files]]
-- *Returns:* JSON object with array of open clock entries
+- *Returns:* JSON object with array of open clock entries, each with the link to its heading as =uri=
 
 Example response:
 #+begin_src json
@@ -1143,7 +1201,8 @@ Example response:
     {
       "file": "/home/user/org/tasks.org",
       "heading": "Implement feature X",
-      "start": "[2026-03-23 Mon 14:30]"
+      "start": "[2026-03-23 Mon 14:30]",
+      "uri": "file:~/org/tasks.org::*Implement feature X"
     }
   ],
   "total": 1

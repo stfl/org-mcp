@@ -31,7 +31,7 @@
 
 (defconst org-mcp-test--content-with-id-resource-uri
   (format "org://%s" org-mcp-test--content-with-id-id)
-  "Resource URI form for org-mcp-test--content-with-id (tool output).")
+  "Resource URI form for org-mcp-test--content-with-id, which tools refuse.")
 
 (defconst org-mcp-test--content-nested-siblings-parent-id
   "nested-siblings-parent-id-002"
@@ -247,10 +247,7 @@ Second child content.
           " *:ID: +" org-mcp-test--level2-parent-level3-sibling-id "\n"
           " *:END:\n"
           "Main package file\n"
-          "\\*\\*\\* TODO Review org-mcp-test\\.el +.*:internet:.*\n"
-          " *:PROPERTIES:\n"
-          " *:ID: +[a-fA-F0-9-]+\n"
-          " *:END:\n\\'")
+          "\\*\\*\\* TODO Review org-mcp-test\\.el +.*:internet:.*\n\\'")
   "Expected pattern after adding TODO after level 3 sibling.")
 
 (defconst org-mcp-test--expected-regex-renamed-second-child
@@ -293,21 +290,18 @@ Second child content.
 (defconst org-mcp-test--expected-timestamp-id-done-regex
   (concat
    "\\`\\* DONE Task with timestamp ID"
-   "\\(?:\n:PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\\)?"
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching complete buffer after updating timestamp ID task to DONE.")
 
 (defconst org-mcp-test--expected-task-one-in-progress-regex
   (concat
    "\\`\\* IN-PROGRESS Task One"
-   "\\(?:\n:PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\\)?"
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching complete buffer with Task One in IN-PROGRESS state.")
 
 (defconst org-mcp-test--expected-task-with-id-in-progress-regex
   (concat
    "\\`\\* IN-PROGRESS Task with ID"
-   "\\(?:\n:PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\\)?"
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching complete buffer with Task with ID in IN-PROGRESS state.")
 
@@ -316,9 +310,6 @@ Second child content.
    "\\`#\\+TITLE: My Org Document\n"
    "\n"
    "\\* TODO New Top Task +.*:urgent:\n"
-   "\\(?: *:PROPERTIES:\n"
-   " *:ID: +[^\n]+\n"
-   " *:END:\n\\)?"
    "\n?"
    "\\* Parent Task\n"
    ":PROPERTIES:\n"
@@ -349,8 +340,7 @@ Second child content.
     "\\(?: *:PROPERTIES:\n *:ID: +%s\n *:END:\n\\)?"
     "Second child content\\.\n"
     "\\*\\* Third Child #3\n"
-    "\\*\\* TODO Child Task +.*:work:.*\n"
-    "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?")
+    "\\*\\* TODO Child Task +.*:work:.*\n")
    org-mcp-test--content-with-id-id)
   "Pattern for child TODO (level 2) added under parent (level 1) with existing child (level 2).")
 
@@ -361,8 +351,7 @@ Second child content.
    ":ID: +" org-mcp-test--childless-parent-id "\n"
    ":END:\n"
    "Some parent content\\.\n"
-   "\\*\\* TODO Only Child +.*:work:.*\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?\\'")
+   "\\*\\* TODO Only Child +.*:work:.*\n\\'")
   "Pattern for first child (level 2) added under a previously-childless parent (level 1).")
 
 (defconst org-mcp-test--regex-second-child-same-level
@@ -372,14 +361,12 @@ Second child content.
    "\\*\\*\\* Review org-mcp\\.el\n"
    "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?"  ; Review org-mcp.el has ID
    "Main package file\n"
-   "\\*\\*\\* TODO Second Child +.*:work:.*\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?\\'")  ; Second Child may have ID
+   "\\*\\*\\* TODO Second Child +.*:work:.*\n\\'")
   "Pattern for second child (level 3) added at same level as first child (level 3) under parent (level 2).")
 
 (defconst org-mcp-test--regex-todo-with-body
   (concat
    "^\\* TODO Task with Body +:[^\n]*\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?" ; Optional properties
    (regexp-quote org-mcp-test--body-text-multiline)
    "\n?$")
   "Pattern for TODO with body text.")
@@ -399,7 +386,6 @@ Second child content.
    "First child content\\.\n"
    "It spans multiple lines\\.\n\n?"
    "\\*\\* TODO New Task After First +:[^\n]*\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[^\n]+\n *:END:\n\\)?"
    "\\*\\* Second Child\n"
    ":PROPERTIES:\n"
    ":ID: +" org-mcp-test--content-with-id-id "\n"
@@ -410,30 +396,26 @@ Second child content.
 
 (defconst org-mcp-test--regex-todo-without-tags
   (concat
-   "^\\* TODO Task Without Tags *\n" ; No tags, optional spaces
-   "\\(?: *:PROPERTIES:\n" " *:ID: +[^\n]+\n" " *:END:\n\\)?$")
+   "\\`\\* TODO Task Without Tags *\n\\'") ; No tags, optional spaces
   "Pattern for TODO item without any tags.")
 
 (defconst org-mcp-test--pattern-add-todo-parent-id-uri
   (concat
    "^\\* Parent Task\n"
-   "\\(?: *:PROPERTIES:\n"
-   " *:ID: +[^\n]+\n"
-   " *:END:\n\\)?"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-nested-siblings-parent-id "\n"
+   ":END:\n"
    "Some parent content\\.\n"
    "\\*\\* First Child 50% Complete\n"
    "First child content\\.\n"
    "It spans multiple lines\\.\n"
    "\\*\\* Second Child\n"
-   "\\(?: *:PROPERTIES:\n"
-   " *:ID: +[^\n]+\n"
-   " *:END:\n\\)?"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--content-with-id-id "\n"
+   ":END:\n"
    "Second child content\\.\n"
    "\\*\\* Third Child #3\n"
-   "\\*\\* TODO Child via ID +:work:\n"
-   "\\(?: *:PROPERTIES:\n"
-   " *:ID: +[^\n]+\n"
-   " *:END:\n\\)?$")
+   "\\*\\* TODO Child via ID +:work:\n\\'")
   "Pattern for TODO added via parent ID URI.")
 
 (defconst org-mcp-test--client-id
@@ -469,9 +451,9 @@ The new heading carries that ID and no other.")
    "\\`\\* TODO Custom ID Task\n"
    " *:PROPERTIES:\n"
    " *:CUSTOM_ID: +custom-id-task\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n\\'")
-  "Pattern for a TODO created with a client-set CUSTOM_ID.")
+  "Pattern for a TODO created with a client-set CUSTOM_ID.
+The heading carries that CUSTOM_ID and no ID.")
 
 (defconst org-mcp-test--pattern-add-todo-with-properties
   (concat
@@ -480,7 +462,6 @@ The new heading carries that ID and no other.")
    " *:EFFORT: +1:00\n"
    " *:OWNER: +alice\n"
    " *:ESTIMATE: +3\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    (regexp-quote org-mcp-test--body-text-multiline)
    "\n\\'")
@@ -491,21 +472,15 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--pattern-renamed-simple-todo
   (concat
    "\\`\\* TODO Updated Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "First line of body\\.\n"
    "Second line of body\\.\n"
    "Third line of body\\.\n?\\'")
-  "Pattern for renamed simple TODO with generated ID.")
+  "Pattern for renamed simple TODO, which gains no ID.")
 
 (defconst org-mcp-test--pattern-renamed-todo-with-tags
   (concat
-   "^\\* TODO Renamed Task[ \t]+:work:urgent:\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
-   "Task description\\.$")
+   "\\`\\* TODO Renamed Task[ \t]+:work:urgent:\n"
+   "Task description\\.\n?\\'")
   "Pattern for renamed TODO task preserving tags.")
 
 (defconst org-mcp-test--pattern-renamed-headline-no-todo
@@ -517,9 +492,6 @@ as its text, and a property sent as null is not written.")
     "\\(?: *:PROPERTIES:\n *:ID: +nested-siblings-parent-id-002\n *:END:\n\\)?"
     "Some parent content\\.\n"
     "\\*\\* Updated Child\n"
-    " *:PROPERTIES:\n"
-    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-    " *:END:\n"
     "First child content\\.\n"
     "It spans multiple lines\\.\n"
     "\\*\\* Second Child\n"
@@ -530,27 +502,27 @@ as its text, and a property sent as null is not written.")
    org-mcp-test--content-with-id-id)
   "Pattern for renamed headline without TODO state.")
 
-(defconst org-mcp-test--pattern-renamed-headline-with-id
+(defconst org-mcp-test--pattern-renamed-headline-without-id
   (format
    (concat
     "\\`#\\+TITLE: My Org Document\n"
     "\n"
     "\\* Parent Task\n"
-    "\\(?: *:PROPERTIES:\n *:ID: +nested-siblings-parent-id-002\n *:END:\n\\)?"
+    ":PROPERTIES:\n"
+    ":ID: +nested-siblings-parent-id-002\n"
+    ":END:\n"
     "Some parent content\\.\n"
     "\\*\\* First Child 50%% Complete\n"
-    "\\(?: *:PROPERTIES:\n *:ID:[ \t]+[A-Fa-f0-9-]+\n *:END:\n\\)?"
     "First child content\\.\n"
     "It spans multiple lines\\.\n"
     "\\*\\* Second Child\n"
-    "\\(?: *:PROPERTIES:\n *:ID: +%s\n *:END:\n\\)?"
+    ":PROPERTIES:\n"
+    ":ID: +%s\n"
+    ":END:\n"
     "Second child content\\.\n"
-    "\\*\\* Renamed Child\n"
-    " *:PROPERTIES:\n"
-    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-    " *:END:\n?\\'")
+    "\\*\\* Renamed Child\n?\\'")
    org-mcp-test--content-with-id-id)
-  "Pattern for headline renamed with ID creation.")
+  "Pattern for a headline without an ID renamed, which gains none.")
 
 (defconst org-mcp-test--pattern-renamed-slash-headline
   (concat
@@ -558,9 +530,6 @@ as its text, and a property sent as null is not written.")
    "\\*\\* Real Child\n"
    "Content here\\.\n"
    "\\* Parent/Child Renamed\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "This is a single headline with a slash, not nested under Parent\\.\n?\\'")
   "Pattern for renamed headline containing slash character.")
 
@@ -570,9 +539,6 @@ as its text, and a property sent as null is not written.")
    "\\*\\* Real Child\n"
    "Content here\\.\n"
    "\\* Parent-Child Renamed\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "This is a single headline with a slash, not nested under Parent\\.\n?\\'")
   "Regex for slash-not-nested test after renaming Parent/Child.")
 
@@ -587,9 +553,6 @@ as its text, and a property sent as null is not written.")
     ":END:\n"
     "Some parent content\\.\n"
     "\\*\\* First Child 75%% Complete\n"
-    " *:PROPERTIES:\n"
-    " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-    " *:END:\n"
     "First child content\\.\n"
     "It spans multiple lines\\.\n"
     "\\*\\* Second Child\n"
@@ -606,9 +569,6 @@ as its text, and a property sent as null is not written.")
   (concat
    "\\`\\* Team Updates\n"
    "\\*\\* Q1 Review\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "First review content\\.\n"
    "\\* Development Tasks\n"
    "\\*\\* Project Review\n"
@@ -627,9 +587,6 @@ as its text, and a property sent as null is not written.")
    "\\*\\* Other Item\n"
    "More content\\.\n"
    "\\*\\* Renamed Target\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "This Target is under Second Section, not First Section\\.\n?\\'")
   "Regex for hierarchy test after renaming second Target.")
 
@@ -637,19 +594,13 @@ as its text, and a property sent as null is not written.")
   (concat
    "\\`#\\+TITLE: Test Org File\n"
    "\n"
-   "\\* TODO Test Task[ \t]+\\(:[^:\n]+\\)+:\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n?\\'")
+   "\\* TODO Test Task[ \t]+\\(:[^:\n]+\\)+:\n\\'")
   "Regex for add-todo test accepting any tag order.")
 
 (defconst org-mcp-test--regex-todo-keywords-after
   (concat
    "\\`\\* Project Management\n"
    "\\*\\* TODO Q1 Planning Review\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "This task needs to be renamed\n"
    "\\*\\* DONE Review Code\n"
    "This is already done\n?\\'")
@@ -699,39 +650,58 @@ as its text, and a property sent as null is not written.")
     "\\`#\\+TITLE: My Org Document\n"
     "\n"
     "\\* Parent Task\n"
-    "\\(?: *:PROPERTIES:\n *:ID: +nested-siblings-parent-id-002\n *:END:\n\\)?"
+    ":PROPERTIES:\n"
+    ":ID: +nested-siblings-parent-id-002\n"
+    ":END:\n"
     "Updated parent content\n"
     "\\*\\* First Child 50%% Complete\n"
-    "\\(?: *:PROPERTIES:\n *:ID:[ \t]+[A-Fa-f0-9-]+\n *:END:\n\\)?"
     "First child content\\.\n"
     "It spans multiple lines\\.\n"
     "\\*\\* Second Child\n"
-    "\\(?: *:PROPERTIES:\n *:ID: +%s\n *:END:\n\\)?"
+    ":PROPERTIES:\n"
+    ":ID: +%s\n"
+    ":END:\n"
     "Second child content\\.\n"
     "\\*\\* Third Child #3\n?"
-    "\\(?: *:PROPERTIES:\n *:ID:[ \t]+[A-Fa-f0-9-]+\n *:END:\n\\)?"
     "\\'")
    org-mcp-test--content-with-id-id)
-  "Pattern for nested headlines edit-body test result.")
+  "Pattern for nested headlines edit-body test result.
+No heading gains an ID, the first child included.")
 
 (defconst org-mcp-test--pattern-edit-body-empty
-  (concat
-   "\\*\\* Third Child #3New content added\\.\n"
-   " *:PROPERTIES:\n"
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:")
-  "Pattern for edit-body test with empty body adding content.")
+  (format
+   (concat
+    "\\`#\\+TITLE: My Org Document\n"
+    "\n"
+    "\\* Parent Task\n"
+    ":PROPERTIES:\n"
+    ":ID: +nested-siblings-parent-id-002\n"
+    ":END:\n"
+    "Some parent content\\.\n"
+    "\\*\\* First Child 50%% Complete\n"
+    "First child content\\.\n"
+    "It spans multiple lines\\.\n"
+    "\\*\\* Second Child\n"
+    ":PROPERTIES:\n"
+    ":ID: +%s\n"
+    ":END:\n"
+    "Second child content\\.\n"
+    "\\*\\* Third Child #3New content added\\.\n?\\'")
+   org-mcp-test--content-with-id-id)
+  "Pattern for edit-body test with empty body adding content.
+The fixture's last heading has no newline, so the content is added to
+the heading line.")
 
 (defconst org-mcp-test--pattern-edit-body-empty-with-props
   (format (concat
-           " *:PROPERTIES:\n"
-           " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-           " *:END:\n"
-           " *:PROPERTIES:\n"
-           " *:ID: +%s\n"
-           " *:END:Content added after properties\\.")
+           "\\`\\* TODO Task with ID but no body\n"
+           ":PROPERTIES:\n"
+           ":ID: +%s\n"
+           ":END:Content added after properties\\.\n?\\'")
           org-mcp-test--timestamp-id)
-  "Pattern for edit-body with existing properties adding content.")
+  "Pattern for edit-body with existing properties adding content.
+The fixture ends in `:END:' with no newline, so the content is added to
+that line.")
 
 (defconst org-mcp-test--pattern-edit-body-accept-lower-level
   (concat
@@ -751,9 +721,6 @@ as its text, and a property sent as null is not written.")
    " *:END:\n"
    "some text\n"
    "\\*\\*\\* Subheading content\n"
-   "\\(?: *:PROPERTIES:\n" ; Subheading gets ID
-   " *:ID:[ \t]+[A-Fa-f0-9-]+\n"
-   " *:END:\n\\)?"
    "\\*\\* Third Child #3")
   "Pattern for edit-body accepting lower-level headlines.")
 
@@ -805,7 +772,6 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--clock-add-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
@@ -816,7 +782,6 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--clock-in-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    ":END:\n"
@@ -826,7 +791,6 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--clock-out-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
@@ -844,9 +808,6 @@ as its text, and a property sent as null is not written.")
 (defconst org-mcp-test--scope-task-done-regex
   (concat
    "\\`\\* DONE Task\n"
-   ":PROPERTIES:\n"
-   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
-   ":END:\n"
    "Body\n"
    "\\'")
   "Regex matching the complete scope-test file after Task becomes DONE.")
@@ -887,6 +848,21 @@ clock, so each tool taking `files' reports the file by that title.")
       (widen)
       (should (string-match-p expected-pattern (buffer-string))))))
 
+(defun org-mcp-test--file-link (file search)
+  "Return the `file:' link to FILE with SEARCH after `::'.
+The file name is written the way `org-store-link' writes it.  SEARCH
+is `*Title', `#custom-id' or a line of text."
+  (concat "file:" (abbreviate-file-name file) "::" search))
+
+(defun org-mcp-test--should-resolve-to (link title)
+  "Assert that a later tool call reaches the heading TITLE through LINK.
+LINK must be an `id:' or `file:' link.  org-read must read a heading
+titled TITLE there and return LINK itself as that heading's link."
+  (should (string-match-p "\\`\\(?:id\\|file\\):" link))
+  (let ((heading (json-read-from-string (org-mcp-test--call-read link))))
+    (should (equal (alist-get 'title heading) title))
+    (should (equal (alist-get 'uri heading) link))))
+
 (defmacro org-mcp-test--assert-error-and-file (test-file error-form)
   "Assert that ERROR-FORM throws an error and TEST-FILE remains unchanged."
   (declare (indent 1) (debug t))
@@ -894,14 +870,48 @@ clock, so each tool taking `files' reports the file by that title.")
      (should-error ,error-form :type 'mcp-server-lib-tool-error)
      (should (string= (org-mcp-test--read-file ,test-file) original-content))))
 
+(defvar org-mcp-test--in-request nil
+  "Non-nil while the MCP server handles a request.")
+
+(defvar org-mcp-test--created-ids nil
+  "Buffers in which Org's ID generator ran during an MCP request.")
+
+(defun org-mcp-test--mark-request (orig &rest args)
+  "Call ORIG with ARGS with `org-mcp-test--in-request' bound to t."
+  (let ((org-mcp-test--in-request t))
+    (apply orig args)))
+
+(defun org-mcp-test--record-created-id (&rest _)
+  "Record that Org's ID generator ran while org-mcp handled a request."
+  (when org-mcp-test--in-request
+    (push (buffer-name) org-mcp-test--created-ids)))
+
 (defmacro org-mcp-test--with-enabled (&rest body)
-  "Run BODY with org-mcp enabled, ensuring cleanup."
+  "Run BODY with org-mcp enabled, ensuring cleanup.
+Fails the test when Org's ID generator runs while org-mcp handles
+any request in BODY, since org-mcp creates no identifiers.  Every
+path that makes an ID, `org-id-get-create' and `org-id-get' with
+CREATE included, goes through `org-id-new', which is watched.  Test
+setup outside requests may still create IDs."
   (declare (indent defun) (debug t))
-  `(progn
+  `(let ((org-mcp-test--created-ids nil)
+         ;; An enclosing use of this macro already watches, and removes
+         ;; the advice when it is done.
+         (watching
+          (advice-member-p #'org-mcp-test--record-created-id 'org-id-new)))
+     (unless watching
+       (advice-add 'mcp-server-lib-process-jsonrpc
+                   :around #'org-mcp-test--mark-request)
+       (advice-add 'org-id-new :before #'org-mcp-test--record-created-id))
      (org-mcp-enable)
      (unwind-protect
-         (mcp-server-lib-ert-with-server :tools t :resources t ,@body)
-       (org-mcp-disable))))
+         (prog1 (mcp-server-lib-ert-with-server :tools t :resources t ,@body)
+           (should-not org-mcp-test--created-ids))
+       (org-mcp-disable)
+       (unless watching
+         (advice-remove 'org-id-new #'org-mcp-test--record-created-id)
+         (advice-remove 'mcp-server-lib-process-jsonrpc
+                        #'org-mcp-test--mark-request)))))
 
 (defmacro org-mcp-test--with-temp-org-files (file-specs &rest body)
   "Create temporary Org files, execute BODY, and ensure cleanup.
@@ -1101,7 +1111,8 @@ PROPERTIES is an optional alist sent as the properties parameter."
 
 (defun org-mcp-test--add-todo-and-check
     (title todoState tags body parentUri afterUri
-           basename test-file expected-pattern &optional properties)
+           basename test-file expected-pattern &optional properties
+           expected-uri)
   "Add TODO item, verify the result and return the parsed response.
 TITLE is the headline text.
 TODOSTATE is the TODO state.
@@ -1112,7 +1123,9 @@ AFTERURI is optional URI of sibling to insert after.
 BASENAME is the expected file basename.
 TEST-FILE is the path to the file to check.
 EXPECTED-PATTERN is a regexp that the file content should match.
-PROPERTIES is an optional alist sent as the properties parameter."
+PROPERTIES is an optional alist sent as the properties parameter.
+EXPECTED-URI is the link the response must carry; it defaults to the
+title link, since the new heading has no identifier."
   (let* ((params
           `((title . ,title)
             (todo_state . ,todoState)
@@ -1127,7 +1140,10 @@ PROPERTIES is an optional alist sent as the properties parameter."
     (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
     (should (eq (alist-get 'saved result) t))
-    (should (string-match-p "\\`org://.+" (alist-get 'uri result)))
+    (should
+     (equal (alist-get 'uri result)
+            (or expected-uri
+                (org-mcp-test--file-link test-file (concat "*" title)))))
     (should (equal (alist-get 'file result) basename))
     (should (equal (alist-get 'title result) title))
     (org-mcp-test--verify-file-matches test-file expected-pattern)
@@ -1201,13 +1217,17 @@ NEW-STATE is the new TODO state to set."
      (error "Expected error but got success: %s" result))))
 
 (defun org-mcp-test--update-todo-state-and-check
-    (resource-uri old-state new-state test-file expected-content-regex)
+    (resource-uri old-state new-state test-file expected-content-regex
+                  &optional expected-uri)
   "Update TODO state and verify the result via MCP JSON-RPC.
 RESOURCE-URI is the URI to update.
 OLD-STATE is the current TODO state to update from.
 NEW-STATE is the new TODO state to update to.
 TEST-FILE is the file to verify content after update.
-EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
+EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer.
+EXPECTED-URI is the link the response must carry.  It may be omitted
+when RESOURCE-URI is a bare ID, which the response returns as an
+`id:' link."
   (let ((result
          (org-mcp-test--call-update-todo-state
           resource-uri new-state old-state)))
@@ -1216,13 +1236,11 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
     (should (eq (alist-get 'saved result) t))
     (should (equal (alist-get 'previous_state result) old-state))
     (should (equal (alist-get 'new_state result) new-state))
-    (should (stringp (alist-get 'uri result)))
-    (should (string-prefix-p "org://" (alist-get 'uri result)))
-    ;; For ID-based URIs, returned URI is the canonical `org://{uuid}'
-    ;; resource form even though the input was bare.
-    (when (org-mcp--uri-is-id-based resource-uri)
-      (should (equal (alist-get 'uri result)
-                     (concat "org://" resource-uri))))
+    (should
+     (equal (alist-get 'uri result)
+            (or expected-uri
+                (and (org-mcp--uri-is-id-based resource-uri)
+                     (concat "id:" resource-uri)))))
     (org-mcp-test--verify-file-matches test-file expected-content-regex)))
 
 ;; Helper functions for testing org-rename-headline MCP tool
@@ -1234,7 +1252,9 @@ URI is the headline URI.
 CURRENT-TITLE is the expected current title.
 NEW-TITLE is the new title to set.
 TEST-FILE is the file to verify content after rename.
-EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
+EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer.
+The response must link to the renamed heading: by `id:' when URI is a
+bare ID, else by its new title."
   (let* ((params
           `((uri . ,uri)
             (current_title . ,current-title)
@@ -1248,12 +1268,11 @@ EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer."
     (should (eq (alist-get 'saved result) t))
     (should (equal (alist-get 'previous_title result) current-title))
     (should (equal (alist-get 'new_title result) new-title))
-    (should (stringp result-uri))
-    (should (string-prefix-p "org://" result-uri))
-    ;; If input URI was ID-based, result URI is the canonical
-    ;; `org://{uuid}' resource form even though the input was bare.
-    (when (org-mcp--uri-is-id-based uri)
-      (should (equal result-uri (concat "org://" uri))))
+    (should
+     (equal result-uri
+            (if (org-mcp--uri-is-id-based uri)
+                (concat "id:" uri)
+              (org-mcp-test--file-link test-file (concat "*" new-title)))))
     (org-mcp-test--verify-file-matches test-file expected-content-regex)))
 
 (defun org-mcp-test--call-rename-headline-expecting-error
@@ -1295,15 +1314,15 @@ NEW-TITLE is the new title to set."
 
 (defun org-mcp-test--call-edit-body-and-check
     (test-file resource-uri old-body new-body expected-pattern
-               &optional append expected-id)
+               append expected-uri)
   "Call org-edit-body tool and check result structure and file content.
 TEST-FILE is the path to the file to check.
 RESOURCE-URI is the URI of the node to edit.
 OLD-BODY is the substring to search for within the node's body.
 NEW-BODY is the replacement text.
 EXPECTED-PATTERN is a regexp that the file content should match.
-APPEND if true, append new-body to end of body (default: nil).
-EXPECTED-ID if provided, check the returned URI has this exact ID."
+APPEND if true, append new-body to end of body.
+EXPECTED-URI is the link to the edited heading the response carries."
   (let* ((params
           `((resource_uri . ,resource-uri)
             (old_body . ,old-body)
@@ -1314,10 +1333,7 @@ EXPECTED-ID if provided, check the returned URI has this exact ID."
     (should (= (length result) 3))
     (should (equal (alist-get 'success result) t))
     (should (eq (alist-get 'saved result) t))
-    (let ((uri (alist-get 'uri result)))
-      (if expected-id
-          (should (equal uri (concat "org://" expected-id)))
-        (should (string-prefix-p "org://" uri))))
+    (should (equal (alist-get 'uri result) expected-uri))
     (org-mcp-test--verify-file-matches test-file expected-pattern)))
 
 (defun org-mcp-test--call-edit-body-expecting-error
@@ -3067,7 +3083,8 @@ parent."
                (format "%s#Task%%20One" test-file)))
           (org-mcp-test--update-todo-state-and-check
            resource-uri "TODO" "IN-PROGRESS"
-           test-file org-mcp-test--expected-task-one-in-progress-regex))))))
+           test-file org-mcp-test--expected-task-one-in-progress-regex
+           (org-mcp-test--file-link test-file "*Task One")))))))
 
 (ert-deftest org-mcp-test-update-todo-state-mismatch ()
   "Test TODO state update fails on state mismatch."
@@ -3141,7 +3158,8 @@ When the visited buffer was clean, org-mcp edits it and auto-saves to disk."
                                test-file)))
                   (org-mcp-test--update-todo-state-and-check
                    resource-uri "TODO" "IN-PROGRESS"
-                   test-file org-mcp-test--expected-task-one-in-progress-regex)
+                   test-file org-mcp-test--expected-task-one-in-progress-regex
+                   (org-mcp-test--file-link test-file "*Task One"))
                   ;; Verify the buffer was also updated
                   (with-current-buffer buffer
                     (goto-char (point-min))
@@ -3161,7 +3179,6 @@ Another task description."
 (defconst org-mcp-test--expected-modified-buffer-task-one-in-progress-regex
   (concat
    "\\`\\* IN-PROGRESS Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "Task description\\.\n"
    "\\* TODO Task Two\n"
    "Another task description\\.\n"
@@ -3283,8 +3300,9 @@ Another task."))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) "TODO"))
             (should (equal (alist-get 'new_state result) "IN-PROGRESS"))
-            (should (stringp (alist-get 'uri result)))
-            (should (string-prefix-p "org://" (alist-get 'uri result)))
+            (should
+             (equal (alist-get 'uri result)
+                    (org-mcp-test--file-link test-file "*Task One")))
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--expected-task-one-in-progress-regex)))))))
 
@@ -3304,13 +3322,13 @@ Another task."))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) ""))
             (should (equal (alist-get 'new_state result) "TODO"))
-            (should (stringp (alist-get 'uri result)))
-            (should (string-prefix-p "org://" (alist-get 'uri result)))))))))
+            (should
+             (equal (alist-get 'uri result)
+                    (org-mcp-test--file-link test-file "*Task One")))))))))
 
 (defconst org-mcp-test--expected-task-one-done-with-note-regex
   (concat
    "\\`\\* DONE Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "- State \"DONE\"[ \t]+from \"TODO\"[ \t]+\\[.*\\] \\\\\\\\\n"
    "  Test note\n"
@@ -3321,7 +3339,6 @@ Another task."))
 (defconst org-mcp-test--expected-task-one-done-with-note-no-drawer-regex
   (concat
    "\\`\\* DONE Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "- State \"DONE\"[ \t]+from \"TODO\"[ \t]+\\[.*\\] \\\\\\\\\n"
    "  Test note\n"
    "\\(?:.\\|\n\\)*\\'")
@@ -3345,7 +3362,6 @@ Another task."))
    "\\`\\* TODO Weekly Task\n"
    "\\(?::PROPERTIES:\n"
    "\\(?::REPEAT_TO_STATE:[ \t]+\\S-+\n\\)?"
-   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
    "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
    ":END:\n\\)?"
    "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
@@ -3358,7 +3374,6 @@ Another task."))
    "\\`\\* NEXT Weekly Task\n"
    "\\(?::PROPERTIES:\n"
    "\\(?::REPEAT_TO_STATE:[ \t]+NEXT\n\\)?"
-   ":ID:[ \t]+[A-Fa-f0-9-]+\n"
    "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
    ":END:\n\\)?"
    "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
@@ -3422,7 +3437,6 @@ Task body."
    "\\`\\* TODO Simple Task\n"
    " *:PROPERTIES:\n"
    " *:EFFORT: +2:00\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    "Task body text\\.\n?\\'")
   "Pattern after setting EFFORT property on bare task.")
@@ -3433,7 +3447,6 @@ Task body."
    " *:PROPERTIES:\n"
    " *:EFFORT: +2:30\n"
    " *:CATEGORY: +work\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    "Some body\\.\n?\\'")
   "Pattern after updating EFFORT property.")
@@ -3443,7 +3456,6 @@ Task body."
    "\\`\\* TODO Task with Properties\n"
    " *:PROPERTIES:\n"
    " *:CATEGORY: +work\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    "Some body\\.\n?\\'")
   "Pattern after deleting EFFORT property.")
@@ -3463,9 +3475,6 @@ The heading carries the client's ID and no other.")
   (concat
    "\\`\\* TODO Simple Task\n"
    "SCHEDULED: <2026-03-27 .*>\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body text\\.\n?\\'")
   "Pattern after setting SCHEDULED on bare task.")
 
@@ -3473,18 +3482,12 @@ The heading carries the client's ID and no other.")
   (concat
    "\\`\\* TODO Scheduled Task\n"
    "SCHEDULED: <2026-04-15 .*>\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after updating existing SCHEDULED.")
 
 (defconst org-mcp-test--pattern-scheduled-remove
   (concat
    "\\`\\* TODO Scheduled Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after removing SCHEDULED.")
 
@@ -3492,9 +3495,6 @@ The heading carries the client's ID and no other.")
   (concat
    "\\`\\* TODO Simple Task\n"
    "DEADLINE: <2026-03-27 .*>\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body text\\.\n?\\'")
   "Pattern after setting DEADLINE on bare task.")
 
@@ -3502,81 +3502,54 @@ The heading carries the client's ID and no other.")
   (concat
    "\\`\\* TODO Deadline Task\n"
    "DEADLINE: <2026-04-15 .*>\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after updating existing DEADLINE.")
 
 (defconst org-mcp-test--pattern-deadline-remove
   (concat
    "\\`\\* TODO Deadline Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after removing DEADLINE.")
 
 (defconst org-mcp-test--pattern-tags-set
   (concat
    "\\`\\* TODO Simple Task[ \t]+:work:urgent:\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body text\\.\n?\\'")
   "Pattern after setting tags on bare task.")
 
 (defconst org-mcp-test--pattern-tags-replace
   (concat
    "\\`\\* TODO Task with Tags[ \t]+:personal:\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task description\\.\n?\\'")
   "Pattern after replacing tags.")
 
 (defconst org-mcp-test--pattern-tags-clear
   (concat
    "\\`\\* TODO Task with Tags\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task description\\.\n?\\'")
   "Pattern after clearing all tags.")
 
 (defconst org-mcp-test--pattern-priority-set
   (concat
    "\\`\\* TODO \\[#A\\] Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body text\\.\n?\\'")
   "Pattern after setting priority A on bare task.")
 
 (defconst org-mcp-test--pattern-priority-change
   (concat
    "\\`\\* TODO \\[#C\\] Priority Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after changing priority from B to C.")
 
 (defconst org-mcp-test--pattern-priority-remove
   (concat
    "\\`\\* TODO Priority Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body\\.\n?\\'")
   "Pattern after removing priority.")
 
 (defconst org-mcp-test--pattern-append-body
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Task body text\\.\n"
    "Appended line\\.\n?\\'")
   "Pattern after appending to body.")
@@ -3584,18 +3557,12 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-append-body-empty
   (concat
    "\\`\\* TODO Empty Body Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "New body content\\.\n?\\'")
   "Pattern after appending to empty body.")
 
 (defconst org-mcp-test--pattern-append-body-with-children
   (concat
    "\\`\\* TODO Parent Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Parent body\\.\n"
    "Appended text\\.\n"
    "\\*\\* Child One\n"
@@ -3605,9 +3572,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-new
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  This is my note\\.\n"
@@ -3618,9 +3582,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-existing
   (concat
    "\\`\\* TODO Task with Logbook\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  Another note\\.\n"
@@ -3632,9 +3593,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-multiline
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  First line\\.\n"
@@ -3646,9 +3604,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-special-chars
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  Quotes \"like this\", backslash \\\\, percent %, asterisk \\*\\.\n"
@@ -3659,9 +3614,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-no-drawer
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  Plain note\\.\n"
    "Task body text\\.\n?\\'")
@@ -3670,9 +3622,6 @@ The heading carries the client's ID and no other.")
 (defconst org-mcp-test--pattern-logbook-note-custom-heading
   (concat
    "\\`\\* TODO Simple Task\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "- Custom note prefix \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
    "  My note\\.\n"
@@ -3788,10 +3737,7 @@ LOGBOOK drawer."
        (file-name-nondirectory test-file)
        test-file
        (concat
-        "^\\* TODO New Task +:.*work.*urgent.*:\n"
-        "\\(?: *:PROPERTIES:\n"
-        " *:ID: +[^\n]+\n"
-        " *:END:\n\\)?$")))))
+        "^\\* TODO New Task +:.*work.*urgent.*:\n\\'")))))
 
 (ert-deftest org-mcp-test-add-todo-top-level-with-header ()
   "Test adding top-level TODO after header comments."
@@ -3950,10 +3896,7 @@ Org permits free-form tags in headlines, so we only enforce
        (file-name-nondirectory test-file)
        test-file
        (concat
-        "^\\* TODO Task1 +:freeform:\n"
-        "\\(?: *:PROPERTIES:\n"
-        " *:ID: +[^\n]+\n"
-        " *:END:\n\\)?$")))))
+        "^\\* TODO Task1 +:freeform:\n\\'")))))
 
 (ert-deftest org-mcp-test-add-todo-tag-accept-valid-with-alist ()
   "Test that tags in `org-tag-alist' are accepted."
@@ -3971,10 +3914,7 @@ Org permits free-form tags in headlines, so we only enforce
        (file-name-nondirectory test-file)
        test-file
        (concat
-        "^\\* TODO ValidTask +:work:\n"
-        "\\(?: *:PROPERTIES:\n"
-        " *:ID: +[^\n]+\n"
-        " *:END:\n\\)?$")))))
+        "^\\* TODO ValidTask +:work:\n\\'")))))
 
 (ert-deftest org-mcp-test-add-todo-tag-validation-without-alist ()
   "Test valid tag names are accepted when `org-tag-alist' is empty."
@@ -3995,10 +3935,7 @@ Org permits free-form tags in headlines, so we only enforce
          test-file
          (concat
           "^\\* TODO Task1 +:"
-          ".*validtag.*tag123.*my_tag.*@home.*:\n"
-          "\\(?: *:PROPERTIES:\n"
-          " *:ID: +[^\n]+\n"
-          " *:END:\n\\)?$"))))))
+          ".*validtag.*tag123.*my_tag.*@home.*:\n\\'"))))))
 
 (ert-deftest org-mcp-test-add-todo-tag-invalid-characters ()
   "Test that tags with characters outside `org-tag-re' are rejected."
@@ -4042,10 +3979,7 @@ Org permits free-form tags in headlines, so we only enforce
          test-file
          (concat
           "^\\* TODO Task1 +:"
-          ".*tag#hash.*pct%tag.*:\n"
-          "\\(?: *:PROPERTIES:\n"
-          " *:ID: +[^\n]+\n"
-          " *:END:\n\\)?$"))))))
+          ".*tag#hash.*pct%tag.*:\n\\'"))))))
 
 (ert-deftest org-mcp-test-add-todo-grouptags-children-allowed ()
   "Tags inside `:startgrouptag'/`:grouptags'/`:endgrouptag' are allowed."
@@ -4073,10 +4007,7 @@ Org permits free-form tags in headlines, so we only enforce
          test-file
          (concat
           "^\\* TODO Task1 +:"
-          "\\(?:project:proj_a\\|proj_a:project\\):\n"
-          "\\(?: *:PROPERTIES:\n"
-          " *:ID: +[^\n]+\n"
-          " *:END:\n\\)?$"))))))
+          "\\(?:project:proj_a\\|proj_a:project\\):\n\\'"))))))
 
 (ert-deftest org-mcp-test-add-todo-mutex-tags-from-persistent-alist ()
   "Mutex group declared in `org-tag-persistent-alist' is enforced."
@@ -4254,9 +4185,6 @@ A single asterisk without space is not a valid Org headline."
        test-file
        (concat
         "^\\* TODO Task +:work:\n"
-        "\\(?: *:PROPERTIES:\n"
-        " *:ID: +[^\n]+\n"
-        " *:END:\n\\)?"
         "Some initial text\\.\n"
         "\\*$")))))
 
@@ -4317,9 +4245,6 @@ This is valid Org-mode syntax and should be allowed."
        test-file
        (concat
         "^\\* TODO Task with literal END_SRC +:work:\n"
-        "\\(?: *:PROPERTIES:\n"
-        " *:ID: +[^\n]+\n"
-        " *:END:\n\\)?"
         "Example of source block:\n"
         "#\\+BEGIN_EXAMPLE\n"
         "#\\+END_SRC\n"
@@ -4514,10 +4439,10 @@ by that ID, and the ID is not added to `org-id-locations'."
             (file-name-nondirectory test-file)
             test-file
             org-mcp-test--pattern-add-todo-with-id-property
-            `((ID . ,org-mcp-test--client-id)))))
-     (should
-      (equal
-       (alist-get 'uri result) (concat "org://" org-mcp-test--client-id)))
+            `((ID . ,org-mcp-test--client-id))
+            (concat "id:" org-mcp-test--client-id))))
+     (should (equal (alist-get 'uri result)
+                    (concat "id:" org-mcp-test--client-id)))
      (should
       (org-mcp-test--id-registered-p
        org-mcp-test--content-nested-siblings-parent-id))
@@ -4537,7 +4462,8 @@ by that ID, and the ID is not added to `org-id-locations'."
      (file-name-nondirectory test-file)
      test-file
      org-mcp-test--pattern-add-todo-with-custom-id-property
-     '((CUSTOM_ID . "custom-id-task")))))
+     '((CUSTOM_ID . "custom-id-task"))
+     (org-mcp-test--file-link test-file "#custom-id-task"))))
 
 (ert-deftest org-mcp-test-add-todo-with-properties ()
   "Test a new TODO gets arbitrary properties next to tags and a body."
@@ -4807,12 +4733,15 @@ disambiguate."
      test-file
      org-mcp-test--regex-duplicate-first-renamed)))
 
-(ert-deftest org-mcp-test-rename-headline-creates-id ()
-  "Test that renaming a headline creates an Org ID and returns it."
+(ert-deftest org-mcp-test-rename-headline-creates-no-id ()
+  "Test that renaming a headline without an ID creates none.
+The response links to the heading by its new title, and Org's ID
+locations gain no entry."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
       (let ((org-id-track-globally t)
-            (org-id-locations-file (make-temp-file "test-org-id")))
+            (org-id-locations-file nil)
+            (org-id-locations nil))
         ;; Rename headline using path-based URI
         (let ((resource-uri
                (format
@@ -4823,7 +4752,8 @@ disambiguate."
            "Third Child #3"
            "Renamed Child"
            test-file
-           org-mcp-test--pattern-renamed-headline-with-id)))))
+           org-mcp-test--pattern-renamed-headline-without-id)
+          (should-not org-id-locations)))))
 
 
 (ert-deftest org-mcp-test-rename-headline-hierarchy ()
@@ -4876,7 +4806,7 @@ The navigation function should find headlines even when they have TODO keywords.
     "Updated second child content."
     org-mcp-test--pattern-edit-body-single-line
     nil
-    org-mcp-test--content-with-id-id)))
+    (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-multiline ()
   "Test org-edit-body tool for multi-line replacement."
@@ -4892,7 +4822,7 @@ with new multiline
 content here."
      org-mcp-test--pattern-edit-body-multiline
      nil
-     org-mcp-test--content-with-id-id)))
+     (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-multiple-occurrences-error ()
   "Test error for multiple occurrences."
@@ -4926,7 +4856,10 @@ content here."
        resource-uri
        ""
        "New content added."
-       org-mcp-test--pattern-edit-body-empty))))
+       org-mcp-test--pattern-edit-body-empty
+       nil
+       (org-mcp-test--file-link
+        test-file "*Third Child #3New content added.")))))
 
 (ert-deftest org-mcp-test-edit-body-empty-old-non-empty-body ()
   "Test error when oldBody is empty but body has content."
@@ -4949,7 +4882,9 @@ content here."
      (format "%s" org-mcp-test--timestamp-id)
      ""
      "Content added after properties."
-     org-mcp-test--pattern-edit-body-empty-with-props)))
+     org-mcp-test--pattern-edit-body-empty-with-props
+     nil
+     (org-mcp-test--file-link test-file "*Task with ID but no body"))))
 
 (ert-deftest org-mcp-test-edit-body-nested-headlines ()
   "Test org-edit-body preserves nested headlines."
@@ -4960,7 +4895,9 @@ content here."
      (format "%s#Parent%%20Task" test-file)
      "Some parent content."
      "Updated parent content"
-     org-mcp-test--pattern-edit-body-nested-headlines)))
+     org-mcp-test--pattern-edit-body-nested-headlines
+     nil
+     (concat "id:" org-mcp-test--content-nested-siblings-parent-id))))
 
 (ert-deftest org-mcp-test-edit-body-reject-headline-in-middle ()
   "Test org-edit-body rejects newBody with headline marker in middle."
@@ -4985,7 +4922,9 @@ content here."
      "Second child content."
      "some text
 *** Subheading content"
-     org-mcp-test--pattern-edit-body-accept-lower-level)))
+     org-mcp-test--pattern-edit-body-accept-lower-level
+     nil
+     (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-reject-higher-level-headline ()
   "Test org-edit-body rejects newBody with higher-level headline.
@@ -5377,7 +5316,6 @@ Body after everything."))
 (defconst org-mcp-test--clock-add-modified-buffer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
@@ -5391,7 +5329,6 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
 (defconst org-mcp-test--clock-in-modified-buffer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    ":END:\n"
@@ -5404,7 +5341,6 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
 (defconst org-mcp-test--clock-out-modified-buffer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
@@ -5517,7 +5453,6 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
 (defconst org-mcp-test--clock-in-resolve-mixed-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    "CLOCK: \\[2025-12-28 [A-Za-z]\\{2,3\\} 09:00\\]"
@@ -5529,7 +5464,6 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
 (defconst org-mcp-test--clock-in-resolve-other-heading-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    ":END:\n"
@@ -5653,7 +5587,6 @@ Used for clock-out tests when `org-clock-into-drawer' is nil.")
 (defconst org-mcp-test--clock-add-no-drawer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
    "\\'")
@@ -5663,7 +5596,6 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
 (defconst org-mcp-test--clock-in-no-drawer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    "\\'")
   "File contents after clock-in with `org-clock-into-drawer' nil.")
@@ -5671,7 +5603,6 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
 (defconst org-mcp-test--clock-out-no-drawer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
    "\\'")
@@ -5680,7 +5611,6 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
 (defconst org-mcp-test--clock-add-custom-drawer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":WORK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
@@ -5725,13 +5655,11 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
 (defconst org-mcp-test--clock-in-close-same-file-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
    ":END:\n"
    "\\* TODO Task Two\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
    ":END:\n"
@@ -5741,7 +5669,6 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
 (defconst org-mcp-test--clock-in-close-different-file-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
@@ -5786,7 +5713,6 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
    ":END:\n"
    "\\* TODO Task Two\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
    ":END:\n"
@@ -5850,7 +5776,6 @@ on disk stays unchanged and the response reports `saved' as false."
 (defconst org-mcp-test--clock-in-at-eleven-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
    ":END:\n"
@@ -6191,7 +6116,6 @@ closed clocks."
 (defconst org-mcp-test--clock-delete-only-entry-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "\\'")
   "After deleting the sole CLOCK entry, the LOGBOOK drawer is removed.")
 
@@ -6205,7 +6129,6 @@ closed clocks."
 (defconst org-mcp-test--clock-delete-one-of-several-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-02 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-02 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
@@ -6251,7 +6174,6 @@ closed clocks."
 (defconst org-mcp-test--clock-delete-no-drawer-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    "\\'")
   "After deleting a bare CLOCK with no drawer, only the heading remains.")
 
@@ -6307,7 +6229,6 @@ Exercises `org-mcp--clock-remove-empty-logbook' when
 (defconst org-mcp-test--clock-delete-keeps-state-note-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "- State \"DONE\"       from \"TODO\"       "
    "\\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\]\n"
@@ -6345,7 +6266,6 @@ deleting the CLOCK leaves whitespace-only content behind.")
 (defconst org-mcp-test--clock-delete-keeps-blank-line-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
-   "\\(?::PROPERTIES:\n:ID:[ \t]+[A-Fa-f0-9-]+\n:END:\n\\)?"
    ":LOGBOOK:\n"
    "\n"
    ":END:\n"
@@ -6383,7 +6303,9 @@ whitespace-between-markers edge case."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
-      (should (string-prefix-p "org://" (alist-get 'uri result)))
+      (should
+       (equal (alist-get 'uri result)
+              (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-new))))
 
@@ -6447,7 +6369,7 @@ whitespace-between-markers edge case."
            (mcp-server-lib-ert-call-tool "org-set-properties" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 (ert-deftest org-mcp-test-set-properties-id-and-custom-id ()
   "Test a client sets ID and CUSTOM_ID on an existing heading.
@@ -6470,7 +6392,7 @@ addresses it by that ID, and the ID is not added to
         (should
          (equal
           (alist-get 'uri result)
-          (concat "org://" org-mcp-test--client-id)))
+          (concat "id:" org-mcp-test--client-id)))
         (should
          (equal (alist-get 'properties_set result) ["ID" "CUSTOM_ID"]))
         (org-mcp-test--verify-file-matches
@@ -6581,7 +6503,7 @@ with one is refused all the same."
            (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 ;;; Tests for org-update-deadline
 
@@ -6665,7 +6587,7 @@ with one is refused all the same."
            (mcp-server-lib-ert-call-tool "org-update-deadline" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 ;;; Tests for org-set-tags
 
@@ -6781,7 +6703,7 @@ not membership in the configured alist."
            (mcp-server-lib-ert-call-tool "org-set-tags" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 ;;; Tests for org-set-priority
 
@@ -6879,7 +6801,7 @@ not membership in the configured alist."
            (mcp-server-lib-ert-call-tool "org-set-priority" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 ;;; Tests for org-edit-body append mode
 
@@ -6896,7 +6818,9 @@ not membership in the configured alist."
             (mcp-server-lib-ert-call-tool "org-edit-body" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (string-prefix-p "org://" (alist-get 'uri result)))
+      (should
+       (equal (alist-get 'uri result)
+              (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body))))
 
@@ -6986,7 +6910,7 @@ not membership in the configured alist."
            (mcp-server-lib-ert-call-tool "org-edit-body" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 ;;; Tests for org-add-logbook-note
 
@@ -7003,7 +6927,9 @@ not membership in the configured alist."
              (result (json-read-from-string result-text)))
         (should (equal (alist-get 'success result) t))
         (should (eq (alist-get 'saved result) t))
-        (should (string-prefix-p "org://" (alist-get 'uri result)))
+        (should
+         (equal (alist-get 'uri result)
+                (org-mcp-test--file-link test-file "*Simple Task")))
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--pattern-logbook-note-new)))))
 
@@ -7068,7 +6994,7 @@ not membership in the configured alist."
            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'uri result) (concat "org://" uri))))))
+     (should (equal (alist-get 'uri result) (concat "id:" uri))))))
 
 (ert-deftest org-mcp-test-add-logbook-note-special-chars ()
   "Test adding logbook note containing special characters."
@@ -7132,7 +7058,7 @@ QUERY is the org-ql query sexp as a string."
     (json-read-from-string result-text)))
 
 (ert-deftest org-mcp-test-ql-query-uri-with-id ()
-  "Test that org-ql-query returns org:// URI with UUID for headlines with IDs."
+  "Test that org-ql-query links a headline with an ID by `id:'."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-with-id-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
@@ -7140,10 +7066,10 @@ QUERY is the org-ql query sexp as a string."
            (first-match (aref matches 0))
            (uri (alist-get 'uri first-match)))
       (should (equal (alist-get 'total result) 1))
-      (should (equal uri org-mcp-test--content-with-id-resource-uri)))))
+      (should (equal uri (concat "id:" org-mcp-test--content-with-id-id))))))
 
 (ert-deftest org-mcp-test-ql-query-uri-without-id ()
-  "Test that org-ql-query returns org:// path URI for headlines without IDs."
+  "Test that org-ql-query links a headline without an ID by its title."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
@@ -7151,10 +7077,8 @@ QUERY is the org-ql query sexp as a string."
            (first-match (aref matches 0))
            (uri (alist-get 'uri first-match)))
       (should (equal (alist-get 'total result) 1))
-      (should (string-match-p
-               (concat "\\`org://" (regexp-quote test-file)
-                       "#Simple%20Task\\'")
-               uri)))))
+      (should
+       (equal uri (org-mcp-test--file-link test-file "*Simple Task"))))))
 
 ;;; Extra-properties tests
 
@@ -7430,11 +7354,8 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
              (let (,@let-bindings
                    (org-mcp-allowed-files (list ,@temp-vars))
                    ,@bindings)
-               (org-mcp-enable)
-               (unwind-protect
-                   (mcp-server-lib-ert-with-server :tools t :resources t
-                     ,@body)
-                 (org-mcp-disable))))
+               (org-mcp-test--with-enabled
+                 ,@body)))
          ,@cleanups))))
 
 (ert-deftest org-mcp-test-query-inbox-tool ()
@@ -7547,7 +7468,6 @@ Line 10 is the Beta heading.")
    "\\* Alpha[ \t]+:work:\n"
    " *:PROPERTIES:\n"
    " *:CUSTOM_ID: +alpha-slug\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    "Alpha body\\.\n"
    "\\*\\* Review\n"
@@ -7582,9 +7502,6 @@ Line 10 is the Beta heading.")
      org-mcp-test--content-links-alpha
      org-mcp-test--content-links-beta))
    "\\* TODO Gamma[ \t]+:work:\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Gamma body\\.\n"
    "\\'")
   "Regex matching the links file after tagging Gamma.")
@@ -7612,9 +7529,6 @@ Line 10 is the Beta heading.")
      org-mcp-test--content-links-alpha
      org-mcp-test--content-links-beta))
    "\\* DONE Gamma\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Gamma body\\.\n"
    "\\'")
   "Regex matching the links file after marking Gamma DONE.")
@@ -7628,9 +7542,6 @@ Line 10 is the Beta heading.")
      org-mcp-test--content-links-alpha
      org-mcp-test--content-links-beta))
    "\\* TODO Gamma\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
    "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => 2:15\n"
@@ -7646,7 +7557,6 @@ Line 10 is the Beta heading.")
    "\\* Alpha\n"
    " *:PROPERTIES:\n"
    " *:CUSTOM_ID: +alpha-slug\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
    " *:END:\n"
    "Alpha body\\.\n"
    "Alpha appended\\.\n"
@@ -7667,9 +7577,6 @@ Line 10 is the Beta heading.")
    ":END:\n"
    "Alpha body\\.\n"
    "\\*\\* First Review\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "Alpha review\\.\n"
    (regexp-quote org-mcp-test--content-links-beta)
    (regexp-quote org-mcp-test--content-links-gamma)
@@ -7701,9 +7608,6 @@ Line 10 is the Beta heading.")
    "\\`"
    (regexp-quote org-mcp-test--content-links-preamble)
    "\\* TODO New Task *\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    "\n?"
    (regexp-quote org-mcp-test--content-links-alpha)
    (regexp-quote org-mcp-test--content-links-beta)
@@ -7721,9 +7625,6 @@ Line 10 is the Beta heading.")
      org-mcp-test--content-links-beta))
    "\n?"
    "\\*\\* TODO New Task *\n"
-   " *:PROPERTIES:\n"
-   " *:ID: +[A-Fa-f0-9-]+\n"
-   " *:END:\n"
    (regexp-quote org-mcp-test--content-links-gamma)
    "\\'")
   "Regex matching the links file after adding a TODO after Beta's Review.")
@@ -7927,7 +7828,8 @@ heading, and a tool that needs a heading refuses it."
      nil
      "Alpha appended."
      org-mcp-test--regex-links-alpha-body-appended
-     t)))
+     t
+     (org-mcp-test--file-link test-file "#alpha-slug"))))
 
 (ert-deftest org-mcp-test-link-heading-tools ()
   "Every other tool that changes a heading accepts a link."
@@ -8521,7 +8423,6 @@ Größe body.
    "\\`\\* Ärger\n"
    "Ärger body\\.\n"
    "\\*\\* DONE Größe #3\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
    "Größe body\\.\n"
    "\\'")
   "Regex matching `org-mcp-test--content-non-ascii-titles' after DONE.")
@@ -8531,17 +8432,15 @@ Größe body.
    "\\`\\* Ärger\n"
    "Ärger body\\.\n"
    "\\*\\* DONE Größe #3\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
    "Größe body\\.\n"
    "\\*\\* TODO New Task *\n"
-   "\\(?: *:PROPERTIES:\n *:ID: +[A-Fa-f0-9-]+\n *:END:\n\\)?"
    "\\'")
   "Regex matching the DONE file after adding a TODO under Ärger.")
 
 (ert-deftest org-mcp-test-bare-outline-path-non-ascii-titles ()
   "A bare outline path decodes non-ASCII titles as UTF-8.
-The titles are percent-encoded as org-mcp encodes them in the org://
-URIs it returns.  org-read, the resource with the URI as returned,
+The titles are percent-encoded as `url-hexify-string' encodes them.
+org-read, the resource with the URI so encoded,
 org-read-headline, org-update-todo-state and org-add-todo's parent
 all reach the heading, and the resource also reads the titles sent
 raw."
@@ -9171,6 +9070,636 @@ used."
            (string=
             (org-mcp-test--read-file b-file)
             org-mcp-test--content-sibling-elsewhere)))))))
+
+;;; Returned link tests
+
+(defconst org-mcp-test--link-both-id "0c7e2f4a-5b6d-4e8f-9a1b-2c3d4e5f6a7b"
+  "ID of the Both heading in `org-mcp-test--content-link-kinds'.")
+
+(defconst org-mcp-test--content-link-kinds
+  (concat
+   "#+TITLE: Links\n"
+   "\n"
+   "Notes before the first heading.\n"
+   org-mcp-test--content-links-alpha
+   org-mcp-test--content-links-beta
+   org-mcp-test--content-links-gamma
+   "* Both\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--link-both-id "\n"
+   ":CUSTOM_ID: both-slug\n"
+   ":END:\n"
+   "* Blank ID\n"
+   ":PROPERTIES:\n"
+   ":ID:\n"
+   ":END:\n"
+   "* TODO [#A] Decorated [1/2] :tag:\n")
+  "Org file with a heading of every kind a link is chosen for.
+Alpha has a custom ID, Beta an ID, Gamma neither, Both an ID and a
+custom ID, Blank ID an empty ID, and Decorated a priority, a
+statistics cookie and a tag.  A line of text precedes the headings.")
+
+(defconst org-mcp-test--content-read-tools
+  (concat
+   org-mcp-test--content-link-kinds
+   "* TODO Clocked :#inbox:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n")
+  "The link kinds file plus a heading whose clock is still running.")
+
+(defconst org-mcp-test--regex-links-review-and-gamma-seen
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-links-preamble
+     org-mcp-test--content-links-alpha))
+   "\\* Beta\n"
+   ":PROPERTIES:\n"
+   ":ID: +" org-mcp-test--link-beta-id "\n"
+   ":END:\n"
+   "Beta body\\.\n"
+   "\\*\\* Review\n"
+   " *:PROPERTIES:\n"
+   " *:SEEN: +yes\n"
+   " *:END:\n"
+   "Beta review\\.\n"
+   "\\* TODO Gamma\n"
+   " *:PROPERTIES:\n"
+   " *:SEEN: +yes\n"
+   " *:END:\n"
+   "Gamma body\\.\n"
+   "\\'")
+  "Regex matching the links file after marking Beta's Review and Gamma.
+Neither heading gains an ID.")
+
+(defconst org-mcp-test--content-entry-with-targets
+  (concat
+   "* Heading\n"
+   "Text with a <<target>> in it.\n"
+   "#+NAME: named-block\n"
+   "#+begin_src emacs-lisp\n"
+   "(+ 1 2)\n"
+   "#+end_src\n")
+  "A heading whose body holds a target and a named element.")
+
+(defconst org-mcp-test--regex-delta-done
+  "\\`\\* DONE Delta\n\\'"
+  "Regex matching a file holding only the heading Delta, marked DONE.")
+
+(defconst org-mcp-test--content-parent-with-child
+  "* TODO Parent Task\nParent body.\n** Child One\nChild body.\n"
+  "A heading without identifiers whose body is followed by a child.")
+
+(defconst org-mcp-test--regex-parent-body-replaced
+  "\\`\\* TODO Parent Task\nNew parent body\\.\n\\*\\* Child One\nChild body\\.\n\\'"
+  "Regex matching the parent file after replacing the parent's body.")
+
+(defun org-mcp-test--set-seen (link)
+  "Set the property SEEN on the heading LINK names and return the response."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-set-properties" `((uri . ,link) (properties . ((SEEN . "yes")))))))
+
+(defun org-mcp-test--links-in (value)
+  "Return every `uri' string in VALUE, a parsed JSON result, in order."
+  (cond
+   ((vectorp value)
+    (apply #'append (mapcar #'org-mcp-test--links-in value)))
+   ((and (consp value) (consp (car value)))
+    (apply #'append
+           (mapcar
+            (lambda (field)
+              (if (and (eq (car field) 'uri) (stringp (cdr field)))
+                  (list (cdr field))
+                (org-mcp-test--links-in (cdr field))))
+            value)))
+   (t
+    nil)))
+
+(defun org-mcp-test--call-tool-with-error (tool params)
+  "Call TOOL with PARAMS expecting a tool error and return its message."
+  (cadr
+   (should-error
+    (mcp-server-lib-ert-process-tool-response
+     (mcp-server-lib-process-jsonrpc-parsed
+      (mcp-server-lib-create-tools-call-request tool 1 params)
+      mcp-server-lib-ert-server-id))
+    :type 'mcp-server-lib-tool-error)))
+
+(ert-deftest org-mcp-test-returned-link-forms ()
+  "Reads and writes link a heading by its ID, else custom ID, else title.
+A heading with both an ID and a custom ID is linked by the ID, an empty
+ID counts as none, and a title link leaves out the TODO keyword, the
+priority, the statistics cookie and the tags, as Org does.  The form
+does not follow the link the call was sent: every write here is
+addressed by a title link.  org-read's `id' field is the ID its `uri'
+names."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-link-kinds
+      (list org-mcp-test--link-beta-id org-mcp-test--link-both-id)
+    (let ((expected
+           `(("Alpha" . ,(org-mcp-test--file-link test-file "#alpha-slug"))
+             ("Beta" . ,(concat "id:" org-mcp-test--link-beta-id))
+             ("Gamma" . ,(org-mcp-test--file-link test-file "*Gamma"))
+             ("Both" . ,(concat "id:" org-mcp-test--link-both-id))
+             ("Blank ID" . ,(org-mcp-test--file-link test-file "*Blank ID"))
+             ("Decorated [1/2]"
+              . ,(org-mcp-test--file-link test-file "*Decorated")))))
+      (should
+       (equal
+        (mapcar
+         (lambda (child)
+           (cons (alist-get 'title child) (alist-get 'uri child)))
+         (alist-get
+          'children
+          (json-read-from-string
+           (org-mcp-test--call-read (format "file:%s" test-file)))))
+        expected))
+      (pcase-dolist (`(,title . ,link) expected)
+        ;; Org's title search ignores the statistics cookie in the
+        ;; heading but not in the search string.
+        (let* ((search
+                (org-mcp-test--file-link
+                 test-file
+                 (concat "*" (string-trim-right title " \\[1/2\\]"))))
+               (heading
+                (json-read-from-string (org-mcp-test--call-read search))))
+          (should (equal (alist-get 'uri heading) link))
+          (should
+           (equal (alist-get 'id heading)
+                  (and (string-prefix-p "id:" link) (substring link 3))))
+          (should
+           (equal (alist-get 'uri (org-mcp-test--set-seen search)) link)))))))
+
+(ert-deftest org-mcp-test-returned-link-off-heading ()
+  "Before the first heading, the link searches for the line's text.
+An empty line gives the link to the bare file.  No tool returns a link
+for a position off a heading, since every tool links a heading, so
+the link builder is called directly."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-link-kinds))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (goto-char (point-min))
+            (forward-line 2)
+            (should
+             (equal
+              (org-mcp--link-at-point)
+              (org-mcp-test--file-link
+               test-file "Notes before the first heading.")))
+            (forward-line -1)
+            (let ((here (point)))
+              (should
+               (equal
+                (org-mcp--link-at-point)
+                (concat "file:" (abbreviate-file-name test-file))))
+              (should (= (point) here)))
+            (should-not (buffer-modified-p)))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-returned-link-inside-entry ()
+  "Anywhere in a heading's entry, the link is the heading's own.
+Org would link a target or a named element at point instead, and a
+tool can leave point on either after an edit.  The link builder is
+called directly with point on each."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-entry-with-targets))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (with-current-buffer buffer
+            (dolist (place '("<<ta" "(+ 1"))
+              (goto-char (point-min))
+              (search-forward place)
+              (should
+               (equal (org-mcp--link-at-point)
+                      (org-mcp-test--file-link test-file "*Heading")))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-returned-link-round-trip ()
+  "A link a tool returns reaches the same heading in a later call.
+Links of each form come back from writes addressed by outline path:
+an `id:' link, a custom ID link and a title link.  Reading through
+each finds the heading and returns the same link.  The title link of
+a heading a call creates is then sent to a write, which changes that
+heading."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+        (list org-mcp-test--link-beta-id)
+      (pcase-dolist (`(,title . ,link)
+                     `(("Alpha"
+                        . ,(org-mcp-test--file-link test-file "#alpha-slug"))
+                       ("Beta" . ,(concat "id:" org-mcp-test--link-beta-id))
+                       ("Gamma"
+                        . ,(org-mcp-test--file-link test-file "*Gamma"))))
+        (should
+         (equal
+          (alist-get
+           'uri (org-mcp-test--set-seen (format "%s#%s" test-file title)))
+          link))
+        (org-mcp-test--should-resolve-to link title)))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-empty))
+      (let ((link
+             (alist-get
+              'uri
+              (org-mcp-test--add-todo-and-check
+               "Delta" "TODO" nil nil (format "file:%s" test-file) nil
+               (file-name-nondirectory test-file)
+               test-file "\\`\\* TODO Delta\n\\'"))))
+        (org-mcp-test--should-resolve-to link "Delta")
+        (org-mcp-test--update-todo-state-and-check
+         link "TODO" "DONE" test-file org-mcp-test--regex-delta-done
+         link)))))
+
+(ert-deftest org-mcp-test-returned-link-ignores-link-config ()
+  "The user's link settings change neither the returned link nor the file.
+Every setting that makes `org-store-link' create an ID or return
+another link is active: `org-id-link-to-org-use-id' is t, and
+`find-file-hook' makes it `create-if-interactive' in the buffer
+org-mcp visits, as Doom's org-roam module does; Beta's ID would be
+inherited through `org-id-link-consider-parent-id'; file links carry
+no context; a search function supplies its own search string; and an
+active region spans a line of the buffer.  Beta's Review still gets its
+title link, Gamma too, neither gains an ID, and the buffer-local
+setting is intact afterwards."
+  (let ((local-hook
+         (lambda ()
+           (setq-local org-id-link-to-org-use-id 'create-if-interactive)))
+        (org-id-link-to-org-use-id t)
+        (org-id-link-consider-parent-id t)
+        (org-id-link-use-context t)
+        (org-link-context-for-files nil)
+        (org-create-file-search-functions (list (lambda () "custom-search")))
+        (transient-mark-mode t))
+    (add-hook 'find-file-hook local-hook)
+    (unwind-protect
+        (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+            (list org-mcp-test--link-beta-id)
+          (should-not (find-buffer-visiting test-file))
+          (should
+           (equal
+            (alist-get
+             'uri
+             (org-mcp-test--set-seen
+              (format "id:%s::*Review" org-mcp-test--link-beta-id)))
+            (org-mcp-test--file-link test-file "*Review")))
+          (let ((buffer (find-buffer-visiting test-file)))
+            (should
+             (eq (buffer-local-value 'org-id-link-to-org-use-id buffer)
+                 'create-if-interactive))
+            (with-current-buffer buffer
+              (goto-char (point-min))
+              (forward-line 3)
+              (push-mark (point) t t)
+              (end-of-line)
+              (should (use-region-p)))
+            (should
+             (equal
+              (alist-get
+               'uri
+               (org-mcp-test--set-seen
+                (org-mcp-test--file-link test-file "*Gamma")))
+              (org-mcp-test--file-link test-file "*Gamma")))
+            (should
+             (eq (buffer-local-value 'org-id-link-to-org-use-id buffer)
+                 'create-if-interactive)))
+          (org-mcp-test--verify-file-matches
+           test-file org-mcp-test--regex-links-review-and-gamma-seen))
+      (remove-hook 'find-file-hook local-hook))))
+
+(ert-deftest org-mcp-test-returned-link-competing-store-function ()
+  "Another package's link store function does not take the link over.
+A store function claims every Org buffer.  Alone, it would replace the
+title link, and together with Org's `id:' store function it would make
+Org 9.7 prompt and Org 9.8 pick it.  Reads and writes still return the
+`id:', custom ID and title links."
+  (let ((org-link-parameters
+         (cons
+          (list
+           "probe"
+           :store
+           (lambda (&optional _interactive)
+             (when (derived-mode-p 'org-mode)
+               (org-link-store-props :type "probe" :link "probe:taken-over")
+               t)))
+          org-link-parameters)))
+    (org-mcp-test--with-id-setup test-file org-mcp-test--content-links
+        (list org-mcp-test--link-beta-id)
+      (let ((expected
+             `(,(org-mcp-test--file-link test-file "#alpha-slug")
+               ,(concat "id:" org-mcp-test--link-beta-id)
+               ,(org-mcp-test--file-link test-file "*Gamma"))))
+        (should
+         (equal
+          (org-mcp-test--links-in
+           (alist-get
+            'children
+            (json-read-from-string
+             (org-mcp-test--call-read (format "file:%s" test-file)))))
+          expected))
+        (should
+         (equal
+          (mapcar
+           (lambda (title)
+             (alist-get
+              'uri (org-mcp-test--set-seen (format "%s#%s" test-file title))))
+           '("Alpha" "Beta" "Gamma"))
+          expected))))))
+
+(ert-deftest org-mcp-test-returned-link-refuses-foreign-link ()
+  "A link that comes back in another form fails the call, which says so.
+Advice on `org-store-link' that returns a link of another type makes a
+read fail, and a write fail with a message that the change was made;
+that change is saved.  Advice that edits the buffer while a link is
+stored fails the call too."
+  (let ((foreign (lambda (&rest _) "[[probe:taken-over]]"))
+        (editing
+         (lambda (store &rest args)
+           (org-entry-put nil "STORED" "yes")
+           (apply store args))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-links))
+      (let ((gamma (org-mcp-test--file-link test-file "*Gamma")))
+        (advice-add 'org-store-link :override foreign)
+        (unwind-protect
+            (progn
+              (should
+               (string-match-p
+                "made \\[\\[probe:taken-over\\]\\], not an id: or file: link"
+                (org-mcp-test--call-tool-expecting-error
+                 test-file "org-read" `((uri . ,gamma)))))
+              (should
+               (string-match-p
+                "\\`The change was made, but no link to it could be made: "
+                (org-mcp-test--call-tool-with-error
+                 "org-set-tags" `((uri . ,gamma) (tags . "work")))))
+              (org-mcp-test--verify-file-matches
+               test-file org-mcp-test--regex-links-gamma-tagged)
+              (org-mcp-test--verify-no-modified-buffer test-file))
+          (advice-remove 'org-store-link foreign))
+        (should-not (advice-member-p foreign 'org-store-link))
+        (advice-add 'org-store-link :around editing)
+        (unwind-protect
+            (should
+             (string-match-p
+              "org-store-link changed"
+              (org-mcp-test--call-tool-expecting-error
+               test-file "org-read" `((uri . ,gamma)))))
+          (advice-remove 'org-store-link editing)
+          (with-current-buffer (find-buffer-visiting test-file)
+            (set-buffer-modified-p nil)
+            (kill-buffer)))
+        (should-not (advice-member-p editing 'org-store-link))))))
+
+(ert-deftest org-mcp-test-returned-link-edited-heading-with-children ()
+  "Replacing the body of a heading with children links to that heading.
+The replacement ends where the first child starts, and the response
+still links to the heading whose body changed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-parent-with-child))
+    (org-mcp-test--call-edit-body-and-check
+     test-file
+     (org-mcp-test--file-link test-file "*Parent Task")
+     "Parent body."
+     "New parent body."
+     org-mcp-test--regex-parent-body-replaced
+     nil
+     (org-mcp-test--file-link test-file "*Parent Task"))))
+
+(ert-deftest org-mcp-test-returned-link-clock-tools ()
+  "Clock tools link the clocked heading, wherever they leave point.
+Adding, starting, finding, stopping and deleting a clock all return
+Gamma's title link, although the edit ends on a CLOCK line."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (let ((gamma (org-mcp-test--file-link test-file "*Gamma")))
+      (should
+       (equal
+        (alist-get
+         'uri
+         (org-mcp-test--call-clock-add
+          gamma "2026-03-23T10:00:00" "2026-03-23T11:00:00"))
+        gamma))
+      (should
+       (equal
+        (alist-get
+         'uri (org-mcp-test--call-clock-in gamma "2026-03-23T14:30:00"))
+        gamma))
+      (should (equal (alist-get 'uri (org-mcp-test--call-clock-get-active))
+                     gamma))
+      (should
+       (equal
+        (org-mcp-test--links-in (org-mcp-test--call-clock-find-dangling))
+        (list gamma)))
+      (should
+       (equal
+        (alist-get 'uri (org-mcp-test--call-clock-out "2026-03-23T16:45:00"))
+        gamma))
+      (should
+       (equal
+        (alist-get
+         'uri (org-mcp-test--call-clock-delete gamma "2026-03-23T10:00:00"))
+        gamma))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-links-gamma-clocked))))
+
+(ert-deftest org-mcp-test-returned-link-query-in-narrowed-buffer ()
+  "Queries read headings outside the user's narrowing where they are.
+The user's buffer is narrowed to Alpha.  org-ql-query and query-next
+both return Gamma with its own title and link, and the narrowing is
+unchanged afterwards."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-links))
+      ((org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
+       (org-mcp-query-sort-fn nil))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (let ((restriction
+                 (with-current-buffer buffer
+                   (goto-char (point-min))
+                   (re-search-forward "^\\* Alpha")
+                   (org-narrow-to-subtree)
+                   (list (point-min) (point-max)))))
+            (dolist (call '(("org-ql-query" (query . "(todo)"))
+                            ("query-next")))
+              (let ((matches
+                     (alist-get
+                      'matches
+                      (json-read-from-string
+                       (mcp-server-lib-ert-call-tool
+                        (car call) (cdr call))))))
+                (should (= (length matches) 1))
+                (should (equal (alist-get 'title (aref matches 0)) "Gamma"))
+                (should
+                 (equal (alist-get 'uri (aref matches 0))
+                        (org-mcp-test--file-link test-file "*Gamma")))))
+            (should
+             (equal (with-current-buffer buffer
+                      (list (point-min) (point-max)))
+                    restriction)))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-returned-link-session-clock-in-narrowed-buffer ()
+  "The session's clock is read where it is, outside the user's narrowing.
+The Emacs clock runs in Clocked while the user's buffer is narrowed to
+Alpha.  org-clock-get-active names Clocked and links it, and the
+narrowing is unchanged afterwards."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-read-tools))
+    (org-mcp-test--with-session-clock test-file
+      (let* ((buffer (find-buffer-visiting test-file))
+             (restriction
+              (with-current-buffer buffer
+                (goto-char (point-min))
+                (re-search-forward "^\\* Alpha")
+                (org-narrow-to-subtree)
+                (list (point-min) (point-max))))
+             (active (org-mcp-test--call-clock-get-active)))
+        (should (equal (alist-get 'heading active) "Clocked"))
+        (should
+         (equal (alist-get 'uri active)
+                (org-mcp-test--file-link test-file "*Clocked")))
+        (should
+         (equal (with-current-buffer buffer
+                  (list (point-min) (point-max)))
+                restriction))))))
+
+(ert-deftest org-mcp-test-read-tools-leave-files-unchanged ()
+  "Every read tool and resource leaves the file byte-for-byte unchanged.
+The reads cover each read tool, with and without a file set where it
+takes one, and the org://{link} resource with links and bare forms.
+Each read runs once with no buffer visiting the file and once with a
+clean one.  Afterwards the file on disk is the before image, the
+buffer is unmodified with its text untouched, and Org's ID locations
+have not grown.  Every heading in a result carries its link, and each
+link reads back to itself through org-read."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-read-tools))
+      ((org-mcp-query-inbox-fn (lambda () '(tags "#inbox")))
+       (org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
+       (org-mcp-query-backlog-fn (lambda (&optional _tag-filter) '(todo)))
+       (org-mcp-query-sort-fn nil)
+       (org-tag-alist nil)
+       (org-tag-persistent-alist nil))
+    (org-mcp-test--with-id-tracking
+        (list test-file)
+        `((,org-mcp-test--link-beta-id . ,test-file)
+          (,org-mcp-test--link-both-id . ,test-file))
+      (let* ((beta (concat "id:" org-mcp-test--link-beta-id))
+             (reads
+              (list
+               (lambda () (org-mcp-test--call-read (format "file:%s" test-file)))
+               (lambda () (org-mcp-test--call-read test-file))
+               (lambda () (org-mcp-test--call-read beta))
+               (lambda () (org-mcp-test--call-read org-mcp-test--link-beta-id))
+               (lambda () (org-mcp-test--call-read (format "%s#Alpha" test-file)))
+               (lambda ()
+                 (org-mcp-test--call-read
+                  (org-mcp-test--file-link test-file "#alpha-slug")))
+               (lambda ()
+                 (org-mcp-test--call-read-headline
+                  (org-mcp-test--file-link test-file "*Gamma")))
+               (lambda () (org-mcp-test--call-read-headline test-file))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool
+                  "org-read-outline" `((file . ,test-file))))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool
+                  "org-ql-query"
+                  `((query . "(todo)") (files . ,(vector test-file)))))
+               (lambda () (mcp-server-lib-ert-call-tool "query-inbox" nil))
+               (lambda () (mcp-server-lib-ert-call-tool "query-next" nil))
+               (lambda () (mcp-server-lib-ert-call-tool "query-backlog" nil))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool "org-get-tag-candidates" nil))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool
+                  "org-get-tag-candidates" `((files . ,(vector test-file)))))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool "org-clock-get-active" nil))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool "org-clock-find-dangling" nil))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool
+                  "org-clock-find-dangling" `((files . ,(vector test-file)))))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (car
+                   (org-mcp-test--resource-uris (format "file:%s" test-file)))))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (car (org-mcp-test--resource-uris beta))))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (car
+                   (org-mcp-test--resource-uris
+                    (org-mcp-test--file-link test-file "#alpha-slug")))))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (car
+                   (org-mcp-test--resource-uris
+                    (org-mcp-test--file-link test-file "*Gamma")))))
+               (lambda ()
+                 (org-mcp-test--read-resource (concat "org://" test-file)))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (format "org://%s#Beta" test-file)))
+               (lambda ()
+                 (org-mcp-test--read-resource
+                  (concat "org://" org-mcp-test--link-beta-id)))))
+             (ids (hash-table-count org-id-locations))
+             (links nil))
+        (should-not (find-buffer-visiting test-file))
+        (dolist (visited '(nil t))
+          (dolist (read reads)
+            (let ((buffer (find-buffer-visiting test-file)))
+              (when (and buffer (not visited))
+                (kill-buffer buffer))
+              (when visited
+                (setq buffer (find-file-noselect test-file)))
+              (let ((ticks (and visited (buffer-chars-modified-tick buffer)))
+                    (result (funcall read)))
+                (when (string-prefix-p "{" result)
+                  (setq links
+                        (append
+                         links
+                         (org-mcp-test--links-in
+                          (json-read-from-string result)))))
+                (should
+                 (string= (org-mcp-test--read-file test-file)
+                          org-mcp-test--content-read-tools))
+                (setq buffer (find-buffer-visiting test-file))
+                (should-not (and buffer (buffer-modified-p buffer)))
+                (when visited
+                  (should
+                   (= ticks (buffer-chars-modified-tick buffer))))))))
+        (should (= ids (hash-table-count org-id-locations)))
+        (should
+         (equal
+          (sort (delete-dups (copy-sequence links)) #'string<)
+          (sort
+           (list
+            beta
+            (concat "id:" org-mcp-test--link-both-id)
+            (org-mcp-test--file-link test-file "#alpha-slug")
+            (org-mcp-test--file-link test-file "*Review")
+            (org-mcp-test--file-link test-file "*Gamma")
+            (org-mcp-test--file-link test-file "*Blank ID")
+            (org-mcp-test--file-link test-file "*Decorated")
+            (org-mcp-test--file-link test-file "*Clocked"))
+           #'string<)))
+        (dolist (link (delete-dups (copy-sequence links)))
+          (should
+           (equal
+            (alist-get
+             'uri (json-read-from-string (org-mcp-test--call-read link)))
+            link)))
+        (should
+         (string= (org-mcp-test--read-file test-file)
+                  org-mcp-test--content-read-tools))
+        (should-not (buffer-modified-p (find-buffer-visiting test-file)))))))
 
 ;;; Script installation tests
 
