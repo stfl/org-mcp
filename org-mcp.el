@@ -2292,10 +2292,12 @@ MCP Parameters:
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
                Values are single-line strings or numbers, written as
-               given; null or empty values are skipped
+               given, or booleans: true writes t and false writes
+               nil; null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
-               null, false, \"\" and {} mean no properties
+               properties itself given as null, false, \"\" or {}
+               means no properties
   files - Files and directories to look up an id: link of parent_link
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent_link"
@@ -2615,13 +2617,15 @@ MCP Parameters:
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
 PROPERTIES is the alist a JSON object decodes to.  NAME is a string.
 VALUE is a string, or nil for a JSON null or an empty string; a JSON
-number becomes its decimal text.  Throws a validation error when
-PROPERTIES is not a non-empty object, when a name is not a valid Org
-property name or is a special property, which has its own tool, or
-when a value is a boolean, array or object or spans several lines.
-Org property values are single lines, and a line break would add
-structure such as a heading to the file.  Values are otherwise taken
-as given; `ID' and `CUSTOM_ID' are ordinary properties here."
+number becomes its decimal text, and JSON true and false become \"t\"
+and \"nil\".  Throws a validation error when PROPERTIES is not a
+non-empty object, when a name is not a valid Org property name or is
+a special property, which has its own tool, or when a value is an
+array or object or spans several lines.  Org property values are
+single lines, and a line break would add structure such as a heading
+to the file.  Values are otherwise taken as given, the strings \"t\"
+and \"nil\" included; `ID' and `CUSTOM_ID' are ordinary properties
+here."
   (unless (and properties (listp properties))
     (org-mcp--tool-validation-error
      "Properties must be a non-empty JSON object"))
@@ -2651,11 +2655,20 @@ as given; `ID' and `CUSTOM_ID' are ordinary properties here."
         (cond
          ((or (null value) (equal value ""))
           nil)
+         ;; mcp-server-lib decodes JSON with `json-read-from-string':
+         ;; true is t, false is :json-false and null is nil, so false
+         ;; writes a value where null deletes.  `org-entry-put' writes
+         ;; the text "nil" as given, and `org-entry-get' reads it back
+         ;; as nil.
+         ((eq value t)
+          "t")
+         ((eq value :json-false)
+          "nil")
          ((numberp value)
           (number-to-string value))
          ((not (stringp value))
           (org-mcp--tool-validation-error
-           "Property '%s' must be a string, a number or null"
+           "Property '%s' must be a string, a number, a boolean or null"
            name))
          ((string-match-p "[\n\r]" value)
           (org-mcp--tool-validation-error
@@ -2668,7 +2681,8 @@ as given; `ID' and `CUSTOM_ID' are ordinary properties here."
 (defun org-mcp--tool-set-properties (link properties &optional files)
   "Set or delete properties on the headline LINK names.
 PROPERTIES is an alist of property name-value pairs.
-String values set the property; null/empty values delete it.
+String, number and boolean values set the property; null/empty values
+delete it.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -2682,6 +2696,7 @@ MCP Parameters:
   properties - JSON object of property name-value pairs (required)
                String or number value: set property to that value;
                it must be a single line
+               true or false: set property to t or nil
                null or empty string: delete the property
                ID and CUSTOM_ID are accepted and written as given
                Special properties (TODO, TAGS, PRIORITY, etc.) are
@@ -3879,14 +3894,17 @@ Parameters:
   properties - Properties for the new headline (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
-               Values are strings (numbers are accepted) on a
-               single line, written as given and not otherwise
-               checked; an ID is not added to Org's ID index
+               Values are strings (numbers and booleans are
+               accepted) on a single line, written as given and
+               not otherwise checked; an ID is not added to Org's
+               ID index
+               true writes t and false writes nil
                null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
                parameters and dedicated tools
-               null, false, \"\" and {} mean no properties
+               properties itself given as null, false, \"\" or {}
+               means no properties
   files - Files and directories to look up an id: link of
           parent_link in (array of strings, optional); see org-read.
           It applies to parent_link only, and is refused unless
@@ -4007,8 +4025,9 @@ Parameters:
 "
     org-mcp--heading-link-formats
     "  properties - JSON object of property name-value pairs (required)
-               String value (numbers are accepted): set the
-               property; it must be a single line
+               String value (numbers and booleans are accepted):
+               set the property; it must be a single line
+               true sets t and false sets nil
                null or empty string: delete the property
                ID and CUSTOM_ID can be set; values are written as
                given and not otherwise checked, and an ID is not

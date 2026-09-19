@@ -479,6 +479,19 @@ The heading carries that CUSTOM_ID and no ID.")
 The drawer sits between the heading and the body, a number is written
 as its text, and a property sent as null is not written.")
 
+(defconst org-mcp-test--pattern-add-todo-with-boolean-properties
+  (concat
+   "\\`\\* TODO Flagged Task\n"
+   " *:PROPERTIES:\n"
+   " *:ENABLED: +t\n"
+   " *:DISABLED: +nil\n"
+   " *:LITERAL_T: +t\n"
+   " *:LITERAL_NIL: +nil\n"
+   " *:END:\n\\'")
+  "Pattern for a TODO created with boolean and t/nil string properties.
+JSON true is written as t and false as nil, the strings \"t\" and
+\"nil\" as given, and a property sent as null is not written.")
+
 (defconst org-mcp-test--pattern-renamed-simple-todo
   (concat
    "\\`\\* TODO Updated Task\n"
@@ -3595,6 +3608,21 @@ Task body."
    "Some body\\.\n?\\'")
   "Pattern after deleting EFFORT property.")
 
+(defconst org-mcp-test--pattern-set-properties-booleans
+  (concat
+   "\\`\\* TODO Task with Properties\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +nil\n"
+   " *:CATEGORY: +work\n"
+   " *:ENABLED: +t\n"
+   " *:LITERAL_T: +t\n"
+   " *:LITERAL_NIL: +nil\n"
+   " *:END:\n"
+   "Some body\\.\n?\\'")
+  "Pattern after setting boolean and t/nil string properties.
+EFFORT, set to JSON false, holds nil rather than being deleted; JSON
+true is written as t, and the strings \"t\" and \"nil\" as given.")
+
 (defconst org-mcp-test--pattern-set-properties-id-and-custom-id
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -4706,6 +4734,28 @@ by that ID, and the ID is not added to `org-id-locations'."
      org-mcp-test--pattern-add-todo-with-properties
      '((EFFORT . "1:00") (OWNER . "alice") (ESTIMATE . 3) (SKIPPED)))))
 
+(ert-deftest org-mcp-test-add-todo-properties-booleans ()
+  "Test a new TODO gets boolean properties as t and nil.
+JSON true writes t and false writes nil, while null in the same call
+is skipped.  The strings \"t\" and \"nil\" are written as given."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--add-todo-and-check
+     "Flagged Task"
+     "TODO"
+     nil
+     nil
+     (concat "file:" test-file)
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--pattern-add-todo-with-boolean-properties
+     '((ENABLED . t)
+       (DISABLED . :json-false)
+       (LITERAL_T . "t")
+       (LITERAL_NIL . "nil")
+       (SKIPPED)))))
+
 (ert-deftest org-mcp-test-add-todo-properties-forbid-special ()
   "Test a create call with a special property fails, file unchanged."
   (org-mcp-test--with-add-todo-setup test-file
@@ -4767,15 +4817,32 @@ when the parameter is left out."
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--regex-todo-without-properties))))
 
-(ert-deftest org-mcp-test-properties-refuse-non-string-values ()
-  "Test booleans and arrays are refused as property values.
-A create call with a boolean and a set call with an array both fail
-and leave the file unchanged."
+(defconst org-mcp-test--pattern-flagged-task-and-bare-todo
+  (concat
+   "\\`\\* TODO Task\n"
+   " *:PROPERTIES:\n"
+   " *:FLAG: +nil\n"
+   " *:END:\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after adding a TODO whose FLAG property is JSON false.
+The new top-level heading goes before the file's first heading.")
+
+(ert-deftest org-mcp-test-properties-accept-booleans-refuse-arrays ()
+  "Test booleans are accepted and arrays refused as property values.
+A create call with a boolean writes it; a set call with an array
+fails and leaves the file unchanged."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-bare-todo
-    (org-mcp-test--call-add-todo-expecting-error
-     test-file "Task" "TODO" nil nil (concat "file:" test-file) nil
-     '((FLAG . :json-false)))
+    (mcp-server-lib-ert-call-tool
+     "org-add-todo"
+     `((title . "Task")
+       (todo_state . "TODO")
+       (body . nil)
+       (parent_link . ,(concat "file:" test-file))
+       (properties . ((FLAG . :json-false)))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-flagged-task-and-bare-todo)
     (org-mcp-test--call-set-properties-expecting-error
      test-file (org-mcp-test--file-link test-file "*Simple Task")
      '((ITEMS . ["a" "b"])))))
@@ -6692,6 +6759,34 @@ whitespace-between-markers edge case."
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-delete))))
+
+(ert-deftest org-mcp-test-set-properties-booleans ()
+  "Test booleans set properties to t and nil.
+JSON false overwrites EFFORT with nil and does not delete it, as null
+would.  JSON true writes t, and the strings \"t\" and \"nil\" are
+written as given."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let* ((params
+            `((link
+               .
+               ,(org-mcp-test--file-link test-file "*Task with Properties"))
+              (properties
+               .
+               ((EFFORT . :json-false)
+                (ENABLED . t)
+                (LITERAL_T . "t")
+                (LITERAL_NIL . "nil")))))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool "org-set-properties" params))))
+      (should
+       (equal
+        (alist-get 'properties_set result)
+        ["EFFORT" "ENABLED" "LITERAL_T" "LITERAL_NIL"]))
+      (should-not (alist-get 'properties_deleted result))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-booleans))))
 
 (ert-deftest org-mcp-test-set-properties-forbid-special ()
   "Test that special properties are rejected."
