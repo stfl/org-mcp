@@ -1561,62 +1561,64 @@ way, widened, and the user's narrowing is restored afterwards."
 (defun org-mcp--clock-find-active ()
   "Return the open CLOCK entry currently in effect, or nil when there is none.
 The Emacs session's own running clock is authoritative: whenever
-`org-clock-is-active' reports one, that clock is described, whether or
-not its file is in the allowed list.  With no running clock, allowed
-files are scanned in order with `org-find-open-clocks', each in full
-even where the user's buffer is narrowed, see
-`org-mcp--with-wide-clock-buffer', and the first dangling CLOCK line is
-described, which keeps clocks left unclosed by an earlier session or
-another tool discoverable.
+`org-clock-is-active' reports one whose CLOCK line is still open, that
+clock is described, whether or not its file is in the allowed list.
+A line closed since, as the org-clock-out tool closes it without
+stopping the Emacs clock, leaves no clock running there.  With no
+running clock, allowed files are scanned in order with
+`org-find-open-clocks', each in full even where the user's buffer is
+narrowed, see `org-mcp--with-wide-clock-buffer', and the first
+dangling CLOCK line is described, which keeps clocks left unclosed by
+an earlier session or another tool discoverable.
 
 The value is an alist with keys `file', `heading', `start', `allowed'
 and `marker'.  `allowed' is t when the clock's file is in the allowed
 list and nil otherwise.  Start timestamps are read through the Org
 element API."
-  (if (org-clock-is-active)
-      (let* ((buf (org-clock-is-active))
-             (file (buffer-file-name buf)))
-        (when file
-          (with-current-buffer buf
-            (org-with-wide-buffer
-             (goto-char org-clock-marker)
-             (let ((el (org-element-at-point)))
-               (when (eq (org-element-type el) 'clock)
-                 (list
-                  (cons 'file (expand-file-name file))
-                  (cons
-                   'heading
-                   (save-excursion
-                     (org-back-to-heading t)
-                     (org-get-heading t t t t)))
-                  (cons 'start (org-mcp--clock-element-start-str el))
-                  (cons
-                   'allowed (and (org-mcp--find-allowed-file file) t))
-                  (cons 'marker org-clock-marker))))))))
-    (catch 'found
-      (dolist (file (org-mcp--expanded-allowed-files))
-        (when (file-exists-p file)
-          (org-mcp--with-wide-clock-buffer file
-            (when-let* ((open (org-find-open-clocks file))
-                        (marker (car (car open))))
-              (with-current-buffer (marker-buffer marker)
-                (save-excursion
-                  (goto-char marker)
-                  (let* ((el (org-element-at-point))
-                         (start-str
-                          (org-mcp--clock-element-start-str el))
-                         (heading
-                          (save-excursion
-                            (org-back-to-heading t)
-                            (org-get-heading t t t t))))
-                    (throw 'found
-                           (list
-                            (cons 'file (expand-file-name file))
-                            (cons 'heading heading)
-                            (cons 'start start-str)
-                            (cons 'allowed t)
-                            (cons 'marker marker))))))))))
-      nil)))
+  (or (when-let* ((buf (org-clock-is-active))
+                  (file (buffer-file-name buf)))
+        (with-current-buffer buf
+          (org-with-wide-buffer
+           (goto-char org-clock-marker)
+           (let ((el (org-element-at-point)))
+             (when (and (eq (org-element-type el) 'clock)
+                        (eq
+                         (org-element-property :status el) 'running))
+               (list
+                (cons 'file (expand-file-name file))
+                (cons
+                 'heading
+                 (save-excursion
+                   (org-back-to-heading t)
+                   (org-get-heading t t t t)))
+                (cons 'start (org-mcp--clock-element-start-str el))
+                (cons
+                 'allowed (and (org-mcp--find-allowed-file file) t))
+                (cons 'marker org-clock-marker)))))))
+      (catch 'found
+        (dolist (file (org-mcp--expanded-allowed-files))
+          (when (file-exists-p file)
+            (org-mcp--with-wide-clock-buffer file
+              (when-let* ((open (org-find-open-clocks file))
+                          (marker (car (car open))))
+                (with-current-buffer (marker-buffer marker)
+                  (save-excursion
+                    (goto-char marker)
+                    (let* ((el (org-element-at-point))
+                           (start-str
+                            (org-mcp--clock-element-start-str el))
+                           (heading
+                            (save-excursion
+                              (org-back-to-heading t)
+                              (org-get-heading t t t t))))
+                      (throw 'found
+                             (list
+                              (cons 'file (expand-file-name file))
+                              (cons 'heading heading)
+                              (cons 'start start-str)
+                              (cons 'allowed t)
+                              (cons 'marker marker))))))))))
+        nil)))
 
 (defun org-mcp--clock-check-clock-out (active clock-out)
   "Refuse a clock-in unless CLOCK-OUT names the running clock ACTIVE.

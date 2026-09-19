@@ -6571,6 +6571,59 @@ Ask the user to clock out of it before clocking in\\'"
           (should (eq (org-clock-is-active) (find-buffer-visiting outside-file)))
           (should (= (marker-position org-clock-marker) position)))))))
 
+(defconst org-mcp-test--clock-in-after-clock-out-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\] =>  *0:30\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the file after clock-out of Task One and clock-in to Two.
+Task One's clock keeps the end org-clock-out gave it.")
+
+(ert-deftest org-mcp-test-clock-in-after-clock-out-of-session-clock ()
+  "Test clock-in needs no clock_out once the Emacs clock's line is closed.
+org-clock-out closes Task One's CLOCK line, where the Emacs clock still
+points.  That clock no longer runs, so clocking in to Task Two needs no
+clock_out, and Task One keeps its 10:30 end."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (org-mcp-test--call-clock-out "2026-01-01T10:30:00")
+      (let ((result (org-mcp-test--call-clock-in
+                     (org-mcp-test--file-link test-file "*Task Two")
+                     "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'clocked_in result) t)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-after-clock-out-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-after-session-clock-closed-outside ()
+  "Test clock-in proceeds once the Emacs clock outside the allowed files ends.
+The Emacs clock points at a CLOCK line outside the allowed files that
+has since been closed, so no clock runs and clock-in needs no
+clock_out."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file org-mcp-test--clock-task-content)
+       (outside-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-mcp-allowed-files (list allowed-file)))
+      (org-mcp-test--with-session-clock outside-file
+        (with-current-buffer (marker-buffer org-clock-marker)
+          (save-excursion
+            (goto-char org-clock-marker)
+            (insert "--[2026-01-01 Thu 10:30] =>  0:30"))
+          (save-buffer))
+        (let ((result (org-mcp-test--call-clock-in
+                       (org-mcp-test--file-link allowed-file "*Task One")
+                       "2026-01-01T11:00:00")))
+          (should (equal (alist-get 'clocked_in result) t)))
+        (org-mcp-test--verify-file-matches
+         allowed-file org-mcp-test--clock-in-at-eleven-expected-regex)))))
+
 (ert-deftest org-mcp-test-clock-in-refuses-without-clock-out ()
   "Test clock-in refuses while a clock runs and clock_out is not sent.
 The refusal names the running clock's heading by title and link, so
