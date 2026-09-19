@@ -3184,29 +3184,38 @@ MCP Parameters:
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
 FILE is the absolute path to an Org file, or a `file:' link to it with
-no search part, such as org-read returns for a file.  Either way the
-file must pass the scope gate, `org-mcp--find-allowed-file', as a file
-the call names.  A link to a heading is refused.
+no search part, such as file:/path/to/file.org.  Either way the file
+must pass the scope gate, `org-mcp--find-allowed-file', as a file the
+call names.  A link to a heading, an `id:' link or one with a search
+part, is refused as parsed, before an ID is looked up.  A string
+starting with `org://' is refused as no link, the way the link tools
+refuse it.
 
 MCP Parameters:
   file - Absolute path to an Org file, or a file: link to it with no
          search part"
   (json-encode
    (org-mcp--generate-outline
-    (if (org-mcp--link-written-p file)
-        (let ((target (org-mcp--link-target file)))
-          (when (org-mcp--target-heading-p target)
-            (org-mcp--tool-validation-error
-             "org-read-outline takes a file, not a heading: %s.  Send \
+    (cond
+     ((and (stringp file)
+           (string-prefix-p "org://" (string-trim file)))
+      (org-mcp--not-a-link-error file))
+     ((org-mcp--link-written-p file)
+      (let ((object (org-mcp--link-parse file)))
+        (when (or (equal (org-element-property :type object) "id")
+                  (org-element-property :search-option object))
+          (org-mcp--tool-validation-error
+           "org-read-outline takes a file, not a heading: %s.  Send \
 the file's path or file:<path>"
-             file))
-          (plist-get target :file))
+           file))
+        (plist-get (org-mcp--link-target file) :file)))
+     (t
       (unless (and (stringp file) (file-name-absolute-p file))
         (org-mcp--tool-validation-error "Path must be absolute: %s"
                                         file))
       (expand-file-name
        (or (org-mcp--find-allowed-file file t)
-           (org-mcp--tool-file-access-error file)))))))
+           (org-mcp--tool-file-access-error file))))))))
 
 (defun org-mcp--tool-read-headline (link &optional files)
   "Tool handler for org-read-headline.
@@ -4262,6 +4271,8 @@ Parameters:
   file - Absolute path to Org file, or a file: link to it with no
          search part, bare or bracketed, such as file:/path/to/file.org
          (string, required)
+         A link to a heading, such as an id: link, is refused, and so
+         is an org:// resource URI.
 
 Returns: JSON object with hierarchical outline structure:
   headings - Array of top-level headlines, each with title, level,

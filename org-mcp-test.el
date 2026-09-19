@@ -5256,6 +5256,45 @@ that say why, and the files stay unchanged."
         (org-mcp-test--read-file other-file) org-mcp-test--content-links))
       (should-not (find-buffer-visiting other-file)))))
 
+(ert-deftest org-mcp-test-tool-read-outline-refuses-heading-links-unresolved ()
+  "org-read-outline refuses a heading link and an org:// string unresolved.
+An `id:' link, unknown or known, bare or with a search part, and a
+`file:' link with a search part are refused as naming a heading, and
+Emacs's ID index is never consulted or rescanned.  A string starting
+with org:// is refused as no link, with the hint to drop the prefix,
+as the link tools refuse it.  The file stays unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-nested-siblings))
+    (let ((parent-id org-mcp-test--content-nested-siblings-parent-id))
+      (org-mcp-test--with-id-tracking
+          (list test-file)
+          `((,parent-id . ,test-file))
+        (org-mcp-test--without-id-index
+          (dolist (link
+                   (list
+                    "id:0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
+                    (concat "id:" parent-id)
+                    (format "[[id:%s::*Second Child][Second]]" parent-id)
+                    (org-mcp-test--file-link test-file "*Parent Task")))
+            (org-mcp-test--call-tool-refused
+             "org-read-outline" `((file . ,link))
+             (concat
+              "\\`org-read-outline takes a file, not a heading: "
+              (regexp-quote link)
+              "\\.  Send the file's path or file:<path>\\'")
+             test-file))
+          (dolist (uri
+                   (list
+                    (concat "org://" test-file)
+                    (concat "org://file:" test-file)
+                    (concat "org://id:" parent-id)))
+            (org-mcp-test--call-tool-refused
+             "org-read-outline" `((file . ,uri))
+             (concat
+              "\\`Not an Org link: " (regexp-quote uri)
+              "\\.  Drop org://, which only a resource URI starts with\\.  ")
+             test-file)))))))
+
 (ert-deftest org-mcp-test-tool-read-headline-single-level ()
   "Test org-read-headline with a title holding a slash."
   (org-mcp-test--with-temp-org-files

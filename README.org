@@ -1027,8 +1027,9 @@ Example response for a headline:
 - *Description:* Get hierarchical structure of an Org file as JSON outline
 - *Parameters:*
   - =file= (string, required): Absolute path to an Org file, or a =file:=
-    link to it with no search part, bare or bracketed, such as the one
-    =org-read= returns for a file. A link to a heading is refused
+    link to it with no search part, bare or bracketed, such as
+    =file:/path/to/file.org=. A link to a heading, such as an =id:= link, is
+    refused without being looked up, and so is a string starting with =org://=
 - *Returns:* JSON object with hierarchical outline structure: the top-level
   headings and their direct children, each with its =title=, =level=, =link=
   (see [[*Links org-mcp returns]]) and =children=; deeper headings are left out
