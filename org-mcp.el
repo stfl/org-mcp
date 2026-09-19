@@ -3100,7 +3100,7 @@ MCP Parameters:
       (if (or (null priority) (equal priority ""))
           ;; Remove priority
           (progn
-            (org-priority ?\s)
+            (org-priority 'remove)
             (setq new-priority ""))
         ;; Set priority
         (org-priority (string-to-char priority))
