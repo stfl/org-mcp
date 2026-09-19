@@ -6804,6 +6804,62 @@ closed clocks."
       (should
        (equal (alist-get 'start result) "2026-01-01 Thu 11:00")))))
 
+(defmacro org-mcp-test--with-narrowing (file title &rest body)
+  "Run BODY with the buffer visiting FILE narrowed to the heading TITLE.
+The buffer is narrowed with `org-narrow-to-subtree', as a user would.
+Afterwards the buffer must still be narrowed to the same region.  A
+buffer this macro opened is killed; one that already visited FILE is
+left to whoever opened it."
+  (declare (indent 2) (debug t))
+  `(let* ((opened (not (find-buffer-visiting ,file)))
+          (buffer (find-file-noselect ,file))
+          (start nil)
+          (end nil))
+     (unwind-protect
+         (progn
+           (with-current-buffer buffer
+             (goto-char (point-min))
+             (re-search-forward
+              (concat "^\\*+ .*" (regexp-quote ,title)))
+             (org-narrow-to-subtree)
+             (setq start (point-min))
+             (setq end (point-max)))
+           ,@body
+           (with-current-buffer buffer
+             (should (buffer-narrowed-p))
+             (should (= (point-min) start))
+             (should (= (point-max) end))))
+       (when opened
+         (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-clock-get-active-dangling-ignores-narrowing ()
+  "Test clock-get-active finds a dangling clock outside the user's narrowing.
+With no clock running, the buffer is narrowed to Task Two, and Task
+One's open clock is still found; the buffer stays narrowed to Task Two."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (should-not (org-clock-is-active))
+    (org-mcp-test--with-narrowing test-file "Task Two"
+      (let ((result (org-mcp-test--call-clock-get-active)))
+        (should (eq (alist-get 'active result) t))
+        (should (equal (alist-get 'heading result) "Task One"))
+        (should
+         (equal (alist-get 'start result) "2026-01-01 Thu 10:00"))))))
+
+(ert-deftest org-mcp-test-clock-get-active-session-clock-ignores-narrowing ()
+  "Test clock-get-active finds the session clock outside the user's narrowing.
+The Emacs clock runs on Task One while its buffer is narrowed to Task
+Two; the clock is still reported, and the buffer stays narrowed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (org-mcp-test--with-narrowing test-file "Task Two"
+        (let ((result (org-mcp-test--call-clock-get-active)))
+          (should (eq (alist-get 'active result) t))
+          (should (equal (alist-get 'heading result) "Task One"))
+          (should
+           (equal (alist-get 'start result) "2026-01-01 Thu 10:00")))))))
+
 ;;; Tests for org-clock-find-dangling
 
 (ert-deftest org-mcp-test-clock-find-dangling-empty ()
@@ -6841,6 +6897,21 @@ closed clocks."
       (should (equal (alist-get 'total result) 2))
       (should (member "2026-01-01 Thu 10:00" starts))
       (should (member "2026-01-01 Thu 11:00" starts)))))
+
+(ert-deftest org-mcp-test-clock-find-dangling-ignores-narrowing ()
+  "Test clock-find-dangling finds a clock outside the user's narrowing.
+The buffer is narrowed to Task Two, and Task One's open clock is still
+found; the buffer stays narrowed to Task Two."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-narrowing test-file "Task Two"
+      (let* ((result (org-mcp-test--call-clock-find-dangling))
+             (clocks (alist-get 'open_clocks result)))
+        (should (equal (alist-get 'total result) 1))
+        (should (equal (alist-get 'heading (aref clocks 0)) "Task One"))
+        (should
+         (equal (alist-get 'start (aref clocks 0))
+                "2026-01-01 Thu 10:00"))))))
 
 ;;; Tests for org-clock-delete
 

@@ -1547,14 +1547,27 @@ Returns nil for open (unclosed) clocks."
     (when (eq (org-element-property :type value) 'inactive-range)
       (org-timestamp-to-time value t))))
 
+(defmacro org-mcp--with-wide-clock-buffer (file &rest body)
+  "Run BODY in the buffer `org-find-open-clocks' searches for FILE, widened.
+`org-find-open-clocks' searches only the accessible part of that
+buffer, so it misses a clock outside the user's narrowing, and so does
+a read at a clock's marker.  BODY runs with the buffer, found the same
+way, widened, and the user's narrowing is restored afterwards."
+  (declare (indent 1) (debug (form body)))
+  `(with-current-buffer (or (get-file-buffer ,file)
+                            (find-file-noselect ,file))
+     (org-with-wide-buffer ,@body)))
+
 (defun org-mcp--clock-find-active ()
   "Return the open CLOCK entry currently in effect, or nil when there is none.
 The Emacs session's own running clock is authoritative: whenever
 `org-clock-is-active' reports one, that clock is described, whether or
 not its file is in the allowed list.  With no running clock, allowed
-files are scanned in order with `org-find-open-clocks' and the first
-dangling CLOCK line is described, which keeps clocks left unclosed by
-an earlier session or another tool discoverable.
+files are scanned in order with `org-find-open-clocks', each in full
+even where the user's buffer is narrowed, see
+`org-mcp--with-wide-clock-buffer', and the first dangling CLOCK line is
+described, which keeps clocks left unclosed by an earlier session or
+another tool discoverable.
 
 The value is an alist with keys `file', `heading', `start', `allowed'
 and `marker'.  `allowed' is t when the clock's file is in the allowed
@@ -1583,25 +1596,26 @@ element API."
     (catch 'found
       (dolist (file (org-mcp--expanded-allowed-files))
         (when (file-exists-p file)
-          (when-let* ((open (org-find-open-clocks file))
-                      (marker (car (car open))))
-            (with-current-buffer (marker-buffer marker)
-              (save-excursion
-                (goto-char marker)
-                (let* ((el (org-element-at-point))
-                       (start-str
-                        (org-mcp--clock-element-start-str el))
-                       (heading
-                        (save-excursion
-                          (org-back-to-heading t)
-                          (org-get-heading t t t t))))
-                  (throw 'found
-                         (list
-                          (cons 'file (expand-file-name file))
-                          (cons 'heading heading)
-                          (cons 'start start-str)
-                          (cons 'allowed t)
-                          (cons 'marker marker)))))))))
+          (org-mcp--with-wide-clock-buffer file
+            (when-let* ((open (org-find-open-clocks file))
+                        (marker (car (car open))))
+              (with-current-buffer (marker-buffer marker)
+                (save-excursion
+                  (goto-char marker)
+                  (let* ((el (org-element-at-point))
+                         (start-str
+                          (org-mcp--clock-element-start-str el))
+                         (heading
+                          (save-excursion
+                            (org-back-to-heading t)
+                            (org-get-heading t t t t))))
+                    (throw 'found
+                           (list
+                            (cons 'file (expand-file-name file))
+                            (cons 'heading heading)
+                            (cons 'start start-str)
+                            (cons 'allowed t)
+                            (cons 'marker marker))))))))))
       nil)))
 
 (defun org-mcp--clock-check-clock-out (active clock-out)
@@ -3399,7 +3413,8 @@ MCP Parameters: None"
   "Find all open (unclosed) clocks in a set of Org files.
 The files are the ones FILES names, see `org-mcp--with-file-set',
 or the allowed files when FILES is nil.
-Uses `org-find-open-clocks' on each of them.
+Uses `org-find-open-clocks' on each of them, in full even where the
+user's buffer is narrowed; see `org-mcp--with-wide-clock-buffer'.
 Reads each clock's timestamp via the Org element API.
 
 MCP Parameters:
@@ -3408,26 +3423,27 @@ MCP Parameters:
   (org-mcp--with-file-set files
     (let ((all-clocks nil))
       (dolist (file org-agenda-files)
-        (let ((open (org-find-open-clocks file)))
-          (dolist (clock open)
-            (let ((marker (car clock))
-                  (clock-file (expand-file-name file)))
-              (with-current-buffer (marker-buffer marker)
-                (save-excursion
-                  (goto-char marker)
-                  (let* ((el (org-element-at-point))
-                         (start-str
-                          (when (eq (org-element-type el) 'clock)
-                            (org-mcp--clock-element-start-str el)))
-                         (heading
-                          (save-excursion
-                            (org-back-to-heading t)
-                            (org-get-heading t t t t))))
-                    (push `((file . ,clock-file)
-                            (heading . ,heading)
-                            (start . ,start-str)
-                            (link . ,(org-mcp--link-at-point)))
-                          all-clocks))))))))
+        (org-mcp--with-wide-clock-buffer file
+          (let ((open (org-find-open-clocks file)))
+            (dolist (clock open)
+              (let ((marker (car clock))
+                    (clock-file (expand-file-name file)))
+                (with-current-buffer (marker-buffer marker)
+                  (save-excursion
+                    (goto-char marker)
+                    (let* ((el (org-element-at-point))
+                           (start-str
+                            (when (eq (org-element-type el) 'clock)
+                              (org-mcp--clock-element-start-str el)))
+                           (heading
+                            (save-excursion
+                              (org-back-to-heading t)
+                              (org-get-heading t t t t))))
+                      (push `((file . ,clock-file)
+                              (heading . ,heading)
+                              (start . ,start-str)
+                              (link . ,(org-mcp--link-at-point)))
+                            all-clocks)))))))))
       (let ((total (length all-clocks)))
         (json-encode
          `((open_clocks . ,(vconcat (nreverse all-clocks)))
