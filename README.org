@@ -393,10 +393,10 @@ title matches once those are left out, letter case aside. Two headings whose
 titles differ only in those parts share one title link, which reaches the
 first of them, and a title link stops resolving once the heading is renamed.
 Give a heading an =ID= or a =CUSTOM_ID= to give it a stable link of its own.
-An =id:= link resolves within the allowed files only (see
-[[*Addressing headings with links]]): the link returned for a heading with an
-=ID= in another file does not lead back to it, and a =file:= link to its
-custom ID or title does.
+An =id:= link names no file, so on its own it resolves within the allowed files
+only. The link returned for a heading with an =ID= in another file leads back
+to it when the call also names that file in =files= (see
+[[*Naming the file of an ID]]).
 
 org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
 heading, and a read leaves the file byte-for-byte unchanged, whether or not a

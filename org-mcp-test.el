@@ -9394,6 +9394,34 @@ heading."
          link "TODO" "DONE" test-file org-mcp-test--regex-delta-done
          link)))))
 
+(ert-deftest org-mcp-test-returned-link-id-round-trip-with-files ()
+  "The `id:' link returned for a heading in another file leads back with `files'.
+Task, with an ID, is in a file outside the allowed files that the
+override permits.  Read through a title link, it is linked by its ID;
+that link, sent with `files' naming the file, reads Task again and
+returns the same link, and Emacs's ID index is never consulted."
+  (org-mcp-test--with-scope-dirs t
+    (let ((file (org-mcp-test--write-file
+                 outside "task.org" org-mcp-test--scope-task-with-id-content)))
+      (org-mcp-test--without-id-index
+        (should
+         (equal
+          (alist-get
+           'uri
+           (json-read-from-string
+            (org-mcp-test--call-read
+             (org-mcp-test--file-link file "*Task"))))
+          org-mcp-test--scope-id-link))
+        (let ((heading
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-read"
+                 `((uri . ,org-mcp-test--scope-id-link)
+                   (files . ,(vector file)))))))
+          (should (equal (alist-get 'title heading) "Task"))
+          (should
+           (equal (alist-get 'uri heading) org-mcp-test--scope-id-link)))))))
+
 (ert-deftest org-mcp-test-returned-link-ignores-link-config ()
   "The user's link settings change neither the returned link nor the file.
 Every setting that makes `org-store-link' create an ID or return
