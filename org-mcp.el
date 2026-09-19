@@ -555,12 +555,14 @@ Check your Emacs hooks (`before-revert-hook', \
 
 (defvar org-mcp--unsaved-change-p nil
   "Non-nil when the running tool call leaves a change unsaved.
-A change stays unsaved when it lands in a buffer that already had
-unsaved edits, because org-mcp never saves such a buffer.
-`org-mcp--modify-and-save' binds it for the buffer it edits and
-`org-mcp--complete-and-save' reports it as the `saved' response
-field.  A tool that also edits another buffer binds it around
-`org-mcp--modify-and-save' so the response covers both edits.")
+A change stays unsaved when its buffer still differs from its file
+after the save step.  That happens when the buffer already had
+unsaved edits, because org-mcp never saves such a buffer, unless a
+hook saved it during the call.  `org-mcp--modify-and-save' binds it
+after saving the buffer it edits, and `org-mcp--complete-and-save'
+reports it as the `saved' response field.  A tool that also edits
+another buffer binds it around `org-mcp--modify-and-save' so the
+response covers both edits.")
 
 (defun org-mcp--complete-and-save (response-alist)
   "Return the JSON response for a change to the heading at point.
@@ -707,40 +709,56 @@ existing files it works on."
 BODY runs in the canonical visited buffer for FILE-PATH and leaves
 point in the entry of the heading it changed; the response's `link'
 links to that heading.  If the buffer was already modified before
-BODY runs, org-mcp leaves it dirty and unsaved, and the response
-reports `saved' as false.  Otherwise it saves the buffer and
-refreshes other clean visiting buffers afterward.  RESPONSE-ALIST is
-evaluated after the save, with point where BODY left it, so a link
-that cannot be made never keeps the change from being saved.
-OPERATION is retained for call-site clarity and compatibility.
-BODY can access FILE-PATH, OPERATION, and RESPONSE-ALIST as
-variables."
+BODY runs, org-mcp leaves it dirty and unsaved.  Otherwise it saves
+the buffer and refreshes other clean visiting buffers afterward.
+BODY and the save form one change: when either signals an error,
+the buffer is put back as it was and the error propagates, so a
+failed call leaves the buffer unchanged, and the file too unless a
+hook wrote it during the call.  The response reports `saved' as
+false when the buffer still differs from its file after the save,
+so a hook that saved the buffer while BODY ran yields true.  RESPONSE-ALIST is evaluated after the
+save, with point where BODY left it, so a link that cannot be made
+never keeps the change from being saved.  OPERATION is retained for
+call-site clarity and compatibility.  BODY can access FILE-PATH,
+OPERATION, and RESPONSE-ALIST as variables."
   (declare (indent 3) (debug (form form form body)))
   (let ((position (make-symbol "position")))
     `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
             (buf (plist-get ctx :buffer))
             (preexisting-modified-p (plist-get ctx :modified-p))
-            (org-mcp--unsaved-change-p
-             (or org-mcp--unsaved-change-p preexisting-modified-p))
             (,position nil))
        (ignore ,operation)
-       (with-current-buffer buf
-         (save-restriction
-           (widen)
-           (save-mark-and-excursion
-             (save-match-data
-               (goto-char (point-min))
-               ,@body
-               (setq ,position (point-marker))))))
        (unwind-protect
            (progn
-             (org-mcp--maybe-save-buffer
-              buf ,file-path preexisting-modified-p)
              (with-current-buffer buf
-               (org-with-wide-buffer
-                (goto-char ,position)
-                (org-mcp--complete-and-save ,response-alist))))
-         (set-marker ,position nil)))))
+               ;; On an error the change group undoes BODY's edits, and
+               ;; does so with undo turned off in BUF too.  Undoing the
+               ;; first edit of a clean buffer also marks it unmodified
+               ;; again, unless its file was written during the call.
+               (atomic-change-group
+                 (save-restriction
+                   (widen)
+                   (save-mark-and-excursion
+                     (save-match-data
+                       (goto-char (point-min))
+                       ,@body
+                       (setq ,position (point-marker)))))
+                 (unless preexisting-modified-p
+                   (when (buffer-modified-p)
+                     (save-buffer)))))
+             ;; Outside the change group: the file is written by now,
+             ;; and undoing the edit would part the buffer from it.
+             (unless preexisting-modified-p
+               (org-mcp--refresh-file-buffers ,file-path buf))
+             (let ((org-mcp--unsaved-change-p
+                    (or org-mcp--unsaved-change-p
+                        (buffer-modified-p buf))))
+               (with-current-buffer buf
+                 (org-with-wide-buffer
+                  (goto-char ,position)
+                  (org-mcp--complete-and-save ,response-alist)))))
+         (when ,position
+           (set-marker ,position nil))))))
 
 (defun org-mcp--extract-headings ()
   "Extract heading structure from current org buffer.
@@ -3422,15 +3440,16 @@ MCP Parameters:
                                  (org-back-to-heading t)
                                  (point)))
                               (org-clock-out nil t close-at)))))))
-                  ;; Only an edit that reached BUF can stay unsaved.
-                  (when (and was-modified
-                             (/=
+                  (org-mcp--maybe-save-buffer
+                   buf active-file was-modified)
+                  ;; Only an edit that reached BUF can stay unsaved, and
+                  ;; it has not when a hook saved BUF.
+                  (when (and (/=
                               tick
                               (with-current-buffer buf
-                                (buffer-chars-modified-tick))))
-                    (setq org-mcp--unsaved-change-p t))
-                  (org-mcp--maybe-save-buffer
-                   buf active-file was-modified))))
+                                (buffer-chars-modified-tick)))
+                             (buffer-modified-p buf))
+                    (setq org-mcp--unsaved-change-p t)))))
           ;; Non-allowed file: close via org-clock-out
           (let ((buf (marker-buffer org-clock-marker)))
             (when buf
@@ -3442,17 +3461,18 @@ MCP Parameters:
                        (buffer-chars-modified-tick))))
                 (with-current-buffer buf
                   (org-clock-out nil t close-at))
-                ;; Only an edit that reached BUF can stay unsaved.
-                (when (and was-modified
-                           (/=
-                            tick
-                            (with-current-buffer buf
-                              (buffer-chars-modified-tick))))
-                  (setq org-mcp--unsaved-change-p t))
                 (unless was-modified
                   (with-current-buffer buf
                     (when (buffer-modified-p)
-                      (save-buffer))))))))))
+                      (save-buffer))))
+                ;; Only an edit that reached BUF can stay unsaved, and
+                ;; it has not when a hook saved BUF.
+                (when (and (/=
+                            tick
+                            (with-current-buffer buf
+                              (buffer-chars-modified-tick)))
+                           (buffer-modified-p buf))
+                  (setq org-mcp--unsaved-change-p t))))))))
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously (not explicit-start))

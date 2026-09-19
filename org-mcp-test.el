@@ -6951,6 +6951,215 @@ with one is refused all the same."
      test-file (org-mcp-test--file-link test-file "*Simple Task")
      '((FOO . "x\r* Injected heading")))))
 
+;;; Tests for failed writes and the saved flag
+
+(defconst org-mcp-test--pattern-set-first-property
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:FIRST: +1\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting FIRST on the bare task.")
+
+(defconst org-mcp-test--pattern-set-first-property-with-user-edit
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:FIRST: +1\n"
+   " *:END:\n"
+   "Task body text\\.\n"
+   "\\* TODO Other Task\n"
+   "\\'")
+  "Pattern after setting FIRST on the bare task beside the user's edit.
+The user added Other Task before the call and left it unsaved.")
+
+(defconst org-mcp-test--pattern-bare-todo-with-user-edit
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "Task body text\\.\n"
+   "\\* TODO Other Task\n"
+   "\\'")
+  "Pattern of the bare task with the user's unsaved Other Task edit.")
+
+(defun org-mcp-test--fail-on-second (property _value)
+  "Signal an error when PROPERTY is SECOND.
+On `org-property-changed-functions', it makes org-set-properties fail
+after it has written FIRST and SECOND."
+  (when (equal property "SECOND")
+    (error "Property hook failed")))
+
+(ert-deftest org-mcp-test-failed-write-leaves-buffer-and-file-unchanged ()
+  "Test a write that fails partway leaves its buffer and file as they were.
+org-set-properties writes FIRST and SECOND, then a hook fails.  The
+edit is undone in a buffer with undo on and in one with undo off, and
+either buffer reads unmodified afterwards with its undo setting kept."
+  (dolist (undo-disabled '(nil t))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((buffer (find-file-noselect test-file))
+            (org-property-changed-functions
+             '(org-mcp-test--fail-on-second)))
+        (unwind-protect
+            (progn
+              (when undo-disabled
+                (with-current-buffer buffer
+                  (buffer-disable-undo)))
+              (org-mcp-test--call-tool-refused
+               "org-set-properties"
+               `((link
+                  . ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (properties . ((FIRST . "1") (SECOND . "2"))))
+               "Property hook failed" test-file)
+              (with-current-buffer buffer
+                (should
+                 (string= (buffer-string) org-mcp-test--content-bare-todo))
+                (should-not (buffer-modified-p))
+                (should (eq (eq buffer-undo-list t) undo-disabled))))
+          (kill-buffer buffer))))))
+
+(ert-deftest org-mcp-test-failed-write-keeps-user-edits ()
+  "Test a failed write undoes only its own edit in a buffer the user changed.
+The buffer holds the user's unsaved edit before the call.  After the
+call fails, the buffer holds that edit alone and still reads modified,
+and the file is unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file))
+          (org-property-changed-functions
+           '(org-mcp-test--fail-on-second)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Other Task\n"))
+            (org-mcp-test--call-tool-refused
+             "org-set-properties"
+             `((link
+                . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (properties . ((FIRST . "1") (SECOND . "2"))))
+             "Property hook failed" test-file)
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--pattern-bare-todo-with-user-edit)
+            (with-current-buffer buffer
+              (should (buffer-modified-p))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-write-after-failed-write-saves ()
+  "Test a write after a failed one reaches disk and reports `saved' true.
+The failed call leaves no edit behind, so the buffer holds no unsaved
+edits of its own when the next call arrives, and that call saves it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file))
+          (link (org-mcp-test--file-link test-file "*Simple Task")))
+      (unwind-protect
+          (progn
+            (let ((org-property-changed-functions
+                   '(org-mcp-test--fail-on-second)))
+              (org-mcp-test--call-tool-refused
+               "org-set-properties"
+               `((link . ,link)
+                 (properties . ((FIRST . "1") (SECOND . "2"))))
+               "Property hook failed" test-file))
+            (let ((result
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-set-properties"
+                     `((link . ,link) (properties . ((FIRST . "1"))))))))
+              (should (eq (alist-get 'saved result) t)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--pattern-set-first-property)
+            (org-mcp-test--verify-no-modified-buffer test-file))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-failed-save-leaves-buffer-unchanged ()
+  "Test a write whose save fails leaves its buffer and file as they were.
+The edit is undone along with the failed save, so the buffer reads
+unmodified and holds no edit a later call would take for the user's."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (setq-local write-contents-functions
+                          (list (lambda () (error "Save failed")))))
+            (org-mcp-test--call-tool-refused
+             "org-set-properties"
+             `((link
+                . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (properties . ((FIRST . "1"))))
+             "Save failed" test-file)
+            (with-current-buffer buffer
+              (should
+               (string= (buffer-string) org-mcp-test--content-bare-todo))
+              (should-not (buffer-modified-p))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-hook-save-reports-saved ()
+  "Test `saved' is true when a hook saves the buffer during the call.
+The buffer holds the user's unsaved edit, so org-mcp does not save it,
+but a function on `org-property-changed-functions' does.  The change is
+on disk, and the response says so."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Other Task\n"))
+            (let* ((org-property-changed-functions
+                    (list
+                     (lambda (&rest _)
+                       (with-current-buffer buffer
+                         (save-buffer)))))
+                   (result
+                    (json-read-from-string
+                     (mcp-server-lib-ert-call-tool
+                      "org-set-properties"
+                      `((link
+                         .
+                         ,(org-mcp-test--file-link
+                           test-file "*Simple Task"))
+                        (properties . ((FIRST . "1"))))))))
+              (should (eq (alist-get 'saved result) t)))
+            (org-mcp-test--verify-file-matches
+             test-file
+             org-mcp-test--pattern-set-first-property-with-user-edit)
+            (org-mcp-test--verify-no-modified-buffer test-file))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-clock-in-clock-out-hook-save-reports-saved ()
+  "Test clock-in reports `saved' true when `org-clock-out-hook' saves.
+The active clock sits in another allowed file whose buffer holds the
+user's unsaved edit.  org-mcp does not save that buffer, but the hook
+does when the clock is closed, so both files hold their change."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-task-with-open-clock)
+       (file-2 org-mcp-test--clock-task-content))
+    (let ((buffer (find-file-noselect file-1))
+          (org-clock-out-hook (list #'save-buffer)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Task Two\n"))
+            (let ((result
+                   (org-mcp-test--call-clock-in
+                    (org-mcp-test--file-link file-2 "*Task One")
+                    "2026-01-01T11:00:00")))
+              (should (equal (alist-get 'clocked_in result) t))
+              (should (eq (alist-get 'saved result) t)))
+            (org-mcp-test--verify-file-matches
+             file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
+            (org-mcp-test--verify-file-matches
+             file-1
+             org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
+            (org-mcp-test--verify-no-modified-buffer file-1))
+        (kill-buffer buffer)))))
+
 ;;; Tests for org-update-scheduled
 
 (ert-deftest org-mcp-test-update-scheduled-set ()

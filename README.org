@@ -499,12 +499,19 @@ separate recovery file, never to the visited file itself.
 
 Every write tool response carries a =saved= boolean next to =success=, so a
 client can tell these outcomes apart. =saved= is =true= when the change reached
-the file on disk (no existing buffer, or a clean buffer that org-mcp saved), and
-=false= when a buffer visiting the file already had unsaved edits, so the change
-sits only in that buffer. A client that receives =false= should tell the user
-that the buffer needs saving. =org-clock-in= also reports =false= when the
-active clock it closes sits in such a buffer, even though the file it clocks in
-to reaches disk.
+the file on disk: org-mcp saved the buffer (no existing buffer, or a clean
+one), or a hook of the user's saved it during the call. It is =false= when the
+change sits only in a buffer that already had unsaved edits. A client that
+receives =false= should tell the user that the buffer needs saving.
+=org-clock-in= also reports =false= when the active clock it closes stays
+unsaved in such a buffer, even though the file it clocks in to reaches disk.
+
+A write that fails leaves the buffer as it was. When the edit or the save
+signals an error, org-mcp undoes its edit, in a buffer with undo turned off as
+well, and a buffer that was clean reads unmodified again, so the next write
+saves it as usual. The file on disk stays unchanged unless a hook wrote it
+during the failed call. =org-clock-in= closes the active clock before it opens
+the new one; a failure while opening the new clock leaves the old one closed.
 
 *** org-get-todo-config
 - *Description:* Get TODO keyword configuration for understanding task states
