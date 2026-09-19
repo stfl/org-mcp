@@ -402,7 +402,12 @@ the symlink resolves to.
 The walk runs with file name handlers disabled: every name it builds
 is local, and no handler should take part in reading it.
 
-Each file is returned once."
+Each file is returned once, where FILES first reaches it.  Entries
+come in order.  A walked directory's files come in the order
+`directory-files-recursively' returns them: depth first, each
+subdirectory's files before the files beside them, each directory's
+names in alphabetical order.  A directory that is not walked gives
+its allowed files in the order of the allowed files."
   (let ((entries
          (cond
           ((stringp files)

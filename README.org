@@ -165,10 +165,10 @@ directory to resolve against but whichever buffer is current in Emacs:
 A refused entry or found file makes the whole call fail, and so does a named
 directory that cannot be read: the call never searches only part of the set.
 
-A directory search has no size limit.  It runs in Emacs's single thread, so
-Emacs does not respond until it finishes: a tree as large as a home directory,
-which =t= lets a call name, freezes Emacs for that long.  Keep the directories
-=org-mcp-file-scope-override= permits narrow.
+A directory search has no size limit and runs in Emacs's single thread: Emacs
+does not respond until the call has walked the tree and read every Org file in
+it.  Under =t= a call can name a tree as large as your home directory, so
+prefer a list of narrow directories.
 
 The call visits each file of the set in an Emacs buffer and closes the buffers
 it opened once it is done, so your buffer list stays as it was.  A buffer that
@@ -396,8 +396,12 @@ named.
 - Entries are checked, and directories searched, as for the query tools (see
   [[*Querying other files]]): a file outside the allowed files is reached only
   as far as =org-mcp-file-scope-override= permits, for that call alone.
-- The first file that holds the ID wins.  An ID none of them holds is an
-  error naming the ID and the entries as sent.
+- The first file that holds the ID wins.  Files are tried in the order of the
+  entries.  A searched directory's files come depth first: each
+  subdirectory's files before the files beside them, and each directory's
+  names in alphabetical order.  A directory that is not searched gives its
+  allowed files in the order of the allowed files.  An ID none of them holds
+  is an error naming the ID and the entries as sent.
 - The lookup visits none of the named files in a buffer of its own: Org reads
   a file no buffer visits into a hidden work buffer.  The tool then works on
   the file holding the ID like on any other, and leaves its buffer open.
