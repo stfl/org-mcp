@@ -329,7 +329,7 @@ works unchanged:
   the heading.
 - A heading is whatever Org's parser takes for one. A line that starts with
   stars and a space is a heading even inside a block such as
-  =#+begin_example= or =#+begin_src=, which then never closes: reads list
+  =#+begin_example= or =#+begin_src=, and the block breaks there: reads list
   that line as a heading, and a title link reaches it. Inside a block, Org
   escapes such a line with a comma, as =,* Note=; that line is no heading, and
   reads return it with its comma. =org-add-todo= and =org-edit-body= refuse a
@@ -386,9 +386,11 @@ afterwards. Once a heading has one, every link org-mcp returns for it is the
 stable one (see [[*Links org-mcp returns]]).
 
 An =id:= link names no file, so on its own it resolves only within the allowed
-files. For an ID in a file outside them, name that file in =files= on each call
-that sends the link, as far as =org-mcp-file-scope-override= permits (see
-[[*Naming the file of an ID]]).
+files, through Emacs's ID index. org-mcp does not add a new =ID= to that index,
+so the first lookup of it rescans the index; a call that names the heading's
+file in =files= avoids the rescan. For an ID in a file outside the allowed
+files, name that file in =files= on each call that sends the link, as far as
+=org-mcp-file-scope-override= permits (see [[*Naming the file of an ID]]).
 
 ** Naming the file of an ID
 
@@ -700,7 +702,7 @@ Example:
   - =title= (string, required): The headline text
   - =todo_state= (string, required): TODO state from =org-todo-keywords=
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
-  - =body= (string, optional): Body text content to add under the heading
+  - =body= (string, optional): Body text content to add under the heading. A star line inside a block must be escaped as =,*= (see [[*Addressing headings with links]])
   - =parent_link= (string, required): link to the parent item (see [[*Addressing headings with links]]). Use =file:/path/to/file.org= for top-level items in a file
   - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[*Naming the file of an ID]]
@@ -753,7 +755,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[*Addressing headings with links]])
   - =old_body= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
-  - =new_body= (string, required): Replacement or appended text
+  - =new_body= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[*Addressing headings with links]])
   - =append= (boolean, optional, default false): When true, append =new_body= to end of body instead of replacing
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
