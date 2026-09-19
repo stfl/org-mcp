@@ -8388,6 +8388,75 @@ heading, and a tool that needs a heading refuses it."
        test-file
        org-mcp-test--regex-links-top-level-added))))
 
+(defconst org-mcp-test--file-level-id-link "id:file-id"
+  "Link to the file-level ID of `org-mcp-test--content-file-drawer'.")
+
+(ert-deftest org-mcp-test-link-file-level-id-addresses-file ()
+  "An `id:' link to a file-level property drawer addresses the whole file.
+The ID is found through Emacs's ID index, or, without that index, in
+the file the call names in `files'.  Either way org-read and
+org-read-headline read the file exactly as its `file:' link reads,
+and so does the org://{link} resource, which takes no `files'.  With a
+search part, the link searches the whole file for a heading.
+org-set-tags refuses the link as it refuses a `file:' link without a
+search part, leaving the file unchanged, and org-add-todo adds a
+heading at the top level of the file."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (link org-mcp-test--file-level-id-link))
+    (dolist (named '(nil t))
+      (org-mcp-test--with-temp-org-files
+          ((test-file org-mcp-test--content-file-drawer))
+        (org-mcp-test--with-id-tracking
+            (list test-file)
+            (unless named
+              `(("file-id" . ,test-file)))
+          (let* ((files (and named (vector test-file)))
+                 (file-link (concat "file:" test-file))
+                 (with-files
+                  (lambda (params)
+                    (append params (and files `((files . ,files))))))
+                 (calls
+                  (lambda ()
+                    (should
+                     (string=
+                      (org-mcp-test--call-read-headline link files)
+                      org-mcp-test--content-file-drawer))
+                    (should
+                     (string=
+                      (mcp-server-lib-ert-call-tool
+                       "org-read" (funcall with-files `((link . ,link))))
+                      (org-mcp-test--call-read file-link)))
+                    (should
+                     (string=
+                      (org-mcp-test--call-read-headline
+                       (concat link "::*Existing") files)
+                      "* Existing"))
+                    (org-mcp-test--call-tool-refused
+                     "org-set-tags"
+                     (funcall with-files `((link . ,link) (tags . "work")))
+                     (concat
+                      "\\`Link does not point to a heading: "
+                      (regexp-quote link) "\\'")
+                     test-file)
+                    (mcp-server-lib-ert-call-tool
+                     "org-add-todo"
+                     (funcall with-files
+                              `((title . "New")
+                                (todo_state . "TODO")
+                                (body . nil)
+                                (parent_link . ,link)
+                                (after_link . nil)))))))
+            (if named
+                (org-mcp-test--without-id-index
+                  (funcall calls))
+              (should
+               (string=
+                (org-mcp-test--read-resource (concat "org://" link))
+                (org-mcp-test--read-resource (concat "org://" file-link))))
+              (funcall calls))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--regex-file-drawer-top-level-added)))))))
+
 (ert-deftest org-mcp-test-link-title-search-resolves-to-first-match ()
   "A title search that matches several headings resolves to the first."
   (org-mcp-test--with-temp-org-files

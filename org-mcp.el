@@ -1274,10 +1274,13 @@ names its file already, or a link of another type."
   "Return the target of LINK, a native Org link, visiting no buffer.
 The value is a plist: `:link' is LINK, `:file' the allowed file it
 names, `:id' the ID of an `id:' link, and `:search' the part after
-`::', if any.  Only `id:' and `file:' links are accepted.  A string
-that is not a link is refused by `org-mcp--link-parse', and every
-other link type here, before any file is opened, and so is a link
-that names no file, such as `[[#custom-id]]' or `[[*Title]]'.
+`::', if any.  Whether an `id:' link without a search part names a
+heading or its whole file is decided in the file's buffer, by
+`org-mcp--target-heading-p'.  Only `id:' and `file:' links are
+accepted.  A string that is not a link is refused by
+`org-mcp--link-parse', and every other link type here, before any
+file is opened, and so is a link that names no file, such as
+`[[#custom-id]]' or `[[*Title]]'.
 
 FILES is the call's `files' parameter, checked against LINK by
 `org-mcp--check-files'.  When it is not blank, the ID of an `id:' link
@@ -1373,13 +1376,24 @@ heading."
                 (error-message-string err))))))))))
 
 (defun org-mcp--target-heading-p (target)
-  "Return non-nil when TARGET names a heading rather than a whole file."
-  (or (plist-get target :id) (plist-get target :search)))
+  "Return non-nil when TARGET names a heading rather than a whole file.
+TARGET comes from `org-mcp--link-target', and the current buffer
+visits its file, widened.  A link with a search part names a heading.
+Without one, a `file:' link names its file, and so does an `id:' link
+whose ID Org finds before the first heading, in the file-level
+property drawer where org-roam keeps the ID of a file node:
+`org-id-open' opens the file at its top for it.  Point does not move."
+  (or (plist-get target :search)
+      (and (plist-get target :id)
+           (save-excursion
+             (org-mcp--link-goto target)
+             (not (org-before-first-heading-p))))))
 
 (defun org-mcp--goto-heading (target)
   "Move point to the start of the heading TARGET names, or throw a tool error.
 TARGET comes from `org-mcp--link-target', and the current buffer
-visits its file, widened."
+visits its file, widened.  A TARGET naming a whole file, see
+`org-mcp--target-heading-p', is refused."
   (org-mcp--link-goto target)
   (unless (and (org-mcp--target-heading-p target) (org-at-heading-p))
     (org-mcp--tool-validation-error
@@ -1394,15 +1408,16 @@ visits its file, widened."
   "Read what native Org LINK points to.
 READ-HEADING is called with no arguments and point at the heading
 LINK names.  READ-FILE is called with the file when LINK names a
-whole file, that is a `file:' link with no search part.  FILES is
-the call's `files' parameter; see `org-mcp--link-target'."
+whole file, see `org-mcp--target-heading-p'.  FILES is the call's
+`files' parameter; see `org-mcp--link-target'."
   (let* ((target (org-mcp--link-target link files))
          (file (plist-get target :file)))
-    (if (org-mcp--target-heading-p target)
-        (org-mcp--with-org-file file
-          (org-mcp--goto-heading target)
-          (funcall read-heading))
-      (funcall read-file file))))
+    (org-mcp--with-org-file file
+      (if (org-mcp--target-heading-p target)
+          (progn
+            (org-mcp--goto-heading target)
+            (funcall read-heading))
+        (funcall read-file file)))))
 
 ;; Clock helpers
 
@@ -1931,7 +1946,7 @@ Throws error for invalid types."
 (defun org-mcp--navigate-to-parent-or-top (parent)
   "Navigate to the parent headline PARENT names, or to the file's top level.
 PARENT is a target plist as from `org-mcp--link-target'; one that
-names a whole file means top level.
+names a whole file, see `org-mcp--target-heading-p', means top level.
 Returns parent level (integer) if parent exists, nil for top-level.
 At the top level, point goes to the start of the file's first heading,
 or to the end of a file with none.  That is past the file's preamble,
@@ -2289,6 +2304,8 @@ MCP Parameters:
                   - file:{absolute-path}::#{custom-id}
                   - file:{absolute-path}::*{title} (first match)
                   - file:{absolute-path} (top level of the file)
+                  - id:{id} of the file-level property drawer (top
+                    level of the file)
                   - any of these as [[link]] or [[link][description]]
   tags - Tags to add (optional, single string or array of strings)
   after_link - Link to the sibling to insert after (optional), a
@@ -3169,6 +3186,7 @@ MCP Parameters:
          - file:/path/to/file.org::*{title} (first heading with that
            title)
          - file:/path/to/file.org (whole file)
+         - id:{id} of the file-level property drawer (whole file)
          - any of these bracketed, as [[link]] or [[link][description]]
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -3226,6 +3244,8 @@ MCP Parameters:
          - file:/path/to/file.org::*{title} (first heading with that
            title)
          - file:/path/to/file.org (returns entire file)
+         - id:{id} of the file-level property drawer (returns entire
+           file)
          - any of these bracketed, as [[link]] or [[link][description]]
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -3643,6 +3663,7 @@ Tool descriptions `concat' it after the parameter's first line.")
          - file:/path/to/file.org::*{title} - first heading with that
            title
          - file:/path/to/file.org - whole file
+         - id:{id} of the file-level property drawer - whole file
          - any of these as [[link]] or [[link][description]]
 "
   "The link forms of a read tool's `link' parameter.
@@ -3889,6 +3910,8 @@ Parameters:
          If #+BEGIN/#+END blocks are present, they must be balanced
   parent_link - Link to the parent (string, required)
                 For top-level: file:{absolute-path}
+                               or id:{id} of the file-level
+                               property drawer
                 For child: id:{parent-id}
                            or file:{absolute-path}::#{custom-id}
                            or file:{absolute-path}::*{title} (first match)
@@ -4653,6 +4676,7 @@ URI format: org://{link}
     - file:/path/to/file.org::*{title} - first heading with that
       title
     - file:/path/to/file.org - whole file
+    - id:{id} of the file-level property drawer - whole file
     Encode at least % as %25, # as %23, ? as %3F, spaces, [ and ].
     The link is decoded exactly once, so a literal % in a title is
     sent as %25: *50%25%20Done reads the heading \"50% Done\".

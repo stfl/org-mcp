@@ -297,6 +297,7 @@ works unchanged:
 | =file:/abs/path.org::#<custom-id>= | the heading with that =CUSTOM_ID= property |
 | =file:/abs/path.org::*<title>=     | the first heading with that title          |
 | =file:/abs/path.org=               | the whole file                             |
+| =id:<id>= (file-level drawer)      | the whole file                             |
 
 - A link may be bare or bracketed, with or without a description:
   =id:abc=, =[[id:abc]]= and =[[id:abc][Project Alpha]]= name the same
@@ -331,8 +332,14 @@ works unchanged:
   [[*Configuring the scope override]]). An =id:= link names no file and
   resolves only within the allowed files, unless the call names its file in
   =files=.
-- =org-add-todo= reads a =file:= link without a search part as the top level of
-  that file. A tool that needs a heading refuses it.
+- An =id:= link whose =ID= sits in a file-level property drawer, before the
+  first heading, where org-roam keeps the =ID= of a file node, addresses the
+  whole file, as =org-id-open= opens the file at its top. It reads exactly as
+  the file's =file:= link without a search part does. With a search part, as
+  in =id:<id>::*Review=, it searches the whole file.
+- =org-add-todo= reads a link to a whole file, a =file:= link without a search
+  part or an =id:= link to a file-level property drawer, as the top level of
+  that file. A tool that needs a heading refuses either.
 
 org-mcp refuses:
 
@@ -694,7 +701,7 @@ Example:
   - =todo_state= (string, required): TODO state from =org-todo-keywords=
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =body= (string, optional): Body text content to add under the heading. A star line inside a block must be escaped as =,*= (see [[*Addressing headings with links]])
-  - =parent_link= (string, required): link to the parent item (see [[*Addressing headings with links]]). Use =file:/path/to/file.org= for top-level items in a file
+  - =parent_link= (string, required): link to the parent item (see [[*Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
   - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[*Naming the file of an ID]]
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[*Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
@@ -1022,7 +1029,7 @@ the same data as the resource for the same link; =org-read-outline= and
 - *Parameters:*
   - =link= (string, required): link (see [[*Addressing headings with links]]). Formats:
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
-    - =file:/path/to/file.org= - file (returns file with children)
+    - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Structured JSON with file or headline data including metadata
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
@@ -1080,7 +1087,7 @@ Example response:
 - *Parameters:*
   - =link= (string, required): link (see [[*Addressing headings with links]]). Formats:
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
-    - =file:/path/to/file.org= - returns entire file
+    - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - returns entire file
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Plain text content of the file or headline subtree
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
