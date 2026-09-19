@@ -2651,13 +2651,16 @@ an Org name that is no regular file: a dangling symlink, a FIFO."
                   '("deep" "inner" "top")))
         (set-file-modes (expand-file-name "locked" tree) #o700))
       ;; A named directory that cannot be read is refused by the name
-      ;; the call gave it.
+      ;; the call gave it, and so is one that can be listed but not
+      ;; searched, whose files the call could not open.
       (make-directory locked)
-      (set-file-modes locked #o000)
       (unwind-protect
-          (org-mcp-test--assert-files-refused
-           (vector locked)
-           (concat "\\`Cannot read directory: " (regexp-quote locked) "\\'"))
+          (dolist (mode '(#o000 #o400))
+            (set-file-modes locked mode)
+            (org-mcp-test--assert-files-refused
+             (vector locked)
+             (concat
+              "\\`Cannot read directory: " (regexp-quote locked) "\\'")))
         (set-file-modes locked #o700)))))
 
 (ert-deftest org-mcp-test-file-set-walk-error-names-directory ()
