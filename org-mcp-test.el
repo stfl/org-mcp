@@ -8291,24 +8291,39 @@ remote method records no operation."
 Org reads `[[/path.org#Parent/Child]]' as a `file:' link to a file
 named with `#', which does not exist, so the call is refused as for a
 file outside the allowed files, and the message names the link forms
-to send.  A refusal for a file that exists carries no such hint."
+to send.  Every refused path holding `#' carries that hint, also one
+naming an existing file, such as an auto-save file, so the refusal
+never tells whether a file outside the scope exists.  A refused path
+without `#' carries no hint."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-links)
        (other-file org-mcp-test--content-links))
-    (let ((org-mcp-allowed-files (list test-file))
-          (outline-path (format "[[%s#Beta/Review]]" test-file))
-          (outside (format "[[%s::*Beta]]" other-file)))
-      (dolist (call
-               `(("org-read-headline" (link . ,outline-path))
-                 ("org-set-tags" (link . ,outline-path) (tags . "work"))))
-        (should
-         (string-match-p
-          (concat
-           "\\`'" (regexp-quote outline-path)
-           "': the referenced file not in allowed list\\.  "
-           (regexp-quote org-mcp--link-forms-hint) "\\'")
-          (org-mcp-test--call-tool-expecting-error
-           test-file (car call) (cdr call)))))
+    (let* ((org-mcp-allowed-files (list test-file))
+           (dir (file-name-directory other-file))
+           (auto-save
+            (org-mcp-test--write-file
+             dir (format "#%s#" (file-name-nondirectory other-file))
+             org-mcp-test--content-links))
+           (outline-path (format "[[%s#Beta/Review]]" test-file))
+           (outside (format "[[%s::*Beta]]" other-file)))
+      (unwind-protect
+          (dolist (link
+                   (list outline-path
+                         (format "[[%s]]" auto-save)
+                         (format "file:%s" auto-save)
+                         (format "[[%s#missing#]]" dir)))
+            (dolist (call
+                     `(("org-read-headline" (link . ,link))
+                       ("org-set-tags" (link . ,link) (tags . "work"))))
+              (should
+               (string-match-p
+                (concat
+                 "\\`'" (regexp-quote link)
+                 "': the referenced file not in allowed list\\.  "
+                 (regexp-quote org-mcp--link-forms-hint) "\\'")
+                (org-mcp-test--call-tool-expecting-error
+                 test-file (car call) (cdr call))))))
+        (delete-file auto-save))
       (should
        (string-match-p
         (concat

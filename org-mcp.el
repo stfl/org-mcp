@@ -1141,9 +1141,11 @@ goes through the scope gate, `org-mcp--find-allowed-file', as a file
 the call names, so `org-mcp-file-scope-override' applies.  No buffer
 is visited.
 
-A refused path that holds `#' and names no existing file is most
-likely a path with an outline path appended, bracketed so that Org
-reads it as a file link; its refusal names the link forms to send."
+A refused path that holds `#' is most likely a path with an outline
+path appended, bracketed so that Org reads it as a file link; its
+refusal names the link forms to send.  Whether such a file exists
+does not change the refusal, so it tells nothing about files the call
+may not reach."
   (let ((application (org-element-property :application object))
         (path (org-element-property :path object)))
     (unless (member application '(nil "emacs"))
@@ -1159,7 +1161,6 @@ reads it as a file link; its refusal names the link forms to send."
           (org-mcp--tool-file-access-error
            link
            (and (string-search "#" path)
-                (not (file-exists-p local))
                 org-mcp--link-forms-hint))))))
 
 (defun org-mcp--link-id-file (id link)
