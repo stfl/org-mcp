@@ -2660,60 +2660,6 @@ an Org name that is no regular file: a dangling symlink, a FIFO."
            (concat "\\`Cannot read directory: " (regexp-quote locked) "\\'"))
         (set-file-modes locked #o700)))))
 
-(defun org-mcp-test--cap-regexp (cap)
-  "Return a regexp matching the refusal of a set over CAP."
-  (format "more than %d files and directories.*org-mcp-max-files" cap))
-
-(ert-deftest org-mcp-test-file-set-cap-is-an-error ()
-  "A named set over `org-mcp-max-files' is an error, never a partial result.
-The limit counts every file in the set and every directory searched
-for it, the named ones included."
-  (org-mcp-test--with-scope-dirs t
-    (let* ((tree (file-name-as-directory (expand-file-name "tree" outside)))
-           (a (org-mcp-test--write-set-file tree "a.org" "a"))
-           (sub (file-name-as-directory (expand-file-name "sub" tree))))
-      (org-mcp-test--write-set-file sub "b.org" "b")
-      (org-mcp-test--write-set-file sub "c.org" "c")
-      ;; tree, a.org, sub, b.org and c.org.
-      (let ((org-mcp-max-files 5))
-        (should
-         (equal (org-mcp-test--scan-files (vector tree)) '("a" "b" "c")))
-        ;; However often it is named, a file counts once.
-        (should
-         (equal (org-mcp-test--scan-files (vector a tree a))
-                '("a" "b" "c"))))
-      (let ((org-mcp-max-files 4))
-        (org-mcp-test--assert-files-refused
-         (vector tree) (org-mcp-test--cap-regexp 4)))
-      ;; sub, b.org and c.org; the count runs across entries.
-      (let ((org-mcp-max-files 3))
-        (should (equal (org-mcp-test--scan-files (vector sub)) '("b" "c")))
-        (org-mcp-test--assert-files-refused
-         (vector a sub) (org-mcp-test--cap-regexp 3))))))
-
-(ert-deftest org-mcp-test-file-set-cap-counts-empty-directories ()
-  "Directories count toward `org-mcp-max-files' even when they hold no file.
-The walk stops as soon as the count passes the limit: a file it would
-refuse, sorting after the directories, is then never reached."
-  (org-mcp-test--with-scope-dirs (list root)
-    (let ((out (org-mcp-test--write-set-file outside "out.org" "out"))
-          (escape (expand-file-name "zz-escape.org" root)))
-      (dotimes (i 30)
-        (make-directory (expand-file-name (format "d%02d" i) root)))
-      ;; root and its 30 subdirectories.
-      (let ((org-mcp-max-files 31))
-        (should (equal (org-mcp-test--scan-files (vector root)) nil)))
-      (let ((org-mcp-max-files 30))
-        (org-mcp-test--assert-files-refused
-         (vector root) (org-mcp-test--cap-regexp 30)))
-      (make-symbolic-link out escape)
-      (let ((org-mcp-max-files 31))
-        (org-mcp-test--assert-files-refused
-         (vector root) (org-mcp-test--refused-path-regexp escape)))
-      (let ((org-mcp-max-files 30))
-        (org-mcp-test--assert-files-refused
-         (vector root) (org-mcp-test--cap-regexp 30))))))
-
 (ert-deftest org-mcp-test-file-set-ignores-agenda-restriction ()
   "An agenda restriction never widens what the set-scanning tools reach.
 While the agenda is restricted, as by `C-c a <', the function
@@ -2763,10 +2709,10 @@ allowed files, and org-get-allowed-files reports them unchanged."
        `((query . "(no-such-predicate)") (files . ,(vector beta)))
        "Org-ql query error")
       (funcall check)
-      ;; A call failing while its set is built.
-      (let ((org-mcp-max-files 0))
+      ;; A call failing while its set is built, after taking beta.
+      (let ((missing (expand-file-name "missing.org" outside)))
         (org-mcp-test--assert-files-refused
-         (vector beta) "org-mcp-max-files"))
+         (vector beta missing) (org-mcp-test--refused-path-regexp missing)))
       (funcall check))))
 
 (ert-deftest org-mcp-test-gtd-queries-refuse-files ()

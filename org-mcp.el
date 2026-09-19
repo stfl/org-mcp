@@ -95,18 +95,6 @@ check, so a symlink pointing out of a root is refused."
     (repeat :tag "Permit under these directories" directory))
   :group 'org-mcp)
 
-(defcustom org-mcp-max-files 1000
-  "Most files and directories a call's `files' parameter may reach.
-The query tools that take `files' search the Org files it names, and
-the tools that name a heading look an `id:' link up in them.
-Each of those files counts once, and so does every directory
-searched for them, a named one included.  A call reaching more is
-refused with an error that names this limit, as soon as the count
-passes it; it never searches only some of the files, and it reads
-no more directories than this limit."
-  :type 'natnum
-  :group 'org-mcp)
-
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
@@ -413,12 +401,7 @@ below it, never the file the symlink resolves to.
 The walk runs with file name handlers disabled: every name it builds
 is local, and no handler should take part in reading it.
 
-Each file is returned once.  Every directory the walk visits and
-every file returned counts toward `org-mcp-max-files', and passing
-the limit is an error raised at once, so the walk reads no more than
-that many directories.  That is why the walk is written out here:
-`directory-files-recursively' returns only once it has walked the
-whole tree."
+Each file is returned once."
   (let ((entries
          (cond
           ((stringp files)
@@ -426,7 +409,6 @@ whole tree."
           ((sequencep files)
            (append files nil))))
         (found nil)
-        (count 0)
         ;; The allowed files, computed once for the whole set, and
         ;; never the set of an enclosing call.  The gate reads them
         ;; from here.
@@ -445,26 +427,17 @@ whole tree."
 path, such as /home/user/notes.org"
          entry)))
     (cl-labels
-     ((count-one
-       ()
-       (when (> (cl-incf count) org-mcp-max-files)
-         (org-mcp--tool-validation-error
-          "files reaches more than %d files and directories, the \
-limit set by org-mcp-max-files; name fewer files or smaller directories"
-          org-mcp-max-files)))
-      (add
+     ((add
        (file locator)
        ;; LOCATOR is FILE as the call reaches it, for the refusal.
        (let ((allowed
               (or (org-mcp--find-allowed-file file t)
                   (org-mcp--tool-file-access-error locator))))
          (unless (member allowed found)
-           (count-one)
            (push allowed found))))
       (walk
        (dir locator named)
        ;; DIR is local; LOCATOR is DIR as the call reaches it.
-       (count-one)
        (let ((file-name-handler-alist nil))
          (dolist (name
                   (condition-case nil
@@ -3656,10 +3629,9 @@ Tool descriptions `concat' it after the parameter's first line.")
           no archive), skipping hidden and unreadable directories,
           symlinked directories and anything not a regular file.
           Any other directory is not read: it stands for the allowed
-          files under it, and is refused when there are none.  More
-          than org-mcp-max-files files and searched directories in
-          total is an error, never a partial result.  The buffers
-          the call opens for these files are closed afterwards.
+          files under it, and is refused when there are none.  The
+          buffers the call opens for these files are closed
+          afterwards.
           null, false, \"\" and [] mean no files.
 "
   "How the `files' parameter of a tool scanning a set of files works.
