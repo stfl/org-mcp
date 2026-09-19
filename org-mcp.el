@@ -384,19 +384,20 @@ directory is not read at all: the entry stands for the allowed files
 under it, and is refused when there are none.  A remote directory is
 never read either, since it has no local truename.
 
-The walk descends into every subdirectory except hidden ones, whose
-names start with `.', and never follows a symlink to a directory, so
-it cannot loop or leave the directory that way.  A subdirectory it
-cannot read is skipped; a named directory it cannot read is an
-error.  In each directory it takes the files Org takes from a
-directory in `org-agenda-files': names matching
-`org-agenda-file-regexp', by default every `.org' file and no
-archive, and of those the ones `org-mcp--org-file-name-p' accepts.
-Of those it skips what is not a regular file, such as a dangling
-symlink.  Every file it takes must pass the gate; one that does not,
-such as a symlink out of every root, fails the call with an error
-naming it as the call reaches it, the entry followed by the path
-below it, never the file the symlink resolves to.
+The walk, `directory-files-recursively', descends into every
+subdirectory except hidden ones, whose names start with `.', and
+never follows a symlink to a directory, so it cannot loop or leave
+the directory that way.  A subdirectory it cannot read is skipped; a
+named directory it cannot read is an error.  In each directory it
+takes the files Org takes from a directory in `org-agenda-files':
+names matching `org-agenda-file-regexp', by default every `.org'
+file and no archive, and of those the ones not hidden that
+`org-mcp--org-file-name-p' accepts.  Of those it skips what is not a
+regular file, such as a dangling symlink or a FIFO.  Every file it
+takes must pass the gate; one that does not, such as a symlink out
+of every root, fails the call with an error naming it as the call
+reaches it, the entry followed by the path below it, never the file
+the symlink resolves to.
 
 The walk runs with file name handlers disabled: every name it builds
 is local, and no handler should take part in reading it.
@@ -426,7 +427,7 @@ Each file is returned once."
          "files entry names no file by its full path: %s.  Send a full \
 path, such as /home/user/notes.org"
          entry)))
-    (cl-labels
+    (cl-flet
      ((add
        (file locator)
        ;; LOCATOR is FILE as the call reaches it, for the refusal.
@@ -434,41 +435,46 @@ path, such as /home/user/notes.org"
               (or (org-mcp--find-allowed-file file t)
                   (org-mcp--tool-file-access-error locator))))
          (unless (member allowed found)
-           (push allowed found))))
-      (walk
-       (dir locator named)
-       ;; DIR is local; LOCATOR is DIR as the call reaches it.
-       (let ((file-name-handler-alist nil))
-         (dolist (name
-                  (condition-case nil
-                      (directory-files dir)
-                    (file-error
-                     (when named
-                       (org-mcp--tool-validation-error
-                        "Cannot read directory: %s"
-                        locator)))))
-           (unless (string-prefix-p "." name)
-             ;; Joined, not expanded: `expand-file-name' would
-             ;; read an entry named `~' as the home directory.
-             (let ((path (concat (file-name-as-directory dir) name))
-                   (child
-                    (concat (file-name-as-directory locator) name)))
-               (cond
-                ((file-directory-p path)
-                 (unless (file-symlink-p path)
-                   (walk path child nil)))
-                ((and (org-mcp--org-file-name-p name)
-                      (let ((case-fold-search nil))
-                        (string-match-p org-agenda-file-regexp name))
-                      (file-regular-p path))
-                 (add path child)))))))))
+           (push allowed found)))))
      (dolist (entry entries)
        (let ((truename (org-mcp--local-truename entry)))
          (cond
           ((not (and truename (file-directory-p truename)))
            (add entry entry))
           ((org-mcp--override-permits-p entry truename)
-           (walk truename entry t))
+           (let ((file-name-handler-alist nil))
+             (dolist
+                 (path
+                  (condition-case nil
+                      (let ((case-fold-search nil))
+                        (directory-files-recursively
+                         truename
+                         org-agenda-file-regexp
+                         nil
+                         (lambda (dir)
+                           (and (not
+                                 (string-prefix-p
+                                  "." (file-name-nondirectory dir)))
+                                ;; With a function as PREDICATE,
+                                ;; rather than t, the walk signals
+                                ;; on a subdirectory it cannot read
+                                ;; instead of skipping it.
+                                (file-readable-p dir)))))
+                    ;; The predicate keeps out every subdirectory
+                    ;; that cannot be read, so the named one failed.
+                    (file-error
+                     (org-mcp--tool-validation-error
+                      "Cannot read directory: %s"
+                      entry))))
+               (let ((name (file-name-nondirectory path)))
+                 (when (and (not (string-prefix-p "." name))
+                            (org-mcp--org-file-name-p name)
+                            (file-regular-p path))
+                   (add
+                    path
+                    (concat
+                     (file-name-as-directory entry)
+                     (file-relative-name path truename))))))))
           (t
            (let ((under
                   (cl-remove-if-not
