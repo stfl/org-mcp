@@ -333,7 +333,9 @@ org-mcp refuses:
 - a string that is no link: a bare ID, a bare path, a path with an outline
   path such as =/home/user/org/projects.org#Parent/Child=, a title on its own,
   or a link behind =org://=. The error names the link forms to send instead,
-  and nothing is looked up.
+  and nothing is looked up. Bracketed, as =[[/home/user/org/projects.org#Parent/Child]]=,
+  such a path is a link to a file that does not exist, refused as outside the
+  allowed files with the same hint.
 
 ** Naming the file of an ID
 
@@ -359,9 +361,11 @@ named.
   link, such as a =file:= link, which names its file already, is refused
   before any file is opened.  A blank value, =null=, =false=, =""= or =[]=,
   counts as no =files=.
-- =org-add-todo= looks the =id:= link of =parent_link= up in =files=.  It
-  looks the sibling of =after_link= up in the parent's file, with or without
-  =files=, since the sibling must be a child of the parent.
+- =org-add-todo= looks the =id:= link of =parent_link= up in =files=, which
+  applies to =parent_link= only.  It looks the sibling of =after_link= up in
+  the parent's file, with or without =files=, since the sibling must be a
+  child of the parent, so =after_link= may be any link, such as the
+  =file:= link org-mcp returns for a child without an =ID=.
 
 #+begin_src json
 {
@@ -650,8 +654,8 @@ Example:
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =body= (string, optional): Body text content to add under the heading
   - =parent_link= (string, required): link to the parent item (see [[*Addressing headings with links]]). Use =file:/path/to/file.org= for top-level items in a file
-  - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading; it must be a direct child of the parent, and it is looked up in the parent's file. If not given, or =null=, =false= or blank, append as last child of parent
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index. See [[*Naming the file of an ID]]
+  - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's header lines, before every existing heading
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[*Naming the file of an ID]]
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
 
@@ -685,6 +689,14 @@ Example:
   "todo_state": "TODO",
   "parent_link": "id:550e8400-e29b-41d4-a716-446655440001",
   "after_link": "file:/home/user/org/projects.org::*Draft the plan"
+}
+
+# Top-level item inserted after a top-level heading:
+{
+  "title": "Plan the offsite",
+  "todo_state": "TODO",
+  "parent_link": "file:/home/user/org/projects.org",
+  "after_link": "id:550e8400-e29b-41d4-a716-446655440001"
 }
 #+end_src
 
@@ -998,7 +1010,9 @@ Example response for a headline:
 *** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline
 - *Parameters:*
-  - =file= (string, required): Absolute path to an Org file
+  - =file= (string, required): Absolute path to an Org file, or a =file:=
+    link to it with no search part, bare or bracketed, such as the one
+    =org-read= returns for a file. A link to a heading is refused
 - *Returns:* JSON object with hierarchical outline structure: the top-level
   headings and their direct children, each with its =title=, =level=, =link=
   (see [[*Links org-mcp returns]]) and =children=; deeper headings are left out

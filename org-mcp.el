@@ -167,12 +167,6 @@ When nil, no sorting is applied."
   "Throw validation error MESSAGE with ARGS for tool operations."
   (mcp-server-lib-tool-throw (apply #'format message args)))
 
-(defun org-mcp--resource-validation-error (message &rest args)
-  "Signal validation error MESSAGE with ARGS for resource operations."
-  (mcp-server-lib-resource-signal-error
-   mcp-server-lib-jsonrpc-error-invalid-params
-   (apply #'format message args)))
-
 (defun org-mcp--state-mismatch-error (expected found context)
   "Throw state mismatch error.
 EXPECTED is the expected value, FOUND is the actual value,
@@ -181,20 +175,14 @@ CONTEXT describes what is being compared."
    (format "%s mismatch: expected '%s', found '%s'"
            context expected found)))
 
-(defun org-mcp--tool-file-access-error (locator)
+(defun org-mcp--tool-file-access-error (locator &optional hint)
   "Throw file access error for tool operations.
-LOCATOR is the resource identifier (file path or ID) that was
-denied access."
+LOCATOR is the link or path the call sent, naming the file it may not
+reach.  HINT, when non-nil, is a sentence appended to the message."
   (mcp-server-lib-tool-throw
-   (format "'%s': the referenced file not in allowed list" locator)))
-
-(defun org-mcp--resource-file-access-error (locator)
-  "Signal file access error for resource operations.
-LOCATOR is the resource identifier (file path or ID) that was
-denied access."
-  (mcp-server-lib-resource-signal-error
-   mcp-server-lib-jsonrpc-error-invalid-params
-   (format "'%s': the referenced file not in allowed list" locator)))
+   (concat
+    (format "'%s': the referenced file not in allowed list" locator)
+    (and hint (concat ".  " hint)))))
 
 ;; Helpers
 
@@ -713,19 +701,6 @@ variables."
                 (org-mcp--complete-and-save ,response-alist))))
          (set-marker ,position nil)))))
 
-(defun org-mcp--validate-file-access (filename)
-  "Validate that the call may reach FILENAME, a path the call names.
-FILENAME must be an absolute path.  It is reachable when it is in
-the allowed files or `org-mcp-file-scope-override' permits it.
-Returns the full path if allowed, signals an error otherwise."
-  (unless (file-name-absolute-p filename)
-    (org-mcp--resource-validation-error "Path must be absolute: %s"
-                                        filename))
-  (let ((allowed-file (org-mcp--find-allowed-file filename t)))
-    (unless allowed-file
-      (org-mcp--resource-file-access-error filename))
-    allowed-file))
-
 (defun org-mcp--extract-headings ()
   "Extract heading structure from current org buffer.
 Returns a vector of level-1 heading alists.  Each level-1 heading
@@ -1044,36 +1019,50 @@ Returns alist with file path, preamble content, and top-level children."
 
 ;; Links
 
+(defconst org-mcp--link-forms-hint
+  "Send id:<uuid>, file:<path>::#<custom-id>, file:<path>::*<title> or \
+file:<path>, with the file's full path"
+  "The sentence that tells a client which link forms a call takes.")
+
 (defun org-mcp--not-a-link-error (link)
   "Throw the error for LINK, a string that is not written as an Org link.
 The message names the link forms a call takes instead, and says when
 LINK starts with `org://', the scheme of the resource, not of a link."
   (org-mcp--tool-validation-error
-   "Not an Org link: %s.  %sSend id:<uuid>, file:<path>::#<custom-id>, \
-file:<path>::*<title> or file:<path>, with the file's full path"
+   "Not an Org link: %s.  %s%s"
    link
    (if (and (stringp link)
             (string-prefix-p "org://" (string-trim link)))
        "Drop org://, which only a resource URI starts with.  "
-     "")))
+     "")
+   org-mcp--link-forms-hint))
+
+(defun org-mcp--link-written-p (string)
+  "Return non-nil when STRING is written as an Org link.
+It is bracketed, with or without a description, starts with a link
+type such as `id:' or `file:', or is a search such as `#custom-id' or
+`*Title'.  A string starting with `org://', the scheme of the
+resource, is no link, and neither is any other string, such as an ID,
+a path or a title on its own."
+  (when (stringp string)
+    (let ((trimmed (string-trim string)))
+      (and (not (string-prefix-p "org://" trimmed))
+           (or (string-prefix-p "[[" trimmed)
+               (string-match-p "\\`[#*]" trimmed)
+               (string-match-p org-link-types-re trimmed))))))
 
 (defun org-mcp--link-parse (link)
   "Parse LINK with `org-element-link-parser' and return the link object.
-LINK is bracketed, with or without a description, or bare.  A bare
-link starts with its type, such as `id:' or `file:', or is a search
-such as `#custom-id' or `*Title', which `org-mcp--link-target' refuses
-for naming no file.  Any other string, such as an ID, a path or a
-title on its own, or anything starting with `org://', is not a link
-and is refused by `org-mcp--not-a-link-error'.  Link abbreviations are
-not expanded, since an abbreviation can call a function, and
+LINK is bracketed, with or without a description, or bare; see
+`org-mcp--link-written-p'.  A search on its own, such as `#custom-id'
+or `*Title', is parsed here and refused by `org-mcp--link-target' for
+naming no file.  A string that is no link is refused by
+`org-mcp--not-a-link-error'.  Link abbreviations are not expanded,
+since an abbreviation can call a function, and
 `org-link-translation-function' is not applied."
-  (let ((trimmed (and (stringp link) (string-trim link))))
-    (unless (and trimmed
-                 (not (string-prefix-p "org://" trimmed))
-                 (or (string-prefix-p "[[" trimmed)
-                     (string-match-p "\\`[#*]" trimmed)
-                     (string-match-p org-link-types-re trimmed)))
-      (org-mcp--not-a-link-error link))
+  (unless (org-mcp--link-written-p link)
+    (org-mcp--not-a-link-error link))
+  (let ((trimmed (string-trim link)))
     (with-temp-buffer
       (let ((org-link-abbrev-alist nil)
             (org-link-abbrev-alist-local nil)
@@ -1108,7 +1097,11 @@ written, or only once `.', `..' or `~' are expanded, is refused
 before TRAMP can open a connection for it.  The expanded name then
 goes through the scope gate, `org-mcp--find-allowed-file', as a file
 the call names, so `org-mcp-file-scope-override' applies.  No buffer
-is visited."
+is visited.
+
+A refused path that holds `#' and names no existing file is most
+likely a path with an outline path appended, bracketed so that Org
+reads it as a file link; its refusal names the link forms to send."
   (let ((application (org-element-property :application object))
         (path (org-element-property :path object)))
     (unless (member application '(nil "emacs"))
@@ -1121,7 +1114,11 @@ is visited."
       (unless local
         (org-mcp--link-full-path-error link))
       (or (org-mcp--find-allowed-file local t)
-          (org-mcp--tool-file-access-error link)))))
+          (org-mcp--tool-file-access-error
+           link
+           (and (string-search "#" path)
+                (not (file-exists-p local))
+                org-mcp--link-forms-hint))))))
 
 (defun org-mcp--link-id-file (id link)
   "Return the allowed file that holds ID, which LINK names.
@@ -1859,41 +1856,52 @@ Assumes point is in an Org buffer."
         (forward-line)))
     nil))
 
-(defun org-mcp--goto-after-child (target)
-  "Move point past the child of the heading at point that TARGET names.
-TARGET comes from `org-mcp--link-target'.  Throws a validation error
-unless TARGET names a direct child of the heading at point."
-  (let ((parent
-         (progn
-           (org-back-to-heading t)
-           (point))))
-    (unless (and (org-mcp--paths-equal-p
-                  (plist-get target :file) (buffer-file-name))
-                 (progn
-                   (org-mcp--goto-heading target)
-                   (save-excursion
-                     (and (org-up-heading-safe) (= (point) parent)))))
-      (org-mcp--tool-validation-error
-       "Sibling %s not found under parent"
-       (plist-get target :link)))
-    (org-end-of-subtree t t)))
+(defun org-mcp--goto-after-child (target parent)
+  "Move point past the subtree of the child of PARENT that TARGET names.
+TARGET comes from `org-mcp--link-target'.  PARENT is the position of
+the parent heading in the current buffer, or nil for the top level of
+the file, where the child is a heading with no parent.  Throws a
+validation error unless TARGET names such a heading in the current
+buffer's file."
+  (unless (and (org-mcp--paths-equal-p
+                (plist-get target :file) (buffer-file-name))
+               (progn
+                 (org-mcp--goto-heading target)
+                 (save-excursion
+                   (if parent
+                       (and (org-up-heading-safe) (= (point) parent))
+                     (not (org-up-heading-safe))))))
+    (org-mcp--tool-validation-error
+     "Sibling %s not found under parent"
+     (plist-get target :link)))
+  (org-end-of-subtree t t))
 
-(defun org-mcp--position-for-new-child (after)
-  "Position point for inserting a new child under current heading.
+(defun org-mcp--position-for-new-child (after parent-level)
+  "Position point where a new heading goes under its parent.
+PARENT-LEVEL is the parent's level, with point at the parent heading,
+or nil for the top level of the file, with point past the file's
+header lines, where the heading goes when AFTER is nil.
 AFTER is nil or the target, from `org-mcp--link-target', of the
-sibling to insert after, which must be a direct child of the parent.
-Assumes point is at parent heading.
-If AFTER is non-nil, positions after that sibling.
+sibling to insert after: a direct child of the parent, or a heading
+with no parent at the top level.
+If AFTER is non-nil, positions after that sibling's subtree.
 If nil, positions at end of parent's subtree.
 Throws validation error if the sibling is not found under the parent."
-  (if after
-      (org-mcp--goto-after-child after)
+  (cond
+   (after
+    (org-mcp--goto-after-child
+     after
+     (and parent-level
+          (progn
+            (org-back-to-heading t)
+            (point)))))
+   (parent-level
     ;; No sibling named: insert at end of parent's subtree
     (org-end-of-subtree t t)
     ;; If we're at the start of a sibling, go back one char
     ;; to be at the end of parent's content
     (when (looking-at "^\\*+ ")
-      (backward-char 1))))
+      (backward-char 1)))))
 
 (defun org-mcp--ensure-newline ()
   "Ensure there is a newline or buffer start before point."
@@ -2170,13 +2178,14 @@ BODY is optional body text.
 PARENT_LINK is the link to the parent item, or to a whole file for
 its top level.
 TAGS is an optional single tag string or list of tag strings.
-AFTER_LINK is an optional link to the sibling to insert after, a
-direct child of the parent; an `id:' AFTER_LINK is looked up in the
-parent's file.
+AFTER_LINK is an optional link to the sibling to insert after: a
+direct child of the parent, or a heading with no parent when
+PARENT_LINK names a whole file.  An `id:' AFTER_LINK is looked up in
+the parent's file.
 PROPERTIES is an optional alist of property names and values, checked
 by `org-mcp--validate-properties' like those of `org-set-properties'.
 FILES, when not blank, names the files an `id:' PARENT_LINK is looked
-up in; see `org-mcp--link-target'.
+up in; see `org-mcp--link-target'.  It applies to PARENT_LINK only.
 
 MCP Parameters:
   title - The headline text
@@ -2191,7 +2200,8 @@ MCP Parameters:
                   - any of these as [[link]] or [[link][description]]
   tags - Tags to add (optional, single string or array of strings)
   after_link - Link to the sibling to insert after (optional), a
-               direct child of the parent
+               direct child of the parent, or a top-level heading of
+               the file when parent_link names a whole file
                Formats:
                  - id:{id}
                  - file:{absolute-path}::#{custom-id}
@@ -2205,8 +2215,7 @@ MCP Parameters:
                forbidden
   files - Files and directories to look up an id: link of parent_link
           in, in order, instead of Emacs's ID index (array of
-          strings, optional); refused with any other link, of
-          parent_link or of after_link"
+          strings, optional); refused with any other parent_link"
   (org-mcp--validate-headline-title title)
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
@@ -2214,26 +2223,17 @@ MCP Parameters:
         (and properties
              (not (equal properties ""))
              (org-mcp--validate-properties properties)))
-       (after-link (org-mcp--link-given after_link))
-       ;; Both links must take FILES before either is resolved.
-       (parent
-        (progn
-          (org-mcp--check-files parent_link files)
-          (when after-link
-            (org-mcp--check-files after-link files))
-          ;; A link that names a whole file means top level.
-          (org-mcp--link-target parent_link files)))
+       ;; A link that names a whole file means top level.
+       (parent (org-mcp--link-target parent_link files))
        (file-path (plist-get parent :file))
-       ;; The sibling can only be a child of the parent, so its `id:'
-       ;; link is taken to be in the parent's file: no ID index is
-       ;; consulted, and neither are FILES.  Resolving it here refuses
-       ;; a bad link before any buffer is visited.  A top-level TODO
-       ;; goes after the file's header lines, and AFTER_LINK is not
-       ;; used.
+       ;; The sibling can only be a child of the parent, or a heading
+       ;; with no parent at the top level, so its `id:' link is taken
+       ;; to be in the parent's file: no ID index is consulted, and
+       ;; neither are FILES.  Resolving it here refuses a bad link
+       ;; before the parent's buffer is changed.
        (after
-        (and after-link
-             (org-mcp--target-heading-p parent)
-             (org-mcp--link-target after-link nil file-path))))
+        (when-let* ((after-link (org-mcp--link-given after_link)))
+          (org-mcp--link-target after-link nil file-path))))
 
     ;; Add the TODO item
     (org-mcp--modify-and-save file-path "add TODO"
@@ -2248,8 +2248,7 @@ MCP Parameters:
              (org-mcp--navigate-to-parent-or-top parent)))
 
         ;; Handle positioning after navigation to parent
-        (when parent-level
-          (org-mcp--position-for-new-child after))
+        (org-mcp--position-for-new-child after parent-level)
 
         ;; Validate body before inserting heading
         ;; Calculate the target level for validation
@@ -3110,13 +3109,30 @@ MCP Parameters:
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
-FILE is the absolute path to an Org file.
+FILE is the absolute path to an Org file, or a `file:' link to it with
+no search part, such as org-read returns for a file.  Either way the
+file must pass the scope gate, `org-mcp--find-allowed-file', as a file
+the call names.  A link to a heading is refused.
 
 MCP Parameters:
-  file - Absolute path to an Org file"
+  file - Absolute path to an Org file, or a file: link to it with no
+         search part"
   (json-encode
    (org-mcp--generate-outline
-    (expand-file-name (org-mcp--validate-file-access file)))))
+    (if (org-mcp--link-written-p file)
+        (let ((target (org-mcp--link-target file)))
+          (when (org-mcp--target-heading-p target)
+            (org-mcp--tool-validation-error
+             "org-read-outline takes a file, not a heading: %s.  Send \
+the file's path or file:<path>"
+             file))
+          (plist-get target :file))
+      (unless (and (stringp file) (file-name-absolute-p file))
+        (org-mcp--tool-validation-error "Path must be absolute: %s"
+                                        file))
+      (expand-file-name
+       (or (org-mcp--find-allowed-file file t)
+           (org-mcp--tool-file-access-error file)))))))
 
 (defun org-mcp--tool-read-headline (link &optional files)
   "Tool handler for org-read-headline.
@@ -3771,9 +3787,11 @@ Parameters:
                 Links may be bracketed: [[link]] or
                 [[link][description]]
   after_link - Link to the sibling to insert after (string, optional),
-               a direct child of the parent, in any form parent_link
-               takes for a child.  Its id: link is looked up in the
-               parent's file.
+               in any form parent_link takes for a child: a direct
+               child of the parent, or a top-level heading of the file
+               when parent_link names the whole file.  Its id: link is
+               looked up in the parent's file.  null, false and \"\"
+               mean none.
                If omitted, appends as last child of parent
   properties - Properties for the new headline (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
@@ -3787,8 +3805,8 @@ Parameters:
                parameters and dedicated tools
   files - Files and directories to look up an id: link of
           parent_link in (array of strings, optional); see org-read.
-          Refused unless both parent_link and after_link, if given,
-          are id: links.
+          It applies to parent_link only, and is refused unless
+          parent_link is an id: link.
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -3803,9 +3821,11 @@ Returns JSON object:
 Positioning behavior:
   - With parent_link only: Appends as last child of parent
   - With parent_link + after_link: Inserts immediately after specified
-sibling
+sibling and its subtree
   - Top-level (parent_link naming only the file): Adds after the
-file's header lines."
+file's header lines, before every existing heading
+  - Top-level + after_link: Inserts immediately after that top-level
+heading and its subtree"
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4163,7 +4183,9 @@ org-mcp-file-scope-override."
    allowed files, or permitted by org-mcp-file-scope-override.
 
 Parameters:
-  file - Absolute path to Org file (string, required)
+  file - Absolute path to Org file, or a file: link to it with no
+         search part, bare or bracketed, such as file:/path/to/file.org
+         (string, required)
 
 Returns: JSON object with hierarchical outline structure:
   headings - Array of top-level headlines, each with title, level,

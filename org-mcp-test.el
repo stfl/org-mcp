@@ -2971,13 +2971,16 @@ Very deep content."
                  forbidden-file))))))
 
 (ert-deftest org-mcp-test-headline-resource-not-found ()
-  "Test org-read-headline tool error for non-existent headline."
+  "Test org-read-headline tool error for non-existent headline.
+The error names the link and says Org found no match."
   (let ((test-content "* Existing Section\nSome content."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
-      (should-error
-       (org-mcp-test--call-read-headline
-        (org-mcp-test--file-link test-file "*Nonexistent"))))))
+      (let ((link (org-mcp-test--file-link test-file "*Nonexistent")))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((link . ,link))
+         (concat "\\`Cannot resolve link " (regexp-quote link) ": No match")
+         test-file)))))
 
 (ert-deftest org-mcp-test-headline-resource-file-with-hash ()
   "Test org-read-headline tool with # in filename.
@@ -5093,13 +5096,7 @@ Second block:
 #+BEGIN_QUOTE
 unfinished")))
 
-;;; Resource template workaround tool tests
-
-(defun org-mcp-test--call-read (link)
-  "Call org-read tool via JSON-RPC and return the result.
-LINK is the native Org link sent as the `link' parameter."
-  (let ((params `((link . ,link))))
-    (mcp-server-lib-ert-call-tool "org-read" params)))
+;;; Read tool tests
 
 (ert-deftest org-mcp-test-tool-read-file ()
   "Test org-read tool returns structured JSON for files."
@@ -5128,6 +5125,38 @@ LINK is the native Org link sent as the `link' parameter."
            (headings (alist-get 'headings result)))
       (should (= (length headings) 1))
       (should (string= (alist-get 'title (aref headings 0)) "Parent Task")))))
+
+(ert-deftest org-mcp-test-tool-read-outline-file-link ()
+  "org-read-outline takes a `file:' link to the file as well as its path.
+A bare and a bracketed link with no search part read the same outline
+as the path.  A link to a heading, a relative path and a file outside
+the allowed files, as a path or a link, are refused with tool errors
+that say why, and the files stay unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-nested-siblings)
+       (other-file org-mcp-test--content-links))
+    (let ((org-mcp-allowed-files (list test-file))
+          (expected (org-mcp-test--call-read-outline test-file)))
+      (dolist (link (list (concat "file:" test-file)
+                          (format "[[file:%s][Siblings]]" test-file)))
+        (should (equal (org-mcp-test--call-read-outline link) expected)))
+      (pcase-dolist (`(,file ,refusal)
+                     `((,(org-mcp-test--file-link test-file "*Parent Task")
+                        "\\`org-read-outline takes a file, not a heading: ")
+                       (,(file-name-nondirectory test-file)
+                        "\\`Path must be absolute: ")
+                       (,other-file "not in allowed list\\'")
+                       (,(concat "file:" other-file)
+                        "not in allowed list\\'")))
+        (should
+         (string-match-p
+          refusal
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-read-outline" `((file . ,file))))))
+      (should
+       (string=
+        (org-mcp-test--read-file other-file) org-mcp-test--content-links))
+      (should-not (find-buffer-visiting other-file)))))
 
 (ert-deftest org-mcp-test-tool-read-headline-single-level ()
   "Test org-read-headline with a title holding a slash."
@@ -8159,6 +8188,37 @@ remote method records no operation."
                (car call) (cdr call) "Send a full path" test-file))))
         (should (null ops))))))
 
+(ert-deftest org-mcp-test-link-bracketed-outline-path-refused ()
+  "A bracketed path with an outline path is refused with the link forms.
+Org reads `[[/path.org#Parent/Child]]' as a `file:' link to a file
+named with `#', which does not exist, so the call is refused as for a
+file outside the allowed files, and the message names the link forms
+to send.  A refusal for a file that exists carries no such hint."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links)
+       (other-file org-mcp-test--content-links))
+    (let ((org-mcp-allowed-files (list test-file))
+          (outline-path (format "[[%s#Beta/Review]]" test-file))
+          (outside (format "[[%s::*Beta]]" other-file)))
+      (dolist (call
+               `(("org-read-headline" (link . ,outline-path))
+                 ("org-set-tags" (link . ,outline-path) (tags . "work"))))
+        (should
+         (string-match-p
+          (concat
+           "\\`'" (regexp-quote outline-path)
+           "': the referenced file not in allowed list\\.  "
+           (regexp-quote org-mcp--link-forms-hint) "\\'")
+          (org-mcp-test--call-tool-expecting-error
+           test-file (car call) (cdr call)))))
+      (should
+       (string-match-p
+        (concat
+         "\\`'" (regexp-quote outside)
+         "': the referenced file not in allowed list\\'")
+        (org-mcp-test--call-tool-expecting-error
+         other-file "org-read-headline" `((link . ,outside))))))))
+
 (ert-deftest org-mcp-test-link-refuses-regexp-search ()
   "A regexp search is refused, since Org answers it with a sparse tree."
   (org-mcp-test--with-temp-org-files
@@ -8923,10 +8983,12 @@ Emacs's index, in an allowed file, and is not looked up there."
   "`files' applies only to an `id:' link; any other link refuses it.
 A `file:' link names its file already, and a custom ID search is no
 `id:' link.  Each is refused, before any file is opened, for a read, a
-write, and as the parent of org-add-todo, and as its sibling next to
-an `id:' parent.  A path with an outline path and a bare ID are no
-links, and are refused as such with `files' as without.  The file
-stays unchanged."
+write, and as the parent of org-add-todo.  A path with an outline
+path and a bare ID are no links, and are refused as such with `files'
+as without.  The file stays unchanged.  org-add-todo's sibling never
+uses `files', so next to an `id:' parent it may be any link: a
+`file:' title or custom ID link, bare or bracketed, inserts after it,
+and a bare ID is refused as no link, leaving its file unchanged."
   (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
     (org-mcp-test--with-scope-dirs t
       (let* ((file (org-mcp-test--write-file
@@ -8937,7 +8999,8 @@ stays unchanged."
               (lambda (address)
                 (if (member address
                             (list (format "%s#Task" file)
-                                  org-mcp-test--content-with-id-id))
+                                  org-mcp-test--content-with-id-id
+                                  "file-set-sibling-id"))
                     (concat "\\`Not an Org link: " (regexp-quote address))
                   (concat
                    "\\`files applies only to an id: link: "
@@ -8968,27 +9031,41 @@ stays unchanged."
                (append (cdr call) `((files . ,files)))
                (funcall refusal address)
                file)))
-          (dolist (after
-                   (list
-                    (format "file:%s::*Task" file)
-                    org-mcp-test--content-with-id-id))
-            (org-mcp-test--call-tool-refused
-             "org-add-todo"
-             `((title . "New Task")
-               (todo_state . "TODO")
-               (body . nil)
-               (parent_link . ,org-mcp-test--scope-id-link)
-               (after_link . ,after)
-               (files . ,files))
-             (funcall refusal after)
-             file))
-          (should-not (find-buffer-visiting file)))))))
+          (should-not (find-buffer-visiting file))
+          (let ((count 0))
+            (dolist (after
+                     '("file:%s::*Sibling"
+                       "file:%s::#sibling-slug"
+                       "[[file:%s::*Sibling][Sibling]]"
+                       "file-set-sibling-id"))
+              (let* ((parent-file
+                      (org-mcp-test--write-file
+                       outside (format "parent-%d.org" (cl-incf count))
+                       org-mcp-test--content-sibling-parent))
+                     (after-link (format after parent-file))
+                     (params
+                      `((title . "New Task")
+                        (todo_state . "TODO")
+                        (body . nil)
+                        (parent_link . "id:file-set-parent-id")
+                        (after_link . ,after-link)
+                        (properties . ((ID . "new-task-id")))
+                        (files . ,(vector parent-file)))))
+                (if (string-prefix-p "file-set" after-link)
+                    (org-mcp-test--call-tool-refused
+                     "org-add-todo" params (funcall refusal after-link)
+                     parent-file)
+                  (mcp-server-lib-ert-call-tool "org-add-todo" params)
+                  (org-mcp-test--verify-file-matches
+                   parent-file
+                   org-mcp-test--regex-sibling-parent-added))))))))))
 
 (ert-deftest org-mcp-test-file-set-every-heading-tool ()
   "Every tool that names a heading looks an `id:' link up in the files named.
 Beta's ID is not in Emacs's index, so only the named file finds it.
 The reads return Beta, and each write changes Beta alone.  The set
-serves org-add-todo's parent and the sibling it inserts after."
+serves org-add-todo's parent; the sibling it inserts after is looked
+up in the parent's file."
   (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-links))
@@ -9253,6 +9330,231 @@ used."
            (string=
             (org-mcp-test--read-file b-file)
             org-mcp-test--content-sibling-elsewhere)))))))
+
+(defconst org-mcp-test--content-custom-id-children-first
+  "* Parent
+:PROPERTIES:
+:ID:       file-set-parent-id
+:END:
+** First
+:PROPERTIES:
+:CUSTOM_ID: first
+:END:
+First body.
+"
+  "Parent with an ID and its child First, which has a custom ID only.")
+
+(defconst org-mcp-test--content-custom-id-children-second
+  "** Second\nSecond body.\n"
+  "Second child of Parent, with no identifier.")
+
+(defconst org-mcp-test--content-custom-id-children
+  (concat
+   org-mcp-test--content-custom-id-children-first
+   org-mcp-test--content-custom-id-children-second)
+  "File holding Parent, with an ID, and two children without one.")
+
+(defconst org-mcp-test--regex-custom-id-children-after-first
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-custom-id-children-first)
+   "\n?"
+   "\\*\\* TODO New Task *\n"
+   (regexp-quote org-mcp-test--content-custom-id-children-second)
+   "\\'")
+  "Regex matching the whole file after adding a TODO after First.")
+
+(defconst org-mcp-test--regex-custom-id-children-after-second
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-custom-id-children)
+   "\n?"
+   "\\*\\* TODO New Task *\n"
+   "\\'")
+  "Regex matching the whole file after adding a TODO after Second.")
+
+(ert-deftest org-mcp-test-file-set-parent-id-with-file-sibling ()
+  "With `files' naming the parent's file, a `file:' sibling link works.
+The parent, reached by its `id:' link through `files', lies in a file
+outside the allowed files that Emacs never indexed.  Its children have
+no ID, so org-read returns a custom ID link for First and a title link
+for Second.  Each, sent back as after_link next to the parent's `id:'
+link and `files', inserts the new TODO after that child, and Emacs's
+ID index is never consulted."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-scope-dirs t
+      (pcase-dolist (`(,title ,search ,name ,expected)
+                     `(("First" "#first" "first.org"
+                        ,org-mcp-test--regex-custom-id-children-after-first)
+                       ("Second" "*Second" "second.org"
+                        ,org-mcp-test--regex-custom-id-children-after-second)))
+        (let* ((file (org-mcp-test--write-file
+                      outside name org-mcp-test--content-custom-id-children))
+               (files (vector file)))
+          (org-mcp-test--without-id-index
+            (let* ((parent
+                    (json-read-from-string
+                     (mcp-server-lib-ert-call-tool
+                      "org-read"
+                      `((link . "id:file-set-parent-id") (files . ,files)))))
+                   (after-link
+                    (alist-get
+                     'link
+                     (seq-find
+                      (lambda (child) (equal (alist-get 'title child) title))
+                      (alist-get 'children parent)))))
+              (should
+               (equal after-link (org-mcp-test--file-link file search)))
+              (mcp-server-lib-ert-call-tool
+               "org-add-todo"
+               `((title . "New Task")
+                 (todo_state . "TODO")
+                 (body . nil)
+                 (parent_link . "id:file-set-parent-id")
+                 (after_link . ,after-link)
+                 (files . ,files)))))
+          (org-mcp-test--verify-file-matches file expected))))))
+
+(defconst org-mcp-test--content-top-level-preamble "#+TITLE: Top\n\n"
+  "Header lines of `org-mcp-test--content-top-level'.")
+
+(defconst org-mcp-test--content-top-level-first
+  "* First
+:PROPERTIES:
+:ID:       top-level-first-id
+:END:
+First body.
+** Nested
+Nested body.
+"
+  "Top-level heading First, with an ID and a child.")
+
+(defconst org-mcp-test--content-top-level-second
+  "* Second
+:PROPERTIES:
+:CUSTOM_ID: second-slug
+:END:
+Second body.
+"
+  "Top-level heading Second, with a custom ID.")
+
+(defconst org-mcp-test--content-top-level-third "* Third\nThird body.\n"
+  "Top-level heading Third, with no identifier.")
+
+(defconst org-mcp-test--content-top-level
+  (concat
+   org-mcp-test--content-top-level-preamble
+   org-mcp-test--content-top-level-first
+   org-mcp-test--content-top-level-second
+   org-mcp-test--content-top-level-third)
+  "File with three top-level headings after its header lines.")
+
+(defconst org-mcp-test--regex-top-level-after-first
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-top-level-preamble
+     org-mcp-test--content-top-level-first))
+   "\n?"
+   "\\* TODO New Task *\n"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-top-level-second
+     org-mcp-test--content-top-level-third))
+   "\\'")
+  "Regex matching the whole file after adding a TODO after First.")
+
+(defconst org-mcp-test--regex-top-level-after-second
+  (concat
+   "\\`"
+   (regexp-quote
+    (concat
+     org-mcp-test--content-top-level-preamble
+     org-mcp-test--content-top-level-first
+     org-mcp-test--content-top-level-second))
+   "\n?"
+   "\\* TODO New Task *\n"
+   (regexp-quote org-mcp-test--content-top-level-third)
+   "\\'")
+  "Regex matching the whole file after adding a TODO after Second.")
+
+(defconst org-mcp-test--regex-top-level-after-third
+  (concat
+   "\\`"
+   (regexp-quote org-mcp-test--content-top-level)
+   "\n?"
+   "\\* TODO New Task *\n"
+   "\\'")
+  "Regex matching the whole file after adding a TODO after Third.")
+
+(ert-deftest org-mcp-test-add-todo-top-level-after-sibling ()
+  "At the top level, org-add-todo inserts after the heading after_link names.
+parent_link names the whole file.  An `id:' link, a custom ID link and
+a bracketed title link each name a top-level heading, and the new TODO
+goes after that heading and its subtree, not after the header lines.
+The `id:' link is looked up in the file, with no ID index."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (pcase-dolist (`(,after ,expected)
+                   `(("id:top-level-first-id"
+                      ,org-mcp-test--regex-top-level-after-first)
+                     ("file:%s::#second-slug"
+                      ,org-mcp-test--regex-top-level-after-second)
+                     ("[[file:%s::*Third][Third]]"
+                      ,org-mcp-test--regex-top-level-after-third)))
+      (org-mcp-test--with-temp-org-files
+          ((test-file org-mcp-test--content-top-level))
+        (org-mcp-test--with-id-tracking (list test-file) nil
+          (org-mcp-test--without-id-index
+            (org-mcp-test--add-todo-and-check
+             "New Task" "TODO" nil nil (concat "file:" test-file)
+             (format after test-file)
+             (file-name-nondirectory test-file)
+             test-file
+             expected)))))))
+
+(ert-deftest org-mcp-test-add-todo-top-level-after-link-refused ()
+  "At the top level, a bad after_link is refused and the file is unchanged.
+A level-2 heading is not a top-level sibling, so its link is refused
+as not found under the parent.  A bare UUID is no link, and a
+`shell:' link is a type org-mcp does not resolve; neither runs or is
+looked up, and the shell command never runs."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-top-level))
+      (let* ((canary
+              (expand-file-name "org-mcp-test-top-level-canary"
+                                (file-name-directory test-file)))
+             (nested (org-mcp-test--file-link test-file "*Nested"))
+             (uuid "0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0")
+             (shell (format "shell:touch %s" canary)))
+        (unwind-protect
+            (pcase-dolist (`(,after ,refusal)
+                           `((,nested
+                              ,(concat
+                                "\\`Sibling " (regexp-quote nested)
+                                " not found under parent\\'"))
+                             (,uuid
+                              ,(concat
+                                "\\`Not an Org link: " (regexp-quote uuid)))
+                             (,shell "\\`Link type 'shell' is not supported")))
+              (org-mcp-test--call-tool-refused
+               "org-add-todo"
+               `((title . "New Task")
+                 (todo_state . "TODO")
+                 (body . nil)
+                 (parent_link . ,(concat "file:" test-file))
+                 (after_link . ,after))
+               refusal
+               test-file)
+              (org-mcp-test--verify-file-matches
+               test-file
+               (concat
+                "\\`" (regexp-quote org-mcp-test--content-top-level) "\\'"))
+              (org-mcp-test--verify-no-modified-buffer test-file))
+          (when (file-exists-p canary)
+            (delete-file canary)))
+        (should-not (file-exists-p canary))))))
 
 (ert-deftest org-mcp-test-link-old-forms-refused ()
   "A string that is no Org link is refused before any lookup.
