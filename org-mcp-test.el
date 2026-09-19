@@ -1889,7 +1889,10 @@ clock entry to delete."
            ;; Only the relative allowed-name is in the list.
            (org-mcp-allowed-files (list allowed-name))
            (link (org-mcp-test--file-link forbidden-file "*Forbidden")))
-      (should-error (org-mcp-test--call-read-headline link)))))
+      (org-mcp-test--call-tool-refused
+       "org-read-headline" `((link . ,link))
+       (org-mcp-test--refused-path-regexp link)
+       forbidden-file))))
 
 (ert-deftest org-mcp-test-allowed-files-fn-returns-configured ()
   "`org-mcp-allowed-files' (function) returns the variable when set."
@@ -1941,7 +1944,10 @@ clock entry to delete."
                          "* Allowed")))
       ;; A file only in `org-agenda-files' must NOT be reachable.
       (let ((link (org-mcp-test--file-link agenda-only "*AgendaOnly")))
-        (should-error (org-mcp-test--call-read-headline link))))))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((link . ,link))
+         (org-mcp-test--refused-path-regexp link)
+         agenda-only)))))
 
 ;; Scope override
 
@@ -6478,9 +6484,11 @@ Exercises `org-mcp--clock-remove-empty-logbook' when
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-only-closed-content))
     (let ((link (org-mcp-test--file-link test-file "*Task One")))
-      (should-error
-       (org-mcp-test--call-clock-delete
-        link "2026-01-03T09:00:00")))))
+      (org-mcp-test--call-tool-refused
+       "org-clock-delete"
+       `((link . ,link) (start . "2026-01-03T09:00:00"))
+       "\\`No clock entry starting at \\[2026-01-03 [^]]+ 09:00\\] found\\'"
+       test-file))))
 
 (defconst org-mcp-test--clock-delete-with-state-note-content
   (concat
@@ -7667,12 +7675,9 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
       ((org-mcp-query-inbox-fn nil)
        (org-mcp-query-next-fn nil)
        (org-mcp-query-backlog-fn nil))
-    (should-error
-     (mcp-server-lib-ert-call-tool "query-inbox" nil))
-    (should-error
-     (mcp-server-lib-ert-call-tool "query-next" nil))
-    (should-error
-     (mcp-server-lib-ert-call-tool "query-backlog" nil))))
+    (dolist (tool '("query-inbox" "query-next" "query-backlog"))
+      (org-mcp-test--call-tool-refused
+       tool nil (concat "\\`Tool not found: " tool "\\'")))))
 
 ;;; Native link tests
 
