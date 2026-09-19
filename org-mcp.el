@@ -810,24 +810,26 @@ may use existing identifiers only, in this order:
   heading with an :ID:        id:ID
   heading with a :CUSTOM_ID:  file:PATH::#CUSTOM_ID
   any other heading           file:PATH::*TITLE
-  before the first heading    file:PATH::LINE, or file:PATH
+  before the first heading    id:ID of a file-level :ID:, else
+                              file:PATH::LINE, or file:PATH
 
 PATH is the file name as `abbreviate-file-name' writes it.  The link
 is returned as its text, without brackets or description.  Point may
 be anywhere in the heading's entry and is not moved; the buffer is
 read widened.  No identifier is created.
 
-A link made before the first heading searches for the text of its
-line.  org-mcp cannot resolve it: its resolver accepts only a search
-that ends on a heading.  No tool links such a position: every write
-links the heading it changed, and every read lists the headings Org's
-parser finds.
+An `id:' link made before the first heading addresses the whole file;
+see `org-mcp--target-heading-p'.  A `file:' link made there searches
+for the text of its line.  org-mcp cannot resolve that one: its
+resolver accepts only a search that ends on a heading.  No tool links
+such a position: every write links the heading it changed, and every
+read lists the headings Org's parser finds.
 
 Throws a tool error when `org-store-link' changes the buffer, or makes
 anything but an `id:' link or a `file:' link searching for the
-heading's custom ID or title, or, before the first heading, a `file:'
-link.  Neither happens in stock Org; advice on `org-store-link' can
-cause both."
+heading's custom ID or title, or, before the first heading, an `id:'
+or `file:' link.  Neither happens in stock Org; advice on
+`org-store-link' can cause both."
   (org-with-wide-buffer
    (unless (org-before-first-heading-p)
      (org-back-to-heading t))
@@ -896,7 +898,7 @@ non-interactive calls alone"
                   (string-match-p
                    (if at-heading
                        "\\`\\(?:id:\\|file:.*::[*#]\\)"
-                     "\\`file:")
+                     "\\`\\(?:id:\\|file:\\)")
                    link))
        (org-mcp--tool-validation-error
         "org-store-link made %s, not an id: or file: link to the \
