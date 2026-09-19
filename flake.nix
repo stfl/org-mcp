@@ -38,7 +38,7 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             # Emacs / eask
-            emacs
+            emacs31
             eask-cli
 
             # CI runner
