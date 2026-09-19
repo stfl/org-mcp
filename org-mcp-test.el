@@ -4644,6 +4644,34 @@ The break would inject a heading, so the call edits nothing."
      '((FOO . "x\n* Injected heading")))
     (org-mcp-test--verify-no-modified-buffer test-file)))
 
+(defconst org-mcp-test--regex-todo-without-properties
+  "\\`\\* TODO Plain Task *\n\\'"
+  "Pattern for an empty file after adding a TODO with no properties.")
+
+(ert-deftest org-mcp-test-add-todo-blank-properties-set-none ()
+  "A blank properties parameter sets no properties.
+Some clients send null, false, \"\", [] or {} for every optional
+parameter they do not use; each adds the TODO with no drawer, as
+when the parameter is left out."
+  (dolist (blank '(null :json-false "" [] empty-object))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (mcp-server-lib-ert-call-tool
+       "org-add-todo"
+       `((title . "Plain Task")
+         (todo_state . "TODO")
+         (body . nil)
+         (parent_link . ,(concat "file:" test-file))
+         (properties
+          .
+          ,(pcase blank
+             ('null nil)
+             ;; `json-encode' writes an empty hash table as {}.
+             ('empty-object (make-hash-table))
+             (_ blank)))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-todo-without-properties))))
+
 (ert-deftest org-mcp-test-properties-refuse-non-string-values ()
   "Test booleans and arrays are refused as property values.
 A create call with a boolean and a set call with an array both fail

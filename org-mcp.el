@@ -634,12 +634,18 @@ returns the file of the restriction, not the binding."
            #'file-exists-p (org-mcp--expanded-allowed-files))))
      ,@body))
 
+(defun org-mcp--blank-param-p (value)
+  "Return non-nil when VALUE, an optional parameter of a call, is blank.
+Clients may fill an optional parameter they do not use with an empty
+value, so JSON null, false, \"\", [] and {}, which decodes to nil,
+all mean that the call does not send it."
+  (member value '(nil "" [] :json-false)))
+
 (defun org-mcp--files-given (files)
   "Return FILES, a call's `files' parameter, or nil when it is blank.
-Clients may fill an optional parameter they do not use with an empty
-value, so JSON null, false, \"\" and [] all mean that the call names
-no files.  Every tool taking `files' reads it through here."
-  (unless (member files '(nil "" [] :json-false))
+See `org-mcp--blank-param-p'.  Every tool taking `files' reads it
+through here."
+  (unless (org-mcp--blank-param-p files)
     files))
 
 (defun org-mcp--link-given (link)
@@ -2225,6 +2231,7 @@ PARENT_LINK names a whole file.  An `id:' AFTER_LINK is looked up in
 the parent's file.
 PROPERTIES is an optional alist of property names and values, checked
 by `org-mcp--validate-properties' like those of `org-set-properties'.
+A blank PROPERTIES, see `org-mcp--blank-param-p', sets none.
 FILES, when not blank, names the files an `id:' PARENT_LINK is looked
 up in; see `org-mcp--link-target'.  It applies to PARENT_LINK only.
 
@@ -2254,6 +2261,7 @@ MCP Parameters:
                given; null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
+               null, false, \"\" and {} mean no properties
   files - Files and directories to look up an id: link of parent_link
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent_link"
@@ -2261,9 +2269,8 @@ MCP Parameters:
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
        (property-list
-        (and properties
-             (not (equal properties ""))
-             (org-mcp--validate-properties properties)))
+        (unless (org-mcp--blank-param-p properties)
+          (org-mcp--validate-properties properties)))
        ;; A link that names a whole file means top level.
        (parent (org-mcp--link-target parent_link files))
        (file-path (plist-get parent :file))
@@ -3845,6 +3852,7 @@ Parameters:
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
                parameters and dedicated tools
+               null, false, \"\" and {} mean no properties
   files - Files and directories to look up an id: link of
           parent_link in (array of strings, optional); see org-read.
           It applies to parent_link only, and is refused unless
