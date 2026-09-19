@@ -3890,6 +3890,87 @@ LOGBOOK drawer."
          test-file
          org-mcp-test--expected-regex-top-level-with-header)))))
 
+(defconst org-mcp-test--content-file-drawer-preamble
+  ":PROPERTIES:\n:ID: file-id\n:END:\n#+TITLE: T\n\n"
+  "Preamble opening with a file-level property drawer, as org-roam writes.")
+
+(defconst org-mcp-test--content-file-drawer
+  (concat org-mcp-test--content-file-drawer-preamble "* Existing\n")
+  "File with a file-level property drawer, a title and one heading.")
+
+(defconst org-mcp-test--regex-file-drawer-top-level-added
+  (concat
+   "\\`" (regexp-quote org-mcp-test--content-file-drawer-preamble)
+   "\\* TODO New\n"
+   "\n?"
+   "\\* Existing\n"
+   "\\'")
+  "Regex matching the whole drawer file with New before Existing.")
+
+(defconst org-mcp-test--regex-file-drawer-added-after-existing
+  (concat
+   "\\`" (regexp-quote org-mcp-test--content-file-drawer-preamble)
+   "\\* Existing\n"
+   "\n?"
+   "\\* TODO New\n"
+   "\\'")
+  "Regex matching the whole drawer file with New after Existing.")
+
+(defconst org-mcp-test--content-file-drawer-only
+  ":PROPERTIES:\n:ID: file-id\n:END:\n"
+  "File holding a file-level property drawer and no heading.")
+
+(defconst org-mcp-test--regex-file-drawer-only-added
+  (concat
+   "\\`" (regexp-quote org-mcp-test--content-file-drawer-only)
+   "\\* TODO New\n"
+   "\\'")
+  "Regex matching the whole drawer-only file with New below the drawer.")
+
+(defconst org-mcp-test--content-preamble-text-preamble
+  "#+TITLE: T\n\nIntro text.\n\n"
+  "Preamble holding a paragraph after its keyword line.")
+
+(defconst org-mcp-test--content-preamble-text
+  (concat org-mcp-test--content-preamble-text-preamble "* Existing\n")
+  "File whose preamble holds a paragraph, followed by one heading.")
+
+(defconst org-mcp-test--regex-preamble-text-top-level-added
+  (concat
+   "\\`" (regexp-quote org-mcp-test--content-preamble-text-preamble)
+   "\\* TODO New\n"
+   "\n?"
+   "\\* Existing\n"
+   "\\'")
+  "Regex matching the whole file with New after the preamble's paragraph.")
+
+(ert-deftest org-mcp-test-add-todo-top-level-after-preamble ()
+  "A top-level TODO goes after the file's preamble, before every heading.
+The preamble is everything before the first heading.  A file-level
+property drawer with its ID, as org-roam writes one, stays intact
+above the new heading, and so does a paragraph after the keyword
+lines; in a file with only a drawer, the heading goes below it.  With
+after_link, the TODO goes after that heading, as in any file."
+  (pcase-dolist (`(,content ,after ,expected)
+                 `((,org-mcp-test--content-file-drawer
+                    nil ,org-mcp-test--regex-file-drawer-top-level-added)
+                   (,org-mcp-test--content-file-drawer
+                    "*Existing"
+                    ,org-mcp-test--regex-file-drawer-added-after-existing)
+                   (,org-mcp-test--content-file-drawer-only
+                    nil ,org-mcp-test--regex-file-drawer-only-added)
+                   (,org-mcp-test--content-preamble-text
+                    nil
+                    ,org-mcp-test--regex-preamble-text-top-level-added)))
+    (org-mcp-test--with-add-todo-setup test-file content
+      (org-mcp-test--add-todo-and-check
+       "New" "TODO" nil nil
+       (concat "file:" test-file)
+       (and after (org-mcp-test--file-link test-file after))
+       (file-name-nondirectory test-file)
+       test-file
+       expected))))
+
 (ert-deftest org-mcp-test-add-todo-invalid-state ()
   "Test that adding TODO with invalid state throws error."
   (org-mcp-test--with-add-todo-setup test-file

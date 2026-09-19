@@ -1919,10 +1919,15 @@ Throws error for invalid types."
     (org-mcp--tool-validation-error "Invalid tags format: %s" tags))))
 
 (defun org-mcp--navigate-to-parent-or-top (parent)
-  "Navigate to the parent headline PARENT names, or to the top of file.
+  "Navigate to the parent headline PARENT names, or to the file's top level.
 PARENT is a target plist as from `org-mcp--link-target'; one that
 names a whole file means top level.
 Returns parent level (integer) if parent exists, nil for top-level.
+At the top level, point goes to the start of the file's first heading,
+or to the end of a file with none.  That is past the file's preamble,
+everything before the first heading: a file-level property drawer,
+keyword lines such as #+TITLE and any text, which a new heading must
+neither split nor join.
 Assumes point is in an Org buffer."
   (if (org-mcp--target-heading-p parent)
       (progn
@@ -1931,16 +1936,9 @@ Assumes point is in an Org buffer."
         ;; Ensure we're at the beginning of headline
         (org-back-to-heading t)
         (org-current-level))
-    ;; No parent specified - top level
-    ;; Skip past any header comments (#+TITLE, #+AUTHOR, etc.)
-    (while (and (not (eobp)) (looking-at "^#\\+"))
-      (forward-line))
-    ;; Position correctly: if blank line after headers,
-    ;; skip it; if headline immediately after, stay
-    (when (and (not (eobp)) (looking-at "^[ \t]*$"))
-      ;; On blank line after headers, skip
-      (while (and (not (eobp)) (looking-at "^[ \t]*$"))
-        (forward-line)))
+    (goto-char (point-min))
+    (when (org-before-first-heading-p)
+      (outline-next-heading))
     nil))
 
 (defun org-mcp--goto-after-child (target parent)
@@ -1972,7 +1970,7 @@ is only ever looked for here."
   "Position point where a new heading goes under its parent.
 PARENT-LEVEL is the parent's level, with point at the parent heading,
 or nil for the top level of the file, with point past the file's
-header lines, where the heading goes when AFTER is nil.
+preamble, where the heading goes when AFTER is nil.
 AFTER is nil or the target, from `org-mcp--link-target', of the
 sibling to insert after: a direct child of the parent, or a heading
 with no parent at the top level.
@@ -3909,7 +3907,9 @@ Positioning behavior:
   - With parent_link + after_link: Inserts immediately after specified
 sibling and its subtree
   - Top-level (parent_link naming only the file): Adds after the
-file's header lines, before every existing heading
+file's preamble (a file-level property drawer, keyword lines such as
+#+TITLE and any text before the first heading), before every existing
+heading
   - Top-level + after_link: Inserts immediately after that top-level
 heading and its subtree"
    :read-only nil
