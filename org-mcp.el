@@ -2478,20 +2478,18 @@ MCP Parameters:
              Ignored when append is true.
   new_body - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
-           default false)
+           default false); false, \"false\" and null mean replace
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  ;; Normalize JSON false to nil for proper boolean handling
-  ;; JSON false can arrive as :false (keyword) or "false" (string)
+  ;; JSON false decodes to :json-false, which is non-nil.  A blank
+  ;; value, as `org-mcp--blank-param-p' reads it, means the parameter
+  ;; is not sent, so false; so do the string "false" and :false, the
+  ;; keyword `json-parse-string' decodes false to.
   (let ((append
-         (cond
-          ((eq append :false)
-           nil)
-          ((equal append "false")
-           nil)
-          (t
-           append))))
+         (not
+          (or (org-mcp--blank-param-p append)
+              (member append '(:false "false"))))))
     (if append
         ;; Append mode
         (progn

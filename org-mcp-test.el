@@ -7211,6 +7211,33 @@ heading's body, and the response links to Parent."
    "\\'")
   "Regex matching the whole sibling file after appending to Parent.")
 
+(defconst org-mcp-test--content-body-to-edit "* Task\nold text\n"
+  "Task whose body is one line, for replacing and appending.")
+
+(defconst org-mcp-test--regex-body-to-edit-replaced
+  "\\`\\* Task\nnew text\n\\'"
+  "Regex matching the whole file once the body line is replaced.")
+
+(defconst org-mcp-test--regex-body-to-edit-appended
+  "\\`\\* Task\nold text\nnew text\n\\'"
+  "Regex matching the whole file once a line is appended to the body.")
+
+(ert-deftest org-mcp-test-edit-body-append-false-replaces ()
+  "append false, as JSON false or any other false spelling, replaces.
+JSON false, \"false\", null, \"\" and a missing parameter each replace
+old_body with new_body; only true appends."
+  (pcase-dolist (`(,append ,expected)
+                 `((:json-false ,org-mcp-test--regex-body-to-edit-replaced)
+                   ("false" ,org-mcp-test--regex-body-to-edit-replaced)
+                   ("" ,org-mcp-test--regex-body-to-edit-replaced)
+                   (nil ,org-mcp-test--regex-body-to-edit-replaced)
+                   (t ,org-mcp-test--regex-body-to-edit-appended)))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-body-to-edit))
+      (let ((link (org-mcp-test--file-link test-file "*Task")))
+        (org-mcp-test--call-edit-body-and-check
+         test-file link "old text" "new text" expected append link)))))
+
 (defconst org-mcp-test--content-body-mixed-case
   "* Task\nFoo bar first.\nThen foo bar again.\n"
   "Task whose body holds old_body once as written and once capitalized.")
