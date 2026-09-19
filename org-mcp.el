@@ -1230,20 +1230,16 @@ Org reads a file that no buffer visits into a work buffer of its own."
              files
            (mapconcat #'identity files ", "))))))
 
-(defun org-mcp--check-files (link files)
+(defun org-mcp--check-files (object link files)
   "Return FILES, sent with LINK, or nil when it is blank.
-FILES is the call's `files' parameter, read through
-`org-mcp--files-given'.  It applies only to an `id:' link, the one
-link type org-mcp resolves without a file, so with any other LINK a
-FILES that is not blank is refused here, before any file is opened:
-with a `file:' link, which names its file already, or a link of
-another type.  A LINK that is not a link at all is refused by
-`org-mcp--link-parse'."
+OBJECT is LINK as `org-mcp--link-parse' parsed it.  FILES is the
+call's `files' parameter, read through `org-mcp--files-given'.  It
+applies only to an `id:' link, the one link type org-mcp resolves
+without a file, so with any other LINK a FILES that is not blank is
+refused here, before any file is opened: with a `file:' link, which
+names its file already, or a link of another type."
   (when-let* ((files (org-mcp--files-given files)))
-    (unless (equal
-             (org-element-property
-              :type (org-mcp--link-parse link))
-             "id")
+    (unless (equal (org-element-property :type object) "id")
       (org-mcp--tool-validation-error
        "files applies only to an id: link: %s"
        link))
@@ -1267,7 +1263,7 @@ with no lookup, and the caller finds the ID in that file's buffer."
   (let*
       ((object (org-mcp--link-parse link))
        (link (string-trim link))
-       (files (org-mcp--check-files link files))
+       (files (org-mcp--check-files object link files))
        (type (org-element-property :type object))
        (path (org-element-property :path object))
        (target
@@ -3630,6 +3626,51 @@ MCP Parameters:
          "No clock entry starting at %s found"
          (org-mcp--clock-format-timestamp start-time))))))
 
+;; Tool description parts shared by several tools
+
+(defconst org-mcp--heading-link-formats
+  "         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+"
+  "The link forms of a `link' parameter naming a heading.
+Tool descriptions `concat' it after the parameter's first line.")
+
+(defconst org-mcp--read-link-formats
+  "         Formats:
+         - id:{id} - heading with that ID
+         - file:/path/to/file.org::#{custom-id} - heading with that
+           CUSTOM_ID
+         - file:/path/to/file.org::*{title} - first heading with that
+           title
+         - file:/path/to/file.org - whole file
+         - any of these as [[link]] or [[link][description]]
+"
+  "The link forms of a read tool's `link' parameter.
+Tool descriptions `concat' it after the parameter's first line.")
+
+(defconst org-mcp--files-set-description
+  "          Each entry is an absolute path to an Org file or a
+          directory; a relative path is refused.  A file outside the
+          allowed files is accepted only as far as
+          org-mcp-file-scope-override permits; see
+          org-get-allowed-files.  A directory the setting permits is
+          searched recursively for the Org files Org takes from a
+          directory in org-agenda-files (by default every .org file,
+          no archive), skipping hidden and unreadable directories,
+          symlinked directories and anything not a regular file.
+          Any other directory is not read: it stands for the allowed
+          files under it, and is refused when there are none.  More
+          than org-mcp-max-files files and searched directories in
+          total is an error, never a partial result.  The buffers
+          the call opens for these files are closed afterwards.
+          null, false, \"\" and [] mean no files.
+"
+  "How the `files' parameter of a tool scanning a set of files works.
+Tool descriptions `concat' it after the parameter's first lines.")
+
 (defun org-mcp-enable ()
   "Enable the org-mcp server."
   (mcp-server-lib-register-tool
@@ -3699,7 +3740,8 @@ adding or modifying tags on TODO items."
    #'org-mcp--tool-get-tag-candidates
    :id "org-get-tag-candidates"
    :description
-   "Return all candidate tags the user might want to use across the
+   (concat
+    "Return all candidate tags the user might want to use across the
 allowed files, or across the files named in `files'.
 
 Mirrors Org's interactive tag completion (C-c C-q): the result is
@@ -3712,27 +3754,14 @@ Parameters:
   files - Files and directories to collect tags from (array of
           strings, optional)
           Replaces the allowed files for this call; when omitted, all
-          allowed files are used.  Each entry is an absolute path to
-          an Org file or a directory; a relative path is refused.  A
-          file outside the allowed files is accepted only as far as
-          org-mcp-file-scope-override permits; see
-          org-get-allowed-files.  A directory the setting permits is
-          searched recursively for the Org files Org takes from a
-          directory in org-agenda-files (by default every .org file,
-          no archive), skipping hidden and unreadable directories,
-          symlinked directories and anything not a regular file.
-          Any other directory is not read: it stands for the allowed
-          files under it, and is refused when there are none.  More
-          than org-mcp-max-files files and searched directories in
-          total is an error, never a partial result.  The buffers
-          the call opens for these files are closed afterwards.
-          null, false, \"\" and [] mean no files.
-
+          allowed files are used.
+"
+    org-mcp--files-set-description "
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
 
 Use this when suggesting or completing tags rather than
-`org-get-tag-config', which only exposes the static configuration."
+`org-get-tag-config', which only exposes the static configuration.")
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -3808,17 +3837,15 @@ Use cases:
    #'org-mcp--tool-update-todo-state
    :id "org-update-todo-state"
    :description
-   "Update the TODO state of an Org headline.  Changes the task state
+   (concat
+    "Update the TODO state of an Org headline.  Changes the task state
 while preserving the headline title, tags, and other properties.
 
 Parameters:
   link - Link to the headline to update (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  current_state - Expected current TODO state (string, optional)
+"
+    org-mcp--heading-link-formats
+    "  current_state - Expected current TODO state (string, optional)
                   When provided, must match actual state or tool will error
                   Omit to skip the state check
   new_state - New TODO state to set (string, required)
@@ -3837,7 +3864,7 @@ Returns JSON object:
   new_state - The new TODO state that was set (string)
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -3919,17 +3946,15 @@ heading and its subtree"
    #'org-mcp--tool-rename-headline
    :id "org-rename-headline"
    :description
-   "Rename an Org headline's title while preserving its TODO state,
+   (concat
+    "Rename an Org headline's title while preserving its TODO state,
 tags, properties, and body content.
 
 Parameters:
   link - Link to the headline to rename (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  current_title - Expected current title without TODO/tags (string,
+"
+    org-mcp--heading-link-formats
+    "  current_title - Expected current title without TODO/tags (string,
 required)
                   Must match actual title or tool will error
                   Used to prevent race conditions
@@ -3947,7 +3972,7 @@ Returns JSON object:
   new_title - The new title that was set (string)
   link - Link to the renamed headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -3955,19 +3980,17 @@ Returns JSON object:
    #'org-mcp--tool-edit-body
    :id "org-edit-body"
    :description
-   "Edit or append to the body content of an Org headline.  In replace
+   (concat
+    "Edit or append to the body content of an Org headline.  In replace
 mode (default), finds and replaces a unique substring within the
 headline's body text.  In append mode, inserts new content after
 existing body content but before any child headlines.
 
 Parameters:
   link - Link to the headline to edit (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  old_body - Substring to find and replace (string, required in
+"
+    org-mcp--heading-link-formats
+    "  old_body - Substring to find and replace (string, required in
              replace mode, ignored when append is true)
              Must appear exactly once in the body
              Use empty string \"\" only for adding to empty nodes
@@ -3992,7 +4015,7 @@ Special behavior - Empty old_body (replace mode):
   When old_body is \"\", the tool adds content to empty nodes:
   - Only works if node body is empty or whitespace-only
   - Error if node already has content
-  - Useful for adding initial content to newly created headlines"
+  - Useful for adding initial content to newly created headlines")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4001,18 +4024,16 @@ Special behavior - Empty old_body (replace mode):
    #'org-mcp--tool-set-properties
    :id "org-set-properties"
    :description
-   "Set or delete properties on an Org headline.  Updates the
+   (concat
+    "Set or delete properties on an Org headline.  Updates the
 PROPERTIES drawer.  Setting ID or CUSTOM_ID gives the headline a
 stable link; org-mcp creates neither itself.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  properties - JSON object of property name-value pairs (required)
+"
+    org-mcp--heading-link-formats
+    "  properties - JSON object of property name-value pairs (required)
                String value (numbers are accepted): set the
                property; it must be a single line
                null or empty string: delete the property
@@ -4032,7 +4053,7 @@ Returns JSON object:
   properties_deleted - Array of property names that were deleted
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4040,16 +4061,14 @@ Returns JSON object:
    #'org-mcp--tool-update-scheduled
    :id "org-update-scheduled"
    :description
-   "Update the SCHEDULED timestamp on an Org headline.
+   (concat
+    "Update the SCHEDULED timestamp on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  scheduled - ISO date string (string, optional)
+"
+    org-mcp--heading-link-formats
+    "  scheduled - ISO date string (string, optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
               Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
@@ -4063,7 +4082,7 @@ Returns JSON object:
   new_scheduled - New SCHEDULED value (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4071,16 +4090,14 @@ Returns JSON object:
    #'org-mcp--tool-update-deadline
    :id "org-update-deadline"
    :description
-   "Update the DEADLINE timestamp on an Org headline.
+   (concat
+    "Update the DEADLINE timestamp on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  deadline - ISO date string (string, optional)
+"
+    org-mcp--heading-link-formats
+    "  deadline - ISO date string (string, optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
              Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
@@ -4094,7 +4111,7 @@ Returns JSON object:
   new_deadline - New DEADLINE value (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4102,16 +4119,14 @@ Returns JSON object:
    #'org-mcp--tool-set-tags
    :id "org-set-tags"
    :description
-   "Set tags on an Org headline, replacing any existing tags.
+   (concat
+    "Set tags on an Org headline, replacing any existing tags.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  tags - Tags to set (string or array, optional)
+"
+    org-mcp--heading-link-formats
+    "  tags - Tags to set (string or array, optional)
          Single tag: \"work\"
          Multiple tags: [\"work\", \"urgent\"]
          Omit or empty to clear all tags
@@ -4129,7 +4144,7 @@ Returns JSON object:
   new_tags - Array of new tags
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4137,16 +4152,14 @@ Returns JSON object:
    #'org-mcp--tool-set-priority
    :id "org-set-priority"
    :description
-   "Set or remove priority on an Org headline.
+   (concat
+    "Set or remove priority on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  priority - Priority character (string, optional)
+"
+    org-mcp--heading-link-formats
+    "  priority - Priority character (string, optional)
              Must be in the configured range (default \"A\" to \"C\")
              Use org-get-priority-config to check the valid range
              Omit or empty string to remove priority
@@ -4161,7 +4174,7 @@ Returns JSON object:
   new_priority - New priority (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4169,17 +4182,15 @@ Returns JSON object:
    #'org-mcp--tool-add-logbook-note
    :id "org-add-logbook-note"
    :description
-   "Add a timestamped note to the LOGBOOK drawer of an Org headline.
+   (concat
+    "Add a timestamped note to the LOGBOOK drawer of an Org headline.
 Creates the LOGBOOK drawer if it doesn't exist.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  note - Note text to add (string, required)
+"
+    org-mcp--heading-link-formats
+    "  note - Note text to add (string, required)
          Cannot be empty or whitespace-only
          Multi-line notes are properly indented in the LOGBOOK
          Note is inserted at the top of the LOGBOOK drawer
@@ -4192,7 +4203,7 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4200,21 +4211,16 @@ Returns JSON object:
    #'org-mcp--tool-read
    :id "org-read"
    :description
-   "Read Org file or headline with structured JSON output.  Takes a
+   (concat
+    "Read Org file or headline with structured JSON output.  Takes a
 native Org link and returns structured data including children,
 properties, and timestamps.
 
 Parameters:
   link - Link to a heading or a file (string, required)
-         Formats:
-         - id:{id} - heading with that ID
-         - file:/path/to/file.org::#{custom-id} - heading with that
-           CUSTOM_ID
-         - file:/path/to/file.org::*{title} - first heading with that
-           title
-         - file:/path/to/file.org - whole file
-         - any of these as [[link]] or [[link][description]]
-         Any other string, such as a bare ID, a bare path or an
+"
+    org-mcp--read-link-formats
+    "         Any other string, such as a bare ID, a bare path or an
          org:// resource URI, is refused.
   files - Files and directories to look up an id: link in (array of
           strings, optional)
@@ -4255,7 +4261,7 @@ Returns: JSON object with structured data:
     children - Array of direct children (title, todo, level, link)
 
 File must be in the allowed files, or permitted by
-org-mcp-file-scope-override."
+org-mcp-file-scope-override.")
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4289,25 +4295,20 @@ Returns: JSON object with hierarchical outline structure:
    #'org-mcp--tool-read-headline
    :id "org-read-headline"
    :description
-   "Read Org headline or file as plain text.  Takes a native Org link.
+   (concat
+    "Read Org headline or file as plain text.  Takes a native Org link.
 Returns headline with TODO state, tags, properties, body text, and all
 nested subheadings.
 
 Parameters:
   link - Link to a heading or a file (string, required)
-         Formats:
-         - id:{id} - heading with that ID
-         - file:/path/to/file.org::#{custom-id} - heading with that
-           CUSTOM_ID
-         - file:/path/to/file.org::*{title} - first heading with that
-           title
-         - file:/path/to/file.org - whole file
-         - any of these as [[link]] or [[link][description]]
-         Any other string is refused, as in org-read.
+"
+    org-mcp--read-link-formats
+    "         Any other string is refused, as in org-read.
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-read
 
-Returns: Plain text content of the headline and its subtree (or file)"
+Returns: Plain text content of the headline and its subtree (or file)")
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4315,7 +4316,8 @@ Returns: Plain text content of the headline and its subtree (or file)"
    #'org-mcp--tool-ql-query
    :id "org-ql-query"
    :description
-   "Search Org files using org-ql query expressions.  Supports
+   (concat
+    "Search Org files using org-ql query expressions.  Supports
 querying by TODO state, tags, priority, deadlines, properties, and
 more.  Returns matched entries as JSON with Org links for follow-up
 access.
@@ -4329,22 +4331,9 @@ Parameters:
             (deadline :to today)
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
-          allowed files are searched.  Each entry is an absolute path
-          to an Org file or a directory; a relative path is refused.
-          A file outside the allowed files is accepted only as far as
-          org-mcp-file-scope-override permits; see
-          org-get-allowed-files.  A directory the setting permits is
-          searched recursively for the Org files Org takes from a
-          directory in org-agenda-files (by default every .org file,
-          no archive), skipping hidden and unreadable directories,
-          symlinked directories and anything not a regular file.
-          Any other directory is not read: it stands for the allowed
-          files under it, and is refused when there are none.  More
-          than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.  The buffers
-          the call opens for these files are closed afterwards.
-          null, false, \"\" and [] mean no files.
-
+          allowed files are searched.
+"
+    org-mcp--files-set-description "
 Returns JSON object:
   matches - Array of matched entries, each with:
     title - Headline text (string)
@@ -4358,7 +4347,7 @@ Returns JSON object:
            else file:{path}::*{title}
     properties - Standard properties (object, omitted if none)
   total - Number of matches (number)
-  files_searched - Number of files searched (number)"
+  files_searched - Number of files searched (number)")
    :read-only t
    :server-id org-mcp--server-id)
 
@@ -4466,7 +4455,8 @@ Returns JSON object:
    #'org-mcp--tool-clock-in
    :id "org-clock-in"
    :description
-   "Clock in to the specified heading.  If another clock is active,
+   (concat
+    "Clock in to the specified heading.  If another clock is active,
 it is automatically closed first.
 
 When org-clock-continuously is enabled and no explicit start_time
@@ -4477,12 +4467,9 @@ Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
   link - Link to the headline to clock in (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  start_time - ISO 8601 start time (string, optional)
+"
+    org-mcp--heading-link-formats
+    "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
                If omitted, uses current time (or continuous time)
   resolve - When 'true', delete dangling (unclosed) CLOCK lines
@@ -4502,7 +4489,7 @@ Returns JSON object:
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
   resolved - Number of dangling clocks deleted (integer, only if
-             resolve was requested and dangling clocks were found)"
+             resolve was requested and dangling clocks were found)")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4549,7 +4536,8 @@ Returns JSON object:
    #'org-mcp--tool-clock-add
    :id "org-clock-add"
    :description
-   "Add a completed clock entry to a heading.  Creates a LOGBOOK
+   (concat
+    "Add a completed clock entry to a heading.  Creates a LOGBOOK
 drawer if one doesn't exist.  New entries are inserted at the top
 of the LOGBOOK.
 
@@ -4557,12 +4545,9 @@ Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  start - ISO 8601 start time (string, required)
+"
+    org-mcp--heading-link-formats
+    "  start - ISO 8601 start time (string, required)
           Example: 2026-03-23T14:30:00
   end - ISO 8601 end time (string, required)
         Example: 2026-03-23T16:45:00
@@ -4580,7 +4565,7 @@ Returns JSON object:
   duration - Duration as H:MM (string)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4588,19 +4573,17 @@ Returns JSON object:
    #'org-mcp--tool-clock-delete
    :id "org-clock-delete"
    :description
-   "Delete a clock entry from a heading.  Removes the LOGBOOK
+   (concat
+    "Delete a clock entry from a heading.  Removes the LOGBOOK
 drawer if it becomes empty after deletion.
 
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
   link - Link to the headline (string, required)
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - any of these as [[link]] or [[link][description]]
-  start - ISO 8601 start time of the clock entry to delete
+"
+    org-mcp--heading-link-formats
+    "  start - ISO 8601 start time of the clock entry to delete
           (string, required)
           Example: 2026-03-23T14:30:00
   files - Files and directories to look up an id: link in (array of
@@ -4616,7 +4599,7 @@ Returns JSON object:
   duration - Duration as H:MM (string, present if closed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
    :read-only nil
    :server-id org-mcp--server-id)
 
@@ -4624,7 +4607,8 @@ Returns JSON object:
    #'org-mcp--tool-clock-find-dangling
    :id "org-clock-find-dangling"
    :description
-   "Find all open (unclosed) clocks in allowed Org files, or in the
+   (concat
+    "Find all open (unclosed) clocks in allowed Org files, or in the
 files named in `files'.  Searches for dangling CLOCK entries that
 were never closed.  Uses Emacs native `org-find-open-clocks' on
 each of those files.
@@ -4632,22 +4616,9 @@ each of those files.
 Parameters:
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
-          allowed files are searched.  Each entry is an absolute path
-          to an Org file or a directory; a relative path is refused.
-          A file outside the allowed files is accepted only as far as
-          org-mcp-file-scope-override permits; see
-          org-get-allowed-files.  A directory the setting permits is
-          searched recursively for the Org files Org takes from a
-          directory in org-agenda-files (by default every .org file,
-          no archive), skipping hidden and unreadable directories,
-          symlinked directories and anything not a regular file.
-          Any other directory is not read: it stands for the allowed
-          files under it, and is refused when there are none.  More
-          than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.  The buffers
-          the call opens for these files are closed afterwards.
-          null, false, \"\" and [] mean no files.
-
+          allowed files are searched.
+"
+    org-mcp--files-set-description "
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
     file - File path (string)
@@ -4656,7 +4627,7 @@ Returns JSON object:
     link - Link to the heading (string): id:{id} when it has an ID,
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
            else file:{path}::*{title}
-  total - Number of open clocks found (number)"
+  total - Number of open clocks found (number)")
    :read-only t
    :server-id org-mcp--server-id)
 
