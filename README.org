@@ -319,7 +319,7 @@ works unchanged:
   file a call names in =files= (see [[*Naming the file of an ID]]). The file
   the index names must be one of the allowed files before org-mcp reads it, so
   an index entry for a remote or outside file is refused without touching that
-  file. When the index lacks the ID, or the file it names no longer holds it,
+  file. When the index lacks the ID, or names a file that does not hold it,
   org-mcp rescans the index once, as =org-id-find= does. For the part after
   =::=, it is =org-link-search=. The search part of an =id:= link, as in
   =id:<id>::*Review=, runs within that heading's subtree; a =file:= link
