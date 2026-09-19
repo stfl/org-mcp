@@ -175,9 +175,8 @@ reach.  HINT, when non-nil, is a sentence appended to the message."
 
 ;; Helpers
 
-(cl-defun
- org-mcp--file-buffer-context (file-path)
- "Return canonical buffer context for FILE-PATH.
+(cl-defun org-mcp--file-buffer-context (file-path)
+  "Return canonical buffer context for FILE-PATH.
 The result is a plist with:
 
 - `:buffer'     the canonical visited buffer
@@ -187,14 +186,14 @@ The result is a plist with:
 
 If no buffer is visiting FILE-PATH yet, the buffer is opened with
 `find-file-noselect'."
- (let* ((existing-buf (find-buffer-visiting file-path))
-        (buf (or existing-buf (find-file-noselect file-path))))
-   (list
-    :buffer buf
-    :existing-p (not (null existing-buf))
-    :modified-p
-    (with-current-buffer buf
-      (buffer-modified-p)))))
+  (let* ((existing-buf (find-buffer-visiting file-path))
+         (buf (or existing-buf (find-file-noselect file-path))))
+    (list
+     :buffer buf
+     :existing-p (not (null existing-buf))
+     :modified-p
+     (with-current-buffer buf
+       (buffer-modified-p)))))
 
 (defun org-mcp--get-file-buffer (file-path)
   "Return the canonical visited buffer for FILE-PATH."
@@ -362,7 +361,7 @@ resolves to, only the allowed files are reachable."
                 truename
                 (org-mcp--expanded-allowed-files)
                 :test #'org-mcp--paths-equal-p)))
-      (expand-file-name found)
+        (expand-file-name found)
       (when (and named
                  (org-mcp--org-file-name-p truename)
                  (org-mcp--override-permits-p filename truename)
@@ -435,82 +434,82 @@ its allowed files in the order of the allowed files."
 path, such as /home/user/notes.org"
          entry)))
     (cl-flet
-     ((add
-       (file locator)
-       ;; LOCATOR is FILE as the call reaches it, for the refusal.
-       (let ((allowed
-              (or (org-mcp--find-allowed-file file t)
-                  (org-mcp--tool-file-access-error locator))))
-         (unless (member allowed found)
-           (push allowed found))))
-      (below
-       (entry truename path)
-       ;; PATH as the call reaches it.  ENTRY names the directory
-       ;; whose local truename is TRUENAME; a PATH under TRUENAME is
-       ;; ENTRY followed by the path below it, any other PATH, such
-       ;; as TRUENAME itself, is ENTRY.
-       (if (and (stringp path)
-                (string-prefix-p
-                 (file-name-as-directory truename) path))
-           (concat
-            (file-name-as-directory entry)
-            (file-relative-name path truename))
-         entry)))
-     (dolist (entry entries)
-       (let ((truename (org-mcp--local-truename entry)))
-         (cond
-          ((not (and truename (file-directory-p truename)))
-           (add entry entry))
-          ((org-mcp--override-permits-p entry truename)
-           (let ((file-name-handler-alist nil))
-             (unless (file-accessible-directory-p truename)
-               (org-mcp--tool-validation-error
-                "Cannot read directory: %s"
-                entry))
-             (dolist
-                 (path
-                  (condition-case err
-                      (let ((case-fold-search nil))
-                        (directory-files-recursively
-                         truename
-                         org-agenda-file-regexp
-                         nil
-                         (lambda (dir)
-                           (and (not
-                                 (string-prefix-p
-                                  "." (file-name-nondirectory dir)))
-                                ;; With a function as PREDICATE,
-                                ;; rather than t, the walk signals
-                                ;; on a subdirectory it cannot read
-                                ;; instead of skipping it.
-                                (file-readable-p dir)))))
-                    ;; A directory can still fail when it is listed:
-                    ;; one removed after the predicate passed it, an
-                    ;; I/O error, or a denial `file-readable-p' did
-                    ;; not foresee.  The error data ends with the
-                    ;; directory.  The whole call fails, so it never
-                    ;; searches only part of the set.
-                    (file-error
-                     (org-mcp--tool-validation-error
-                      "Cannot read directory: %s"
-                      (below entry truename (car (last err)))))))
-               (let ((name (file-name-nondirectory path)))
-                 (when (and (not (string-prefix-p "." name))
-                            (org-mcp--org-file-name-p name)
-                            (file-regular-p path))
-                   (add path (below entry truename path)))))))
-          (t
-           (let ((under
-                  (cl-remove-if-not
-                   (lambda (file)
-                     (when-let* ((file-truename
-                                  (org-mcp--local-truename file)))
-                       (file-in-directory-p file-truename truename)))
-                   org-mcp--file-set)))
-             (unless under
-               (org-mcp--tool-file-access-error entry))
-             (dolist (file under)
-               (add file entry))))))))
+        ((add
+          (file locator)
+          ;; LOCATOR is FILE as the call reaches it, for the refusal.
+          (let ((allowed
+                 (or (org-mcp--find-allowed-file file t)
+                     (org-mcp--tool-file-access-error locator))))
+            (unless (member allowed found)
+              (push allowed found))))
+         (below
+          (entry truename path)
+          ;; PATH as the call reaches it.  ENTRY names the directory
+          ;; whose local truename is TRUENAME; a PATH under TRUENAME is
+          ;; ENTRY followed by the path below it, any other PATH, such
+          ;; as TRUENAME itself, is ENTRY.
+          (if (and (stringp path)
+                   (string-prefix-p
+                    (file-name-as-directory truename) path))
+              (concat
+               (file-name-as-directory entry)
+               (file-relative-name path truename))
+            entry)))
+      (dolist (entry entries)
+        (let ((truename (org-mcp--local-truename entry)))
+          (cond
+           ((not (and truename (file-directory-p truename)))
+            (add entry entry))
+           ((org-mcp--override-permits-p entry truename)
+            (let ((file-name-handler-alist nil))
+              (unless (file-accessible-directory-p truename)
+                (org-mcp--tool-validation-error
+                 "Cannot read directory: %s"
+                 entry))
+              (dolist
+                  (path
+                   (condition-case err
+                       (let ((case-fold-search nil))
+                         (directory-files-recursively
+                          truename
+                          org-agenda-file-regexp
+                          nil
+                          (lambda (dir)
+                            (and (not
+                                  (string-prefix-p
+                                   "." (file-name-nondirectory dir)))
+                                 ;; With a function as PREDICATE,
+                                 ;; rather than t, the walk signals
+                                 ;; on a subdirectory it cannot read
+                                 ;; instead of skipping it.
+                                 (file-readable-p dir)))))
+                     ;; A directory can still fail when it is listed:
+                     ;; one removed after the predicate passed it, an
+                     ;; I/O error, or a denial `file-readable-p' did
+                     ;; not foresee.  The error data ends with the
+                     ;; directory.  The whole call fails, so it never
+                     ;; searches only part of the set.
+                     (file-error
+                      (org-mcp--tool-validation-error
+                       "Cannot read directory: %s"
+                       (below entry truename (car (last err)))))))
+                (let ((name (file-name-nondirectory path)))
+                  (when (and (not (string-prefix-p "." name))
+                             (org-mcp--org-file-name-p name)
+                             (file-regular-p path))
+                    (add path (below entry truename path)))))))
+           (t
+            (let ((under
+                   (cl-remove-if-not
+                    (lambda (file)
+                      (when-let* ((file-truename
+                                   (org-mcp--local-truename file)))
+                        (file-in-directory-p file-truename truename)))
+                    org-mcp--file-set)))
+              (unless under
+                (org-mcp--tool-file-access-error entry))
+              (dolist (file under)
+                (add file entry))))))))
     (nreverse found)))
 
 (defun org-mcp--refresh-file-buffers
@@ -822,34 +821,34 @@ Returns a vector of level-1 heading alists.  Each level-1 heading
 includes its immediate level-2 children; deeper levels are not
 included.  Each heading carries its link as `link'."
   (cl-flet
-   ((link
-     (headline)
-     ;; The parse tree is walked without moving point, and the link
-     ;; is made at point.
-     (save-excursion
-       (goto-char (org-element-property :begin headline))
-       (org-mcp--link-at-point))))
-   (vconcat
-    (org-element-map
-     (org-element-parse-buffer 'headline) 'headline
-     (lambda (h)
-       (when (= (org-element-property :level h) 1)
-         `((title . ,(org-element-property :raw-value h))
-           (level . 1) (link . ,(link h))
-           (children
-            .
-            ,(vconcat
-              (org-element-map
-               (org-element-contents h) 'headline
-               (lambda (child)
-                 (when (= (org-element-property :level child) 2)
-                   `((title
-                      . ,(org-element-property :raw-value child))
-                     (level . 2)
-                     (link . ,(link child))
-                     (children . []))))
-               nil nil 'headline))))))
-     nil nil 'headline))))
+      ((link
+        (headline)
+        ;; The parse tree is walked without moving point, and the link
+        ;; is made at point.
+        (save-excursion
+          (goto-char (org-element-property :begin headline))
+          (org-mcp--link-at-point))))
+    (vconcat
+     (org-element-map
+      (org-element-parse-buffer 'headline) 'headline
+      (lambda (h)
+        (when (= (org-element-property :level h) 1)
+          `((title . ,(org-element-property :raw-value h))
+            (level . 1) (link . ,(link h))
+            (children
+             .
+             ,(vconcat
+               (org-element-map
+                (org-element-contents h) 'headline
+                (lambda (child)
+                  (when (= (org-element-property :level child) 2)
+                    `((title
+                       . ,(org-element-property :raw-value child))
+                      (level . 2)
+                      (link . ,(link child))
+                      (children . []))))
+                nil nil 'headline))))))
+      nil nil 'headline))))
 
 (defun org-mcp--generate-outline (file-path)
   "Generate JSON outline structure for FILE-PATH."
@@ -1287,26 +1286,25 @@ falls back to the current buffer's file for an ID it lacks.  Errors
 from the index, such as the refusal to rescan when
 `org-id-track-globally' is off, count as an unknown ID.  Neither error
 this function throws names a file."
-  (cl-flet
-   ((indexed-file
-     ()
-     (with-temp-buffer
-       (ignore-errors
-         (org-id-find-id-file id))))
-    (reachable
-     (file)
-     (or (org-mcp--find-allowed-file file)
-         (org-mcp--tool-file-access-error link))))
-   (unless (org-string-nw-p id)
-     (org-mcp--id-not-found-error id))
-   (let* ((indexed (indexed-file))
-          (file (and indexed (reachable indexed))))
-     (if (and file (org-id-find-id-in-file id file))
-         file
-       (ignore-errors
-         (org-id-update-id-locations nil t))
-       (reachable
-        (or (indexed-file) (org-mcp--id-not-found-error id)))))))
+  (cl-flet ((indexed-file
+             ()
+             (with-temp-buffer
+               (ignore-errors
+                 (org-id-find-id-file id))))
+            (reachable
+             (file)
+             (or (org-mcp--find-allowed-file file)
+                 (org-mcp--tool-file-access-error link))))
+    (unless (org-string-nw-p id)
+      (org-mcp--id-not-found-error id))
+    (let* ((indexed (indexed-file))
+           (file (and indexed (reachable indexed))))
+      (if (and file (org-id-find-id-in-file id file))
+          file
+        (ignore-errors
+          (org-id-update-id-locations nil t))
+        (reachable
+         (or (indexed-file) (org-mcp--id-not-found-error id)))))))
 
 (defun org-mcp--link-id-in-files (id files)
   "Return the first of the files FILES names that holds ID.
@@ -1394,7 +1392,8 @@ with no lookup, and the caller finds the ID in that file's buffer."
                 (org-mcp--link-id-file id link)))
               :id id
               :search search)))
-          ("file" (list
+          ("file"
+           (list
             :link link
             :file (org-mcp--link-file object link)
             :search (org-element-property :search-option object)))
