@@ -940,6 +940,41 @@ locale-dependent reformatting)."
      :deadline (and deadl (org-element-property :raw-value deadl))
      :closed (and clsd (org-element-property :raw-value clsd)))))
 
+(defun org-mcp--body-bounds ()
+  "Return the body of the heading at point as (BEGIN . END).
+The body begins where `org-end-of-meta-data' with FULL leaves point,
+past planning lines, drawers and blank lines.  It ends at the first
+child, which `org-goto-first-child' finds, or, when there is none,
+after the last non-blank character of the subtree, where
+`org-end-of-subtree' leaves point.  An empty body ends where it
+begins, at the start of the next heading's line or at the end of the
+buffer.  A line starting with `*' is part of the body unless Org
+reads it as a heading.
+
+Both ends are found from the heading itself.  Past an empty body lies
+the next heading, a child or a sibling, and `org-goto-first-child'
+called there would find that heading's first child instead.  Point
+does not move."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((end
+           (save-excursion
+             (if (org-goto-first-child)
+                 (point)
+               (org-end-of-subtree t)))))
+      (org-end-of-meta-data t)
+      (cons (point) (max (point) end)))))
+
+(defun org-mcp--insert-body-text (text)
+  "Insert TEXT at point, the end of a heading's body, on lines of its own.
+A line break goes before TEXT unless point starts a line, and after
+it unless TEXT ends in one or a line break follows point."
+  (unless (bolp)
+    (insert "\n"))
+  (insert text)
+  (unless (or (bolp) (eq (char-after) ?\n))
+    (insert "\n")))
+
 (defun org-mcp--extract-heading-child ()
   "Extract lightweight child entry at current heading.
 Returns an alist with title, todo, level, and link.
@@ -959,43 +994,27 @@ Point should be at the heading. Does not recurse into children."
   "Extract full structured JSON for current heading.
 Point should be at the heading.
 Returns alist with all heading properties and lightweight children."
-  (let*
-      ((meta (org-mcp--heading-metadata-at-point t))
-       (title (plist-get meta :title))
-       (todo (plist-get meta :todo))
-       (priority (plist-get meta :priority))
-       (tags (plist-get meta :tags))
-       (level (plist-get meta :level))
-       (scheduled (plist-get meta :scheduled))
-       (deadline (plist-get meta :deadline))
-       (closed (plist-get meta :closed))
-       (link (org-mcp--link-at-point))
-       ;; The ID the link names, so `id' and `link' always agree; a
-       ;; blank :ID: gives neither.
-       (id (and (string-prefix-p "id:" link) (substring link 3)))
-       (children '())
-       (content-end
-        (save-excursion
-          (org-end-of-subtree t t)
-          (point)))
-       ;; The body runs from the end of the meta data, which
-       ;; `org-end-of-meta-data' (with FULL=t) finds past planning lines,
-       ;; PROPERTIES, LOGBOOK and any other drawers in any order, to the
-       ;; first child, or to the end of the subtree when there is none,
-       ;; as `org-mcp--tool-edit-body' bounds it.  `org-goto-first-child'
-       ;; finds the child as Org does, so a body line starting with `*',
-       ;; such as `*bold*', stays in the body.
-       (body-content
-        (let ((body-end
-               (save-excursion
-                 (if (org-goto-first-child)
-                     (point)
-                   content-end))))
-          (save-excursion
-            (org-end-of-meta-data t)
-            (buffer-substring-no-properties (point) body-end))))
-       ;; Extract direct children
-       (child-level (1+ level)))
+  (let* ((meta (org-mcp--heading-metadata-at-point t))
+         (title (plist-get meta :title))
+         (todo (plist-get meta :todo))
+         (priority (plist-get meta :priority))
+         (tags (plist-get meta :tags))
+         (level (plist-get meta :level))
+         (scheduled (plist-get meta :scheduled))
+         (deadline (plist-get meta :deadline))
+         (closed (plist-get meta :closed))
+         (link (org-mcp--link-at-point))
+         ;; The ID the link names, so `id' and `link' always agree; a
+         ;; blank :ID: gives neither.
+         (id (and (string-prefix-p "id:" link) (substring link 3)))
+         (children '())
+         ;; The body as org-edit-body bounds it, before any child.
+         (body-content
+          (let ((bounds (org-mcp--body-bounds)))
+            (buffer-substring-no-properties
+             (car bounds) (cdr bounds))))
+         ;; Extract direct children
+         (child-level (1+ level)))
     ;; Collect direct children via sibling navigation.
     (save-excursion
       (org-back-to-heading t)
@@ -2020,34 +2039,22 @@ After insertion, point is left on the heading line at end-of-line."
 (defun org-mcp--replace-body-content
     (old-body new-body body-content body-begin body-end)
   "Replace body content in the current buffer.
-OLD-BODY is the substring to replace.
+OLD-BODY is the non-empty substring to replace.
 NEW-BODY is the replacement text.
 BODY-CONTENT is the current body content string.
 BODY-BEGIN is the buffer position where body starts.
 BODY-END is the buffer position where body ends."
   (let ((new-body-content
-         (cond
-          ;; Special case: empty oldBody with empty body
-          ((and (string= old-body "")
-                (string-match-p "\\`[[:space:]]*\\'" body-content))
-           new-body)
-          ;; Normal single replacement
-          (t
-           (let ((pos
-                  (string-match
-                   (regexp-quote old-body) body-content)))
-             (if pos
-                 (concat
-                  (substring body-content 0 pos)
-                  new-body
-                  (substring body-content (+ pos (length old-body))))
-               body-content))))))
-
-    ;; Replace the body content
-    (if (< body-begin body-end)
-        (delete-region body-begin body-end)
-      ;; Empty body - ensure we're at the right position
-      (goto-char body-begin))
+         (let ((pos
+                (string-match (regexp-quote old-body) body-content)))
+           (if pos
+               (concat
+                (substring body-content 0 pos)
+                new-body
+                (substring body-content (+ pos (length old-body))))
+             body-content))))
+    (delete-region body-begin body-end)
+    (goto-char body-begin)
     (insert new-body-content)))
 
 ;; Tool handlers
@@ -2504,31 +2511,8 @@ MCP Parameters:
 
               ;; Save the heading position for the response's link
               (let ((heading-pos (point)))
-
-                ;; Skip past headline and properties/planning
-                (org-end-of-meta-data t)
-
-                ;; Find end of body (before next headline or end of subtree)
-                (let ((body-end nil))
-                  (save-excursion
-                    (if (org-goto-first-child)
-                        (setq body-end (point))
-                      (org-end-of-subtree t)
-                      (setq body-end (point))))
-
-                  (goto-char body-end)
-
-                  ;; Ensure there's a newline before our content
-                  (unless (or (= body-end (point-min))
-                              (= (char-before body-end) ?\n))
-                    (insert "\n"))
-
-                  (insert new_body)
-
-                  ;; Ensure trailing newline
-                  (unless (= (char-before (point)) ?\n)
-                    (insert "\n")))
-
+                (goto-char (cdr (org-mcp--body-bounds)))
+                (org-mcp--insert-body-text new_body)
                 ;; Return to the heading for the response's link
                 (goto-char heading-pos)))))
 
@@ -2550,35 +2534,14 @@ MCP Parameters:
           (org-mcp--validate-body-no-headlines
            new_body (org-current-level))
 
-          ;; Skip past headline and properties
-          (org-end-of-meta-data t)
-
           ;; Get body boundaries
-          (let ((body-begin (point))
-                (body-end nil)
-                (body-content nil)
-                (occurrence-count 0))
-
-            ;; Find end of body (before next headline or end of subtree)
-            (save-excursion
-              (if (org-goto-first-child)
-                  ;; Has children - body ends before first child
-                  (setq body-end (point))
-                ;; No children - body extends to end of subtree
-                (org-end-of-subtree t)
-                (setq body-end (point))))
-
-            ;; Extract body content
-            (setq body-content
+          (let* ((bounds (org-mcp--body-bounds))
+                 (body-begin (car bounds))
+                 (body-end (cdr bounds))
+                 (body-content
                   (buffer-substring-no-properties
                    body-begin body-end))
-
-            ;; Trim leading newline if present
-            ;; (`org-end-of-meta-data' includes it)
-            (when (and (> (length body-content) 0)
-                       (= (aref body-content 0) ?\n))
-              (setq body-content (substring body-content 1))
-              (setq body-begin (1+ body-begin)))
+                 (occurrence-count 0))
 
             ;; Check if body is empty
             (when (string-match-p "\\`[[:space:]]*\\'" body-content)
@@ -2618,9 +2581,15 @@ MCP Parameters:
                "Text appears %d times (must be unique)"
                occurrence-count)))
 
-            ;; Perform replacement
-            (org-mcp--replace-body-content
-             old_body new_body body-content body-begin body-end))
+            ;; Perform replacement.  An empty OLD_BODY got here only with
+            ;; a blank body, which NEW_BODY replaces as a whole.
+            (if (string= old_body "")
+                (progn
+                  (delete-region body-begin body-end)
+                  (goto-char body-begin)
+                  (org-mcp--insert-body-text new_body))
+              (org-mcp--replace-body-content
+               old_body new_body body-content body-begin body-end)))
 
           (goto-char heading)
           (set-marker heading nil))))))

@@ -699,22 +699,24 @@ No heading gains an ID, the first child included.")
     ":ID: +%s\n"
     ":END:\n"
     "Second child content\\.\n"
-    "\\*\\* Third Child #3New content added\\.\n?\\'")
+    "\\*\\* Third Child #3\n"
+    "New content added\\.\n\\'")
    org-mcp-test--content-with-id-id)
   "Pattern for edit-body test with empty body adding content.
-The fixture's last heading has no newline, so the content is added to
-the heading line.")
+The fixture's last heading ends the file without a newline; the
+content goes on a line of its own below it.")
 
 (defconst org-mcp-test--pattern-edit-body-empty-with-props
   (format (concat
            "\\`\\* TODO Task with ID but no body\n"
            ":PROPERTIES:\n"
            ":ID: +%s\n"
-           ":END:Content added after properties\\.\n?\\'")
+           ":END:\n"
+           "Content added after properties\\.\n\\'")
           org-mcp-test--timestamp-id)
   "Pattern for edit-body with existing properties adding content.
-The fixture ends in `:END:' with no newline, so the content is added to
-that line.")
+The fixture ends in `:END:' without a newline; the content goes on a
+line of its own below it.")
 
 (defconst org-mcp-test--pattern-edit-body-accept-lower-level
   (concat
@@ -5025,8 +5027,7 @@ content here."
        "New content added."
        org-mcp-test--pattern-edit-body-empty
        nil
-       (org-mcp-test--file-link
-        test-file "*Third Child #3New content added.")))))
+       (org-mcp-test--file-link test-file "*Third Child #3")))))
 
 (ert-deftest org-mcp-test-edit-body-empty-old-non-empty-body ()
   "Test error when oldBody is empty but body has content."
@@ -5040,7 +5041,9 @@ content here."
      "replacement")))
 
 (ert-deftest org-mcp-test-edit-body-empty-with-properties ()
-  "Test adding content to empty body with properties drawer."
+  "Test adding content to empty body with properties drawer.
+The content goes below the drawer, which stays intact, so the
+response links to the heading by its ID."
   (org-mcp-test--with-id-setup test-file
       org-mcp-test--content-with-id-no-body
       `(,org-mcp-test--timestamp-id)
@@ -5051,7 +5054,7 @@ content here."
      "Content added after properties."
      org-mcp-test--pattern-edit-body-empty-with-props
      nil
-     (org-mcp-test--file-link test-file "*Task with ID but no body"))))
+     (concat "id:" org-mcp-test--timestamp-id))))
 
 (ert-deftest org-mcp-test-edit-body-nested-headlines ()
   "Test org-edit-body preserves nested headlines."
@@ -7123,6 +7126,101 @@ not membership in the configured alist."
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body-with-children))))
+
+(defconst org-mcp-test--content-empty-body-before-child
+  "* Parent\n** Child\n*** Grandchild\nDeep.\n"
+  "Parent with no body, followed directly by its child and grandchild.")
+
+(defconst org-mcp-test--regex-empty-body-before-child-set
+  (concat
+   "\\`\\* Parent\n"
+   "Parent body\\.\n"
+   "\\*\\* Child\n"
+   "\\*\\*\\* Grandchild\n"
+   "Deep\\.\n"
+   "\\'")
+  "Regex matching the whole file once Parent's body is set.")
+
+(defconst org-mcp-test--content-drawer-no-body-before-child
+  "* Parent\n:PROPERTIES:\n:CUSTOM_ID: parent\n:END:\n** Child\nChild body.\n"
+  "Parent with a property drawer and no body, followed by its child.")
+
+(defconst org-mcp-test--regex-drawer-no-body-before-child-set
+  (concat
+   "\\`\\* Parent\n"
+   ":PROPERTIES:\n"
+   ":CUSTOM_ID: parent\n"
+   ":END:\n"
+   "Parent body\\.\n"
+   "\\*\\* Child\n"
+   "Child body\\.\n"
+   "\\'")
+  "Regex matching the whole drawer file once Parent's body is set.")
+
+(defconst org-mcp-test--content-empty-body-before-sibling
+  "* Parent\n* Sibling\n** Sibling child\nSibling body.\n"
+  "Parent with no body and no child, followed by a sibling with a child.")
+
+(defconst org-mcp-test--regex-empty-body-before-sibling-set
+  (concat
+   "\\`\\* Parent\n"
+   "Parent body\\.\n"
+   "\\* Sibling\n"
+   "\\*\\* Sibling child\n"
+   "Sibling body\\.\n"
+   "\\'")
+  "Regex matching the whole sibling file once Parent's body is set.")
+
+(ert-deftest org-mcp-test-edit-body-empty-body-before-next-heading ()
+  "org-edit-body sets an empty body followed directly by another heading.
+The body lies between the heading's meta data and its first child, or
+the end of its subtree, whichever heading follows it.  Appending, and
+replacing with an empty old_body, each put the text under Parent: when
+a child follows at once, when a property drawer comes first, and when
+a sibling with a child of its own follows.  Nothing lands in the next
+heading's body, and the response links to Parent."
+  (pcase-dolist (`(,content ,search ,expected)
+                 `((,org-mcp-test--content-empty-body-before-child
+                    "*Parent"
+                    ,org-mcp-test--regex-empty-body-before-child-set)
+                   (,org-mcp-test--content-drawer-no-body-before-child
+                    "#parent"
+                    ,org-mcp-test--regex-drawer-no-body-before-child-set)
+                   (,org-mcp-test--content-empty-body-before-sibling
+                    "*Parent"
+                    ,org-mcp-test--regex-empty-body-before-sibling-set)))
+    (pcase-dolist (`(,old-body ,append) '((nil t) ("" nil)))
+      (org-mcp-test--with-temp-org-files
+          ((test-file content))
+        (let ((link (org-mcp-test--file-link test-file search)))
+          (org-mcp-test--call-edit-body-and-check
+           test-file link old-body "Parent body." expected append link))))))
+
+(defconst org-mcp-test--content-body-before-sibling
+  "* Parent\nParent body.\n\n* Sibling\nSibling body.\n"
+  "Parent with a body and no child, a blank line, then a sibling.")
+
+(defconst org-mcp-test--regex-body-before-sibling-appended
+  (concat
+   "\\`\\* Parent\n"
+   "Parent body\\.\n"
+   "Appended\\.\n"
+   "\n"
+   "\\* Sibling\n"
+   "Sibling body\\.\n"
+   "\\'")
+  "Regex matching the whole sibling file after appending to Parent.")
+
+(ert-deftest org-mcp-test-edit-body-append-before-sibling ()
+  "Appending to a body followed by a sibling adds the text after it.
+The text goes on the line after the body's last line, and the blank
+line before the sibling stays the only one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-body-before-sibling))
+    (let ((link (org-mcp-test--file-link test-file "*Parent")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file link nil "Appended."
+       org-mcp-test--regex-body-before-sibling-appended t link))))
 
 (ert-deftest org-mcp-test-edit-body-append-headline-error ()
   "Test that content with headlines is rejected in append mode."
