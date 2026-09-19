@@ -327,6 +327,13 @@ works unchanged:
   the first, as it does in Org, and =::<n>= in a =file:= link goes to line /n/.
   A search that matches nothing is an error; org-mcp never offers to create
   the heading.
+- A heading is whatever Org's parser takes for one. A line that starts with
+  stars and a space is a heading even inside a block such as
+  =#+begin_example= or =#+begin_src=, which then never closes: reads list
+  that line as a heading, and a title link reaches it. Inside a block, Org
+  escapes such a line with a comma, as =,* Note=; that line is no heading, and
+  reads return it with its comma. =org-add-todo= and =org-edit-body= refuse a
+  body with an unescaped star line inside a block; send it escaped.
 - A link is resolved, never followed: your windows, narrowing, point, folding
   and marks stay as they were, even when the buffer is narrowed to another
   subtree, and so do the buffers you have open. A tool works in the buffer
@@ -357,6 +364,31 @@ org-mcp refuses:
   and nothing is looked up. Bracketed, as =[[/home/user/org/projects.org#Parent/Child]]=,
   such a path is a link to a file that does not exist, refused as outside the
   allowed files with the same hint.
+
+** Stable links
+
+A title link, =file:<path>::*<title>=, is a convenience. It resolves as it
+does in Org, to the first heading of the file whose title matches, letter case
+aside and with the TODO keyword, the priority, statistics cookies and the tags
+left out. It is ambiguous when two headings share a title, since it always
+reaches the first of them, and it breaks when the heading is renamed.
+
+For a stable address, give the heading an identifier:
+
+- An =ID=, such as a UUID, in a file Emacs's ID index covers, for example an
+  agenda file. The link is =id:<id>=.
+- A =CUSTOM_ID=, unique within its file, in any other file. The link is
+  =file:<path>::#<custom-id>=.
+
+org-mcp adds neither on its own. Set one with the =properties= parameter of
+=org-add-todo= when the heading is created, or with =org-set-properties=
+afterwards. Once a heading has one, every link org-mcp returns for it is the
+stable one (see [[*Links org-mcp returns]]).
+
+An =id:= link names no file, so on its own it resolves only within the allowed
+files. For an ID in a file outside them, name that file in =files= on each call
+that sends the link, as far as =org-mcp-file-scope-override= permits (see
+[[*Naming the file of an ID]]).
 
 ** Naming the file of an ID
 
@@ -416,21 +448,12 @@ this order:
 
 =<path>= is the file name as Org writes it, with =~= for your home directory. A
 title link leaves out the TODO keyword, the priority, statistics cookies and the
-tags, and resolves, as it does in Org, to the first heading of the file whose
-title matches once those are left out, letter case aside. Two headings whose
-titles differ only in those parts share one title link, which reaches the
-first of them, and a title link stops resolving once the heading is renamed.
-Give a heading an =ID= or a =CUSTOM_ID= to give it a stable link of its own.
-An =id:= link names no file, so on its own it resolves within the allowed files
-only. The link returned for a heading with an =ID= in another file leads back
-to it when the call also names that file in =files= (see
-[[*Naming the file of an ID]]).
+tags. It reaches the first heading with that title and breaks on rename; see
+[[*Stable links]] for a link that does neither.
 
 org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
 heading, and a read leaves the file byte-for-byte unchanged, whether or not a
-buffer visits it. A client that wants a stable link sets the identifier itself:
-through the =properties= parameter of =org-add-todo= when it creates the
-heading, or through =org-set-properties= afterwards.
+buffer visits it. A client that wants a stable link sets the identifier itself.
 
 Your link settings do not change the returned link. org-mcp calls
 =org-store-link= non-interactively and, for that call only, binds
@@ -681,7 +704,7 @@ Example:
   - =parent_link= (string, required): link to the parent item (see [[*Addressing headings with links]]). Use =file:/path/to/file.org= for top-level items in a file
   - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[*Naming the file of an ID]]
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[*Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
 
 Example:
