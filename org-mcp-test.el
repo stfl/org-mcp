@@ -8273,18 +8273,33 @@ heading's body, and the response links to Parent."
 (ert-deftest org-mcp-test-edit-body-append-false-replaces ()
   "append false, as JSON false or any other false spelling, replaces.
 JSON false, \"false\", null, \"\" and a missing parameter each replace
-old_body with new_body; only true appends."
+old_body with new_body; only JSON true and \"true\" append."
   (pcase-dolist (`(,append ,expected)
                  `((:json-false ,org-mcp-test--regex-body-to-edit-replaced)
                    ("false" ,org-mcp-test--regex-body-to-edit-replaced)
                    ("" ,org-mcp-test--regex-body-to-edit-replaced)
                    (nil ,org-mcp-test--regex-body-to-edit-replaced)
-                   (t ,org-mcp-test--regex-body-to-edit-appended)))
+                   (t ,org-mcp-test--regex-body-to-edit-appended)
+                   ("true" ,org-mcp-test--regex-body-to-edit-appended)))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-body-to-edit))
       (let ((link (org-mcp-test--file-link test-file "*Task")))
         (org-mcp-test--call-edit-body-and-check
          test-file link "old text" "new text" expected append link)))))
+
+(ert-deftest org-mcp-test-edit-body-refuses-unknown-append ()
+  "append that is neither true nor false is refused, changing nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-body-to-edit))
+    (should
+     (string-match-p
+      "\\`append must be true or false: \"yes\"\\'"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-edit-body"
+       `((link . ,(org-mcp-test--file-link test-file "*Task"))
+         (old_body . "old text")
+         (new_body . "new text")
+         (append . "yes")))))))
 
 (defconst org-mcp-test--content-body-mixed-case
   "* Task\nFoo bar first.\nThen foo bar again.\n"

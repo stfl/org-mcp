@@ -647,6 +647,23 @@ value, so JSON null, false, \"\", [] and {}, which decodes to nil,
 all mean that the call does not send it."
   (member value '(nil "" [] :json-false)))
 
+(defun org-mcp--boolean-param (value name)
+  "Return VALUE, the call's boolean parameter NAME, as t or nil.
+JSON true and \"true\" are true.  A blank VALUE, see
+`org-mcp--blank-param-p', JSON false and null included, is false, and
+so are \"false\" and :false, the keyword `json-parse-string' decodes
+false to.  Any other VALUE is refused with an error naming NAME."
+  (cond
+   ((member value '(t "true"))
+    t)
+   ((or (org-mcp--blank-param-p value)
+        (member value '(:false "false")))
+    nil)
+   (t
+    (org-mcp--tool-validation-error "%s must be true or false: %S"
+                                    name
+                                    value))))
+
 (defun org-mcp--files-given (files)
   "Return FILES, a call's `files' parameter, or nil when it is blank.
 See `org-mcp--blank-param-p'.  Every tool taking `files' reads it
@@ -2654,18 +2671,12 @@ MCP Parameters:
              Ignored when append is true.
   new_body - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
-           default false); false, \"false\" and null mean replace
+           default false); true or \"true\" append, false, \"false\"
+           and null replace, and any other value is refused
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  ;; JSON false decodes to :json-false, which is non-nil.  A blank
-  ;; value, as `org-mcp--blank-param-p' reads it, means the parameter
-  ;; is not sent, so false; so do the string "false" and :false, the
-  ;; keyword `json-parse-string' decodes false to.
-  (let ((append
-         (not
-          (or (org-mcp--blank-param-p append)
-              (member append '(:false "false"))))))
+  (let ((append (org-mcp--boolean-param append "append")))
     (if append
         ;; Append mode
         (progn
@@ -3509,42 +3520,31 @@ MCP Parameters:
            - any of these as [[link]] or [[link][description]]
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
   resolve - true or \"true\" to delete dangling clocks before clocking
-            in; false, \"false\" and null mean not to
+            in; false, \"false\" and null mean not to, and any other
+            value is refused
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link
   clock_out - Link to the heading of the running clock, which is
               closed first; required while a clock runs, refused
               while none does"
-  (let*
-      ((target (org-mcp--link-target link files))
-       (file-path (plist-get target :file))
-       (resolve
-        (cond
-         ((member resolve '(t "true"))
-          t)
-         ;; A blank value, JSON false and null included, is false, as
-         ;; are "false" and :false; see org-edit-body's `append'.
-         ((or (org-mcp--blank-param-p resolve)
-              (member resolve '(:false "false")))
-          nil)
-         (t
-          (org-mcp--tool-validation-error
-           "resolve must be true or false: %S"
-           resolve))))
-       (now (current-time))
-       (explicit-start
-        (when start_time
-          (org-mcp--clock-parse-timestamp start_time)))
-       ;; The running clock closes where the new one starts.
-       (close-at (org-mcp--clock-round-time (or explicit-start now)))
-       (active (org-mcp--clock-find-active))
-       (running-start
-        (and active
-             (org-time-string-to-time (alist-get 'start active))))
-       ;; Closing the running clock may edit another buffer that
-       ;; already had unsaved edits; `saved' covers that edit too.
-       (org-mcp--unsaved-change-p nil))
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         (resolve (org-mcp--boolean-param resolve "resolve"))
+         (now (current-time))
+         (explicit-start
+          (when start_time
+            (org-mcp--clock-parse-timestamp start_time)))
+         ;; The running clock closes where the new one starts.
+         (close-at
+          (org-mcp--clock-round-time (or explicit-start now)))
+         (active (org-mcp--clock-find-active))
+         (running-start
+          (and active
+               (org-time-string-to-time (alist-get 'start active))))
+         ;; Closing the running clock may edit another buffer that
+         ;; already had unsaved edits; `saved' covers that edit too.
+         (org-mcp--unsaved-change-p nil))
     ;; Every check runs before any clock is closed, so a refused call
     ;; changes nothing: a link that names no heading, such as
     ;; file:…::*Nope, is refused with the running clock intact.
@@ -4145,7 +4145,8 @@ Parameters:
              Cannot introduce headlines at same or higher level
              Must maintain balanced #+BEGIN/#+END blocks
   append - Append new_body to end of body instead of replacing
-           (boolean, optional, default false)
+           (optional, default false): true or \"true\" append; false,
+           \"false\" and null replace; any other value is refused
            When true, old_body is ignored
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-read
@@ -4633,7 +4634,7 @@ Parameters:
   resolve - true or \"true\" to delete the dangling (unclosed) CLOCK
             lines under the heading before clocking in (optional);
             the running clock is closed, never deleted; false,
-            \"false\" and null mean not to
+            \"false\" and null mean not to; any other value is refused
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-read.  Not used for clock_out
   clock_out - Link to the heading of the running clock (string);
