@@ -7533,6 +7533,52 @@ HEADLINE is the heading's title, reached through its title link."
          (result-text (org-mcp-test--call-read link)))
     (json-parse-string result-text :object-type 'alist)))
 
+(defconst org-mcp-test--bold-parent-body
+  "*bold* opens the body.\nMore text after it.\n"
+  "Body of Parent, whose first line starts with an emphasized word.")
+
+(defconst org-mcp-test--bold-solo-body
+  "Intro line.\n*emphasis* starts this line.\nLast line.\n"
+  "Body of Solo, whose second line starts with an emphasized word.")
+
+(defconst org-mcp-test--content-bold-body-lines
+  (concat
+   "* Parent\n"
+   ":PROPERTIES:\n:CUSTOM_ID: parent\n:END:\n"
+   org-mcp-test--bold-parent-body
+   "** Child\nChild body.\n"
+   "* Solo\n"
+   org-mcp-test--bold-solo-body)
+  "File whose bodies hold lines starting with `*' that are no headings.
+Parent has a property drawer and a child; Solo has no child.")
+
+(ert-deftest org-mcp-test-read-content-keeps-lines-starting-with-star ()
+  "org-read's content is the whole body up to the first child heading.
+A body line starting with `*bold*' is text, not a heading, so it and
+the lines after it stay in `content'.  Parent's content stops at its
+child, which is listed in `children' instead; Solo, with no child,
+has its body up to the end of its subtree.  The file stays unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bold-body-lines))
+    (let ((parent (org-mcp-test--read-structured test-file "Parent"))
+          (solo (org-mcp-test--read-structured test-file "Solo")))
+      (should
+       (equal (alist-get 'content parent)
+              (string-trim org-mcp-test--bold-parent-body)))
+      (should
+       (equal (mapcar (lambda (child)
+                        (list (alist-get 'title child)
+                              (alist-get 'level child)))
+                      (alist-get 'children parent))
+              '(("Child" 2))))
+      (should
+       (equal (alist-get 'content solo)
+              (string-trim org-mcp-test--bold-solo-body)))
+      (should (equal (alist-get 'children solo) [])))
+    (should
+     (string= (org-mcp-test--read-file test-file)
+              org-mcp-test--content-bold-body-lines))))
+
 (ert-deftest org-mcp-test-read-exports-priority ()
   "Test that org-read returns priority as a one-character string."
   (org-mcp-test--with-temp-org-files

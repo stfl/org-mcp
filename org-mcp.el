@@ -978,19 +978,22 @@ Returns alist with all heading properties and lightweight children."
         (save-excursion
           (org-end-of-subtree t t)
           (point)))
-       ;; Get body content (before children).  Use `org-end-of-meta-data'
-       ;; (with FULL=t) to skip planning lines, PROPERTIES, LOGBOOK, and
-       ;; any other drawers in any order — matching the behaviour of
-       ;; `org-mcp--tool-edit-body'.
+       ;; The body runs from the end of the meta data, which
+       ;; `org-end-of-meta-data' (with FULL=t) finds past planning lines,
+       ;; PROPERTIES, LOGBOOK and any other drawers in any order, to the
+       ;; first child, or to the end of the subtree when there is none,
+       ;; as `org-mcp--tool-edit-body' bounds it.  `org-goto-first-child'
+       ;; finds the child as Org does, so a body line starting with `*',
+       ;; such as `*bold*', stays in the body.
        (body-content
-        (save-excursion
-          (org-end-of-meta-data t)
-          (let ((body-start (point)))
-            (if (re-search-forward "^\*" content-end t)
-                (buffer-substring-no-properties
-                 body-start (line-beginning-position))
-              (buffer-substring-no-properties
-               body-start content-end)))))
+        (let ((body-end
+               (save-excursion
+                 (if (org-goto-first-child)
+                     (point)
+                   content-end))))
+          (save-excursion
+            (org-end-of-meta-data t)
+            (buffer-substring-no-properties (point) body-end))))
        ;; Extract direct children
        (child-level (1+ level)))
     ;; Collect direct children via sibling navigation.
