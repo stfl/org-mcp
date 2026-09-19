@@ -2660,6 +2660,42 @@ an Org name that is no regular file: a dangling symlink, a FIFO."
            (concat "\\`Cannot read directory: " (regexp-quote locked) "\\'"))
         (set-file-modes locked #o700)))))
 
+(ert-deftest org-mcp-test-file-set-walk-error-names-directory ()
+  "A directory that fails while it is listed fails the call and is named.
+The refusal names it as the call reaches it: the entry, here a
+symlink, followed by the path below it.  A subdirectory that passed
+the readability check and then fails to open, as when it is removed
+meanwhile, is such a directory.  So is a named directory that can be
+searched but not listed; the refusal names it by the entry alone."
+  (org-mcp-test--with-scope-dirs t
+    (let ((tree (expand-file-name "tree" outside))
+          (link (expand-file-name "link" outside))
+          (list-directory (symbol-function 'file-name-all-completions)))
+      (org-mcp-test--write-set-file tree "a/b/deep.org" "deep")
+      (make-symbolic-link tree link)
+      (let ((failing (file-truename (expand-file-name "a/b" tree))))
+        (cl-letf (((symbol-function 'file-name-all-completions)
+                   (lambda (file directory)
+                     (if (string= directory failing)
+                         (signal 'file-missing
+                                 (list
+                                  "Opening directory"
+                                  "No such file or directory"
+                                  directory))
+                       (funcall list-directory file directory)))))
+          (org-mcp-test--assert-files-refused
+           (vector link)
+           (concat
+            "\\`Cannot read directory: "
+            (regexp-quote (concat link "/a/b"))
+            "\\'"))))
+      (set-file-modes tree #o300)
+      (unwind-protect
+          (org-mcp-test--assert-files-refused
+           (vector link)
+           (concat "\\`Cannot read directory: " (regexp-quote link) "\\'"))
+        (set-file-modes tree #o700)))))
+
 (ert-deftest org-mcp-test-file-set-ignores-agenda-restriction ()
   "An agenda restriction never widens what the set-scanning tools reach.
 While the agenda is restricted, as by `C-c a <', the function

@@ -388,7 +388,9 @@ The walk, `directory-files-recursively', descends into every
 subdirectory except hidden ones, whose names start with `.', and
 never follows a symlink to a directory, so it cannot loop or leave
 the directory that way.  A subdirectory it cannot read is skipped; a
-named directory it cannot read is an error.  In each directory it
+named directory it cannot search is an error.  So is a directory
+that fails while the walk lists it, such as one removed meanwhile;
+the error names it as the call reaches it.  In each directory it
 takes the files Org takes from a directory in `org-agenda-files':
 names matching `org-agenda-file-regexp', by default every `.org'
 file and no archive, and of those the ones not hidden that
@@ -440,7 +442,20 @@ path, such as /home/user/notes.org"
               (or (org-mcp--find-allowed-file file t)
                   (org-mcp--tool-file-access-error locator))))
          (unless (member allowed found)
-           (push allowed found)))))
+           (push allowed found))))
+      (below
+       (entry truename path)
+       ;; PATH as the call reaches it.  ENTRY names the directory
+       ;; whose local truename is TRUENAME; a PATH under TRUENAME is
+       ;; ENTRY followed by the path below it, any other PATH, such
+       ;; as TRUENAME itself, is ENTRY.
+       (if (and (stringp path)
+                (string-prefix-p
+                 (file-name-as-directory truename) path))
+           (concat
+            (file-name-as-directory entry)
+            (file-relative-name path truename))
+         entry)))
      (dolist (entry entries)
        (let ((truename (org-mcp--local-truename entry)))
          (cond
@@ -448,9 +463,13 @@ path, such as /home/user/notes.org"
            (add entry entry))
           ((org-mcp--override-permits-p entry truename)
            (let ((file-name-handler-alist nil))
+             (unless (file-accessible-directory-p truename)
+               (org-mcp--tool-validation-error
+                "Cannot read directory: %s"
+                entry))
              (dolist
                  (path
-                  (condition-case nil
+                  (condition-case err
                       (let ((case-fold-search nil))
                         (directory-files-recursively
                          truename
@@ -465,21 +484,21 @@ path, such as /home/user/notes.org"
                                 ;; on a subdirectory it cannot read
                                 ;; instead of skipping it.
                                 (file-readable-p dir)))))
-                    ;; The predicate keeps out every subdirectory
-                    ;; that cannot be read, so the named one failed.
+                    ;; A directory can still fail when it is listed:
+                    ;; one removed after the predicate passed it, an
+                    ;; I/O error, or a denial `file-readable-p' did
+                    ;; not foresee.  The error data ends with the
+                    ;; directory.  The whole call fails, so it never
+                    ;; searches only part of the set.
                     (file-error
                      (org-mcp--tool-validation-error
                       "Cannot read directory: %s"
-                      entry))))
+                      (below entry truename (car (last err)))))))
                (let ((name (file-name-nondirectory path)))
                  (when (and (not (string-prefix-p "." name))
                             (org-mcp--org-file-name-p name)
                             (file-regular-p path))
-                   (add
-                    path
-                    (concat
-                     (file-name-as-directory entry)
-                     (file-relative-name path truename))))))))
+                   (add path (below entry truename path)))))))
           (t
            (let ((under
                   (cl-remove-if-not

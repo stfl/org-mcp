@@ -163,7 +163,9 @@ directory to resolve against but whichever buffer is current in Emacs:
   the allowed files there, and it is refused when none of them is.
 
 A refused entry or found file makes the whole call fail, and so does a named
-directory that cannot be read: the call never searches only part of the set.
+directory that cannot be read, or any directory that fails while it is
+searched, such as one removed meanwhile: the call never searches only part of
+the set.  The error names the directory by the entry and the path below it.
 
 A directory search has no size limit and runs in Emacs's single thread: Emacs
 does not respond until the call has walked the tree and read every Org file in
