@@ -2292,8 +2292,8 @@ MCP Parameters:
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
                Values are single-line strings or numbers, written as
-               given, or booleans: true writes t and false writes
-               nil; null or empty values are skipped
+               given, or booleans: true or false writes the text t
+               or nil; null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
                properties itself given as null, false, \"\" or {}
@@ -2696,7 +2696,8 @@ MCP Parameters:
   properties - JSON object of property name-value pairs (required)
                String or number value: set property to that value;
                it must be a single line
-               true or false: set property to t or nil
+               true or false: set property to the text t or nil;
+               false keeps the property
                null or empty string: delete the property
                ID and CUSTOM_ID are accepted and written as given
                Special properties (TODO, TAGS, PRIORITY, etc.) are
@@ -3898,7 +3899,8 @@ Parameters:
                accepted) on a single line, written as given and
                not otherwise checked; an ID is not added to Org's
                ID index
-               true writes t and false writes nil
+               true or false writes the text t or nil (false writes
+               the property; null skips it)
                null or empty values are skipped
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
@@ -4027,7 +4029,8 @@ Parameters:
     "  properties - JSON object of property name-value pairs (required)
                String value (numbers and booleans are accepted):
                set the property; it must be a single line
-               true sets t and false sets nil
+               true or false writes the text t or nil (false keeps
+               the property; null deletes it)
                null or empty string: delete the property
                ID and CUSTOM_ID can be set; values are written as
                given and not otherwise checked, and an ID is not
