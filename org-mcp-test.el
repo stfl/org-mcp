@@ -409,7 +409,7 @@ Second child content.
    "\\`\\* TODO Task Without Tags *\n\\'") ; No tags, optional spaces
   "Pattern for TODO item without any tags.")
 
-(defconst org-mcp-test--pattern-add-todo-parent-id-uri
+(defconst org-mcp-test--pattern-add-todo-parent-id-link
   (concat
    "^\\* Parent Task\n"
    ":PROPERTIES:\n"
@@ -1840,7 +1840,7 @@ clock entry to delete."
                  (car org-agenda-files)
                  real-file))))))
 
-(ert-deftest org-mcp-test-uri-relative-allowed-absolute-uri ()
+(ert-deftest org-mcp-test-file-link-relative-allowed-entry ()
   "A file: link with an absolute path resolves when allowed list uses relative path."
   (org-mcp-test--with-temp-org-files
       ((real-file "* Heading\nBody"))
@@ -1848,37 +1848,37 @@ clock entry to delete."
            (name (file-name-nondirectory real-file))
            (org-directory dir)
            (org-mcp-allowed-files (list name))
-           (uri (org-mcp-test--file-link real-file "*Heading"))
-           (result (org-mcp-test--call-read-headline uri)))
+           (link (org-mcp-test--file-link real-file "*Heading"))
+           (result (org-mcp-test--call-read-headline link)))
       (should (string= result "* Heading\nBody")))))
 
-(ert-deftest org-mcp-test-uri-absolute-allowed-absolute-uri ()
+(ert-deftest org-mcp-test-file-link-absolute-allowed-entry ()
   "A file: link with an absolute path resolves when allowed list uses absolute path."
   (org-mcp-test--with-temp-org-files
       ((real-file "* Heading\nBody"))
     ;; with-temp-org-files already binds allowed-files to (list real-file).
-    (let* ((uri (org-mcp-test--file-link real-file "*Heading"))
-           (result (org-mcp-test--call-read-headline uri)))
+    (let* ((link (org-mcp-test--file-link real-file "*Heading"))
+           (result (org-mcp-test--call-read-headline link)))
       (should (string= result "* Heading\nBody")))))
 
-(ert-deftest org-mcp-test-uri-interchangeable-paths-same-result ()
+(ert-deftest org-mcp-test-file-link-interchangeable-allowed-entries ()
   "Same file is reachable whether the allowed entry is absolute or relative."
   (org-mcp-test--with-temp-org-files
       ((real-file "* Heading\nBody"))
     (let* ((dir (file-name-directory real-file))
            (name (file-name-nondirectory real-file))
-           (uri (org-mcp-test--file-link real-file "*Heading")))
+           (link (org-mcp-test--file-link real-file "*Heading")))
       ;; Configured as absolute path
       (let ((org-mcp-allowed-files (list real-file)))
-        (should (string= (org-mcp-test--call-read-headline uri)
+        (should (string= (org-mcp-test--call-read-headline link)
                          "* Heading\nBody")))
       ;; Configured as relative path (same physical file)
       (let ((org-directory dir)
             (org-mcp-allowed-files (list name)))
-        (should (string= (org-mcp-test--call-read-headline uri)
+        (should (string= (org-mcp-test--call-read-headline link)
                          "* Heading\nBody"))))))
 
-(ert-deftest org-mcp-test-uri-relative-allowed-rejects-other-file ()
+(ert-deftest org-mcp-test-file-link-relative-allowed-rejects-other-file ()
   "Relative allowed entry does not accidentally allow a sibling file."
   (org-mcp-test--with-temp-org-files
       ((allowed-file "* Allowed\n")
@@ -1888,8 +1888,8 @@ clock entry to delete."
            (org-directory dir)
            ;; Only the relative allowed-name is in the list.
            (org-mcp-allowed-files (list allowed-name))
-           (uri (org-mcp-test--file-link forbidden-file "*Forbidden")))
-      (should-error (org-mcp-test--call-read-headline uri)))))
+           (link (org-mcp-test--file-link forbidden-file "*Forbidden")))
+      (should-error (org-mcp-test--call-read-headline link)))))
 
 (ert-deftest org-mcp-test-allowed-files-fn-returns-configured ()
   "`org-mcp-allowed-files' (function) returns the variable when set."
@@ -1905,14 +1905,14 @@ clock entry to delete."
           (org-agenda-files (list agenda-file)))
       (should (equal (org-mcp-allowed-files) (list agenda-file))))))
 
-(ert-deftest org-mcp-test-fallback-uri-tool-uses-agenda-files ()
+(ert-deftest org-mcp-test-fallback-link-tool-uses-agenda-files ()
   "Tool calls with a link work when allowed list is nil and `org-agenda-files' is set."
   (org-mcp-test--with-temp-org-files
       ((agenda-file "* Heading\nBody"))
     (let ((org-mcp-allowed-files nil)
           (org-agenda-files (list agenda-file)))
-      (let* ((uri (org-mcp-test--file-link agenda-file "*Heading"))
-             (result (org-mcp-test--call-read-headline uri)))
+      (let* ((link (org-mcp-test--file-link agenda-file "*Heading"))
+             (result (org-mcp-test--call-read-headline link)))
         (should (string= result "* Heading\nBody"))))))
 
 (ert-deftest org-mcp-test-fallback-respects-relative-agenda-entries ()
@@ -1924,8 +1924,8 @@ clock entry to delete."
            (org-mcp-allowed-files nil)
            (org-directory dir)
            (org-agenda-files (list name)))
-      (let* ((uri (org-mcp-test--file-link agenda-file "*Heading"))
-             (result (org-mcp-test--call-read-headline uri)))
+      (let* ((link (org-mcp-test--file-link agenda-file "*Heading"))
+             (result (org-mcp-test--call-read-headline link)))
         (should (string= result "* Heading\nBody"))))))
 
 (ert-deftest org-mcp-test-fallback-explicit-overrides-agenda ()
@@ -1936,12 +1936,12 @@ clock entry to delete."
     (let ((org-mcp-allowed-files (list allowed))
           (org-agenda-files (list allowed agenda-only)))
       ;; Allowed file is reachable
-      (let ((uri (org-mcp-test--file-link allowed "*Allowed")))
-        (should (string= (org-mcp-test--call-read-headline uri)
+      (let ((link (org-mcp-test--file-link allowed "*Allowed")))
+        (should (string= (org-mcp-test--call-read-headline link)
                          "* Allowed")))
       ;; A file only in `org-agenda-files' must NOT be reachable.
-      (let ((uri (org-mcp-test--file-link agenda-only "*AgendaOnly")))
-        (should-error (org-mcp-test--call-read-headline uri))))))
+      (let ((link (org-mcp-test--file-link agenda-only "*AgendaOnly")))
+        (should-error (org-mcp-test--call-read-headline link))))))
 
 ;; Scope override
 
@@ -2043,12 +2043,12 @@ byte-for-byte unchanged afterwards."
 (defun org-mcp-test--assert-scope-refused (file)
   "Assert that reading and writing the Task heading in FILE is refused.
 FILE holds `org-mcp-test--scope-task-content' and stays unchanged."
-  (let ((uri (org-mcp-test--file-link file "*Task")))
+  (let ((link (org-mcp-test--file-link file "*Task")))
     (org-mcp-test--call-tool-refused
-     "org-read-headline" `((link . ,uri)) "not in allowed list")
+     "org-read-headline" `((link . ,link)) "not in allowed list")
     (org-mcp-test--call-tool-refused
      "org-update-todo-state"
-     `((link . ,uri) (current_state . "TODO") (new_state . "DONE"))
+     `((link . ,link) (current_state . "TODO") (new_state . "DONE"))
      "not in allowed list"
      file)))
 
@@ -2056,11 +2056,11 @@ FILE holds `org-mcp-test--scope-task-content' and stays unchanged."
   "Assert that the Task heading in FILE can be read and then written.
 FILE holds `org-mcp-test--scope-task-content'; afterwards its Task
 is DONE."
-  (let ((uri (org-mcp-test--file-link file "*Task")))
+  (let ((link (org-mcp-test--file-link file "*Task")))
     (should
-     (string= (org-mcp-test--call-read-headline uri) "* TODO Task\nBody"))
+     (string= (org-mcp-test--call-read-headline link) "* TODO Task\nBody"))
     (let ((result
-           (org-mcp-test--call-update-todo-state uri "DONE" "TODO")))
+           (org-mcp-test--call-update-todo-state link "DONE" "TODO")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'new_state result) "DONE")))
     (org-mcp-test--verify-file-matches
@@ -2834,13 +2834,13 @@ INITIAL-CONTENT is the initial file content.
 PARENT-HEADLINE is the parent's title (empty string for top-level).
 BODY-WITH-HEADLINE is the body containing invalid headline."
   (org-mcp-test--with-add-todo-setup test-file initial-content
-    (let ((parent-uri
+    (let ((parent-link
            (if (string-empty-p parent-headline)
                (concat "file:" test-file)
              (org-mcp-test--file-link
               test-file (concat "*" parent-headline)))))
       (org-mcp-test--call-add-todo-expecting-error
-       test-file "Test Task" "TODO" '("work") body-with-headline parent-uri))))
+       test-file "Test Task" "TODO" '("work") body-with-headline parent-link))))
 
 (ert-deftest org-mcp-test-file-resource-template-in-list ()
   "The only resource template is org://{link}; an org-outline:// URI is not found."
@@ -2861,9 +2861,9 @@ BODY-WITH-HEADLINE is the body containing invalid headline."
 Tests that the given title is rejected when creating a TODO."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--call-add-todo-expecting-error
-       test-file invalid-title "TODO" nil nil parent-uri))))
+       test-file invalid-title "TODO" nil nil parent-link))))
 
 (defun org-mcp-test--assert-rename-headline-rejected
     (initial-content headline-title new-title)
@@ -2873,10 +2873,10 @@ HEADLINE-TITLE is the current headline to rename.
 NEW-TITLE is the invalid new title that should be rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file initial-content))
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file (concat "*" headline-title))))
       (org-mcp-test--call-rename-headline-expecting-error
-       test-file resource-uri headline-title new-title))))
+       test-file link headline-title new-title))))
 
 (ert-deftest org-mcp-test-file-resource-not-in-list-after-disable ()
   "Test that resources are unregistered after `org-mcp-disable'."
@@ -2970,7 +2970,7 @@ Very deep content."
          (format "'file:%s': the referenced file not in allowed list"
                  forbidden-file))))))
 
-(ert-deftest org-mcp-test-headline-resource-not-found ()
+(ert-deftest org-mcp-test-read-headline-not-found ()
   "Test org-read-headline tool error for non-existent headline.
 The error names the link and says Org found no match."
   (let ((test-content "* Existing Section\nSome content."))
@@ -2982,38 +2982,38 @@ The error names the link and says Org found no match."
          (concat "\\`Cannot resolve link " (regexp-quote link) ": No match")
          test-file)))))
 
-(ert-deftest org-mcp-test-headline-resource-file-with-hash ()
+(ert-deftest org-mcp-test-read-headline-file-with-hash ()
   "Test org-read-headline tool with # in filename.
 A `file:' link takes the file name as it is, with no encoding."
   (org-mcp-test--with-temp-org-files
       ((file org-mcp-test--content-nested-siblings "org-mcp-test-file#"))
-    (let* ((uri
+    (let* ((link
             (org-mcp-test--file-link file "*First Child 50% Complete"))
-           (result (org-mcp-test--call-read-headline uri)))
+           (result (org-mcp-test--call-read-headline link)))
       (should
        (string=
         result
         "** First Child 50% Complete\nFirst child content.\nIt spans multiple lines.")))))
 
-(ert-deftest org-mcp-test-headline-resource-headline-with-hash ()
+(ert-deftest org-mcp-test-read-headline-title-with-hash ()
   "Test org-read-headline tool with # in headline title."
   (org-mcp-test--with-temp-org-files
       ((file org-mcp-test--content-nested-siblings))
-    (let* ((uri (org-mcp-test--file-link file "*Third Child #3"))
-           (result (org-mcp-test--call-read-headline uri)))
+    (let* ((link (org-mcp-test--file-link file "*Third Child #3"))
+           (result (org-mcp-test--call-read-headline link)))
       (should (string= result "** Third Child #3")))))
 
 (ert-deftest
-    org-mcp-test-headline-resource-file-and-headline-with-hash
+    org-mcp-test-read-headline-file-and-title-with-hash
     ()
   "Test org-read-headline tool with # in both filename and headline."
   (org-mcp-test--with-temp-org-files
       ((file org-mcp-test--content-nested-siblings "org-mcp-test-file#"))
-    (let* ((uri (org-mcp-test--file-link file "*Third Child #3"))
-           (result (org-mcp-test--call-read-headline uri)))
+    (let* ((link (org-mcp-test--file-link file "*Third Child #3"))
+           (result (org-mcp-test--call-read-headline link)))
       (should (string= result "** Third Child #3")))))
 
-(ert-deftest org-mcp-test-headline-resource-path-traversal ()
+(ert-deftest org-mcp-test-read-headline-path-traversal ()
   "Test that path traversal with ../ in a `file:' link is rejected.
 The path is relative, so it names no file."
   (org-mcp-test--with-temp-org-files
@@ -3027,7 +3027,7 @@ The path is relative, so it names no file."
      "names no local file by its full path"
      test-file)))
 
-(ert-deftest org-mcp-test-headline-resource-encoded-path-traversal ()
+(ert-deftest org-mcp-test-read-headline-encoded-path-traversal ()
   "Test that URL-encoded path traversal in a `file:' link is rejected.
 A tool takes a link as it is and decodes nothing, so %2E%2E%2F stays
 literal and the path is relative."
@@ -3042,7 +3042,7 @@ literal and the path is relative."
      "names no local file by its full path"
      test-file)))
 
-(ert-deftest org-mcp-test-headline-resource-navigation ()
+(ert-deftest org-mcp-test-read-headline-outline-path-refused ()
   "An outline path of titles is no link, so it is refused, not resolved.
 Nothing is read, neither the level-3 Target Headline, nor the one
 under Third Parent, although First Parent has no such child."
@@ -3054,7 +3054,7 @@ under Third Parent, although First Parent has no such child."
     "\\`Not an Org link: "
     test-file)))
 
-(ert-deftest org-mcp-test-headline-resource-deep-nested-path ()
+(ert-deftest org-mcp-test-read-headline-id-search-reaches-deep-heading ()
   "An `id:' link with a title search reaches a heading two levels below it.
 Other Child's ID scopes the search to its subtree, so the level-3
 Target Headline under Second Parent is read, never the one under Third
@@ -3075,7 +3075,7 @@ Parent."
            "*** Target Headline\n"
            "This should NOT be found via First Parent/Target Headline path.")))))))
 
-(ert-deftest org-mcp-test-headline-resource-bare-non-toplevel-rejected ()
+(ert-deftest org-mcp-test-read-headline-one-title-outline-path-refused ()
   "A one-title outline path is no link, so it is refused, not resolved.
 The title only exists below level 1.  The path is refused as it is,
 before any lookup, and the file is left alone."
@@ -3124,10 +3124,10 @@ before any lookup, and the file is left alone."
       (let ((org-todo-keywords
              '((sequence "TODO(t!)" "IN-PROGRESS(i!)" "|" "DONE(d!)"))))
         ;; Update TODO to IN-PROGRESS
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (org-mcp-test--update-todo-state-and-check
-           resource-uri "TODO" "IN-PROGRESS"
+           link "TODO" "IN-PROGRESS"
            test-file org-mcp-test--expected-task-one-in-progress-regex
            (org-mcp-test--file-link test-file "*Task One")))))))
 
@@ -3139,10 +3139,10 @@ before any lookup, and the file is left alone."
       (let ((org-todo-keywords
              '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
         ;; Try to update with wrong current state
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (org-mcp-test--call-update-todo-state-expecting-error
-           test-file resource-uri "IN-PROGRESS" "DONE"))))))
+           test-file link "IN-PROGRESS" "DONE"))))))
 
 (ert-deftest org-mcp-test-update-todo-with-timestamp-id ()
   "Test updating TODO state using timestamp-format ID (not UUID)."
@@ -3150,9 +3150,9 @@ before any lookup, and the file is left alone."
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (org-mcp-test--with-id-setup test-file test-content
           `("20240101T120000")
-        (let ((uri "id:20240101T120000"))
+        (let ((link "id:20240101T120000"))
           (org-mcp-test--update-todo-state-and-check
-           uri "TODO" "DONE"
+           link "TODO" "DONE"
            test-file
            org-mcp-test--expected-timestamp-id-done-regex))))))
 
@@ -3164,10 +3164,10 @@ before any lookup, and the file is left alone."
       (let ((org-todo-keywords
              '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
         ;; Try to set empty state
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (org-mcp-test--call-update-todo-state-expecting-error
-           test-file resource-uri "TODO" ""))))))
+           test-file link "TODO" ""))))))
 
 (ert-deftest org-mcp-test-update-todo-state-invalid ()
   "Test TODO state update fails for invalid new state."
@@ -3177,10 +3177,10 @@ before any lookup, and the file is left alone."
       (let ((org-todo-keywords
              '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
         ;; Try to update to invalid state
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (org-mcp-test--call-update-todo-state-expecting-error
-           test-file resource-uri "TODO" "INVALID-STATE"))))))
+           test-file link "TODO" "INVALID-STATE"))))))
 
 (ert-deftest org-mcp-test-update-todo-state-with-open-buffer ()
   "Test TODO state update works when file is open in a clean buffer.
@@ -3198,10 +3198,10 @@ When the visited buffer was clean, org-mcp edits it and auto-saves to disk."
                 (with-current-buffer buffer
                   (should-not (buffer-modified-p)))
                 ;; Update TODO state while buffer is open
-                (let ((resource-uri
+                (let ((link
                        (org-mcp-test--file-link test-file "*Task One")))
                   (org-mcp-test--update-todo-state-and-check
-                   resource-uri "TODO" "IN-PROGRESS"
+                   link "TODO" "IN-PROGRESS"
                    test-file org-mcp-test--expected-task-one-in-progress-regex
                    (org-mcp-test--file-link test-file "*Task One"))
                   ;; Verify the buffer was also updated
@@ -3253,11 +3253,11 @@ and the response must report `saved' as false."
                 (should (buffer-modified-p)))
 
               ;; Update TODO state — should succeed without auto-save
-              (let ((resource-uri
+              (let ((link
                      (org-mcp-test--file-link test-file "*Task One")))
                 (let ((result
                        (org-mcp-test--call-update-todo-state
-                        resource-uri "IN-PROGRESS" "TODO")))
+                        link "IN-PROGRESS" "TODO")))
                   (should (equal (alist-get 'success result) t))
                   (should (eq (alist-get 'saved result) :json-false))
                   (should (equal (alist-get 'new_state result) "IN-PROGRESS")))
@@ -3336,10 +3336,10 @@ Another task."))
       (let ((org-todo-keywords
              '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
         ;; Try to update a non-existent headline
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Nonexistent Task")))
           (org-mcp-test--call-update-todo-state-expecting-error
-           test-file resource-uri "TODO" "IN-PROGRESS"))))))
+           test-file link "TODO" "IN-PROGRESS"))))))
 
 (ert-deftest org-mcp-test-update-todo-state-without-current-state ()
   "Test TODO state update without providing current_state."
@@ -3348,11 +3348,11 @@ Another task."))
         ((test-file test-content))
       (let ((org-todo-keywords
              '((sequence "TODO(t!)" "IN-PROGRESS(i!)" "|" "DONE(d!)"))))
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (let ((result
                  (org-mcp-test--call-update-todo-state
-                  resource-uri "IN-PROGRESS")))
+                  link "IN-PROGRESS")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) "TODO"))
@@ -3370,11 +3370,11 @@ Another task."))
         ((test-file test-content))
       (let ((org-todo-keywords
              '((sequence "TODO(t!)" "|" "DONE(d!)"))))
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (let ((result
                  (org-mcp-test--call-update-todo-state
-                  resource-uri "TODO")))
+                  link "TODO")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
             (should (equal (alist-get 'previous_state result) ""))
@@ -3707,9 +3707,9 @@ Task body."
         ((test-file test-content))
       (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
             (org-log-into-drawer t))
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
-          (let* ((params `((link . ,resource-uri)
+          (let* ((params `((link . ,link)
                            (new_state . "DONE")
                            (note . "Test note")))
                  (result-text (mcp-server-lib-ert-call-tool
@@ -3731,9 +3731,9 @@ LOGBOOK drawer."
         ((test-file test-content))
       (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
             (org-log-into-drawer nil))
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
-          (let* ((params `((link . ,resource-uri)
+          (let* ((params `((link . ,link)
                            (new_state . "DONE")
                            (note . "Test note")))
                  (result-text (mcp-server-lib-ert-call-tool
@@ -3752,8 +3752,8 @@ LOGBOOK drawer."
       ((test-file org-mcp-test--content-task-scheduled-repeat))
     (let ((org-log-repeat nil)
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
-      (let* ((resource-uri (org-mcp-test--file-link test-file "*Weekly Task"))
-             (result (org-mcp-test--call-update-todo-state resource-uri "DONE")))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result (org-mcp-test--call-update-todo-state link "DONE")))
         ;; Response fields
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'previous_state result) "TODO"))
@@ -3769,8 +3769,8 @@ LOGBOOK drawer."
       ((test-file org-mcp-test--content-task-scheduled-repeat-to-state))
     (let ((org-log-repeat nil)
           (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
-      (let* ((resource-uri (org-mcp-test--file-link test-file "*Weekly Task"))
-             (result (org-mcp-test--call-update-todo-state resource-uri "DONE")))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result (org-mcp-test--call-update-todo-state link "DONE")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'previous_state result) "TODO"))
         (should (equal (alist-get 'new_state result) "DONE"))
@@ -3783,13 +3783,13 @@ LOGBOOK drawer."
   "Test adding a top-level TODO item."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--add-todo-and-check
        "New Task"
        "TODO"
        '("work" "urgent")
        nil ; no body
-       parent-uri
+       parent-link
        nil ; no after_link
        (file-name-nondirectory test-file)
        test-file
@@ -3800,13 +3800,13 @@ LOGBOOK drawer."
   "Test adding top-level TODO after header comments."
   (let ((initial-content org-mcp-test--content-nested-siblings))
     (org-mcp-test--with-add-todo-setup test-file initial-content
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--add-todo-and-check
          "New Top Task"
          "TODO"
          '("urgent")
          nil ; no body
-         parent-uri
+         parent-link
          nil ; no after_link
          (file-name-nondirectory test-file)
          test-file
@@ -3816,14 +3816,14 @@ LOGBOOK drawer."
   "Test that adding TODO with invalid state throws error."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--call-add-todo-expecting-error
        test-file
        "New Task"
        "INVALID-STATE" ; Not in org-todo-keywords
        '("work")
        nil
-       parent-uri))))
+       parent-link))))
 
 (ert-deftest org-mcp-test-add-todo-invalid-state-error-lists-valid-states ()
   "Invalid TODO state error lists every valid keyword from `org-todo-keywords-1'."
@@ -3832,13 +3832,13 @@ LOGBOOK drawer."
     (let ((org-todo-keywords
            '((sequence "TODO" "NEXT" "|" "DONE" "CANCELED")))
           (org-tag-alist '("work")))
-      (let* ((parent-uri (concat "file:" test-file))
+      (let* ((parent-link (concat "file:" test-file))
              (params
               `((title . "New Task")
                 (todo_state . "BOGUS")
                 (tags . ("work"))
                 (body . nil)
-                (parent_link . ,parent-uri)))
+                (parent_link . ,parent-link)))
              (request
               (mcp-server-lib-create-tools-call-request
                "org-add-todo" nil params))
@@ -3865,13 +3865,13 @@ fast key `c' + log timestamp on entry)."
            '((sequence "TODO(t!)" "|" "DONE(d!)" "CANCELED(c!)")))
           (org-tag-alist '("work"))
           (org-id-locations-file nil))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--add-todo-and-check
          "Cancel Me"
          "CANCELED"
          '("work")
          nil
-         parent-uri
+         parent-link
          nil
          (file-name-nondirectory test-file)
          test-file
@@ -3884,14 +3884,14 @@ fast key `c' + log timestamp on entry)."
     (let ((org-todo-keywords
            '((sequence "TODO(t!)" "|" "DONE(d!)")))
           (org-tag-alist '("work")))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--call-add-todo-expecting-error
          test-file
          "New Task"
          "TODO(t!)" ; selection-key form is not the state name
          '("work")
          nil
-         parent-uri)))))
+         parent-link)))))
 
 (ert-deftest org-mcp-test-add-todo-valid-state-multiple-sequences ()
   "Adding TODO accepts a keyword drawn from a non-first sequence."
@@ -3902,13 +3902,13 @@ fast key `c' + log timestamp on entry)."
              (type "BUG" "FEATURE" "|" "FIXED")))
           (org-tag-alist '("work"))
           (org-id-locations-file nil))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--add-todo-and-check
          "File Bug"
          "BUG"
          '("work")
          nil
-         parent-uri
+         parent-link
          nil
          (file-name-nondirectory test-file)
          test-file
@@ -3942,13 +3942,13 @@ Org permits free-form tags in headlines, so we only enforce
 `org-tag-re' here, not membership in the configured alist."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--add-todo-and-check
        "Task1"
        "TODO"
        '("freeform")
        nil
-       parent-uri
+       parent-link
        nil
        (file-name-nondirectory test-file)
        test-file
@@ -3959,14 +3959,14 @@ Org permits free-form tags in headlines, so we only enforce
   "Test that tags in `org-tag-alist' are accepted."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       ;; Should accept tags in org-tag-alist (work, personal, urgent)
       (org-mcp-test--add-todo-and-check
        "ValidTask"
        "TODO"
        '("work")
        nil
-       parent-uri
+       parent-link
        nil
        (file-name-nondirectory test-file)
        test-file
@@ -3979,14 +3979,14 @@ Org permits free-form tags in headlines, so we only enforce
       org-mcp-test--content-empty
     (let ((org-tag-alist nil)
           (org-tag-persistent-alist nil))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         ;; Should accept valid tag names (alphanumeric, _, @)
         (org-mcp-test--add-todo-and-check
          "Task1"
          "TODO"
          '("validtag" "tag123" "my_tag" "@home")
          nil
-         parent-uri
+         parent-link
          nil
          (file-name-nondirectory test-file)
          test-file
@@ -4000,23 +4000,23 @@ Org permits free-form tags in headlines, so we only enforce
       org-mcp-test--content-empty
     (let ((org-tag-alist nil)
           (org-tag-persistent-alist nil))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         ;; Reject tags containing characters outside `org-tag-re'
         ;; (which permits [:alnum:], `_', `@', `#', `%').  Note that
         ;; Emacs's [:alnum:] is Unicode-aware, so e.g. \"café\" is a
         ;; legal tag and is therefore not tested here.
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("invalid-tag!") nil parent-uri)
+         test-file "Task" "TODO" '("invalid-tag!") nil parent-link)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag-with-dash") nil parent-uri)
+         test-file "Task" "TODO" '("tag-with-dash") nil parent-link)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag with space") nil parent-uri)
+         test-file "Task" "TODO" '("tag with space") nil parent-link)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag:colon") nil parent-uri)
+         test-file "Task" "TODO" '("tag:colon") nil parent-link)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag.dot") nil parent-uri)
+         test-file "Task" "TODO" '("tag.dot") nil parent-link)
         (org-mcp-test--call-add-todo-expecting-error
-         test-file "Task" "TODO" '("tag~tilde") nil parent-uri)))))
+         test-file "Task" "TODO" '("tag~tilde") nil parent-link)))))
 
 (ert-deftest org-mcp-test-add-todo-tag-org-tag-re-extras ()
   "Test that `#' and `%' are accepted (per `org-tag-re')."
@@ -4024,13 +4024,13 @@ Org permits free-form tags in headlines, so we only enforce
       org-mcp-test--content-empty
     (let ((org-tag-alist nil)
           (org-tag-persistent-alist nil))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--add-todo-and-check
          "Task1"
          "TODO"
          '("tag#hash" "pct%tag")
          nil
-         parent-uri
+         parent-link
          nil
          (file-name-nondirectory test-file)
          test-file
@@ -4051,14 +4051,14 @@ Org permits free-form tags in headlines, so we only enforce
              ("proj_a")
              ("proj_b")
              (:endgrouptag))))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         ;; Both the umbrella tag and a child tag are valid.
         (org-mcp-test--add-todo-and-check
          "Task1"
          "TODO"
          '("project" "proj_a")
          nil
-         parent-uri
+         parent-link
          nil
          (file-name-nondirectory test-file)
          test-file
@@ -4078,42 +4078,42 @@ Org permits free-form tags in headlines, so we only enforce
              ("@office" . ?o)
              ("@home" . ?h)
              :endgroup)))
-      (let ((parent-uri (concat "file:" test-file)))
+      (let ((parent-link (concat "file:" test-file)))
         (org-mcp-test--call-add-todo-expecting-error
          test-file "Task" "TODO"
          ["@office" "@home"]
-         nil parent-uri)))))
+         nil parent-link)))))
 
 (ert-deftest org-mcp-test-add-todo-child-under-parent ()
   "Test adding a child TODO under an existing parent."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-nested-siblings
-    (let ((parent-uri
+    (let ((parent-link
            (org-mcp-test--file-link test-file "*Parent Task")))
       (org-mcp-test--add-todo-and-check
        "Child Task"
        "TODO"
        '("work")
        nil ; no body
-       parent-uri
+       parent-link
        nil ; no after_link
        (file-name-nondirectory test-file)
        test-file
        org-mcp-test--regex-child-under-parent))))
 
-(ert-deftest org-mcp-test-add-todo-child-empty-after-uri ()
+(ert-deftest org-mcp-test-add-todo-child-empty-after-link ()
   "Test adding a child TODO with empty string for after_link.
 Empty string should be treated as nil - append as last child."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-nested-siblings
-    (let ((parent-uri
+    (let ((parent-link
            (org-mcp-test--file-link test-file "*Parent Task")))
       (org-mcp-test--add-todo-and-check
        "Child Task"
        "TODO"
        '("work")
        nil ; no body
-       parent-uri
+       parent-link
        "" ; empty string after_link
        (file-name-nondirectory test-file)
        test-file
@@ -4129,14 +4129,14 @@ had no children."
     (org-mcp-test--with-id-tracking
         (list test-file)
         `((,org-mcp-test--childless-parent-id . ,test-file))
-      (let ((parent-uri
+      (let ((parent-link
              (concat "id:" org-mcp-test--childless-parent-id)))
         (org-mcp-test--add-todo-and-check
          "Only Child"
          "TODO"
          '("work")
          nil ; no body
-         parent-uri
+         parent-link
          nil ; no after_link
          (file-name-nondirectory test-file)
          test-file
@@ -4147,20 +4147,20 @@ had no children."
 This tests the bug where the second child was created at level 4 instead of level 3."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-level2-parent-level3-children
-    (let ((parent-uri
+    (let ((parent-link
            (org-mcp-test--file-link test-file "*Review the package")))
       (org-mcp-test--add-todo-and-check
        "Second Child"
        "TODO"
        '("work")
        nil  ; no body
-       parent-uri
+       parent-link
        nil ; no after_link
        (file-name-nondirectory test-file)
        test-file
        org-mcp-test--regex-second-child-same-level))))
 
-(ert-deftest org-mcp-test-add-todo-with-after-uri ()
+(ert-deftest org-mcp-test-add-todo-with-after-link ()
   "Test adding TODO after a sibling using after_link.
 Tests that adding after a level 3 sibling correctly creates level 3.
 Reproduces the emacs.org scenario: level 2 parent (via its title),
@@ -4170,9 +4170,9 @@ level 3 sibling (via its ID)."
           (org-tag-alist '("internet")))
       (org-mcp-test--with-id-setup test-file initial-content
           `(,org-mcp-test--level2-parent-level3-sibling-id)
-        (let ((parent-uri
+        (let ((parent-link
                (org-mcp-test--file-link test-file "*Review the package"))
-              (after-uri
+              (after-link
                (concat "id:" org-mcp-test--level2-parent-level3-sibling-id)))
           ;; BUG: org-insert-heading creates level 1 (*) instead of level 3 (***)
           (org-mcp-test--add-todo-and-check
@@ -4180,8 +4180,8 @@ level 3 sibling (via its ID)."
            "TODO"
            '("internet")
            nil
-           parent-uri
-           after-uri
+           parent-link
+           after-link
            (file-name-nondirectory test-file)
            test-file
            org-mcp-test--regex-after-sibling-level3))))))
@@ -4190,14 +4190,14 @@ level 3 sibling (via its ID)."
   "Test adding TODO with body text."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file))
+    (let ((parent-link (concat "file:" test-file))
           (body-text org-mcp-test--body-text-multiline))
       (org-mcp-test--add-todo-and-check
        "Task with Body"
        "TODO"
        '("work")
        body-text
-       parent-uri
+       parent-link
        nil
        (file-name-nondirectory test-file)
        test-file
@@ -4229,7 +4229,7 @@ level 3 sibling (via its ID)."
 A single asterisk without space is not a valid Org headline."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file))
+    (let ((parent-link (concat "file:" test-file))
           (body-with-asterisk "Some initial text.\n*"))
       ;; Should succeed since * without space is not a headline
       (org-mcp-test--add-todo-and-check
@@ -4237,7 +4237,7 @@ A single asterisk without space is not a valid Org headline."
        "TODO"
        '("work")
        body-with-asterisk
-       parent-uri
+       parent-link
        nil
        (file-name-nondirectory test-file)
        test-file
@@ -4253,7 +4253,7 @@ rejected in TODO body content."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (let
-        ((parent-uri (concat "file:" test-file))
+        ((parent-link (concat "file:" test-file))
          (body-with-unbalanced-block
           "Here's an example:\n#+BEGIN_EXAMPLE\nsome code\nMore text after block"))
       ;; Should reject unbalanced blocks
@@ -4263,14 +4263,14 @@ rejected in TODO body content."
        "TODO"
        '("work")
        body-with-unbalanced-block
-       parent-uri))))
+       parent-link))))
 
 (ert-deftest org-mcp-test-add-todo-body-with-unbalanced-end-block ()
   "Test that adding TODO with body containing unbalanced END block is rejected.
 An #+END_EXAMPLE without matching #+BEGIN_EXAMPLE should be rejected."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file))
+    (let ((parent-link (concat "file:" test-file))
           (body-with-unbalanced-end
            "Some text before\n#+END_EXAMPLE\nMore text after"))
       ;; Should reject unbalanced END blocks
@@ -4280,7 +4280,7 @@ An #+END_EXAMPLE without matching #+BEGIN_EXAMPLE should be rejected."
        "TODO"
        '("work")
        body-with-unbalanced-end
-       parent-uri))))
+       parent-link))))
 
 (ert-deftest org-mcp-test-add-todo-body-with-literal-block-end ()
   "Test that TODO body with END_SRC inside EXAMPLE block is accepted.
@@ -4288,7 +4288,7 @@ An #+END_EXAMPLE without matching #+BEGIN_EXAMPLE should be rejected."
 This is valid Org-mode syntax and should be allowed."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file))
+    (let ((parent-link (concat "file:" test-file))
           (body-with-literal-end
            "Example of source block:\n#+BEGIN_EXAMPLE\n#+END_SRC\n#+END_EXAMPLE\nText after."))
       ;; Should succeed - #+END_SRC is just literal text inside EXAMPLE block
@@ -4297,7 +4297,7 @@ This is valid Org-mode syntax and should be allowed."
        "TODO"
        '("work")
        body-with-literal-end
-       parent-uri
+       parent-link
        nil
        (file-name-nondirectory test-file)
        test-file
@@ -4336,21 +4336,21 @@ This is valid Org-mode syntax and should be allowed."
          (org-mcp-test--with-id-tracking
           (list test-file)
           `((,first-id . ,test-file))
-          (let ((parent-uri
+          (let ((parent-link
                  (org-mcp-test--file-link test-file "*Parent Task"))
-                (after-uri (concat "id:" first-id)))
+                (after-link (concat "id:" first-id)))
             (org-mcp-test--add-todo-and-check
              "New Task After First"
              "TODO"
              '("work")
              nil
-             parent-uri
-             after-uri
+             parent-link
+             after-link
              (file-name-nondirectory test-file)
              test-file
              org-mcp-test--regex-todo-after-sibling))))))))
 
-(ert-deftest org-mcp-test-add-todo-afterUri-not-sibling ()
+(ert-deftest org-mcp-test-add-todo-after-link-not-sibling ()
   "Test error when after_link is not a child of parent_link."
   (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
         (org-tag-alist '("work")))
@@ -4358,9 +4358,9 @@ This is valid Org-mode syntax and should be allowed."
      test-file
      org-mcp-test--content-wrong-levels
      `(,org-mcp-test--other-child-id)
-     (let* ((parent-uri
+     (let* ((parent-link
              (org-mcp-test--file-link test-file "*First Parent"))
-            (after-uri
+            (after-link
              (concat "id:" org-mcp-test--other-child-id)))
        ;; Error: Other Child is not a child of First Parent
        (org-mcp-test--call-tool-refused
@@ -4369,13 +4369,13 @@ This is valid Org-mode syntax and should be allowed."
           (todo_state . "TODO")
           (tags . ["work"])
           (body . nil)
-          (parent_link . ,parent-uri)
-          (after_link . ,after-uri))
-        (concat "\\`Sibling " (regexp-quote after-uri)
+          (parent_link . ,parent-link)
+          (after_link . ,after-link))
+        (concat "\\`Sibling " (regexp-quote after-link)
                 " not found under parent\\'")
         test-file)))))
 
-(ert-deftest org-mcp-test-add-todo-parent-id-uri ()
+(ert-deftest org-mcp-test-add-todo-parent-id-link ()
   "Test adding TODO with parent specified as an `id:' link."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
@@ -4385,7 +4385,7 @@ This is valid Org-mode syntax and should be allowed."
       (org-mcp-test--with-id-tracking
           (list test-file)
           `((,org-mcp-test--content-nested-siblings-parent-id . ,test-file))
-        (let ((parent-uri
+        (let ((parent-link
                (concat "id:"
                        org-mcp-test--content-nested-siblings-parent-id)))
           (org-mcp-test--add-todo-and-check
@@ -4393,11 +4393,11 @@ This is valid Org-mode syntax and should be allowed."
            "TODO"
            '("work")
            nil
-           parent-uri
+           parent-link
            nil
            (file-name-nondirectory test-file)
            test-file
-           org-mcp-test--pattern-add-todo-parent-id-uri))))))
+           org-mcp-test--pattern-add-todo-parent-id-link))))))
 
 (ert-deftest org-mcp-test-add-todo-mutex-tags-error ()
   "Test that mutually exclusive tags are rejected."
@@ -4415,14 +4415,14 @@ This is valid Org-mode syntax and should be allowed."
                ("@home" . ?h)
                :endgroup)))
         ;; Try to add TODO with conflicting tags - should error
-        (let ((parent-uri (concat "file:" test-file)))
+        (let ((parent-link (concat "file:" test-file)))
           (org-mcp-test--call-add-todo-expecting-error
            test-file
            "Test Task"
            "TODO"
            ["work" "@office" "@home"] ; conflicting tags
            nil
-           parent-uri
+           parent-link
            nil))))))
 
 (ert-deftest org-mcp-test-add-todo-mutex-tags-valid ()
@@ -4441,13 +4441,13 @@ This is valid Org-mode syntax and should be allowed."
                ("@home" . ?h)
                :endgroup ("project" . ?p))))
         ;; Add TODO with non-conflicting tags
-        (let ((parent-uri (concat "file:" test-file)))
+        (let ((parent-link (concat "file:" test-file)))
           (org-mcp-test--add-todo-and-check
            "Test Task"
            "TODO"
            ["work" "@office" "project"] ; no conflict
            nil
-           parent-uri
+           parent-link
            nil
            (file-name-nondirectory test-file)
            test-file
@@ -4457,13 +4457,13 @@ This is valid Org-mode syntax and should be allowed."
   "Test that adding TODO with nil tags creates headline without tags."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--add-todo-and-check
        "Task Without Tags"
        "TODO"
        nil ; nil for tags
        nil ; no body
-       parent-uri
+       parent-link
        nil ; no after_link
        (file-name-nondirectory test-file)
        test-file
@@ -4473,13 +4473,13 @@ This is valid Org-mode syntax and should be allowed."
   "Test that adding TODO with empty list tags creates headline without tags."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
-    (let ((parent-uri (concat "file:" test-file)))
+    (let ((parent-link (concat "file:" test-file)))
       (org-mcp-test--add-todo-and-check
        "Task Without Tags"
        "TODO"
        '() ; empty list for tags
        nil ; no body
-       parent-uri
+       parent-link
        nil ; no after_link
        (file-name-nondirectory test-file)
        test-file
@@ -4599,11 +4599,11 @@ and leave the file unchanged."
       ((test-file org-mcp-test--content-simple-todo))
     (let ((org-todo-keywords
            '((sequence "TODO" "IN-PROGRESS" "|" "DONE")))
-          (resource-uri
+          (link
            (org-mcp-test--file-link test-file "*Original Task")))
       ;; Rename the headline
       (org-mcp-test--call-rename-headline-and-check
-       resource-uri
+       link
        "Original Task"
        "Updated Task"
        test-file
@@ -4615,10 +4615,10 @@ and leave the file unchanged."
       ((test-file org-mcp-test--content-simple-todo))
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       ;; Try to rename with wrong current title
-      (let* ((resource-uri
+      (let* ((link
               (org-mcp-test--file-link test-file "*Original Task")))
         (org-mcp-test--call-rename-headline-expecting-error
-         test-file resource-uri "Wrong Title" "Updated Task")))))
+         test-file link "Wrong Title" "Updated Task")))))
 
 (ert-deftest org-mcp-test-rename-headline-preserve-tags ()
   "Test that renaming preserves tags."
@@ -4627,10 +4627,10 @@ and leave the file unchanged."
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
           (org-tag-alist '("work" "urgent" "personal")))
       ;; Rename the headline
-      (let ((resource-uri
+      (let ((link
              (org-mcp-test--file-link test-file "*Task with Tags")))
         (org-mcp-test--call-rename-headline-and-check
-         resource-uri
+         link
          "Task with Tags"
          "Renamed Task"
          test-file
@@ -4641,10 +4641,10 @@ and leave the file unchanged."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
     ;; Rename the headline
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file "*First Child 50% Complete")))
       (org-mcp-test--call-rename-headline-and-check
-       resource-uri
+       link
        "First Child 50% Complete"
        "Updated Child"
        test-file
@@ -4658,15 +4658,15 @@ left unchanged."
   (let ((initial-content org-mcp-test--content-wrong-levels))
     (org-mcp-test--with-temp-org-files
         ((test-file initial-content))
-      (let* ((resource-uri
+      (let* ((link
               (format "%s#First%%20Parent/Target%%20Headline"
                       test-file)))
         (org-mcp-test--call-tool-refused
          "org-rename-headline"
-         `((link . ,resource-uri)
+         `((link . ,link)
            (current_title . "Target Headline")
            (new_title . "Renamed Target Headline"))
-         (concat "\\`Not an Org link: " (regexp-quote resource-uri))
+         (concat "\\`Not an Org link: " (regexp-quote link))
          test-file)))))
 
 (ert-deftest org-mcp-test-rename-headline-by-id ()
@@ -4706,10 +4706,10 @@ left unchanged."
 A title link takes the slash as it is, with no encoding."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-slash-not-nested-before))
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file "*Parent/Child")))
       (org-mcp-test--call-rename-headline-and-check
-       resource-uri
+       link
        "Parent/Child"
        "Parent/Child Renamed"
        test-file
@@ -4722,10 +4722,10 @@ not as Child under Parent."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-slash-not-nested-before))
     ;; Try to rename the "Parent/Child" headline
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file "*Parent/Child")))
       (org-mcp-test--call-rename-headline-and-check
-       resource-uri
+       link
        "Parent/Child"
        "Parent-Child Renamed"
        test-file
@@ -4736,10 +4736,10 @@ not as Child under Parent."
 A title link takes the percent sign as it is, with no encoding."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file "*First Child 50% Complete")))
       (org-mcp-test--call-rename-headline-and-check
-       resource-uri
+       link
        "First Child 50% Complete"
        "First Child 75% Complete"
        test-file
@@ -4766,7 +4766,7 @@ More content."
    "First Child 50% Complete"
    "First Line\nSecond Line"))
 
-(ert-deftest org-mcp-test-rename-headline-duplicate-requires-full-path ()
+(ert-deftest org-mcp-test-rename-headline-duplicate-title-resolves-first ()
   "Test renaming one of several headings sharing a title.
 An outline path, bare or through a parent, is no link and is refused,
 leaving the file unchanged.  A title link resolves, as in Org, to the
@@ -4801,10 +4801,10 @@ locations gain no entry."
             (org-id-locations-file nil)
             (org-id-locations nil))
         ;; Rename headline using its title link
-        (let ((resource-uri
+        (let ((link
                (org-mcp-test--file-link test-file "*Third Child #3")))
           (org-mcp-test--call-rename-headline-and-check
-           resource-uri
+           link
            "Third Child #3"
            "Renamed Child"
            test-file
@@ -4823,11 +4823,11 @@ Target under Second Section, not the first Target in the file."
     (org-mcp-test--with-id-tracking
         (list test-file)
         `((,org-mcp-test--hierarchy-second-section-id . ,test-file))
-      (let ((resource-uri
+      (let ((link
              (format "id:%s::*Target"
                      org-mcp-test--hierarchy-second-section-id)))
         (org-mcp-test--call-rename-headline-and-check
-         resource-uri
+         link
          "Target"
          "Renamed Target"
          test-file
@@ -4839,12 +4839,12 @@ The navigation function should find headlines even when they have TODO keywords.
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-keywords-before))
    ;; Try to rename using the headline title without TODO keyword
-   (let ((resource-uri
+   (let ((link
           (org-mcp-test--file-link test-file "*Review Documents")))
      ;; This should work - finding "Review Documents" even though
      ;; the actual headline is "TODO Review Documents"
      (org-mcp-test--call-rename-headline-and-check
-      resource-uri
+      link
       "Review Documents"
       "Q1 Planning Review"
       test-file
@@ -4912,11 +4912,11 @@ content here."
   "Test org-edit-body tool can add content to empty body."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
-    (let ((resource-uri
+    (let ((link
            (org-mcp-test--file-link test-file "*Third Child #3")))
       (org-mcp-test--call-edit-body-and-check
        test-file
-       resource-uri
+       link
        ""
        "New content added."
        org-mcp-test--pattern-edit-body-empty
@@ -5251,8 +5251,8 @@ behind it."
 (defun org-mcp-test--read-content (file headline)
   "Return parsed `content' field for HEADLINE in FILE via org-read.
 HEADLINE is the heading's title, reached through its title link."
-  (let* ((uri (org-mcp-test--file-link file (concat "*" headline)))
-         (result-text (org-mcp-test--call-read uri))
+  (let* ((link (org-mcp-test--file-link file (concat "*" headline)))
+         (result-text (org-mcp-test--call-read link))
          (result (json-parse-string result-text :object-type 'alist)))
     (alist-get 'content result)))
 
@@ -5385,9 +5385,9 @@ Body after everything."))
   "Test org-clock-add saves the completed CLOCK entry to disk."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-add
-                    uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+                    link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'added result) t))
@@ -5398,14 +5398,14 @@ Body after everything."))
   "Test clock-add on a clean visiting buffer edits it and saves to disk."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (buffer (find-file-noselect test-file)))
       (unwind-protect
           (progn
             (with-current-buffer buffer
               (should-not (buffer-modified-p)))
             (let ((result (org-mcp-test--call-clock-add
-                           uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+                           link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
               (should (equal (alist-get 'success result) t))
               (should (eq (alist-get 'saved result) t))
               (should (equal (alist-get 'added result) t)))
@@ -5459,7 +5459,7 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
   "Test clock-add on a pre-modified buffer edits in-buffer without auto-save."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (buffer (find-file-noselect test-file)))
       (unwind-protect
           (progn
@@ -5469,7 +5469,7 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
               (insert "\n* TODO Task Two\n")
               (should (buffer-modified-p)))
             (let ((result (org-mcp-test--call-clock-add
-                           uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+                           link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
               (should (equal (alist-get 'success result) t))
               (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'added result) t)))
@@ -5487,8 +5487,8 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
   "Test org-clock-in saves the open CLOCK entry to disk."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
-           (result (org-mcp-test--call-clock-in uri "2026-01-01T10:00:00")))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+           (result (org-mcp-test--call-clock-in link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'clocked_in result) t))
@@ -5500,7 +5500,7 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
 When the visited buffer was already dirty, org-mcp must not save to disk."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (buffer (find-file-noselect test-file)))
       (unwind-protect
           (progn
@@ -5510,7 +5510,7 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
               (insert "\n* TODO Task Two\n")
               (should (buffer-modified-p)))
             (let ((result (org-mcp-test--call-clock-in
-                           uri "2026-01-01T10:00:00")))
+                           link "2026-01-01T10:00:00")))
               (should (equal (alist-get 'success result) t))
               (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'clocked_in result) t)))
@@ -5582,9 +5582,9 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
   "Test clock-in with resolve=true on a heading with no dangling clocks."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    uri "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'clocked_in result) t))
       ;; The `resolved' key is only present when clocks were deleted.
@@ -5596,9 +5596,9 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
   "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-one-dangling-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    uri "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 1))
       (org-mcp-test--verify-file-matches
@@ -5608,9 +5608,9 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
   "Test clock-in with resolve=true deletes multiple dangling CLOCK entries."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-multi-dangling-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    uri "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 2))
       (org-mcp-test--verify-file-matches
@@ -5620,9 +5620,9 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
   "Test clock-in with resolve=true deletes dangling but preserves closed."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-mixed-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    uri "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 1))
       (org-mcp-test--verify-file-matches
@@ -5632,9 +5632,9 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
   "Test resolve=true does not touch dangling clocks in sibling headings."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-other-heading-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    uri "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true")))
       (should (equal (alist-get 'success result) t))
       ;; No clocks were under Task One; Task Two's dangling CLOCK is untouched.
       (should (null (assq 'resolved result)))
@@ -5727,9 +5727,9 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
     (let ((org-clock-into-drawer nil))
-      (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
              (result (org-mcp-test--call-clock-add
-                      uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+                      link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'added result) t))
         (org-mcp-test--verify-file-matches
@@ -5741,9 +5741,9 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
     (let ((org-clock-into-drawer nil))
-      (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
              (result (org-mcp-test--call-clock-in
-                      uri "2026-01-01T10:00:00")))
+                      link "2026-01-01T10:00:00")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'clocked_in result) t))
         (org-mcp-test--verify-file-matches
@@ -5784,15 +5784,15 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   "Test clock-in closes an active clock in the same file."
   (org-mcp-test--with-temp-org-files
       ((file-1 org-mcp-test--clock-in-close-same-file-content))
-    (let* ((uri-1 (org-mcp-test--file-link file-1 "*Task One"))
-           (uri-2 (org-mcp-test--file-link file-1 "*Task Two"))
+    (let* ((link-1 (org-mcp-test--file-link file-1 "*Task One"))
+           (link-2 (org-mcp-test--file-link file-1 "*Task Two"))
            (result-1 (org-mcp-test--call-clock-in
-                      uri-1 "2026-01-01T10:00:00")))
+                      link-1 "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result-1) t))
       (should (equal (alist-get 'clocked_in result-1) t))
       ;; Clock in to Task Two — should close Task One first
       (let ((result-2 (org-mcp-test--call-clock-in
-                       uri-2 "2026-01-01T11:00:00")))
+                       link-2 "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result-2) t))
         (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
@@ -5861,15 +5861,15 @@ on disk stays unchanged and the response reports `saved' as false."
   (org-mcp-test--with-temp-org-files
       ((file-1 org-mcp-test--clock-task-content)
        (file-2 org-mcp-test--clock-task-content))
-    (let* ((uri-1 (org-mcp-test--file-link file-1 "*Task One"))
-           (uri-2 (org-mcp-test--file-link file-2 "*Task One"))
+    (let* ((link-1 (org-mcp-test--file-link file-1 "*Task One"))
+           (link-2 (org-mcp-test--file-link file-2 "*Task One"))
            (result-1 (org-mcp-test--call-clock-in
-                      uri-1 "2026-01-01T10:00:00")))
+                      link-1 "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result-1) t))
       (should (equal (alist-get 'clocked_in result-1) t))
       ;; Clock in to file-2 — should close file-1 first
       (let ((result-2 (org-mcp-test--call-clock-in
-                       uri-2 "2026-01-01T11:00:00")))
+                       link-2 "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result-2) t))
         (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
@@ -5936,14 +5936,14 @@ lands in that buffer, so the response covers both edits."
   (org-mcp-test--with-temp-org-files
       ((file-1 org-mcp-test--clock-task-content)
        (file-2 org-mcp-test--clock-task-content))
-    (let* ((uri-1 (org-mcp-test--file-link file-1 "*Task One"))
-           (uri-2 (org-mcp-test--file-link file-2 "*Task One"))
+    (let* ((link-1 (org-mcp-test--file-link file-1 "*Task One"))
+           (link-2 (org-mcp-test--file-link file-2 "*Task One"))
            (result-1 (org-mcp-test--call-clock-in
-                      uri-1 "2026-01-01T10:00:00")))
+                      link-1 "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result-1) t))
       ;; Clock in to file-2 at 12:00 — should close file-1 at 12:00
       (let ((result-2 (org-mcp-test--call-clock-in
-                       uri-2 "2026-01-01T12:00:00")))
+                       link-2 "2026-01-01T12:00:00")))
         (should (equal (alist-get 'success result-2) t))
         ;; Verify file-1 has a 2-hour closed clock
          (should
@@ -5993,9 +5993,9 @@ does not find, so there is no clock to close and no heading to link."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
     (let ((org-clock-into-drawer "WORK"))
-      (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
              (result (org-mcp-test--call-clock-add
-                      uri "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+                      link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'added result) t))
         (org-mcp-test--verify-file-matches
@@ -6267,10 +6267,10 @@ closed clocks."
   "Test clock-delete removes the LOGBOOK drawer when it becomes empty."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-only-closed-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result
             (org-mcp-test--call-clock-delete
-             uri "2026-01-01T10:00:00")))
+             link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'deleted result) t))
@@ -6282,10 +6282,10 @@ closed clocks."
   "Test clock-delete keeps the LOGBOOK drawer when other entries remain."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-delete-multi-initial-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result
             (org-mcp-test--call-clock-delete
-             uri "2026-01-01T10:00:00")))
+             link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'deleted result) t))
       (org-mcp-test--verify-file-matches
@@ -6311,10 +6311,10 @@ Exercises `org-mcp--clock-remove-empty-logbook' when
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-delete-no-drawer-content))
     (let ((org-clock-into-drawer nil))
-      (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
              (result
               (org-mcp-test--call-clock-delete
-               uri "2026-01-01T10:00:00")))
+               link "2026-01-01T10:00:00")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'deleted result) t))
         (org-mcp-test--verify-file-matches
@@ -6329,10 +6329,10 @@ Exercises `org-mcp--clock-remove-empty-logbook' when
          "* TODO Task\n:LOGBOOK:\n"
          "CLOCK: [2026-01-01 Mon 10:00]--[2026-01-01 Mon 11:00] =>  1:00\n"
          ":END:\n")))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task"))
            (result
             (org-mcp-test--call-clock-delete
-             uri "2026-01-01T10:00:00")))
+             link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'deleted result) t)))))
 
@@ -6340,10 +6340,10 @@ Exercises `org-mcp--clock-remove-empty-logbook' when
   "Test clock-delete surfaces an MCP error when no entry matches."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-only-closed-content))
-    (let ((uri (org-mcp-test--file-link test-file "*Task One")))
+    (let ((link (org-mcp-test--file-link test-file "*Task One")))
       (should-error
        (org-mcp-test--call-clock-delete
-        uri "2026-01-03T09:00:00")))))
+        link "2026-01-03T09:00:00")))))
 
 (defconst org-mcp-test--clock-delete-with-state-note-content
   (concat
@@ -6370,10 +6370,10 @@ is gone — any non-CLOCK content (e.g. state-change notes) must
 keep the drawer alive."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-delete-with-state-note-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result
             (org-mcp-test--call-clock-delete
-             uri "2026-01-01T10:00:00")))
+             link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'deleted result) t))
       (org-mcp-test--verify-file-matches
@@ -6406,10 +6406,10 @@ the drawer must remain.  This pins down behavior on the
 whitespace-between-markers edge case."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-delete-with-blank-line-content))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task One"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result
             (org-mcp-test--call-clock-delete
-             uri "2026-01-01T10:00:00")))
+             link "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'deleted result) t))
       (org-mcp-test--verify-file-matches
@@ -6422,8 +6422,8 @@ whitespace-between-markers edge case."
   "Test setting a new property on a bare task."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (properties . ((EFFORT . "2:00")))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-properties" params))
@@ -6440,8 +6440,8 @@ whitespace-between-markers edge case."
   "Test updating an existing property."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task with Properties"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
+           (params `((link . ,link)
                      (properties . ((EFFORT . "2:30")))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-properties" params))
@@ -6454,8 +6454,8 @@ whitespace-between-markers edge case."
   "Test deleting a property via null value."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task with Properties"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
+           (params `((link . ,link)
                      (properties . ((EFFORT)))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-properties" params))
@@ -6468,33 +6468,33 @@ whitespace-between-markers edge case."
   "Test that special properties are rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-set-properties" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (properties . ((TODO . "DONE"))))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-set-properties-id-uri ()
+(ert-deftest org-mcp-test-set-properties-id-link ()
   "Test setting properties via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (properties . ((EFFORT . "1:00")))))
           (result-text
            (mcp-server-lib-ert-call-tool "org-set-properties" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 (ert-deftest org-mcp-test-set-properties-id-and-custom-id ()
   "Test a client sets ID and CUSTOM_ID on an existing heading.
@@ -6552,8 +6552,8 @@ with one is refused all the same."
   "Test setting SCHEDULED on entry without one."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (scheduled . "2026-03-27")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
@@ -6570,8 +6570,8 @@ with one is refused all the same."
   "Test updating an existing SCHEDULED timestamp."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-scheduled))
-    (let* ((uri (org-mcp-test--file-link test-file "*Scheduled Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
+           (params `((link . ,link)
                      (scheduled . "2026-04-15")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
@@ -6588,8 +6588,8 @@ with one is refused all the same."
   "Test removing SCHEDULED timestamp."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-scheduled))
-    (let* ((uri (org-mcp-test--file-link test-file "*Scheduled Task"))
-           (params `((link . ,uri)))
+    (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
+           (params `((link . ,link)))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
            (result (json-read-from-string result-text)))
@@ -6602,33 +6602,33 @@ with one is refused all the same."
   "Test that invalid date format triggers an error."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-update-scheduled" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (scheduled . "not-a-date"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-update-scheduled-id-uri ()
+(ert-deftest org-mcp-test-update-scheduled-id-link ()
   "Test setting SCHEDULED via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (scheduled . "2026-03-27")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-update-scheduled" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 ;;; Tests for org-update-deadline
 
@@ -6636,8 +6636,8 @@ with one is refused all the same."
   "Test setting DEADLINE on entry without one."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (deadline . "2026-03-27")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-deadline" params))
@@ -6654,8 +6654,8 @@ with one is refused all the same."
   "Test updating an existing DEADLINE timestamp."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
-    (let* ((uri (org-mcp-test--file-link test-file "*Deadline Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
+           (params `((link . ,link)
                      (deadline . "2026-04-15")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-deadline" params))
@@ -6672,8 +6672,8 @@ with one is refused all the same."
   "Test removing DEADLINE timestamp."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
-    (let* ((uri (org-mcp-test--file-link test-file "*Deadline Task"))
-           (params `((link . ,uri)))
+    (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
+           (params `((link . ,link)))
            (result-text
             (mcp-server-lib-ert-call-tool "org-update-deadline" params))
            (result (json-read-from-string result-text)))
@@ -6686,33 +6686,33 @@ with one is refused all the same."
   "Test that invalid date format triggers an error."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-update-deadline" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (deadline . "not-a-date"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-update-deadline-id-uri ()
+(ert-deftest org-mcp-test-update-deadline-id-link ()
   "Test setting DEADLINE via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (deadline . "2026-03-27")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-update-deadline" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 ;;; Tests for org-set-tags
 
@@ -6721,8 +6721,8 @@ with one is refused all the same."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((org-tag-alist '("work" "personal" "urgent"))
-           (uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+           (link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (tags . ["work" "urgent"])))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-tags" params))
@@ -6738,8 +6738,8 @@ with one is refused all the same."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-tags))
     (let* ((org-tag-alist '("work" "personal" "urgent"))
-           (uri (org-mcp-test--file-link test-file "*Task with Tags"))
-           (params `((link . ,uri)
+           (link (org-mcp-test--file-link test-file "*Task with Tags"))
+           (params `((link . ,link)
                      (tags . "personal")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-tags" params))
@@ -6752,8 +6752,8 @@ with one is refused all the same."
   "Test clearing all tags."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-tags))
-    (let* ((uri (org-mcp-test--file-link test-file "*Task with Tags"))
-           (params `((link . ,uri)))
+    (let* ((link (org-mcp-test--file-link test-file "*Task with Tags"))
+           (params `((link . ,link)))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-tags" params))
            (result (json-read-from-string result-text)))
@@ -6766,13 +6766,13 @@ with one is refused all the same."
   "Test that invalid tag names are rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-set-tags" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (tags . "invalid tag!"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -6786,8 +6786,8 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((org-tag-alist '("work" "personal"))
-           (uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+           (link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (tags . "nonexistent")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-tags" params))
@@ -6800,33 +6800,33 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((org-tag-alist '(:startgroup "work" "personal" :endgroup "urgent"))
-          (uri (org-mcp-test--file-link test-file "*Simple Task")))
+          (link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-set-tags" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (tags . ["work" "personal"]))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-set-tags-id-uri ()
+(ert-deftest org-mcp-test-set-tags-id-link ()
   "Test setting tags via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (tags . "work")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-set-tags" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 ;;; Tests for org-set-priority
 
@@ -6834,8 +6834,8 @@ not membership in the configured alist."
   "Test setting priority on a bare task."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (priority . "A")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-priority" params))
@@ -6851,8 +6851,8 @@ not membership in the configured alist."
   "Test changing existing priority."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
-    (let* ((uri (org-mcp-test--file-link test-file "*Priority Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
+           (params `((link . ,link)
                      (priority . "C")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-priority" params))
@@ -6867,8 +6867,8 @@ not membership in the configured alist."
   "Test removing priority."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
-    (let* ((uri (org-mcp-test--file-link test-file "*Priority Task"))
-           (params `((link . ,uri)))
+    (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
+           (params `((link . ,link)))
            (result-text
             (mcp-server-lib-ert-call-tool "org-set-priority" params))
            (result (json-read-from-string result-text)))
@@ -6881,13 +6881,13 @@ not membership in the configured alist."
   "Test that out-of-range priority is rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-set-priority" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (priority . "Z"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -6898,33 +6898,33 @@ not membership in the configured alist."
   "Test that multi-character priority is rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-set-priority" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (priority . "AB"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-set-priority-id-uri ()
+(ert-deftest org-mcp-test-set-priority-id-link ()
   "Test setting priority via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (priority . "A")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-set-priority" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 ;;; Tests for org-edit-body append mode
 
@@ -6932,8 +6932,8 @@ not membership in the configured alist."
   "Test appending to existing body."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (params `((link . ,link)
                      (old_body . "")
                      (new_body . "Appended line.")
                      (append . t)))
@@ -6951,8 +6951,8 @@ not membership in the configured alist."
   "Test appending to entry with no body."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-empty-body))
-    (let* ((uri (org-mcp-test--file-link test-file "*Empty Body Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Empty Body Task"))
+           (params `((link . ,link)
                      (old_body . "")
                      (new_body . "New body content.")
                      (append . t)))
@@ -6967,8 +6967,8 @@ not membership in the configured alist."
   "Test that appended content goes before child headlines."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-children))
-    (let* ((uri (org-mcp-test--file-link test-file "*Parent Task"))
-           (params `((link . ,uri)
+    (let* ((link (org-mcp-test--file-link test-file "*Parent Task"))
+           (params `((link . ,link)
                      (old_body . "")
                      (new_body . "Appended text.")
                      (append . t)))
@@ -6983,13 +6983,13 @@ not membership in the configured alist."
   "Test that content with headlines is rejected in append mode."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-edit-body" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (old_body . "")
                   (new_body . "* A headline")
                   (append . t))))
@@ -7002,13 +7002,13 @@ not membership in the configured alist."
   "Test that unbalanced blocks are rejected in append mode."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-edit-body" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (old_body . "")
                   (new_body . "#+BEGIN_SRC\ncode\n")
                   (append . t))))
@@ -7017,14 +7017,14 @@ not membership in the configured alist."
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-edit-body-append-id-uri ()
+(ert-deftest org-mcp-test-edit-body-append-id-link ()
   "Test appending body via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (old_body . "")
                     (new_body . "Appended.")
                     (append . t)))
@@ -7032,7 +7032,7 @@ not membership in the configured alist."
            (mcp-server-lib-ert-call-tool "org-edit-body" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 ;;; Tests for org-add-logbook-note
 
@@ -7041,8 +7041,8 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((org-log-into-drawer t))
-      (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-             (params `((link . ,uri)
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+             (params `((link . ,link)
                        (note . "This is my note.")))
              (result-text
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
@@ -7060,8 +7060,8 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-logbook))
     (let ((org-log-into-drawer t))
-      (let* ((uri (org-mcp-test--file-link test-file "*Task with Logbook"))
-             (params `((link . ,uri)
+      (let* ((link (org-mcp-test--file-link test-file "*Task with Logbook"))
+             (params `((link . ,link)
                        (note . "Another note.")))
              (result-text
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
@@ -7075,8 +7075,8 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((org-log-into-drawer t))
-      (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-             (params `((link . ,uri)
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+             (params `((link . ,link)
                        (note . "First line.\nSecond line.")))
              (result-text
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
@@ -7089,42 +7089,42 @@ not membership in the configured alist."
   "Test that whitespace-only note is rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((uri (org-mcp-test--file-link test-file "*Simple Task")))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--assert-error-and-file
        test-file
        (let* ((request
                (mcp-server-lib-create-tools-call-request
                 "org-add-logbook-note" 1
-                `((link . ,uri)
+                `((link . ,link)
                   (note . "   "))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
               (result (mcp-server-lib-ert-process-tool-response response)))
          (error "Expected error but got success: %s" result))))))
 
-(ert-deftest org-mcp-test-add-logbook-note-id-uri ()
+(ert-deftest org-mcp-test-add-logbook-note-id-link ()
   "Test adding logbook note via an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
-   (let* ((uri (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,uri)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (params `((link . ,link)
                     (note . "Test note.")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
-     (should (equal (alist-get 'link result) uri)))))
+     (should (equal (alist-get 'link result) link)))))
 
 (ert-deftest org-mcp-test-add-logbook-note-special-chars ()
   "Test adding logbook note containing special characters."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((org-log-into-drawer t))
-      (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
              (params
-              `((link . ,uri)
+              `((link . ,link)
                 (note
                  . "Quotes \"like this\", backslash \\, percent %, asterisk *.")))
              (result-text
@@ -7141,8 +7141,8 @@ drawer, matching Org's own behavior."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((org-log-into-drawer nil))
-      (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-             (params `((link . ,uri)
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+             (params `((link . ,link)
                        (note . "Plain note.")))
              (result-text
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
@@ -7158,8 +7158,8 @@ drawer, matching Org's own behavior."
     (let ((org-log-into-drawer t)
           (org-log-note-headings
            '((note . "Custom note prefix %t"))))
-      (let* ((uri (org-mcp-test--file-link test-file "*Simple Task"))
-             (params `((link . ,uri)
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+             (params `((link . ,link)
                        (note . "My note.")))
              (result-text
               (mcp-server-lib-ert-call-tool "org-add-logbook-note" params))
@@ -7178,28 +7178,28 @@ QUERY is the org-ql query sexp as a string."
           (mcp-server-lib-ert-call-tool "org-ql-query" params)))
     (json-read-from-string result-text)))
 
-(ert-deftest org-mcp-test-ql-query-uri-with-id ()
+(ert-deftest org-mcp-test-ql-query-link-with-id ()
   "Test that org-ql-query links a headline with an ID by `id:'."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-with-id-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
            (matches (alist-get 'matches result))
            (first-match (aref matches 0))
-           (uri (alist-get 'link first-match)))
+           (link (alist-get 'link first-match)))
       (should (equal (alist-get 'total result) 1))
-      (should (equal uri (concat "id:" org-mcp-test--content-with-id-id))))))
+      (should (equal link (concat "id:" org-mcp-test--content-with-id-id))))))
 
-(ert-deftest org-mcp-test-ql-query-uri-without-id ()
+(ert-deftest org-mcp-test-ql-query-link-without-id ()
   "Test that org-ql-query links a headline without an ID by its title."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
            (matches (alist-get 'matches result))
            (first-match (aref matches 0))
-           (uri (alist-get 'link first-match)))
+           (link (alist-get 'link first-match)))
       (should (equal (alist-get 'total result) 1))
       (should
-       (equal uri (org-mcp-test--file-link test-file "*Simple Task"))))))
+       (equal link (org-mcp-test--file-link test-file "*Simple Task"))))))
 
 ;;; Extra-properties tests
 
@@ -7384,8 +7384,8 @@ CLOSED: [2024-05-15 Wed 09:00]"
 (defun org-mcp-test--read-structured (file headline)
   "Return parsed JSON alist for HEADLINE in FILE via org-read.
 HEADLINE is the heading's title, reached through its title link."
-  (let* ((uri (org-mcp-test--file-link file (concat "*" headline)))
-         (result-text (org-mcp-test--call-read uri)))
+  (let* ((link (org-mcp-test--file-link file (concat "*" headline)))
+         (result-text (org-mcp-test--call-read link)))
     (json-parse-string result-text :object-type 'alist)))
 
 (ert-deftest org-mcp-test-read-exports-priority ()
@@ -8396,17 +8396,17 @@ the test compares."
                              ":END:\n"
                              "Second child content.")
                             org-mcp-test--content-with-id-id))))
-                (let ((uri (nth 1 call))
+                (let ((link (nth 1 call))
                       (expected (nth 3 call)))
                   (let ((result
                          (mcp-server-lib-ert-call-tool
-                          (nth 0 call) (cons `(link . ,uri) (nth 2 call)))))
+                          (nth 0 call) (cons `(link . ,link) (nth 2 call)))))
                     (when expected
                       (should (string= result expected))))
                   (should
                    (equal
-                    (cons uri (org-mcp-test--view-state))
-                    (cons uri before)))))
+                    (cons link (org-mcp-test--view-state))
+                    (cons link before)))))
               (org-mcp-test--verify-file-matches
                test-file
                org-mcp-test--expected-regex-renamed-second-child)))
@@ -8597,7 +8597,7 @@ Größe body.
    "\\'")
   "Regex matching the DONE file after adding a TODO under Ärger.")
 
-(ert-deftest org-mcp-test-bare-outline-path-non-ascii-titles ()
+(ert-deftest org-mcp-test-title-link-non-ascii-titles ()
   "A title link reaches headings with non-ASCII titles.
 org-read, the resource with the link sent raw and in each spelling
 of `org-mcp-test--resource-uris', which encode the titles as UTF-8 or
@@ -8641,7 +8641,7 @@ percent-encoded outline path are no link and are refused."
          test-file
          org-mcp-test--regex-non-ascii-titles-added)))))
 
-(ert-deftest org-mcp-test-resource-bare-outline-path-decoded-once ()
+(ert-deftest org-mcp-test-resource-decodes-slash-in-title-once ()
   "A `%2F' in the resource URI is a slash inside the title, decoded once.
 The title link to Parent/Child, with its slash sent raw or as `%2F',
 reads the heading Parent/Child, not Real Child under Parent.  The
@@ -9556,7 +9556,7 @@ looked up, and the shell command never runs."
             (delete-file canary)))
         (should-not (file-exists-p canary))))))
 
-(ert-deftest org-mcp-test-link-old-forms-refused ()
+(ert-deftest org-mcp-test-link-non-links-refused ()
   "A string that is no Org link is refused before any lookup.
 A bare ID, known or unknown, a bare path, a path with an outline path,
 a title on its own, and an ID, a path or an `id:' link behind
