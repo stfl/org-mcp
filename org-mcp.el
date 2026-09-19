@@ -97,7 +97,8 @@ check, so a symlink pointing out of a root is refused."
 
 (defcustom org-mcp-max-files 1000
   "Most files and directories a call's `files' parameter may reach.
-The query tools that take `files' search the Org files it names.
+The query tools that take `files' search the Org files it names, and
+the tools that name a heading look an `id:' link up in them.
 Each of those files counts once, and so does every directory
 searched for them, a named one included.  A call reaching more is
 refused with an error that names this limit, as soon as the count

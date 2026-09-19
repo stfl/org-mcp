@@ -41,7 +41,7 @@ Then configure in =config.el=:
   ;; Optional: let a call name Org files under these directories too
   ;; (default nil refuses; t permits every Org file Emacs can reach)
   ;; (org-mcp-file-scope-override '("~/decisions"))
-  ;; Optional: most files and directories a query's `files' may reach
+  ;; Optional: most files and directories a call's `files' may reach
   ;; (default 1000)
   ;; (org-mcp-max-files 2000)
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
@@ -83,9 +83,9 @@ different (or narrower) set:
 (setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
 #+end_src
 
-Absolute and relative entries are interchangeable: a file allowed via a
-relative entry can be referenced through a =file:= link with its absolute path,
-and vice versa.
+Absolute and relative entries allow a file alike, and either way a call
+reaches it through a =file:= link with its absolute path; a link with a
+relative path is refused.
 
 Every entry names a file.  A directory listed in =org-mcp-allowed-files= is
 ignored and makes none of the files under it reachable.  Directories in
@@ -166,23 +166,32 @@ directory to resolve against but whichever buffer is current in Emacs:
   the allowed files there, and it is refused when none of them is.
 
 A refused entry or found file makes the whole call fail, and so does a named
-directory that cannot be read.  So does going over =org-mcp-max-files=, 1000
-by default, which counts every file in the set and every directory searched
-for it: the call never searches only part of the set, and it reads no more
-directories than that.
+directory that cannot be read.  So does a set larger than =org-mcp-max-files=
+(see [[*Configuring the file cap]]): the call never searches only part of the
+set.
 
 The call visits each file of the set in an Emacs buffer and closes the buffers
 it opened once it is done, so your buffer list stays as it was.  A buffer that
 was already open stays open.  Without =files=, a query leaves the buffers it
 opens for the allowed files open, as the agenda does.
 
-#+begin_src emacs-lisp
-;; Let a query reach up to 2000 files and directories
-(setq org-mcp-max-files 2000)
-#+end_src
-
 The GTD queries (=query-inbox=, =query-next=, =query-backlog=) always run over
 the allowed files and refuse a =files= parameter.
+
+** Configuring the file cap
+
+=org-mcp-max-files=, 1000 by default, caps how far one =files= parameter may
+reach, for the query tools and for the tools that look an =id:= link up in
+=files= (see [[*Naming the file of an ID]]).  It counts every Org file in the
+set and every directory searched for one, named directories included.  A call
+that reaches more fails with an error naming the limit as soon as the count
+passes it: it never works on part of the set, and it reads no more directories
+than the limit.
+
+#+begin_src emacs-lisp
+;; Let a call's files reach up to 2000 files and directories
+(setq org-mcp-max-files 2000)
+#+end_src
 
 ** Registering with an MCP Client
 
