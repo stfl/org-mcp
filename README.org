@@ -388,9 +388,15 @@ it may only use the identifiers a heading already has, chosen in this order:
 
 =<path>= is the file name as Org writes it, with =~= for your home directory. A
 title link leaves out the TODO keyword, the priority, statistics cookies and the
-tags. Every returned link reaches the same heading when it is sent back to a
-tool. A title link stops resolving once the heading is renamed, and a title that
-several headings share resolves to the first of them.
+tags, and resolves, as it does in Org, to the first heading of the file whose
+title matches once those are left out, letter case aside. Two headings whose
+titles differ only in those parts share one title link, which reaches the
+first of them, and a title link stops resolving once the heading is renamed.
+Give a heading an =ID= or a =CUSTOM_ID= to give it a stable link of its own.
+An =id:= link resolves within the allowed files only (see
+[[*Addressing headings with links]]): the link returned for a heading with an
+=ID= in another file does not lead back to it, and a =file:= link to its
+custom ID or title does.
 
 org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
 heading, and a read leaves the file byte-for-byte unchanged, whether or not a

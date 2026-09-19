@@ -5861,6 +5861,29 @@ lands in that buffer, so the response covers both edits."
        test-file
        org-mcp-test--clock-out-no-drawer-expected-regex))))
 
+(defconst org-mcp-test--clock-task-with-spaced-open-clock
+  "* TODO Task One\n:LOGBOOK:\nCLOCK:  [2026-01-01 Thu 10:00]\n:END:\n"
+  "Org file whose open CLOCK line has two spaces after `CLOCK:'.
+Org reads the line as a clock; org-clock-out's own search does not.")
+
+(ert-deftest org-mcp-test-clock-out-refuses-clock-line-not-found ()
+  "Test clock-out fails, changing nothing, when it cannot find the CLOCK line.
+The session clock runs on a line Org reads as a clock but org-clock-out
+does not find, so there is no clock to close and no heading to link."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-spaced-open-clock))
+    (org-mcp-test--with-session-clock test-file
+      (should
+       (string-match-p
+        "\\`Cannot find the CLOCK line of the active clock started at \
+\\[2026-01-01 Thu 10:00\\]"
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-clock-out" '((end_time . "2026-01-01T11:00:00")))))
+      (should
+       (string= (org-mcp-test--read-file test-file)
+                org-mcp-test--clock-task-with-spaced-open-clock))
+      (org-mcp-test--verify-no-modified-buffer test-file))))
+
 (ert-deftest org-mcp-test-clock-add-custom-drawer ()
   "Test clock-add uses custom drawer name from `org-clock-into-drawer'."
   (org-mcp-test--with-temp-org-files
@@ -9156,6 +9179,64 @@ Neither heading gains an ID.")
   "\\`\\* TODO Parent Task\nNew parent body\\.\n\\*\\* Child One\nChild body\\.\n\\'"
   "Regex matching the parent file after replacing the parent's body.")
 
+(defconst org-mcp-test--content-targets-before-headings
+  (concat
+   "* Alpha <<alpha-anchor>>\n"
+   "* Beta\n"
+   "Beta body.\n"
+   "* Gamma\n"
+   "See <<gamma-anchor>>\n"
+   "* Delta\n"
+   ":PROPERTIES:\n"
+   ":CUSTOM_ID: delta-slug\n"
+   ":END:\n")
+  "Org file in which a target ends the line before a heading.
+Alpha's heading line ends with one before Beta, which has no
+identifier, and a body line ends with one before Delta, which has a
+custom ID.")
+
+(defconst org-mcp-test--regex-targets-beta-noted-delta-seen
+  (concat
+   "\\`\\* Alpha <<alpha-anchor>>\n"
+   "\\* Beta[ \t]+:work:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Beta note\\.\n"
+   ":END:\n"
+   "Beta body\\.\n"
+   "\\* Gamma\n"
+   "See <<gamma-anchor>>\n"
+   "\\* Delta\n"
+   " *:PROPERTIES:\n"
+   " *:CUSTOM_ID: +delta-slug\n"
+   " *:SEEN: +yes\n"
+   " *:END:\n"
+   "\\'")
+  "Regex matching the targets file after writes to Beta and Delta.
+Alpha and Gamma, whose lines end with the targets, are unchanged.")
+
+(defconst org-mcp-test--content-notes-by-search
+  "* TODO Noted Task\nTask body.\n* Other Task <<other-anchor>>\nOther body.\n"
+  "Org file with two headings without identifiers.
+Other Task's heading line ends with a target.")
+
+(defconst org-mcp-test--regex-notes-by-search
+  (concat
+   "\\`\\* TODO Noted Task\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Note by title\\.\n"
+   ":END:\n"
+   "Task body\\.\n"
+   "\\* Other Task <<other-anchor>>\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Note by target\\.\n"
+   ":END:\n"
+   "Other body\\.\n"
+   "\\'")
+  "Regex matching the notes file after a note on each heading.")
+
 (defun org-mcp-test--set-seen (link)
   "Set the property SEEN on the heading LINK names and return the response."
   (json-read-from-string
@@ -9410,36 +9491,54 @@ Org 9.7 prompt and Org 9.8 pick it.  Reads and writes still return the
 
 (ert-deftest org-mcp-test-returned-link-refuses-foreign-link ()
   "A link that comes back in another form fails the call, which says so.
-Advice on `org-store-link' that returns a link of another type makes a
-read fail, and a write fail with a message that the change was made;
-that change is saved.  Advice that edits the buffer while a link is
-stored fails the call too."
+Advice on `org-store-link' that returns a link of another type, or a
+`file:' link to something other than the heading, makes a read fail.
+It makes a write fail with a message that the change was made, and so
+does advice that signals an error of its own; the change is saved.
+Advice that edits the buffer while a link is stored fails the call
+too."
   (let ((foreign (lambda (&rest _) "[[probe:taken-over]]"))
+        (target (lambda (&rest _) "[[file:/tmp/notes.org::anchor]]"))
+        (failing (lambda (&rest _) (error "Store failed")))
         (editing
          (lambda (store &rest args)
            (org-entry-put nil "STORED" "yes")
            (apply store args))))
+    (pcase-dolist (`(,advice . ,reason)
+                   `((,foreign
+                      . "org-store-link made \\[\\[probe:taken-over\\]\\], \
+not an id: or file: link to the heading")
+                     (,target
+                      . "org-store-link made \\[\\[file:/tmp/notes.org::anchor\\]\\], \
+not an id: or file: link to the heading")
+                     (,failing . "Store failed\\'")))
+      (org-mcp-test--with-temp-org-files
+          ((test-file org-mcp-test--content-links))
+        (let ((gamma (org-mcp-test--file-link test-file "*Gamma")))
+          (advice-add 'org-store-link :override advice)
+          (unwind-protect
+              (progn
+                (unless (eq advice failing)
+                  (should
+                   (string-match-p
+                    reason
+                    (org-mcp-test--call-tool-expecting-error
+                     test-file "org-read" `((uri . ,gamma))))))
+                (should
+                 (string-match-p
+                  (concat
+                   "\\`The change was made, but no link to it could be made: "
+                   reason)
+                  (org-mcp-test--call-tool-with-error
+                   "org-set-tags" `((uri . ,gamma) (tags . "work")))))
+                (org-mcp-test--verify-file-matches
+                 test-file org-mcp-test--regex-links-gamma-tagged)
+                (org-mcp-test--verify-no-modified-buffer test-file))
+            (advice-remove 'org-store-link advice))
+          (should-not (advice-member-p advice 'org-store-link)))))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-links))
       (let ((gamma (org-mcp-test--file-link test-file "*Gamma")))
-        (advice-add 'org-store-link :override foreign)
-        (unwind-protect
-            (progn
-              (should
-               (string-match-p
-                "made \\[\\[probe:taken-over\\]\\], not an id: or file: link"
-                (org-mcp-test--call-tool-expecting-error
-                 test-file "org-read" `((uri . ,gamma)))))
-              (should
-               (string-match-p
-                "\\`The change was made, but no link to it could be made: "
-                (org-mcp-test--call-tool-with-error
-                 "org-set-tags" `((uri . ,gamma) (tags . "work")))))
-              (org-mcp-test--verify-file-matches
-               test-file org-mcp-test--regex-links-gamma-tagged)
-              (org-mcp-test--verify-no-modified-buffer test-file))
-          (advice-remove 'org-store-link foreign))
-        (should-not (advice-member-p foreign 'org-store-link))
         (advice-add 'org-store-link :around editing)
         (unwind-protect
             (should
@@ -9452,6 +9551,73 @@ stored fails the call too."
             (set-buffer-modified-p nil)
             (kill-buffer)))
         (should-not (advice-member-p editing 'org-store-link))))))
+
+(ert-deftest org-mcp-test-returned-link-after-target-line ()
+  "A target ending the line before a heading does not become its link.
+At the start of a heading's line, Org would link a <<target>> that ends
+the previous line, a heading's or a body line.  Beta, without an
+identifier, and Delta, with a custom ID, still get their own links, and
+each link leads a later write to its own heading."
+  (let ((org-log-into-drawer t))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-targets-before-headings))
+      (let ((beta
+             (alist-get
+              'uri
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-set-tags"
+                `((uri . ,(format "%s#Beta" test-file)) (tags . "work"))))))
+            (delta
+             (alist-get
+              'uri (org-mcp-test--set-seen (format "%s#Delta" test-file)))))
+        (should (equal beta (org-mcp-test--file-link test-file "*Beta")))
+        (should
+         (equal delta (org-mcp-test--file-link test-file "#delta-slug")))
+        (org-mcp-test--should-resolve-to delta "Delta")
+        (should
+         (equal
+          (alist-get
+           'uri
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-add-logbook-note" `((uri . ,beta) (note . "Beta note.")))))
+          beta))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-targets-beta-noted-delta-seen)))))
+
+(ert-deftest org-mcp-test-link-search-reaches-heading-start ()
+  "A link whose search lands on a heading's line leads to its start.
+A note sent through a `::*Title' link, and one sent through a link to
+a target inside a heading's line, each land whole in that heading's
+LOGBOOK, which they do only when the write starts at the heading."
+  (let ((org-log-into-drawer t))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-notes-by-search))
+      (pcase-dolist (`(,search . ,note)
+                     '(("*Noted Task" . "Note by title.")
+                       ("other-anchor" . "Note by target.")))
+        (mcp-server-lib-ert-call-tool
+         "org-add-logbook-note"
+         `((uri . ,(org-mcp-test--file-link test-file search))
+           (note . ,note))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-notes-by-search))))
+
+(ert-deftest org-mcp-test-goto-heading-leaves-point-at-heading-start ()
+  "Resolving a link that lands inside a heading's line ends at its start.
+The link's search finds a target in the middle of Other Task's line.
+Every tool that takes a heading starts from `org-mcp--goto-heading', so
+it is called directly to check where point ends."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-notes-by-search))
+    (let ((target
+           (org-mcp--link-target
+            (org-mcp-test--file-link test-file "other-anchor"))))
+      (org-mcp--with-org-file test-file
+        (org-mcp--goto-heading target)
+        (should (bolp))
+        (should (looking-at-p "\\* Other Task <<other-anchor>>$"))))))
 
 (ert-deftest org-mcp-test-returned-link-edited-heading-with-children ()
   "Replacing the body of a heading with children links to that heading.

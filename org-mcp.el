@@ -610,18 +610,21 @@ RESPONSE-ALIST is an alist of response fields.  The `uri' field is
 the heading's link from `org-mcp--link-at-point'; no identifier is
 created for it.  The `saved' field is false when
 `org-mcp--unsaved-change-p' is non-nil.  When no link can be made,
-the tool error says that the change itself was made."
+whatever the error, the tool error says that the change itself was
+made, so a client does not repeat it."
   (let
       ((link
         (condition-case err
             (org-mcp--link-at-point)
-          (mcp-server-lib-tool-error
+          (error
            (org-mcp--tool-validation-error
             "The change was made%s, but no link to it could be made: %s"
             (if org-mcp--unsaved-change-p
                 " and left unsaved"
               "")
-            (cadr err))))))
+            (if (eq (car err) 'mcp-server-lib-tool-error)
+                (cadr err)
+              (error-message-string err)))))))
     (json-encode
      (append
       `((success . t)
@@ -987,14 +990,23 @@ is returned as its text, without brackets or description.  Point may
 be anywhere in the heading's entry and is not moved; the buffer is
 read widened.  No identifier is created.
 
-Throws a tool error when `org-store-link' changes the buffer or makes
-anything but an `id:' or `file:' link.  Neither happens in stock Org;
-advice on `org-store-link' can cause both."
+A link made before the first heading searches for the text of its
+line.  org-mcp cannot resolve it: its resolver accepts only a search
+that ends on a heading.  Every write links the heading it changed, so
+only a read of a file whose preamble holds a line starting with `* '
+inside a block, which that read lists as a heading, returns one.
+
+Throws a tool error when `org-store-link' changes the buffer, or makes
+anything but an `id:' link or a `file:' link searching for the
+heading's custom ID or title, or, before the first heading, a `file:'
+link.  Neither happens in stock Org; advice on `org-store-link' can
+cause both."
   (org-with-wide-buffer
    (unless (org-before-first-heading-p)
      (org-back-to-heading t))
    (let*
-       ((tick (buffer-chars-modified-tick))
+       ((at-heading (not (org-before-first-heading-p)))
+        (tick (buffer-chars-modified-tick))
         (stored
          ;; Each binding stops a user setting from changing the form
          ;; of the link or from creating an identifier.  They are made
@@ -1033,7 +1045,12 @@ advice on `org-store-link' can cause both."
                (org-store-link-plist nil)
                ;; A prompt signals instead of waiting for input.
                (inhibit-interaction t))
-           (org-store-link nil nil)))
+           ;; Before anything else, Org links a <<target>> around
+           ;; point, and at the start of a line that includes one
+           ;; ending the previous line.
+           (save-restriction
+             (narrow-to-region (line-beginning-position) (point-max))
+             (org-store-link nil nil))))
         (link
          ;; A non-interactive `org-store-link' returns a bracket link,
          ;; and Org has no function returning the bare one, so take
@@ -1048,10 +1065,15 @@ advice on `org-store-link' can cause both."
 creates no identifiers, so advice on org-store-link must leave \
 non-interactive calls alone"
         (buffer-name)))
-     (unless (and link (string-match-p "\\`\\(?:id\\|file\\):" link))
+     (unless (and link
+                  (string-match-p
+                   (if at-heading
+                       "\\`\\(?:id:\\|file:.*::[*#]\\)"
+                     "\\`file:")
+                   link))
        (org-mcp--tool-validation-error
-        "org-store-link made %s, not an id: or file: link, in %s; \
-advice on org-store-link changes the link"
+        "org-store-link made %s, not an id: or file: link to the \
+heading, in %s; advice on org-store-link changes the link"
         (or stored "no link") (buffer-name)))
      link)))
 
@@ -1468,7 +1490,7 @@ parameter, checked by `org-mcp--check-files' and applied by
       (plist-member target :olp)))
 
 (defun org-mcp--goto-heading (target)
-  "Move point to the heading TARGET names, or throw a tool error.
+  "Move point to the start of the heading TARGET names, or throw a tool error.
 TARGET comes from `org-mcp--address-target', and the current buffer
 visits its file, widened."
   (if (plist-member target :olp)
@@ -1480,7 +1502,10 @@ visits its file, widened."
                  (org-at-heading-p))
       (org-mcp--tool-validation-error
        "Link does not point to a heading: %s"
-       (plist-get target :link)))))
+       (plist-get target :link)))
+    ;; A search can land inside the heading's line, on a target or a
+    ;; word of the title; every caller starts at the heading.
+    (org-back-to-heading t)))
 
 (defun org-mcp--read-link
     (link read-heading read-file &optional files)
@@ -3798,15 +3823,19 @@ MCP Parameters:
                                      ,(org-mcp--clock-duration-string
                                        duration)))
           ;; Find the active clock line by its exact start timestamp
-          (when (re-search-forward (concat
-                                    "^\\([ \t]*CLOCK: \\["
-                                    (regexp-quote start-str)
-                                    "\\]\\)[ \t]*$")
-                                   nil t)
-            (goto-char (match-end 1))
-            (insert close-text)
-            ;; Navigate to heading for complete-and-save
-            (org-back-to-heading t)))))))
+          (unless (re-search-forward (concat
+                                      "^\\([ \t]*CLOCK: \\["
+                                      (regexp-quote start-str)
+                                      "\\]\\)[ \t]*$")
+                                     nil t)
+            (org-mcp--tool-validation-error
+             "Cannot find the CLOCK line of the active clock started at \
+[%s] in %s"
+             start-str active-file))
+          (goto-char (match-end 1))
+          (insert close-text)
+          ;; The response links to the heading clocked out of
+          (org-back-to-heading t))))))
 
 (defun org-mcp--tool-clock-add (uri start end &optional files)
   "Add a completed clock entry to the heading at URI.
@@ -4635,7 +4664,6 @@ Returns JSON object:
     todo - TODO state (string, omitted if none)
     priority - Priority letter (string, omitted if none)
     tags - Local tags (array, omitted if none)
-    id - Org ID (string, omitted if none)
     uri - Link to the heading (string): id:{id} when it has an ID,
           else file:{path}::#{custom-id} when it has a CUSTOM_ID,
           else file:{path}::*{title}
