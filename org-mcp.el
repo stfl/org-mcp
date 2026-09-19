@@ -1164,21 +1164,46 @@ reads it as a file link; its refusal names the link forms to send."
 
 (defun org-mcp--link-id-file (id link)
   "Return the allowed file that holds ID, which LINK names.
-The lookup is `org-id-find', so org-roam and Org's rescan on a miss
-apply.  It runs in a temporary buffer because `org-id-find-id-file'
-falls back to the current buffer's file for an unknown ID.  Errors
-from the lookup, such as the refusal to rescan when
+Emacs's ID index names the file, through `org-id-find-id-file', which
+only reads the index.  That file must pass the scope gate,
+`org-mcp--find-allowed-file', as a file the call does not name, before
+anything touches it: a remote file, or one outside the allowed files,
+is refused without a single file operation on it.  Only then is the
+file searched for ID, with `org-id-find-id-in-file', which reads the
+buffer visiting it, or else its contents into a temporary buffer.
+
+When the index lacks ID, or the file it names does not hold it, the
+index is rescanned once with `org-id-update-id-locations', as
+`org-id-find' does on a miss, and the file it then names goes through
+the gate in turn; the caller finds ID in that file's buffer.
+`org-id-find' is not called itself: it reads the file the index names
+before any gate could refuse it, and so asks TRAMP about a remote one.
+
+The index is read in a temporary buffer because `org-id-find-id-file'
+falls back to the current buffer's file for an ID it lacks.  Errors
+from the index, such as the refusal to rescan when
 `org-id-track-globally' is off, count as an unknown ID.  Neither error
 this function throws names a file."
-  (let ((found
-         (and (org-string-nw-p id)
-              (with-temp-buffer
-                (ignore-errors
-                  (org-id-find id))))))
-    (unless found
-      (org-mcp--id-not-found-error id))
-    (or (org-mcp--find-allowed-file (car found))
-        (org-mcp--tool-file-access-error link))))
+  (cl-flet
+   ((indexed-file
+     ()
+     (with-temp-buffer
+       (ignore-errors
+         (org-id-find-id-file id))))
+    (reachable
+     (file)
+     (or (org-mcp--find-allowed-file file)
+         (org-mcp--tool-file-access-error link))))
+   (unless (org-string-nw-p id)
+     (org-mcp--id-not-found-error id))
+   (let* ((indexed (indexed-file))
+          (file (and indexed (reachable indexed))))
+     (if (and file (org-id-find-id-in-file id file))
+         file
+       (ignore-errors
+         (org-id-update-id-locations nil t))
+       (reachable
+        (or (indexed-file) (org-mcp--id-not-found-error id)))))))
 
 (defun org-mcp--link-id-in-files (id files)
   "Return the first of the files FILES names that holds ID.
@@ -1304,9 +1329,8 @@ heading."
         (search (plist-get target :search)))
     (goto-char (point-min))
     (when id
-      ;; Locate the ID in this buffer although `org-id-find' already
-      ;; did: org-roam answers from its database, whose position is
-      ;; stale once the buffer holds unsaved edits.
+      ;; The lookup yields the file only.  The ID is located in this
+      ;; buffer, which may hold unsaved edits the file lacks.
       (goto-char
        (or (org-find-entry-with-id id)
            (org-mcp--id-not-found-error id))))

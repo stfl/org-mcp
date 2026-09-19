@@ -8452,6 +8452,76 @@ file, once a file outside the allowed files."
                   (kill-buffer buf))))
           (delete-file org-id-locations-file))))))
 
+(ert-deftest org-mcp-test-link-id-indexed-remote-file-untouched ()
+  "An ID the index places in a remote file is refused before TRAMP runs.
+The fake remote method records every file operation but
+`file-remote-p'; none may run.  The ID's `id:' link is refused, bare
+and with a search, by a read, a write and the resource, as outside the
+allowed files and without naming the file, even when the remote file
+is listed among them, and the calls run from a buffer visiting an
+allowed file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-links))
+    (let ((remote (concat org-mcp-test--remote-prefix "/x/notes.org")))
+      (org-mcp-test--with-id-tracking
+          (list test-file remote)
+          `(("remote-id" . ,remote))
+        (let ((buf (find-file-noselect test-file)))
+          (unwind-protect
+              (with-current-buffer buf
+                (org-mcp-test--with-remote-probe ops
+                  (dolist (link '("id:remote-id" "[[id:remote-id::*Task]]"))
+                    (let ((refusal
+                           (concat
+                            "\\`'" (regexp-quote link)
+                            "': the referenced file not in allowed list\\'")))
+                      (org-mcp-test--call-tool-refused
+                       "org-read-headline" `((link . ,link)) refusal)
+                      (org-mcp-test--call-tool-refused
+                       "org-set-tags" `((link . ,link) (tags . "work"))
+                       refusal test-file)
+                      (should
+                       (string-match-p
+                        refusal
+                        (org-mcp-test--resource-error
+                         (concat "org://" (url-hexify-string link)))))))
+                  (should (null ops))))
+            (kill-buffer buf)))))))
+
+(ert-deftest org-mcp-test-link-id-rescans-stale-index ()
+  "An ID the index places in a file that lacks it is found by a rescan.
+As `org-id-find' does, a miss rescans Emacs's ID index once, and the
+ID resolves in the allowed file that holds it: a read returns the
+heading, a write changes that file alone, and the index then names it."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((stale-file "* Other\nOther body.\n")
+         (test-file org-mcp-test--content-links))
+      (org-mcp-test--with-id-tracking
+          (list stale-file test-file)
+          `((,org-mcp-test--link-beta-id . ,stale-file))
+        (let ((org-agenda-files (list stale-file test-file))
+              (org-id-locations-file
+               (make-temp-file "org-mcp-test-id-locations"))
+              (link (format "id:%s" org-mcp-test--link-beta-id)))
+          (unwind-protect
+              (progn
+                (should
+                 (string=
+                  (org-mcp-test--call-read-headline link)
+                  (string-trim-right org-mcp-test--content-links-beta)))
+                (org-mcp-test--update-todo-state-and-check
+                 link "" "TODO" test-file
+                 org-mcp-test--regex-links-beta-changed)
+                (should
+                 (string= (org-mcp-test--read-file stale-file)
+                          "* Other\nOther body.\n"))
+                (should
+                 (file-equal-p
+                  (gethash org-mcp-test--link-beta-id org-id-locations)
+                  test-file)))
+            (delete-file org-id-locations-file)))))))
+
 (defun org-mcp-test--fold-state ()
   "Return, for each line of the current buffer, whether it is hidden.
 The whole buffer is inspected, whatever its narrowing."

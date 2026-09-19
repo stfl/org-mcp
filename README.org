@@ -305,15 +305,19 @@ works unchanged:
 - A link may be bare or bracketed, with or without a description:
   =id:abc=, =[[id:abc]]= and =[[id:abc][Project Alpha]]= name the same
   heading.
-- org-mcp resolves a link with Org's own lookup: =org-id-find= for an ID,
-  which includes the org-roam database and Org's rescan when the ID is not in
-  the index, or =org-id-find-id-in-file= in each file a call names in =files=
-  (see [[*Naming the file of an ID]]), and =org-link-search= for the part after
-  =::=. The search part of an =id:= link, as in =id:<id>::*Review=, runs
-  within that heading's subtree; a =file:= link searches the whole file. A
-  title that matches several headings resolves to the first, as it does in
-  Org, and =::<n>= in a =file:= link goes to line /n/. A search that matches
-  nothing is an error; org-mcp never offers to create the heading.
+- org-mcp resolves a link with Org's own lookup. For an ID, that is Emacs's ID
+  index, read with =org-id-find-id-file=, or =org-id-find-id-in-file= in each
+  file a call names in =files= (see [[*Naming the file of an ID]]). The file
+  the index names must be one of the allowed files before org-mcp reads it, so
+  an index entry for a remote or outside file is refused without touching that
+  file. When the index lacks the ID, or the file it names no longer holds it,
+  org-mcp rescans the index once, as =org-id-find= does. For the part after
+  =::=, it is =org-link-search=. The search part of an =id:= link, as in
+  =id:<id>::*Review=, runs within that heading's subtree; a =file:= link
+  searches the whole file. A title that matches several headings resolves to
+  the first, as it does in Org, and =::<n>= in a =file:= link goes to line /n/.
+  A search that matches nothing is an error; org-mcp never offers to create
+  the heading.
 - A link is resolved, never followed: your windows, narrowing, point, folding
   and marks stay as they were, even when the buffer is narrowed to another
   subtree, and so do the buffers you have open. A tool works in the buffer
@@ -349,8 +353,9 @@ org-mcp refuses:
 
 An =id:= link names no file, so org-mcp finds the ID through Emacs's ID index
 and reaches it only in the allowed files.  An ID in a file Emacs has not
-indexed is not found that way, and looking up an ID the index lacks makes Org
-rescan every file it knows, which can freeze Emacs for seconds.
+indexed is not found that way, and looking up an ID the index lacks makes
+org-mcp rescan the index, as Org does, reading every file Org knows, which can
+freeze Emacs for seconds.
 
 Every tool that names a heading takes a =files= parameter for this: an array
 of absolute paths to Org files and directories.  With it, the ID of an =id:=
