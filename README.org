@@ -1164,21 +1164,24 @@ Example responses:
 - *Description:* Clock in to the specified heading. Supports continuous clocking and time rounding. Only one clock runs at a time: while one runs, the call must name it in =clock_out=, and that clock is closed at the new clock's start before the new one opens. Naming it makes sure the client knows which clock it closes, so it can ask the user first
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[*Addressing headings with links]])
-  - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
-  - =resolve= (boolean or string, optional): =true= or ="true"= deletes dangling (unclosed) CLOCK entries under the heading before clocking in. When the running clock lies under the heading, it is deleted with them rather than closed. =false=, ="false"=, =null= and =""= mean no; any other value is refused
+  - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies). The running clock closes at this time, so it must not be before that clock's start
+  - =resolve= (=true= / =false= or ="true"= / ="false"=, optional): true deletes the dangling (unclosed) CLOCK entries under the heading before clocking in, that is every open one but the running clock. The running clock is never deleted: =clock_out= names it, and it is closed. =false=, ="false"=, =null= and =""= mean no; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[*Naming the file of an ID]]
-  - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. An =id:= link is looked up in the running clock's file
+  - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. The link a refusal names for the running clock is accepted as sent, even a title link that finds another heading of the same title first. An =id:= link is looked up in the running clock's file
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
 
 Every check runs before anything changes, so a refused call changes no file, no buffer's text and not the running clock. A call is refused when:
 
-- a clock runs and =clock_out= is missing or names another heading.  The error names the running clock's heading by its title and link, so the client can ask the user whether to clock out of it:
+- a clock runs and =clock_out= is missing or names another heading.  The error names the running clock's heading by its title and link, and when the clock started, so the client can ask the user whether to clock out of it.  A clock left running for days shows here before it is closed with that long a duration:
   #+begin_example
-  A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report).  Ask the user whether to clock out of it, then send its link as clock_out
+  A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report) since 2026-03-23 Mon 09:00.  Ask the user whether to clock out of it, then send its link as clock_out
   #+end_example
-- a clock runs in a file outside the allowed files.  org-mcp reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.
+- a clock runs in a file outside the allowed files.  =org-clock-get-active= reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.
 - no clock runs and =clock_out= is given.
-- =link= names no heading.
+- the new clock's start, =start_time= or else the current time, is before the running clock's start, since closing that clock there would give it a negative duration.
+- =start_time= cannot be parsed.
+- =resolve= is neither true nor false.
+- =link= names no heading, or =link= or =clock_out= is no link org-mcp takes or names a file outside the allowed files.  These get the errors any link parameter gets (see [[*Addressing headings with links]]).
 
 Example:
 #+begin_src json

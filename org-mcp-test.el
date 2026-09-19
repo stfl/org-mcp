@@ -1473,6 +1473,25 @@ clock entry to delete."
           "org-clock-find-dangling" nil)))
     (json-read-from-string result-text)))
 
+(defmacro org-mcp-test--with-session-clock (file &rest body)
+  "Run BODY with the Emacs clock running on the open CLOCK line in FILE.
+Points `org-clock-marker' at the end of the first unclosed CLOCK line
+in FILE, where `org-clock-in' leaves it, and unsets the marker again
+afterwards so the clock state does not leak into other tests."
+  (declare (indent 1) (debug t))
+  `(let ((buffer (find-file-noselect ,file)))
+     (unwind-protect
+         (progn
+           (with-current-buffer buffer
+             (goto-char (point-min))
+             (re-search-forward
+              (concat "^[ \t]*" org-clock-string
+                      "[ \t]*\\[[^]\n]+\\][ \t]*$"))
+             (set-marker org-clock-marker (point) buffer))
+           ,@body)
+       (set-marker org-clock-marker nil)
+       (kill-buffer buffer))))
+
 
 ;;; Tests
 
@@ -5952,12 +5971,70 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "After resolve=true on Task One, Task Two's dangling CLOCK survives.")
+
+(defconst org-mcp-test--clock-in-keeps-dangling-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "File contents after clock-in without resolve over a dangling CLOCK.")
+
+(defconst org-mcp-test--clock-in-over-dangling-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] => 49:00\n"
    ":END:\n"
    "\\'")
-  "After resolve=true on Task One, Task Two's running CLOCK is closed.
-clock_out names it, and resolve deletes no clock outside Task One.")
+  "File contents after clock-in closes the running clock under the heading.
+The only open CLOCK is the running clock; clock_out names it, and it is
+closed at the new clock's start.")
+
+(defconst org-mcp-test--clock-running-elsewhere-content
+  "* TODO Running Task\n:LOGBOOK:\nCLOCK: [2026-01-01 Thu 09:00]\n:END:\n"
+  "File whose Running Task holds the Emacs clock in the resolve tests.")
+
+(defconst org-mcp-test--clock-running-elsewhere-closed-regex
+  (concat
+   "\\`\\* TODO Running Task\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 09:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the Running Task file once clock-in at 10:00 closed it.")
+
+(defun org-mcp-test--check-clock-in-resolve
+    (content resolve expected-regex resolved)
+  "Clock in to Task One of a file holding CONTENT with RESOLVE, and check it.
+Meanwhile the Emacs clock runs on Running Task in another allowed file,
+so every open CLOCK line in CONTENT is dangling as Org defines it.  The
+call names that clock in clock_out and clocks in at 10:00, which closes
+it.  The file must then match EXPECTED-REGEX, and the response report
+RESOLVED deleted clocks, or nil for none."
+  (org-mcp-test--with-temp-org-files
+      ((test-file content)
+       (running-file org-mcp-test--clock-running-elsewhere-content))
+    (org-mcp-test--with-session-clock running-file
+      (let ((result
+             (org-mcp-test--call-clock-in
+              (org-mcp-test--file-link test-file "*Task One")
+              "2026-01-01T10:00:00" resolve
+              (org-mcp-test--file-link running-file "*Running Task"))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'resolved result) resolved))
+        (org-mcp-test--verify-file-matches test-file expected-regex)
+        (org-mcp-test--verify-file-matches
+         running-file org-mcp-test--clock-running-elsewhere-closed-regex)))))
 
 (ert-deftest org-mcp-test-clock-in-resolve-no-dangling ()
   "Test clock-in with resolve=true on a heading with no dangling clocks."
@@ -5974,59 +6051,72 @@ clock_out names it, and resolve deletes no clock outside Task One.")
        test-file org-mcp-test--clock-in-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-in-resolve-one-dangling ()
-  "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer.
-The dangling CLOCK is the running clock, so clock_out must name it;
-lying under the heading, it is deleted with resolve rather than closed."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-resolve-one-dangling-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true" link)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'resolved result) 1))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--clock-in-expected-regex))))
+  "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer."
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-one-dangling-content "true"
+   org-mcp-test--clock-in-expected-regex 1))
 
 (ert-deftest org-mcp-test-clock-in-resolve-multi-dangling ()
   "Test clock-in with resolve=true deletes multiple dangling CLOCK entries."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-resolve-multi-dangling-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true" link)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'resolved result) 2))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--clock-in-expected-regex))))
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-multi-dangling-content "true"
+   org-mcp-test--clock-in-expected-regex 2))
 
 (ert-deftest org-mcp-test-clock-in-resolve-mixed ()
   "Test clock-in with resolve=true deletes dangling but preserves closed."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-resolve-mixed-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true" link)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'resolved result) 1))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--clock-in-resolve-mixed-expected-regex))))
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-mixed-content "true"
+   org-mcp-test--clock-in-resolve-mixed-expected-regex 1))
 
 (ert-deftest org-mcp-test-clock-in-resolve-scoped-to-subtree ()
   "Test resolve=true deletes no dangling clock in a sibling heading.
-Task Two's dangling CLOCK is the running clock, which clock_out names,
-so clock-in closes it rather than deleting it."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-resolve-other-heading-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true"
-                    (org-mcp-test--file-link test-file "*Task Two"))))
-      (should (equal (alist-get 'success result) t))
-      ;; No clocks were under Task One, so none was deleted.
-      (should (null (assq 'resolved result)))
-      (org-mcp-test--verify-file-matches
-       test-file
-       org-mcp-test--clock-in-resolve-other-heading-expected-regex))))
+Task Two's dangling CLOCK lies outside Task One, the heading clocked in
+to, so it survives."
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-other-heading-content "true"
+   org-mcp-test--clock-in-resolve-other-heading-expected-regex nil))
+
+(ert-deftest org-mcp-test-clock-in-resolve-true-forms ()
+  "Test clock-in reads resolve given as JSON true and as \"true\" alike.
+Each deletes the dangling CLOCK under the heading."
+  (dolist (resolve '(t "true"))
+    (org-mcp-test--check-clock-in-resolve
+     org-mcp-test--clock-resolve-one-dangling-content resolve
+     org-mcp-test--clock-in-expected-regex 1)))
+
+(ert-deftest org-mcp-test-clock-in-resolve-false-forms ()
+  "Test clock-in reads resolve given as false, \"false\" or \"\" as false.
+The dangling CLOCK under the heading is then kept."
+  (dolist (resolve '(:json-false "false" ""))
+    (org-mcp-test--check-clock-in-resolve
+     org-mcp-test--clock-resolve-one-dangling-content resolve
+     org-mcp-test--clock-in-keeps-dangling-expected-regex nil)))
+
+(ert-deftest org-mcp-test-clock-in-resolve-closes-running-clock ()
+  "Test resolve=true closes the running clock under the heading.
+The running clock is never deleted, whether the Emacs clock runs on it
+or it is the open CLOCK line found with no Emacs clock running:
+clock_out names it, and it is closed at the new clock's start.
+resolve deletes only the dangling clocks left, here none."
+  (dolist (emacs-clock '(nil t))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--clock-resolve-one-dangling-content))
+      (let ((link (org-mcp-test--file-link test-file "*Task One")))
+        (cl-flet
+         ((clock-in
+           ()
+           (let ((result
+                  (org-mcp-test--call-clock-in
+                   link "2026-01-01T10:00:00" "true" link)))
+             (should (equal (alist-get 'clocked_in result) t))
+             (should (null (assq 'resolved result))))))
+         (if emacs-clock
+             (org-mcp-test--with-session-clock test-file
+               (clock-in)
+               (should-not (org-clock-is-active)))
+           (clock-in)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-in-over-dangling-expected-regex)))))
 
 (ert-deftest org-mcp-test-clock-out-saves-file-to-disk ()
   "Test org-clock-out saves the closed CLOCK entry to disk.
@@ -6414,25 +6504,6 @@ does not find, so there is no clock to close and no heading to link."
   "Open CLOCK with an incorrect day-of-week label (Mon for a Thursday).
 Used to verify that date/time matching tolerates locale/label drift.")
 
-(defmacro org-mcp-test--with-session-clock (file &rest body)
-  "Run BODY with the Emacs clock running on the open CLOCK line in FILE.
-Points `org-clock-marker' at the end of the first unclosed CLOCK line
-in FILE, where `org-clock-in' leaves it, and unsets the marker again
-afterwards so the clock state does not leak into other tests."
-  (declare (indent 1) (debug t))
-  `(let ((buffer (find-file-noselect ,file)))
-     (unwind-protect
-         (progn
-           (with-current-buffer buffer
-             (goto-char (point-min))
-             (re-search-forward
-              (concat "^[ \t]*" org-clock-string
-                      "[ \t]*\\[[^]\n]+\\][ \t]*$"))
-             (set-marker org-clock-marker (point) buffer))
-           ,@body)
-       (set-marker org-clock-marker nil)
-       (kill-buffer buffer))))
-
 (ert-deftest org-mcp-test-clock-get-active-none ()
   "Test org-clock-get-active reports no active clock."
   (org-mcp-test--with-temp-org-files
@@ -6638,8 +6709,9 @@ not sent."
           (should
            (string-match-p
             (format
-             "\\`A clock is running on 'Task One' (%s)\\.  Ask the user \
-whether to clock out of it, then send its link as clock_out\\'"
+             "\\`A clock is running on 'Task One' (%s) since 2026-01-01 \
+Thu 10:00\\.  Ask the user whether to clock out of it, then send its \
+link as clock_out\\'"
              (regexp-quote (org-mcp-test--file-link test-file "*Task One")))
             (org-mcp-test--call-tool-expecting-error
              test-file "org-clock-in"
@@ -6669,7 +6741,7 @@ clock's heading named, and nothing changes."
            (string-match-p
             (format
              "\\`clock_out does not name the running clock: %s\\.  \
-The clock runs on 'Task One' (%s)\\'"
+The clock runs on 'Task One' (%s) since 2026-01-01 Thu 10:00\\'"
              (regexp-quote clock-out)
              (regexp-quote (org-mcp-test--file-link test-file "*Task One")))
             (org-mcp-test--call-tool-expecting-error
@@ -6772,6 +6844,84 @@ its buffer and the running clock as they were."
         (should (eq (org-clock-is-active) (find-buffer-visiting test-file)))
         (should (= (marker-position org-clock-marker) position))))))
 
+(ert-deftest org-mcp-test-clock-in-refuses-start-before-running-clock ()
+  "Test clock-in refuses a start before the running clock's start.
+Closing Task One's clock, started at 10:00, at 09:00 would give it a
+negative duration, so the call is refused and nothing changes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((position (marker-position org-clock-marker)))
+        (should
+         (string-match-p
+          "\\`Start time \\[2026-01-01 [A-Za-z]\\{2,3\\} 09:00\\] is \
+before the running clock's start \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\\'"
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-clock-in"
+           `((link . ,(org-mcp-test--file-link test-file "*Task Two"))
+             (start_time . "2026-01-01T09:00:00")
+             (clock_out
+              . ,(org-mcp-test--file-link test-file "*Task One"))))))
+        (org-mcp-test--verify-no-modified-buffer test-file)
+        (should (eq (org-clock-is-active) (find-buffer-visiting test-file)))
+        (should (= (marker-position org-clock-marker) position))))))
+
+(defconst org-mcp-test--clock-duplicate-titles-content
+  (concat
+   "* Project A\n"
+   "** Meeting\n"
+   "* Project B\n"
+   "** Meeting\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n"
+   "* Review\n")
+  "File whose second Meeting, titled like the first, holds an open clock.")
+
+(defconst org-mcp-test--clock-duplicate-titles-expected-regex
+  (concat
+   "\\`\\* Project A\n"
+   "\\*\\* Meeting\n"
+   "\\* Project B\n"
+   "\\*\\* Meeting\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\* Review\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the file once the second Meeting's clock is closed.
+Review holds the new clock, and the first Meeting is untouched.")
+
+(ert-deftest org-mcp-test-clock-in-clock-out-duplicate-title ()
+  "Test clock_out accepts the link the refusal names for a duplicate title.
+The clock runs on the second of two headings titled Meeting.  Its title
+link finds the first one, yet it is the link the refusal names, so
+sending it back as clock_out, bracketed here, closes the running clock."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-duplicate-titles-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((meeting (org-mcp-test--file-link test-file "*Meeting"))
+            (review (org-mcp-test--file-link test-file "*Review")))
+        (should
+         (string-match-p
+          (format "\\`A clock is running on 'Meeting' (%s) since "
+                  (regexp-quote meeting))
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-clock-in"
+           `((link . ,review) (start_time . "2026-01-01T11:00:00")))))
+        (let ((result
+               (org-mcp-test--call-clock-in
+                review "2026-01-01T11:00:00" nil
+                (format "[[%s][Meeting]]" meeting))))
+          (should (equal (alist-get 'clocked_in result) t))))
+      (should-not (org-clock-is-active)))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--clock-duplicate-titles-expected-regex)))
+
 (ert-deftest org-mcp-test-clock-in-refuses-clock-out-without-running-clock ()
   "Test clock-in refuses a clock_out while no clock runs.
 There is no clock for clock_out to name, so the call changes nothing."
@@ -6789,45 +6939,6 @@ There is no clock for clock_out to name, so the call changes nothing."
            (start_time . "2026-01-01T10:00:00")
            (clock_out . ,link)))))
       (org-mcp-test--verify-no-modified-buffer test-file))))
-
-(defconst org-mcp-test--clock-in-over-dangling-expected-regex
-  (concat
-   "\\`\\* TODO Task One\n"
-   ":LOGBOOK:\n"
-   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
-   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] => 49:00\n"
-   ":END:\n"
-   "\\'")
-  "File contents after clock-in without resolve over a dangling CLOCK.
-The dangling CLOCK is the running clock; clock_out names it, and it is
-closed at the new clock's start.")
-
-(ert-deftest org-mcp-test-clock-in-resolve-true-forms ()
-  "Test clock-in reads resolve given as JSON true and as \"true\" alike.
-Each deletes the dangling CLOCK under the heading."
-  (dolist (resolve '(t "true"))
-    (org-mcp-test--with-temp-org-files
-        ((test-file org-mcp-test--clock-resolve-one-dangling-content))
-      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-             (result (org-mcp-test--call-clock-in
-                      link "2026-01-01T10:00:00" resolve link)))
-        (should (equal (alist-get 'resolved result) 1))
-        (org-mcp-test--verify-file-matches
-         test-file org-mcp-test--clock-in-expected-regex)))))
-
-(ert-deftest org-mcp-test-clock-in-resolve-false-forms ()
-  "Test clock-in reads resolve given as false, \"false\" or \"\" as false.
-The dangling CLOCK is then closed as the running clock, not deleted."
-  (dolist (resolve '(:json-false "false" ""))
-    (org-mcp-test--with-temp-org-files
-        ((test-file org-mcp-test--clock-resolve-one-dangling-content))
-      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-             (result (org-mcp-test--call-clock-in
-                      link "2026-01-01T10:00:00" resolve link)))
-        (should (null (assq 'resolved result)))
-        (org-mcp-test--verify-file-matches
-         test-file org-mcp-test--clock-in-over-dangling-expected-regex)))))
 
 (ert-deftest org-mcp-test-clock-in-refuses-unknown-resolve ()
   "Test clock-in refuses a resolve that is neither true nor false."
