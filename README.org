@@ -370,9 +370,9 @@ named.
   as far as =org-mcp-file-scope-override= permits, for that call alone.
 - The first file that holds the ID wins.  An ID none of them holds is an
   error naming the ID and the entries as sent.
-- The buffers the lookup opens for the named files are closed again.  The
-  tool then works on the file holding the ID like on any other, and leaves its
-  buffer open.
+- The lookup visits none of the named files in a buffer of its own: Org reads
+  a file no buffer visits into a hidden work buffer.  The tool then works on
+  the file holding the ID like on any other, and leaves its buffer open.
 - =files= applies only to an =id:= link.  A call sending it with any other
   link, such as a =file:= link, which names its file already, is refused
   before any file is opened.  A blank value, =null=, =false=, =""= or =[]=,

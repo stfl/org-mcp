@@ -2785,9 +2785,11 @@ which none exists, for the GTD queries too."
 After each tool taking `files' searches a directory whose files no
 buffer visits but one, the buffer list is as before: the buffer the
 user had open stays, and no other file of the set is left visited.
-An `id:' link looked up in `files' leaves no buffer when no file holds
-the ID, and otherwise only that of the file holding it, which the tool
-reads, as it does for a heading in an allowed file."
+An `id:' link looked up in `files' visits no file it searches, when
+no file holds the ID and when one does, and the tool leaves only the
+buffer of the file holding it, which it reads, as for a heading in an
+allowed file.  Org reads the files into a hidden work buffer of its
+own, which is no file's buffer."
   (org-mcp-test--with-scope-dirs t
     (let* ((files
             (mapcar
@@ -2800,7 +2802,10 @@ reads, as it does for a heading in an allowed file."
             (org-mcp-test--write-file
              root "holder.org" org-mcp-test--scope-task-with-id-content))
            (open (find-file-noselect (car files)))
-           (before (buffer-list)))
+           (before (buffer-list))
+           (file-buffers
+            (lambda () (seq-filter #'buffer-file-name (buffer-list))))
+           (file-buffers-before (funcall file-buffers)))
       (unwind-protect
           (progn
             (should
@@ -2812,7 +2817,7 @@ reads, as it does for a heading in an allowed file."
              "org-read-headline"
              `((link . "id:no-such-id") (files . ,(vector outside)))
              "\\`Cannot find ID 'no-such-id' in files: ")
-            (should (equal (buffer-list) before))
+            (should (equal (funcall file-buffers) file-buffers-before))
             (should
              (string=
               (org-mcp-test--call-read-headline
@@ -2820,7 +2825,8 @@ reads, as it does for a heading in an allowed file."
               (string-trim-right org-mcp-test--scope-task-with-id-content)))
             (should-not (find-buffer-visiting searched))
             (should
-             (equal (cl-set-difference (buffer-list) before)
+             (equal (cl-set-difference
+                     (funcall file-buffers) file-buffers-before)
                     (list (find-buffer-visiting holder)))))
         (dolist (file (cons holder files))
           (when-let* ((buffer (find-buffer-visiting file)))

@@ -1215,16 +1215,12 @@ the order that function returns them.  Each is searched with
 it, and consults no ID index: an ID in a file Emacs never indexed is
 found, Org's rescan never runs, and nothing is added to
 `org-id-locations'.  An ID none of them holds is an error naming FILES
-as the call sent them.  The buffers the search opens are killed, see
-`org-mcp--closing-opened-buffers', that of the file found included;
-the tool visits that file again to work on it."
+as the call sent them.  The search opens no buffer on these files:
+Org reads a file that no buffer visits into a work buffer of its own."
   (let ((set (org-mcp--named-file-set files)))
     (or (and (org-string-nw-p id)
-             (org-mcp--closing-opened-buffers set
-               (cl-find-if
-                (lambda (file)
-                  (org-id-find-id-in-file id file))
-                set)))
+             (cl-find-if
+              (lambda (file) (org-id-find-id-in-file id file)) set))
         (org-mcp--tool-validation-error
          "Cannot find ID '%s' in files: %s"
          id
@@ -4215,12 +4211,9 @@ Parameters:
           allowed files is reached only as far as
           org-mcp-file-scope-override permits, and a directory is
           searched as that tool searches it.  An ID none of the files
-          holds is an error.  The buffers the lookup opens for these
-          files are closed again; the file holding the ID is read
-          like any other, and its buffer stays open.  Refused with
-          any link but an id: link, such as a file: link, which
-          names its file already.  null, false, \"\" and [] mean no
-          files.
+          holds is an error.  Refused with any link but an id:
+          link, such as a file: link, which names its file already.
+          null, false, \"\" and [] mean no files.
           Every tool that names a heading takes files in the same
           way.
 
