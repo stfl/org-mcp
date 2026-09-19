@@ -7240,11 +7240,18 @@ deleting the CLOCK leaves whitespace-only content behind.")
    "\\'")
   "After deleting the CLOCK, a lone blank line keeps LOGBOOK intact.")
 
-(ert-deftest org-mcp-test-clock-delete-keeps-drawer-with-blank-line ()
-  "Test clock-delete leaves LOGBOOK intact when only whitespace remains.
-`org-remove-empty-drawer-at' treats a blank line as content, so
-the drawer must remain.  This pins down behavior on the
-whitespace-between-markers edge case."
+(defconst org-mcp-test--clock-delete-drops-blank-line-expected-regex
+  "\\`\\* TODO Task One\n\\'"
+  "After deleting the CLOCK, the blank-line-only LOGBOOK is gone.")
+
+(ert-deftest org-mcp-test-clock-delete-drawer-with-blank-line ()
+  "Test clock-delete leaves a blank-line-only LOGBOOK to Org's judgment.
+`org-remove-empty-drawer-at' removes a drawer without contents.
+Org 9.8's drawer parser records leading blank lines as
+`:pre-blank', so a drawer holding only a blank line has no
+contents and goes (ORG-NEWS 9.8, \"`org-element-drawer-parser'
+assigns `:pre-blank' property\").  Earlier Org parses the blank
+line as contents, so the drawer stays."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-delete-with-blank-line-content))
     (let* ((link (org-mcp-test--file-link test-file "*Task One"))
@@ -7255,7 +7262,9 @@ whitespace-between-markers edge case."
       (should (equal (alist-get 'deleted result) t))
       (org-mcp-test--verify-file-matches
        test-file
-       org-mcp-test--clock-delete-keeps-blank-line-expected-regex))))
+       (if (version< (org-version) "9.8")
+           org-mcp-test--clock-delete-keeps-blank-line-expected-regex
+         org-mcp-test--clock-delete-drops-blank-line-expected-regex)))))
 
 ;;; Tests for org-set-properties
 
