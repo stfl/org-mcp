@@ -711,18 +711,25 @@ point in the entry of the heading it changed; the response's `link'
 links to that heading.  If the buffer was already modified before
 BODY runs, org-mcp leaves it dirty and unsaved.  Otherwise it saves
 the buffer and refreshes other clean visiting buffers afterward.
-BODY and the save form one change: when either signals an error,
-the buffer is put back as it was and the error propagates, so a
-failed call leaves the buffer unchanged, and the file too unless a
-hook wrote it during the call.  The response reports `saved' as
-false when the buffer still differs from its file after the save,
-so a hook that saved the buffer while BODY ran yields true.  RESPONSE-ALIST is evaluated after the
-save, with point where BODY left it, so a link that cannot be made
-never keeps the change from being saved.  OPERATION is retained for
+
+BODY and the save form one change.  When either signals an error,
+the buffer is put back as it was and the error propagates.  If a
+hook saved a buffer that was clean partway through, org-mcp saves it
+again, so the file is put back too.  If the save wrote the file and
+then failed, as in `after-save-hook', the change is kept and the
+error says it was made, so a client does not repeat it.
+
+The response reports `saved' as false when the buffer still differs
+from its file after the save, so a hook that saved the buffer while
+BODY ran yields true.  RESPONSE-ALIST is evaluated after the save,
+with point where BODY left it, so a link that cannot be made never
+keeps the change from being saved.  OPERATION is retained for
 call-site clarity and compatibility.  BODY can access FILE-PATH,
 OPERATION, and RESPONSE-ALIST as variables."
   (declare (indent 3) (debug (form form form body)))
-  (let ((position (make-symbol "position")))
+  (let ((position (make-symbol "position"))
+        (group (make-symbol "group"))
+        (done (make-symbol "done")))
     `(let* ((ctx (org-mcp--file-buffer-context ,file-path))
             (buf (plist-get ctx :buffer))
             (preexisting-modified-p (plist-get ctx :modified-p))
@@ -731,21 +738,53 @@ OPERATION, and RESPONSE-ALIST as variables."
        (unwind-protect
            (progn
              (with-current-buffer buf
-               ;; On an error the change group undoes BODY's edits, and
-               ;; does so with undo turned off in BUF too.  Undoing the
-               ;; first edit of a clean buffer also marks it unmodified
-               ;; again, unless its file was written during the call.
-               (atomic-change-group
-                 (save-restriction
-                   (widen)
-                   (save-mark-and-excursion
-                     (save-match-data
-                       (goto-char (point-min))
-                       ,@body
-                       (setq ,position (point-marker)))))
-                 (unless preexisting-modified-p
-                   (when (buffer-modified-p)
-                     (save-buffer)))))
+               ;; `atomic-change-group' written out, with its bindings,
+               ;; so that a save which wrote the file and then failed
+               ;; keeps the change.  Cancelling the group undoes BODY's
+               ;; edits, with undo turned off in BUF too, and undoing
+               ;; the first edit of a clean buffer marks it unmodified
+               ;; again unless its file was written during the call.
+               (let ((,group (prepare-change-group))
+                     (undo-outer-limit nil)
+                     (undo-limit most-positive-fixnum)
+                     (undo-strong-limit most-positive-fixnum)
+                     (,done nil))
+                 (unwind-protect
+                     (progn
+                       (activate-change-group ,group)
+                       (save-restriction
+                         (widen)
+                         (save-mark-and-excursion
+                           (save-match-data
+                             (goto-char (point-min))
+                             ,@body
+                             (setq ,position (point-marker)))))
+                       (unless preexisting-modified-p
+                         (when (buffer-modified-p)
+                           (condition-case err
+                               (save-buffer)
+                             (error
+                              ;; An unmodified buffer means the file
+                              ;; holds the change.
+                              (unless (buffer-modified-p)
+                                (setq ,done t)
+                                (org-mcp--tool-validation-error
+                                 "The change was made and saved, but a \
+function run by the save failed: %s"
+                                 (error-message-string err)))
+                              (signal (car err) (cdr err))))))
+                       (setq ,done t))
+                   (if ,done
+                       (accept-change-group ,group)
+                     (cancel-change-group ,group)
+                     ;; Still modified: a hook wrote the file during the
+                     ;; call.  BUF holds no edits of the user's, so
+                     ;; saving it puts the file back.  A second failure
+                     ;; must not replace the first error.
+                     (when (and (not preexisting-modified-p)
+                                (buffer-modified-p))
+                       (ignore-errors
+                         (save-buffer)))))))
              ;; Outside the change group: the file is written by now,
              ;; and undoing the edit would part the buffer from it.
              (unless preexisting-modified-p

@@ -6974,6 +6974,20 @@ with one is refused all the same."
   "Pattern after setting FIRST on the bare task beside the user's edit.
 The user added Other Task before the call and left it unsaved.")
 
+(defconst org-mcp-test--content-bare-todo-final-newline
+  "* TODO Simple Task\nTask body text.\n"
+  "The bare task ending in a line break, so saving it changes no byte.")
+
+(defconst org-mcp-test--pattern-set-first-and-second-property
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:FIRST: +1\n"
+   " *:SECOND: +2\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after setting FIRST and then SECOND on the bare task.")
+
 (defconst org-mcp-test--pattern-bare-todo-with-user-edit
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -6988,6 +7002,14 @@ On `org-property-changed-functions', it makes org-set-properties fail
 after it has written FIRST and SECOND."
   (when (equal property "SECOND")
     (error "Property hook failed")))
+
+(defun org-mcp-test--save-on-first-fail-on-second (property value)
+  "Save the buffer when PROPERTY is FIRST, and fail when it is SECOND.
+On `org-property-changed-functions', it writes the file partway through
+org-set-properties, which then fails.  VALUE is passed on."
+  (if (equal property "FIRST")
+      (save-buffer)
+    (org-mcp-test--fail-on-second property value)))
 
 (ert-deftest org-mcp-test-failed-write-leaves-buffer-and-file-unchanged ()
   "Test a write that fails partway leaves its buffer and file as they were.
@@ -7095,6 +7117,70 @@ unmodified and holds no edit a later call would take for the user's."
               (should
                (string= (buffer-string) org-mcp-test--content-bare-todo))
               (should-not (buffer-modified-p))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-failed-write-after-hook-save-restores-file ()
+  "Test a write that fails after a hook saved partway puts the file back.
+A hook saves the buffer once FIRST is written, and the call fails on
+SECOND.  The buffer held no edits of the user's, so org-mcp saves the
+restored buffer again: buffer and file both hold the original text, and
+the buffer reads unmodified."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo-final-newline))
+    (let ((buffer (find-file-noselect test-file))
+          (org-property-changed-functions
+           '(org-mcp-test--save-on-first-fail-on-second)))
+      (unwind-protect
+          (progn
+            (org-mcp-test--call-tool-refused
+             "org-set-properties"
+             `((link
+                . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (properties . ((FIRST . "1") (SECOND . "2"))))
+             "Property hook failed" test-file)
+            (with-current-buffer buffer
+              (should
+               (string=
+                (buffer-string)
+                org-mcp-test--content-bare-todo-final-newline))
+              (should-not (buffer-modified-p))))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-failed-after-save-hook-keeps-saved-change ()
+  "Test a failure after the file was written keeps the change and says so.
+A buffer-local `after-save-hook' fails once the file holds the change.
+The change stays in buffer and file, the buffer reads unmodified, and
+the error says that the change was made, so a client does not repeat
+it.  Once the hook is gone, the next write reports `saved' true."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file))
+          (link (org-mcp-test--file-link test-file "*Simple Task")))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (add-hook 'after-save-hook
+                        (lambda () (error "Save hook failed"))
+                        nil t))
+            (org-mcp-test--call-tool-refused
+             "org-set-properties"
+             `((link . ,link) (properties . ((FIRST . "1"))))
+             "\\`The change was made and saved, but .*Save hook failed")
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--pattern-set-first-property)
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--pattern-set-first-property)
+            (org-mcp-test--verify-no-modified-buffer test-file)
+            (with-current-buffer buffer
+              (kill-local-variable 'after-save-hook))
+            (let ((result
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-set-properties"
+                     `((link . ,link) (properties . ((SECOND . "2"))))))))
+              (should (eq (alist-get 'saved result) t)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--pattern-set-first-and-second-property))
         (kill-buffer buffer)))))
 
 (ert-deftest org-mcp-test-hook-save-reports-saved ()
