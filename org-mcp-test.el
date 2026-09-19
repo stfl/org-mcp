@@ -9572,6 +9572,43 @@ used."
             (org-mcp-test--read-file b-file)
             org-mcp-test--content-sibling-elsewhere)))))))
 
+(defconst org-mcp-test--content-other-file-heading
+  "* Elsewhere
+:PROPERTIES:
+:ID:       elsewhere-id
+:END:
+"
+  "File holding a heading whose ID no other test file carries.")
+
+(ert-deftest org-mcp-test-add-todo-after-link-in-other-file ()
+  "An after_link `id:' link to a heading in another file is no sibling.
+The heading lies in an allowed file and its ID is in Emacs's index,
+but the sibling is only looked for in the parent's file, so the call
+is refused as naming no sibling under the parent, bare and with a
+search part, and neither file changes."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((a-file org-mcp-test--content-sibling-parent)
+         (b-file org-mcp-test--content-other-file-heading))
+      (org-mcp-test--with-id-tracking
+          (list a-file b-file)
+          `(("elsewhere-id" . ,b-file))
+        (dolist (after '("id:elsewhere-id" "[[id:elsewhere-id::*Elsewhere]]"))
+          (org-mcp-test--without-id-index
+            (org-mcp-test--call-tool-refused
+             "org-add-todo"
+             `((title . "New Task")
+               (todo_state . "TODO")
+               (body . nil)
+               (parent_link . ,(format "file:%s::*Parent" a-file))
+               (after_link . ,after))
+             (concat "\\`Sibling " (regexp-quote after)
+                     " not found under parent\\'")
+             a-file))
+          (should
+           (string= (org-mcp-test--read-file b-file)
+                    org-mcp-test--content-other-file-heading)))))))
+
 (defconst org-mcp-test--content-custom-id-children-first
   "* Parent
 :PROPERTIES:

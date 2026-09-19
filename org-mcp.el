@@ -1930,9 +1930,14 @@ TARGET comes from `org-mcp--link-target'.  PARENT is the position of
 the parent heading in the current buffer, or nil for the top level of
 the file, where the child is a heading with no parent.  Throws a
 validation error unless TARGET names such a heading in the current
-buffer's file."
+buffer's file.  An ID this buffer does not hold, such as one in
+another file, is such an error too, not an unknown ID: the sibling
+is only ever looked for here."
   (unless (and (org-mcp--paths-equal-p
                 (plist-get target :file) (buffer-file-name))
+               (or (not (plist-get target :id))
+                   (org-with-wide-buffer
+                    (org-find-entry-with-id (plist-get target :id))))
                (progn
                  (org-mcp--goto-heading target)
                  (save-excursion
