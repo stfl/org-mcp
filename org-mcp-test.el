@@ -4004,6 +4004,27 @@ The parent's heading line stays intact."
      test-file
      org-mcp-test--regex-parent-last-line-child-added)))
 
+(defconst org-mcp-test--content-heading-first-line "* Existing\n"
+  "File whose first line is its only heading.")
+
+(defconst org-mcp-test--regex-heading-first-line-top-level-added
+  "\\`\\* TODO New\n\\* Existing\n\\'"
+  "Regex matching the whole first-line file with New before Existing.")
+
+(ert-deftest org-mcp-test-add-todo-top-level-before-heading-on-first-line ()
+  "A top-level TODO goes before a heading on the file's first line.
+That heading counts as one the file has, so the new heading gets a
+line of its own above it."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-heading-first-line
+    (org-mcp-test--add-todo-and-check
+     "New" "TODO" nil nil
+     (concat "file:" test-file)
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--regex-heading-first-line-top-level-added)))
+
 (ert-deftest org-mcp-test-add-todo-invalid-state ()
   "Test that adding TODO with invalid state throws error."
   (org-mcp-test--with-add-todo-setup test-file
