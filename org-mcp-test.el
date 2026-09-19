@@ -9305,6 +9305,36 @@ heading at the top level of the file."
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--regex-file-drawer-top-level-added)))))))
 
+(ert-deftest org-mcp-test-clock-in-file-level-id-keeps-running-clock ()
+  "Test clock-in refuses a file-level ID before closing the running clock.
+The link addresses the whole file, not a heading, so clock-in refuses
+it although clock_out names the running clock correctly.  Neither
+file, the buffer of the running clock, nor the running clock changes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-drawer)
+       (running-file
+        org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock running-file
+      (let ((position (marker-position org-clock-marker)))
+        (org-mcp-test--without-id-index
+          (should
+           (string-match-p
+            (concat
+             "\\`Link does not point to a heading: "
+             (regexp-quote org-mcp-test--file-level-id-link) "\\'")
+            (org-mcp-test--call-tool-expecting-error
+             running-file "org-clock-in"
+             `((link . ,org-mcp-test--file-level-id-link)
+               (files . ,(vector test-file))
+               (start_time . "2026-01-01T11:00:00")
+               (clock_out
+                . ,(org-mcp-test--file-link running-file "*Task One")))))))
+        (should (string= (org-mcp-test--read-file test-file)
+                         org-mcp-test--content-file-drawer))
+        (org-mcp-test--verify-no-modified-buffer running-file)
+        (should (eq (org-clock-is-active) (find-buffer-visiting running-file)))
+        (should (= (marker-position org-clock-marker) position))))))
+
 (ert-deftest org-mcp-test-link-title-search-resolves-to-first-match ()
   "A title search that matches several headings resolves to the first."
   (org-mcp-test--with-temp-org-files
