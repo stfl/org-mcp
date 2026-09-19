@@ -642,13 +642,33 @@ for `org-mcp--link-parse' to check."
               (and (stringp link) (string-blank-p link)))
     link))
 
+(defmacro org-mcp--closing-opened-buffers (files &rest body)
+  "Run BODY, then kill the buffers it opened to visit FILES.
+FILES, a list of files, is evaluated before BODY runs.  A buffer that
+already visited one of them then is left open, and so is a buffer
+BODY leaves modified.  Every other buffer visiting one of them is
+killed once BODY returns or exits non-locally, so scanning files a
+call names leaves the user's buffer list as it was."
+  (declare (indent 1) (debug (form body)))
+  (let ((unvisited (make-symbol "unvisited")))
+    `(let ((,unvisited (cl-remove-if #'find-buffer-visiting ,files)))
+       (unwind-protect
+           (progn
+             ,@body)
+         (dolist (file ,unvisited)
+           (when-let* ((buffer (find-buffer-visiting file)))
+             (unless (buffer-modified-p buffer)
+               (kill-buffer buffer))))))))
+
 (defmacro org-mcp--with-file-set (files &rest body)
   "Run BODY over the files a call names in FILES, or the allowed files.
 FILES is the call's `files' parameter.  Unless it is blank, see
 `org-mcp--files-given', `org-mcp--named-file-set' checks and expands
 it, and the resulting set replaces the allowed files for BODY through
-`org-mcp--file-set'.  When it is blank, BODY runs over the allowed
-files.  Either way BODY runs inside
+`org-mcp--file-set'; the buffers BODY opens to visit that set are
+killed afterwards by `org-mcp--closing-opened-buffers'.  When it is
+blank, BODY runs over the allowed files and leaves the buffers it
+opens for them, as the agenda does.  Either way BODY runs inside
 `org-mcp--with-allowed-agenda-files', so `org-agenda-files' holds the
 existing files it works on."
   (declare (indent 1) (debug (form body)))
@@ -657,8 +677,9 @@ existing files it works on."
             (if ,files
                 (org-mcp--named-file-set ,files)
               'allowed)))
-       (org-mcp--with-allowed-agenda-files
-         ,@body))))
+       (org-mcp--closing-opened-buffers (and ,files org-mcp--file-set)
+         (org-mcp--with-allowed-agenda-files
+           ,@body)))))
 
 (defmacro org-mcp--modify-and-save
     (file-path operation response-alist &rest body)
@@ -1153,11 +1174,16 @@ the order that function returns them.  Each is searched with
 it, and consults no ID index: an ID in a file Emacs never indexed is
 found, Org's rescan never runs, and nothing is added to
 `org-id-locations'.  An ID none of them holds is an error naming FILES
-as the call sent them."
+as the call sent them.  The buffers the search opens are killed, see
+`org-mcp--closing-opened-buffers', that of the file found included;
+the tool visits that file again to work on it."
   (let ((set (org-mcp--named-file-set files)))
     (or (and (org-string-nw-p id)
-             (cl-find-if
-              (lambda (file) (org-id-find-id-in-file id file)) set))
+             (org-mcp--closing-opened-buffers set
+               (cl-find-if
+                (lambda (file)
+                  (org-id-find-id-in-file id file))
+                set)))
         (org-mcp--tool-validation-error
          "Cannot find ID '%s' in files: %s"
          id
@@ -3645,8 +3671,9 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial result.  null, false,
-          \"\" and [] mean no files.
+          total is an error, never a partial result.  The buffers
+          the call opens for these files are closed afterwards.
+          null, false, \"\" and [] mean no files.
 
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
@@ -4146,9 +4173,12 @@ Parameters:
           allowed files is reached only as far as
           org-mcp-file-scope-override permits, and a directory is
           searched as that tool searches it.  An ID none of the files
-          holds is an error.  Refused with any link but an id:
-          link, such as a file: link, which names its file already.
-          null, false, \"\" and [] mean no files.
+          holds is an error.  The buffers the lookup opens for these
+          files are closed again; the file holding the ID is read
+          like any other, and its buffer stays open.  Refused with
+          any link but an id: link, such as a file: link, which
+          names its file already.  null, false, \"\" and [] mean no
+          files.
           Every tool that names a heading takes files in the same
           way.
 
@@ -4258,8 +4288,9 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.  null, false,
-          \"\" and [] mean no files.
+          total is an error, never a partial search.  The buffers
+          the call opens for these files are closed afterwards.
+          null, false, \"\" and [] mean no files.
 
 Returns JSON object:
   matches - Array of matched entries, each with:
@@ -4560,8 +4591,9 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.  null, false,
-          \"\" and [] mean no files.
+          total is an error, never a partial search.  The buffers
+          the call opens for these files are closed afterwards.
+          null, false, \"\" and [] mean no files.
 
 Returns JSON object:
   open_clocks - Array of open clocks, each with:

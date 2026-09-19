@@ -2778,6 +2778,52 @@ which none exists, for the GTD queries too."
               (should (equal (org-mcp-test--gtd-titles) nil))))
         (kill-buffer buffer)))))
 
+(ert-deftest org-mcp-test-file-set-closes-buffers-it-opens ()
+  "A call naming files closes the buffers it opened for them.
+After each tool taking `files' searches a directory whose files no
+buffer visits but one, the buffer list is as before: the buffer the
+user had open stays, and no other file of the set is left visited.
+An `id:' link looked up in `files' leaves no buffer when no file holds
+the ID, and otherwise only that of the file holding it, which the tool
+reads, as it does for a heading in an allowed file."
+  (org-mcp-test--with-scope-dirs t
+    (let* ((files
+            (mapcar
+             (lambda (title)
+               (org-mcp-test--write-set-file
+                outside (concat title ".org") title))
+             '("alpha" "beta" "gamma")))
+           (searched (org-mcp-test--write-set-file root "a.org" "a"))
+           (holder
+            (org-mcp-test--write-file
+             root "holder.org" org-mcp-test--scope-task-with-id-content))
+           (open (find-file-noselect (car files)))
+           (before (buffer-list)))
+      (unwind-protect
+          (progn
+            (should
+             (equal (org-mcp-test--scan-files (vector outside))
+                    '("alpha" "beta" "gamma")))
+            (should (equal (buffer-list) before))
+            (should (eq (find-buffer-visiting (car files)) open))
+            (org-mcp-test--call-tool-refused
+             "org-read-headline"
+             `((link . "id:no-such-id") (files . ,(vector outside)))
+             "\\`Cannot find ID 'no-such-id' in files: ")
+            (should (equal (buffer-list) before))
+            (should
+             (string=
+              (org-mcp-test--call-read-headline
+               org-mcp-test--scope-id-link (vector root))
+              (string-trim-right org-mcp-test--scope-task-with-id-content)))
+            (should-not (find-buffer-visiting searched))
+            (should
+             (equal (cl-set-difference (buffer-list) before)
+                    (list (find-buffer-visiting holder)))))
+        (dolist (file (cons holder files))
+          (when-let* ((buffer (find-buffer-visiting file)))
+            (kill-buffer buffer)))))))
+
 (ert-deftest org-mcp-test-file-set-validates-parameter ()
   "`files' is an array of absolute paths, or a single path.
 A blank value, which some clients send for every optional parameter

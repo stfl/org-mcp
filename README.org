@@ -170,6 +170,11 @@ by default, which counts every file in the set and every directory searched
 for it: the call never searches only part of the set, and it reads no more
 directories than that.
 
+The call visits each file of the set in an Emacs buffer and closes the buffers
+it opened once it is done, so your buffer list stays as it was.  A buffer that
+was already open stays open.  Without =files=, a query leaves the buffers it
+opens for the allowed files open, as the agenda does.
+
 #+begin_src emacs-lisp
 ;; Let a query reach up to 2000 files and directories
 (setq org-mcp-max-files 2000)
@@ -308,9 +313,11 @@ works unchanged:
   title that matches several headings resolves to the first, as it does in
   Org, and =::<n>= in a =file:= link goes to line /n/. A search that matches
   nothing is an error; org-mcp never offers to create the heading.
-- A link is resolved, never followed: your windows, narrowing, point, folding,
-  marks and buffer list stay as they were, even when the buffer is narrowed to
-  another subtree.
+- A link is resolved, never followed: your windows, narrowing, point, folding
+  and marks stay as they were, even when the buffer is narrowed to another
+  subtree, and so do the buffers you have open. A tool works in the buffer
+  visiting the heading's file; when no buffer visits it, the tool opens one and
+  leaves it open.
 - A =file:= link names its file, so it reaches the allowed files and any Org
   file =org-mcp-file-scope-override= permits (see
   [[*Configuring the scope override]]). An =id:= link names no file and
@@ -357,6 +364,9 @@ named.
   as far as =org-mcp-file-scope-override= permits, for that call alone.
 - The first file that holds the ID wins.  An ID none of them holds is an
   error naming the ID and the entries as sent.
+- The buffers the lookup opens for the named files are closed again.  The
+  tool then works on the file holding the ID like on any other, and leaves its
+  buffer open.
 - =files= applies only to an =id:= link.  A call sending it with any other
   link, such as a =file:= link, which names its file already, is refused
   before any file is opened.  A blank value, =null=, =false=, =""= or =[]=,
