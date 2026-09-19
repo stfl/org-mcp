@@ -1872,7 +1872,9 @@ share the `-block' suffix (e.g. `example-block', `src-block',
 `special-block'), so every #+BEGIN_X / #+END_X line whose enclosing
 element does not end in `-block' is unbalanced.  Markers nested inside
 another block are correctly ignored as literal text by
-`org-element-at-point'.
+`org-element-at-point'.  A marker may be indented, as in a list item,
+and a line Org reads as a heading inside a block leaves the block
+unbalanced.
 Throws an MCP tool error if unbalanced blocks are found."
   (with-temp-buffer
     (let ((org-inhibit-startup t))
@@ -1880,8 +1882,13 @@ Throws an MCP tool error if unbalanced blocks are found."
         (org-mode)))
     (insert body)
     (goto-char (point-min))
+    ;; Org's parser has no element for an unbalanced block: it reads the
+    ;; marker line as plain text, so no `org-element-map' finds it.  The
+    ;; markers are therefore found by text and classified by the parser,
+    ;; as `org-lint-invalid-block' does, with the leading whitespace
+    ;; Org's block syntax allows.
     (while (re-search-forward
-            "^#\\+\\(BEGIN\\|END\\|begin\\|end\\)_\\(\\S-+\\)"
+            "^[ \t]*#\\+\\(BEGIN\\|END\\|begin\\|end\\)_\\(\\S-+\\)"
             nil t)
       (let* ((marker-type (upcase (match-string 1)))
              (block-type (upcase (match-string 2)))

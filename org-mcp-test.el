@@ -5351,6 +5351,60 @@ Second block:
 #+BEGIN_QUOTE
 unfinished")))
 
+(defconst org-mcp-test--content-block-body-target "* Task\nTask body.\n"
+  "File whose one heading receives bodies holding indented blocks.")
+
+(defconst org-mcp-test--regex-block-body-target-unchanged
+  (concat "\\`" (regexp-quote org-mcp-test--content-block-body-target) "\\'")
+  "Regex matching `org-mcp-test--content-block-body-target' unchanged.")
+
+(defconst org-mcp-test--regex-block-body-escaped-appended
+  (concat
+   "\\`\\* Task\nTask body\\.\n- item\n  #\\+begin_example\n"
+   "  ,\\*\\* x\n  #\\+end_example\n\\'")
+  "Regex matching the target after appending an indented escaped block.")
+
+(ert-deftest org-mcp-test-body-refuses-star-line-in-indented-block ()
+  "A body whose indented block holds a star line is refused.
+Org parses the star line as a heading, which breaks the block, so the
+body would add a heading.  The refusal holds for a line deeper than
+the heading the body goes under, in org-add-todo and in both modes of
+org-edit-body, and leaves the file unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-block-body-target))
+    (let ((link (org-mcp-test--file-link test-file "*Task")))
+      (dolist (call
+               `(("org-add-todo"
+                  (title . "New")
+                  (todo_state . "TODO")
+                  (body . "- item\n  #+begin_example\n** x\n  #+end_example")
+                  (parent_link . ,(concat "file:" test-file)))
+                 ("org-edit-body"
+                  (link . ,link)
+                  (old_body . "")
+                  (new_body . "  #+begin_example\n** z\n  #+end_example")
+                  (append . t))
+                 ("org-edit-body"
+                  (link . ,link)
+                  (old_body . "Task body.")
+                  (new_body . "  #+begin_example\n*** z\n  #+end_example"))))
+        (org-mcp-test--call-tool-refused
+         (car call) (cdr call)
+         "\\`Body contains unclosed EXAMPLE block\\'"
+         test-file)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-block-body-target-unchanged)))))
+
+(ert-deftest org-mcp-test-body-accepts-escaped-star-line-in-indented-block ()
+  "A body whose indented block escapes its star line is appended as is."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-block-body-target))
+    (let ((link (org-mcp-test--file-link test-file "*Task")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file link ""
+       "- item\n  #+begin_example\n  ,** x\n  #+end_example"
+       org-mcp-test--regex-block-body-escaped-appended t link))))
+
 ;;; Read tool tests
 
 (ert-deftest org-mcp-test-tool-read-file ()
