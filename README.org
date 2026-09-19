@@ -776,7 +776,7 @@ Example:
   - =link= (string, required): link to the node to edit (see [[*Addressing headings with links]])
   - =old_body= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
   - =new_body= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[*Addressing headings with links]])
-  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =new_body= to end of body instead of replacing. =false=, ="false"=, =null= and =""= mean replace; any other value is refused
+  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =new_body= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Special behavior (replace mode):* When =old_body= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
@@ -1165,7 +1165,7 @@ Example responses:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[*Addressing headings with links]])
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies). The running clock closes at this time, so it must not be before that clock's start
-  - =resolve= (=true= / =false= or ="true"= / ="false"=, optional): true deletes the dangling (unclosed) CLOCK entries under the heading before clocking in, that is every open one but the running clock. The running clock is never deleted: =clock_out= names it, and it is closed. =false=, ="false"=, =null= and =""= mean no; any other value is refused
+  - =resolve= (=true= / =false= or ="true"= / ="false"=, optional): true deletes the dangling (unclosed) CLOCK entries under the heading before clocking in, that is every open one but the running clock. The running clock is never deleted: =clock_out= names it, and it is closed. =false=, ="false"=, =null=, =""= and =[]= mean no; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[*Naming the file of an ID]]
   - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. The link a refusal names for the running clock is accepted as sent, even a title link that finds another heading of the same title first. An =id:= link is looked up in the running clock's file
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
