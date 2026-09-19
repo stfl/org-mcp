@@ -38,8 +38,9 @@ An Org file whose IDs Emacs records in its ID index, so an ID in it resolves
 without naming the file.
 
 **ID**:
-A UUID identifying a heading across all indexed files. Only headings in indexed
-files carry one.
+A UUID identifying a heading, or a whole file when it sits in the file's top
+property drawer, across all indexed files. Only headings and files that are
+indexed carry one.
 _Avoid_: slug ID, org-id
 
 **Custom ID**:

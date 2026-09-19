@@ -334,9 +334,10 @@ works unchanged:
   =files=.
 - An =id:= link whose =ID= sits in a file-level property drawer, before the
   first heading, where org-roam keeps the =ID= of a file node, addresses the
-  whole file, as =org-id-open= opens the file at its top. It reads exactly as
-  the file's =file:= link without a search part does. With a search part, as
-  in =id:<id>::*Review=, it searches the whole file.
+  whole file, as =org-id-open= opens the file at its top. In =org-read=,
+  =org-read-headline= and the =org://{link}= resource it reads exactly as the
+  file's =file:= link without a search part does. With a search part, as in
+  =id:<id>::*Review=, it searches the whole file.
 - =org-add-todo= reads a link to a whole file, a =file:= link without a search
   part or an =id:= link to a file-level property drawer, as the top level of
   that file. A tool that needs a heading refuses either.
@@ -1060,8 +1061,9 @@ Example response for a headline:
 - *Parameters:*
   - =file= (string, required): Absolute path to an Org file, or a =file:=
     link to it with no search part, bare or bracketed, such as
-    =file:/path/to/file.org=. A link to a heading, such as an =id:= link, is
-    refused without being looked up, and so is a string starting with =org://=
+    =file:/path/to/file.org=. An =id:= link, even one to a file-level drawer,
+    and a =file:= link with a search part are refused without being looked
+    up, and so is a string starting with =org://=
 - *Returns:* JSON object with hierarchical outline structure: the top-level
   headings and their direct children, each with its =title=, =level=, =link=
   (see [[*Links org-mcp returns]]) and =children=; deeper headings are left out

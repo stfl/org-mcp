@@ -5443,7 +5443,7 @@ org-edit-body, and leaves the file unchanged."
 (ert-deftest org-mcp-test-tool-read-outline-file-link ()
   "org-read-outline takes a `file:' link to the file as well as its path.
 A bare and a bracketed link with no search part read the same outline
-as the path.  A link to a heading, a relative path and a file outside
+as the path.  A link with a search part, a relative path and a file outside
 the allowed files, as a path or a link, are refused with tool errors
 that say why, and the files stay unchanged."
   (org-mcp-test--with-temp-org-files
@@ -5456,7 +5456,8 @@ that say why, and the files stay unchanged."
         (should (equal (org-mcp-test--call-read-outline link) expected)))
       (pcase-dolist (`(,file ,refusal)
                      `((,(org-mcp-test--file-link test-file "*Parent Task")
-                        "\\`org-read-outline takes a file, not a heading: ")
+                        "\\`org-read-outline takes a file's path or file: \
+link, not an id: link or a search: ")
                        (,(file-name-nondirectory test-file)
                         "\\`Path must be absolute: ")
                        (,other-file "not in allowed list\\'")
@@ -5475,8 +5476,8 @@ that say why, and the files stay unchanged."
 (ert-deftest org-mcp-test-tool-read-outline-refuses-heading-links-unresolved ()
   "org-read-outline refuses a heading link and an org:// string unresolved.
 An `id:' link, unknown or known, bare or with a search part, and a
-`file:' link with a search part are refused as naming a heading, and
-Emacs's ID index is never consulted or rescanned.  A string starting
+`file:' link with a search part are refused as parsed, and Emacs's ID
+index is never consulted or rescanned.  A string starting
 with org:// is refused as no link, with the hint to drop the prefix,
 as the link tools refuse it.  The file stays unchanged."
   (org-mcp-test--with-temp-org-files
@@ -5495,9 +5496,9 @@ as the link tools refuse it.  The file stays unchanged."
             (org-mcp-test--call-tool-refused
              "org-read-outline" `((file . ,link))
              (concat
-              "\\`org-read-outline takes a file, not a heading: "
-              (regexp-quote link)
-              "\\.  Send the file's path or file:<path>\\'")
+              "\\`org-read-outline takes a file's path or file: link, \
+not an id: link or a search: "
+              (regexp-quote link) "\\'")
              test-file))
           (dolist (uri
                    (list

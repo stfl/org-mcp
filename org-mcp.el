@@ -3202,10 +3202,10 @@ MCP Parameters:
 FILE is the absolute path to an Org file, or a `file:' link to it with
 no search part, such as file:/path/to/file.org.  Either way the file
 must pass the scope gate, `org-mcp--find-allowed-file', as a file the
-call names.  A link to a heading, an `id:' link or one with a search
-part, is refused as parsed, before an ID is looked up.  A string
-starting with `org://' is refused as no link, the way the link tools
-refuse it.
+call names.  An `id:' link, even one to a file-level drawer, and a
+`file:' link with a search part are refused without being looked up,
+as parsed.  A string starting with `org://' is refused as no link, the
+way the link tools refuse it.
 
 MCP Parameters:
   file - Absolute path to an Org file, or a file: link to it with no
@@ -3221,8 +3221,8 @@ MCP Parameters:
         (when (or (equal (org-element-property :type object) "id")
                   (org-element-property :search-option object))
           (org-mcp--tool-validation-error
-           "org-read-outline takes a file, not a heading: %s.  Send \
-the file's path or file:<path>"
+           "org-read-outline takes a file's path or file: link, not an \
+id: link or a search: %s"
            file))
         (plist-get (org-mcp--link-target file) :file)))
      (t
@@ -4309,8 +4309,9 @@ Parameters:
   file - Absolute path to Org file, or a file: link to it with no
          search part, bare or bracketed, such as file:/path/to/file.org
          (string, required)
-         A link to a heading, such as an id: link, is refused, and so
-         is an org:// resource URI.
+         An id: link, even one to a file-level drawer, and a file:
+         link with a search part are refused without being looked
+         up, and so is an org:// resource URI.
 
 Returns: JSON object with hierarchical outline structure:
   headings - Array of top-level headlines, each with title, level,
