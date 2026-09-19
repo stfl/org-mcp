@@ -148,7 +148,8 @@ among the allowed files, and a remote directory in the list permits nothing.
 allowed files for that call; without it, the call works on the allowed files.
 A blank value, =null=, =false=, =""= or =[]=, counts as no =files=, since some
 clients fill every optional parameter.  Each entry is an absolute path to an
-Org file or to a directory:
+Org file or to a directory, and a relative path is refused, since it has no
+directory to resolve against but whichever buffer is current in Emacs:
 
 - a file is checked like any file a call names: one outside the allowed files
   is accepted only as far as =org-mcp-file-scope-override= permits;

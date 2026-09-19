@@ -2217,12 +2217,14 @@ outline path appended, is no link and refused as such."
         (org-mcp-test--assert-files-refused
          (vector (concat org-mcp-test--remote-prefix "/dir/"))
          "not in allowed list")
-        ;; A relative name inherits a remote `default-directory'.
+        ;; A relative name, which would inherit a remote
+        ;; `default-directory', is refused as no full path.
         (let ((default-directory
                (concat org-mcp-test--remote-prefix "/dir/")))
           (org-mcp-test--assert-files-refused
-           ["x.org"] "not in allowed list")
-          (org-mcp-test--assert-files-refused ["."] "not in allowed list"))
+           ["x.org"] "\\`files entry names no file by its full path: x\\.org")
+          (org-mcp-test--assert-files-refused
+           ["."] "\\`files entry names no file by its full path: \\."))
         (should (null ops))))))
 
 (ert-deftest org-mcp-test-scope-override-refuses-symlink-to-remote ()
@@ -2854,10 +2856,26 @@ tool runs over the allowed files."
           "org-ql-query" '((query . "(todo)") (files)) nil))
         1))
       (org-mcp-test--assert-files-refused [1] "non-empty array of paths")
+      ;; A relative entry is refused, even where it would name a file
+      ;; the setting permits, and so is a set holding one.
       (let ((default-directory outside))
-        (org-mcp-test--assert-files-refused
-         ["beta.org"] "not in allowed list")
-        (org-mcp-test--assert-files-refused ["."] "not in allowed list")))))
+        (dolist (relative '("beta.org" "." "./beta.org" "sub/../beta.org"))
+          (dolist (files (list (vector relative) (vector alpha relative)
+                               relative))
+            (org-mcp-test--assert-files-refused
+             files
+             (concat "\\`files entry names no file by its full path: "
+                     (regexp-quote relative)
+                     "\\.  Send a full path, such as /home/user/notes\\.org\\'")))
+          (org-mcp-test--call-tool-refused
+           "org-read-headline"
+           `((link . ,org-mcp-test--scope-id-link) (files . ,(vector relative)))
+           "\\`files entry names no file by its full path: "))
+        ;; `~/' is a full path.
+        (should
+         (equal (org-mcp-test--scan-files
+                 (vector (concat "~/" (file-relative-name beta "~"))))
+                '("beta")))))))
 
 (defmacro org-mcp-test--with-add-todo-setup
     (file-var initial-content &rest body)

@@ -383,8 +383,10 @@ resolves to, only the allowed files are reachable."
 (defun org-mcp--named-file-set (files)
   "Return the Org files FILES names, each one reachable by the call.
 FILES is the `files' parameter of a call: an array of paths, or a
-single path.  An entry naming a file must pass the gate,
-`org-mcp--find-allowed-file', as a file the call names.
+single path.  Every entry must be absolute, as `file-name-absolute-p'
+reads it, so `~/' counts; a relative entry is refused rather than
+resolved against `default-directory'.  An entry naming a file must
+pass the gate, `org-mcp--find-allowed-file', as a file the call names.
 
 An entry naming a directory is walked for Org files when
 `org-mcp--override-permits-p' permits the directory's local
@@ -433,6 +435,14 @@ whole tree."
     (unless (and entries (cl-every #'stringp entries))
       (org-mcp--tool-validation-error
        "files must be a non-empty array of paths"))
+    ;; A relative entry would resolve against `default-directory',
+    ;; which depends on whatever buffer is current in Emacs.
+    (dolist (entry entries)
+      (unless (file-name-absolute-p entry)
+        (org-mcp--tool-validation-error
+         "files entry names no file by its full path: %s.  Send a full \
+path, such as /home/user/notes.org"
+         entry)))
     (cl-labels
      ((count-one
        ()
@@ -3660,8 +3670,8 @@ Parameters:
           strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are used.  Each entry is an absolute path to
-          an Org file or a directory.  A file outside the allowed
-          files is accepted only as far as
+          an Org file or a directory; a relative path is refused.  A
+          file outside the allowed files is accepted only as far as
           org-mcp-file-scope-override permits; see
           org-get-allowed-files.  A directory the setting permits is
           searched recursively for the Org files Org takes from a
@@ -4277,8 +4287,8 @@ Parameters:
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.  Each entry is an absolute path
-          to an Org file or a directory.  A file outside the allowed
-          files is accepted only as far as
+          to an Org file or a directory; a relative path is refused.
+          A file outside the allowed files is accepted only as far as
           org-mcp-file-scope-override permits; see
           org-get-allowed-files.  A directory the setting permits is
           searched recursively for the Org files Org takes from a
@@ -4580,8 +4590,8 @@ Parameters:
   files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.  Each entry is an absolute path
-          to an Org file or a directory.  A file outside the allowed
-          files is accepted only as far as
+          to an Org file or a directory; a relative path is refused.
+          A file outside the allowed files is accepted only as far as
           org-mcp-file-scope-override permits; see
           org-get-allowed-files.  A directory the setting permits is
           searched recursively for the Org files Org takes from a
