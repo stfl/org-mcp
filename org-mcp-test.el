@@ -1426,15 +1426,19 @@ LINK is the link to the headline, START and END are ISO 8601 timestamps."
           (mcp-server-lib-ert-call-tool "org-clock-add" params)))
     (json-read-from-string result-text)))
 
-(defun org-mcp-test--call-clock-in (link &optional start-time resolve)
+(defun org-mcp-test--call-clock-in
+    (link &optional start-time resolve clock-out)
   "Call org-clock-in tool via JSON-RPC and return the parsed result.
 LINK is the link to the headline.  START-TIME is an optional ISO 8601 timestamp.
-RESOLVE when non-nil is passed as the `resolve' parameter (e.g. \"true\")."
+RESOLVE when non-nil is passed as the `resolve' parameter (e.g. \"true\").
+CLOCK-OUT when non-nil is passed as the `clock_out' parameter, the link
+to the heading of the running clock."
   (let* ((params
           (append
            `((link . ,link))
            (when start-time `((start_time . ,start-time)))
-           (when resolve `((resolve . ,resolve)))))
+           (when resolve `((resolve . ,resolve)))
+           (when clock-out `((clock_out . ,clock-out)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-clock-in" params)))
     (json-read-from-string result-text)))
@@ -5948,10 +5952,12 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
-   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] => 49:00\n"
    ":END:\n"
    "\\'")
-  "After resolve=true on Task One, Task Two's dangling CLOCK survives.")
+  "After resolve=true on Task One, Task Two's running CLOCK is closed.
+clock_out names it, and resolve deletes no clock outside Task One.")
 
 (ert-deftest org-mcp-test-clock-in-resolve-no-dangling ()
   "Test clock-in with resolve=true on a heading with no dangling clocks."
@@ -5968,12 +5974,14 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
        test-file org-mcp-test--clock-in-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-in-resolve-one-dangling ()
-  "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer."
+  "Test clock-in with resolve=true deletes one dangling CLOCK and collapses drawer.
+The dangling CLOCK is the running clock, so clock_out must name it;
+lying under the heading, it is deleted with resolve rather than closed."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-one-dangling-content))
     (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true" link)))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 1))
       (org-mcp-test--verify-file-matches
@@ -5985,7 +5993,7 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
       ((test-file org-mcp-test--clock-resolve-multi-dangling-content))
     (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true" link)))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 2))
       (org-mcp-test--verify-file-matches
@@ -5997,21 +6005,24 @@ When the visited buffer was already dirty, org-mcp must not save to disk."
       ((test-file org-mcp-test--clock-resolve-mixed-content))
     (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true" link)))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'resolved result) 1))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-in-resolve-mixed-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-in-resolve-scoped-to-subtree ()
-  "Test resolve=true does not touch dangling clocks in sibling headings."
+  "Test resolve=true deletes no dangling clock in a sibling heading.
+Task Two's dangling CLOCK is the running clock, which clock_out names,
+so clock-in closes it rather than deleting it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-resolve-other-heading-content))
     (let* ((link (org-mcp-test--file-link test-file "*Task One"))
            (result (org-mcp-test--call-clock-in
-                    link "2026-01-01T10:00:00" "true")))
+                    link "2026-01-01T10:00:00" "true"
+                    (org-mcp-test--file-link test-file "*Task Two"))))
       (should (equal (alist-get 'success result) t))
-      ;; No clocks were under Task One; Task Two's dangling CLOCK is untouched.
+      ;; No clocks were under Task One, so none was deleted.
       (should (null (assq 'resolved result)))
       (org-mcp-test--verify-file-matches
        test-file
@@ -6165,9 +6176,9 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
                       link-1 "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result-1) t))
       (should (equal (alist-get 'clocked_in result-1) t))
-      ;; Clock in to Task Two — should close Task One first
+      ;; Clock in to Task Two, naming Task One's clock to close first
       (let ((result-2 (org-mcp-test--call-clock-in
-                       link-2 "2026-01-01T11:00:00")))
+                       link-2 "2026-01-01T11:00:00" nil link-1)))
         (should (equal (alist-get 'success result-2) t))
         (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
@@ -6216,7 +6227,8 @@ on disk stays unchanged and the response reports `saved' as false."
               (should (buffer-modified-p)))
             (let ((result (org-mcp-test--call-clock-in
                            (org-mcp-test--file-link test-file "*Task Two")
-                           "2026-01-01T11:00:00")))
+                           "2026-01-01T11:00:00" nil
+                           (org-mcp-test--file-link test-file "*Task One"))))
               (should (equal (alist-get 'success result) t))
               (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'clocked_in result) t)))
@@ -6242,15 +6254,17 @@ on disk stays unchanged and the response reports `saved' as false."
                       link-1 "2026-01-01T10:00:00")))
       (should (equal (alist-get 'success result-1) t))
       (should (equal (alist-get 'clocked_in result-1) t))
-      ;; Clock in to file-2 — should close file-1 first
+      ;; Clock in to file-2, naming file-1's clock to close first
       (let ((result-2 (org-mcp-test--call-clock-in
-                       link-2 "2026-01-01T11:00:00")))
+                       link-2 "2026-01-01T11:00:00" nil link-1)))
         (should (equal (alist-get 'success result-2) t))
         (should (eq (alist-get 'saved result-2) t))
         (should (equal (alist-get 'clocked_in result-2) t))
         (org-mcp-test--verify-file-matches
          file-1
-         org-mcp-test--clock-in-close-different-file-expected-regex)))))
+         org-mcp-test--clock-in-close-different-file-expected-regex)
+        (org-mcp-test--verify-file-matches
+         file-2 org-mcp-test--clock-in-at-eleven-expected-regex)))))
 
 (defconst org-mcp-test--clock-in-at-eleven-expected-regex
   (concat
@@ -6291,7 +6305,8 @@ lands in that buffer, so the response covers both edits."
               (should (buffer-modified-p)))
             (let ((result (org-mcp-test--call-clock-in
                            (org-mcp-test--file-link file-2 "*Task One")
-                           "2026-01-01T11:00:00")))
+                           "2026-01-01T11:00:00" nil
+                           (org-mcp-test--file-link file-1 "*Task One"))))
               (should (equal (alist-get 'success result) t))
               (should (eq (alist-get 'saved result) :json-false))
               (should (equal (alist-get 'clocked_in result) t)))
@@ -6318,7 +6333,7 @@ lands in that buffer, so the response covers both edits."
       (should (equal (alist-get 'success result-1) t))
       ;; Clock in to file-2 at 12:00 — should close file-1 at 12:00
       (let ((result-2 (org-mcp-test--call-clock-in
-                       link-2 "2026-01-01T12:00:00")))
+                       link-2 "2026-01-01T12:00:00" nil link-1)))
         (should (equal (alist-get 'success result-2) t))
         ;; Verify file-1 has a 2-hour closed clock
          (should
@@ -6528,36 +6543,250 @@ reports it as active but not in an allowed file."
           (should
            (eq (alist-get 'in_allowed_file result) :json-false)))))))
 
-(ert-deftest org-mcp-test-clock-in-closes-session-clock-in-modified-buffer ()
-  "Test clock-in reports `saved' false for a session clock left unsaved.
-The Emacs clock runs in a non-allowed file whose buffer already has
-unsaved edits.  Closing it only lands in that buffer, so the response
-reports `saved' as false although the target file reaches disk."
+(ert-deftest org-mcp-test-clock-in-refuses-session-clock-outside-allowed-files ()
+  "Test clock-in refuses while the session clock runs outside the allowed files.
+org-mcp tells a client nothing about that clock, so no clock_out can
+name it: the call is refused with or without one.  Neither file, the
+buffer of the running clock, nor the running clock changes."
   (org-mcp-test--with-temp-org-files
       ((allowed-file org-mcp-test--clock-task-content)
        (outside-file org-mcp-test--clock-task-with-open-clock))
     (let ((org-mcp-allowed-files (list allowed-file)))
       (org-mcp-test--with-session-clock outside-file
-        (let ((outside-buffer (find-buffer-visiting outside-file)))
-          (with-current-buffer outside-buffer
-            (goto-char (point-max))
-            (insert "\n* TODO Task Two\n")
-            (should (buffer-modified-p)))
-          (let ((result (org-mcp-test--call-clock-in
-                         (org-mcp-test--file-link allowed-file "*Task One")
-                         "2026-01-01T11:00:00")))
-            (should (equal (alist-get 'success result) t))
-            (should (eq (alist-get 'saved result) :json-false))
-            (should (equal (alist-get 'clocked_in result) t)))
-          (org-mcp-test--verify-file-matches
-           allowed-file org-mcp-test--clock-in-at-eleven-expected-regex)
-          (with-current-buffer outside-buffer
-            (should (buffer-modified-p)))
-          (org-mcp-test--verify-buffer-matches
-           outside-buffer
-           org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
+        (let ((position (marker-position org-clock-marker)))
+          (dolist (clock-out
+                   (list nil (org-mcp-test--file-link outside-file "*Task One")))
+            (should
+             (string-match-p
+              "\\`A clock is running in a file outside the allowed files\\.  \
+Ask the user to clock out of it before clocking in\\'"
+              (org-mcp-test--call-tool-expecting-error
+               allowed-file "org-clock-in"
+               `((link . ,(org-mcp-test--file-link allowed-file "*Task One"))
+                 (start_time . "2026-01-01T11:00:00")
+                 ,@(when clock-out `((clock_out . ,clock-out))))))))
           (should (string= (org-mcp-test--read-file outside-file)
-                           org-mcp-test--clock-task-with-open-clock)))))))
+                           org-mcp-test--clock-task-with-open-clock))
+          (org-mcp-test--verify-no-modified-buffer outside-file)
+          (should (eq (org-clock-is-active) (find-buffer-visiting outside-file)))
+          (should (= (marker-position org-clock-marker) position)))))))
+
+(ert-deftest org-mcp-test-clock-in-refuses-without-clock-out ()
+  "Test clock-in refuses while a clock runs and clock_out is not sent.
+The refusal names the running clock's heading by title and link, so
+the client can ask the user, and neither the file nor the running
+clock changes.  A blank clock_out, false, \"\" or spaces, counts as
+not sent."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((position (marker-position org-clock-marker)))
+        (dolist (clock-out '(nil :json-false "" "  "))
+          (should
+           (string-match-p
+            (format
+             "\\`A clock is running on 'Task One' (%s)\\.  Ask the user \
+whether to clock out of it, then send its link as clock_out\\'"
+             (regexp-quote (org-mcp-test--file-link test-file "*Task One")))
+            (org-mcp-test--call-tool-expecting-error
+             test-file "org-clock-in"
+             `((link . ,(org-mcp-test--file-link test-file "*Task Two"))
+               (start_time . "2026-01-01T11:00:00")
+               ,@(when clock-out `((clock_out . ,clock-out))))))))
+        (org-mcp-test--verify-no-modified-buffer test-file)
+        (should (eq (org-clock-is-active) (find-buffer-visiting test-file)))
+        (should (= (marker-position org-clock-marker) position))))))
+
+(ert-deftest org-mcp-test-clock-in-refuses-mismatched-clock-out ()
+  "Test clock-in refuses a clock_out that does not name the running clock.
+Another heading of the file, a heading that does not exist, the whole
+file, and a heading of another file are each refused with the running
+clock's heading named, and nothing changes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content)
+       (other-file org-mcp-test--clock-task-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((position (marker-position org-clock-marker)))
+        (dolist (clock-out
+                 (list (org-mcp-test--file-link test-file "*Task Two")
+                       (org-mcp-test--file-link test-file "*Nope")
+                       (concat "file:" test-file)
+                       (org-mcp-test--file-link other-file "*Task One")))
+          (should
+           (string-match-p
+            (format
+             "\\`clock_out does not name the running clock: %s\\.  \
+The clock runs on 'Task One' (%s)\\'"
+             (regexp-quote clock-out)
+             (regexp-quote (org-mcp-test--file-link test-file "*Task One")))
+            (org-mcp-test--call-tool-expecting-error
+             test-file "org-clock-in"
+             `((link . ,(org-mcp-test--file-link test-file "*Task Two"))
+               (start_time . "2026-01-01T11:00:00")
+               (clock_out . ,clock-out))))))
+        (should (string= (org-mcp-test--read-file other-file)
+                         org-mcp-test--clock-task-content))
+        (org-mcp-test--verify-no-modified-buffer test-file)
+        (should (eq (org-clock-is-active) (find-buffer-visiting test-file)))
+        (should (= (marker-position org-clock-marker) position))))))
+
+(ert-deftest org-mcp-test-clock-in-clock-out-closes-session-clock ()
+  "Test clock-in closes the session clock clock_out names, then clocks in.
+Task One's clock is closed at the new clock's start, Task Two's clock
+is opened, and the Emacs clock no longer runs."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((result (org-mcp-test--call-clock-in
+                     (org-mcp-test--file-link test-file "*Task Two")
+                     "2026-01-01T11:00:00" nil
+                     (org-mcp-test--file-link test-file "*Task One"))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'clocked_in result) t)))
+      (should-not (org-clock-is-active))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-close-same-file-expected-regex))))
+
+(defconst org-mcp-test--clock-out-id "3f6c2a8e-5d41-4b7a-9e20-6c1d8f0b4a57"
+  "ID of the clocked heading in `org-mcp-test--clock-open-with-id-content'.")
+
+(defconst org-mcp-test--clock-open-with-id-content
+  (concat
+   "* TODO Task One\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--clock-out-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n"
+   "* TODO Task Two\n")
+  "File with an open clock on Task One, which has an ID, and a Task Two.")
+
+(defconst org-mcp-test--clock-in-over-id-clock-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":PROPERTIES:\n"
+   ":ID: +" (regexp-quote org-mcp-test--clock-out-id) "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "Regex matching the ID file after clock-in to Task Two closes Task One.")
+
+(ert-deftest org-mcp-test-clock-in-clock-out-id-in-running-file ()
+  "Test an id: clock_out is looked up in the running clock's file.
+The ID is found there without Org's ID index being consulted, and the
+clock is closed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-open-with-id-content))
+    (org-mcp-test--with-session-clock test-file
+      (org-mcp-test--without-id-index
+        (let ((result (org-mcp-test--call-clock-in
+                       (org-mcp-test--file-link test-file "*Task Two")
+                       "2026-01-01T11:00:00" nil
+                       (concat "id:" org-mcp-test--clock-out-id))))
+          (should (equal (alist-get 'clocked_in result) t))))
+      (should-not (org-clock-is-active))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-in-over-id-clock-expected-regex))))
+
+(ert-deftest org-mcp-test-clock-in-bad-target-keeps-running-clock ()
+  "Test clock-in to a link that names no heading changes nothing.
+clock_out names the running clock, but the heading to clock in to is
+resolved before any clock is closed, so the refusal leaves the file,
+its buffer and the running clock as they were."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
+    (org-mcp-test--with-session-clock test-file
+      (let ((position (marker-position org-clock-marker)))
+        (should
+         (string-match-p
+          "\\`Cannot resolve link "
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-clock-in"
+           `((link . ,(org-mcp-test--file-link test-file "*Nope"))
+             (start_time . "2026-01-01T11:00:00")
+             (clock_out
+              . ,(org-mcp-test--file-link test-file "*Task One"))))))
+        (org-mcp-test--verify-no-modified-buffer test-file)
+        (should (eq (org-clock-is-active) (find-buffer-visiting test-file)))
+        (should (= (marker-position org-clock-marker) position))))))
+
+(ert-deftest org-mcp-test-clock-in-refuses-clock-out-without-running-clock ()
+  "Test clock-in refuses a clock_out while no clock runs.
+There is no clock for clock_out to name, so the call changes nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((link (org-mcp-test--file-link test-file "*Task One")))
+      (should
+       (string-match-p
+        (format
+         "\\`clock_out names a clock to close, but no clock is running: %s\\'"
+         (regexp-quote link))
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-clock-in"
+         `((link . ,link)
+           (start_time . "2026-01-01T10:00:00")
+           (clock_out . ,link)))))
+      (org-mcp-test--verify-no-modified-buffer test-file))))
+
+(defconst org-mcp-test--clock-in-over-dangling-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] => 49:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents after clock-in without resolve over a dangling CLOCK.
+The dangling CLOCK is the running clock; clock_out names it, and it is
+closed at the new clock's start.")
+
+(ert-deftest org-mcp-test-clock-in-resolve-true-forms ()
+  "Test clock-in reads resolve given as JSON true and as \"true\" alike.
+Each deletes the dangling CLOCK under the heading."
+  (dolist (resolve '(t "true"))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--clock-resolve-one-dangling-content))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+             (result (org-mcp-test--call-clock-in
+                      link "2026-01-01T10:00:00" resolve link)))
+        (should (equal (alist-get 'resolved result) 1))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-in-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-resolve-false-forms ()
+  "Test clock-in reads resolve given as false, \"false\" or \"\" as false.
+The dangling CLOCK is then closed as the running clock, not deleted."
+  (dolist (resolve '(:json-false "false" ""))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--clock-resolve-one-dangling-content))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+             (result (org-mcp-test--call-clock-in
+                      link "2026-01-01T10:00:00" resolve link)))
+        (should (null (assq 'resolved result)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-in-over-dangling-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-refuses-unknown-resolve ()
+  "Test clock-in refuses a resolve that is neither true nor false."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (should
+     (string-match-p
+      "\\`resolve must be true or false: \"yes\"\\'"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-clock-in"
+       `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+         (resolve . "yes")))))))
 
 (ert-deftest org-mcp-test-clock-get-active-dangling-without-session ()
   "Test clock-get-active scans allowed files when no clock is running.
@@ -7266,7 +7495,8 @@ does when the clock is closed, so both files hold their change."
             (let ((result
                    (org-mcp-test--call-clock-in
                     (org-mcp-test--file-link file-2 "*Task One")
-                    "2026-01-01T11:00:00")))
+                    "2026-01-01T11:00:00" nil
+                    (org-mcp-test--file-link file-1 "*Task One"))))
               (should (equal (alist-get 'clocked_in result) t))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches

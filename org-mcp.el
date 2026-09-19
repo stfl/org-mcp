@@ -1604,6 +1604,66 @@ element API."
                           (cons 'marker marker)))))))))
       nil)))
 
+(defun org-mcp--clock-check-clock-out (active clock-out)
+  "Refuse a clock-in unless CLOCK-OUT names the running clock ACTIVE.
+ACTIVE is the running clock as `org-mcp--clock-find-active' returns
+it, or nil when none runs.  CLOCK-OUT is the call's `clock_out'
+parameter, a link to the heading of the running clock; a value
+`org-mcp--link-given' reads as blank counts as not sent.
+
+With no clock running, a CLOCK-OUT is refused: it names no clock.  A
+clock running outside the allowed files is refused whatever CLOCK-OUT
+holds, since org-mcp tells a client nothing about that clock, not even
+its heading.  Any other running clock needs a CLOCK-OUT that names the
+heading holding its CLOCK line.  An `id:' CLOCK-OUT is looked up in
+the running clock's file only, with no ID index and no `files', and a
+`file:' CLOCK-OUT must name that file.  A missing or wrong CLOCK-OUT
+is refused with the running clock's heading named by its title and
+link, so the client can ask the user about it.  Nothing is changed."
+  (let ((clock-out (org-mcp--link-given clock-out)))
+    (cond
+     ((not active)
+      (when clock-out
+        (org-mcp--tool-validation-error
+         "clock_out names a clock to close, but no clock is running: %s"
+         clock-out)))
+     ((not (alist-get 'allowed active))
+      (org-mcp--tool-validation-error
+       "A clock is running in a file outside the allowed files.  Ask the \
+user to clock out of it before clocking in"))
+     (t
+      (let ((file (alist-get 'file active))
+            (marker (alist-get 'marker active)))
+        (with-current-buffer (marker-buffer marker)
+          (org-with-wide-buffer
+           (goto-char marker) (org-back-to-heading t)
+           (let ((heading (point)))
+             (cl-flet
+              ((running
+                () (goto-char heading)
+                (format "'%s' (%s)"
+                        (alist-get 'heading active)
+                        (org-mcp--link-at-point))))
+              (unless clock-out
+                (org-mcp--tool-validation-error
+                 "A clock is running on %s.  Ask the user whether to \
+clock out of it, then send its link as clock_out"
+                 (running)))
+              (let ((target
+                     (org-mcp--link-target clock-out nil file)))
+                (unless (and
+                         (org-mcp--paths-equal-p
+                          (plist-get target :file) file)
+                         ;; A link that resolves to no heading in
+                         ;; the file names no running clock either.
+                         (ignore-error mcp-server-lib-tool-error
+                           (org-mcp--goto-heading target)
+                           (= (point) heading)))
+                  (org-mcp--tool-validation-error
+                   "clock_out does not name the running clock: %s.  \
+The clock runs on %s"
+                   clock-out (running)))))))))))))
+
 (defun org-mcp--clock-find-last-closed ()
   "Return the most recent closed-clock end time across allowed files.
 Walks clock elements via `org-element-map' and picks the latest
@@ -3396,16 +3456,21 @@ MCP Parameters: None"
       (json-encode '((active . :json-false))))))
 
 (defun org-mcp--tool-clock-in
-    (link &optional start_time resolve files)
+    (link &optional start_time resolve files clock_out)
   "Clock in to the heading LINK names.
-If another clock is active, it is closed first.
+While a clock runs, CLOCK_OUT must name its heading, see
+`org-mcp--clock-check-clock-out', and that clock is closed first, at
+the new clock's start.  LINK, START_TIME, RESOLVE and CLOCK_OUT are
+all checked before that, so a refused call changes nothing.
 When `org-clock-continuously' is non-nil and no explicit START_TIME
 is given, the new clock may start at the previous clock's end time
 if it is within `org-mcp-clock-continuous-threshold' minutes.
-When RESOLVE is \"true\", dangling (unclosed) CLOCK lines under
-the target heading are deleted before clocking in.
+When RESOLVE is true, dangling (unclosed) CLOCK lines under the
+target heading are deleted before clocking in.  The running clock is
+one of them when it lies under that heading, and is deleted rather
+than closed.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
-see `org-mcp--link-target'.
+see `org-mcp--link-target'.  It does not apply to CLOCK_OUT.
 
 MCP Parameters:
   link - Link to the headline to clock in
@@ -3415,103 +3480,75 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
-  resolve - When \"true\", delete dangling clocks before clocking in
+  resolve - true or \"true\" to delete dangling clocks before clocking
+            in; false, \"false\" and null mean not to
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
-          refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (now (current-time))
-         (explicit-start
-          (when start_time
-            (org-mcp--clock-parse-timestamp start_time)))
-         ;; Check for active clock and close it if needed
-         (active (org-mcp--clock-find-active))
-         ;; Closing the active clock may edit another buffer that
-         ;; already had unsaved edits; `saved' covers that edit too.
-         (org-mcp--unsaved-change-p nil))
-    ;; Close active clock if exists.  When resolve is requested and the
-    ;; active clock is in the same file, skip auto-close — resolve will
-    ;; delete the dangling clock in the modify-and-save body instead.
+          refused with any other link
+  clock_out - Link to the heading of the running clock, which is
+              closed first; required while a clock runs, refused
+              while none does"
+  (let*
+      ((target (org-mcp--link-target link files))
+       (file-path (plist-get target :file))
+       (resolve
+        (cond
+         ((member resolve '(t "true"))
+          t)
+         ;; A blank value, JSON false and null included, is false, as
+         ;; are "false" and :false; see org-edit-body's `append'.
+         ((or (org-mcp--blank-param-p resolve)
+              (member resolve '(:false "false")))
+          nil)
+         (t
+          (org-mcp--tool-validation-error
+           "resolve must be true or false: %S"
+           resolve))))
+       (now (current-time))
+       (explicit-start
+        (when start_time
+          (org-mcp--clock-parse-timestamp start_time)))
+       ;; The heading and the end of its subtree, found before any
+       ;; clock is closed: a link that names no heading, such as
+       ;; file:…::*Nope, is refused with the running clock intact.
+       (subtree
+        (org-mcp--with-org-file file-path
+          (org-mcp--goto-heading target)
+          (cons
+           (point)
+           (save-excursion
+             (org-end-of-subtree t t)
+             (point)))))
+       (active (org-mcp--clock-find-active))
+       ;; Closing the running clock may edit another buffer that
+       ;; already had unsaved edits; `saved' covers that edit too.
+       (org-mcp--unsaved-change-p nil))
+    (org-mcp--clock-check-clock-out active clock_out)
+    ;; RESOLVE deletes the running clock, rather than have it closed,
+    ;; when it lies under the heading.
     (when (and active
                (not
-                (and (equal resolve "true")
+                (and resolve
                      (org-mcp--paths-equal-p
-                      (alist-get 'file active) file-path))))
-      (let* ((active-file (alist-get 'file active))
-             (close-at
-              (org-mcp--clock-round-time
-               (if explicit-start
-                   explicit-start
-                 now)))
-             (marker (alist-get 'marker active)))
-        (if (alist-get 'allowed active)
-            ;; Allowed file: close via org-clock-out using canonical buffer
-            (progn
-              (let* ((buf (org-mcp--get-file-buffer active-file))
-                     (was-modified
-                      (with-current-buffer buf
-                        (buffer-modified-p)))
-                     (tick
-                      (with-current-buffer buf
-                        (buffer-chars-modified-tick)))
-                     (start-str (alist-get 'start active)))
-                (when start-str
-                  (with-current-buffer buf
-                    (save-mark-and-excursion
-                      (save-match-data
-                        (goto-char (point-min))
-                        (when (re-search-forward
-                               (concat
-                                "^\\([ \t]*CLOCK: \\["
-                                (regexp-quote start-str)
-                                "\\]\\)[ \t]*$")
-                               nil t)
-                          (goto-char (match-beginning 1))
-                          (let ((el (org-element-at-point)))
-                            (when (eq (org-element-type el) 'clock)
-                              (move-marker
-                               org-clock-marker
-                               (org-element-property :begin el))
-                              (move-marker
-                               org-clock-hd-marker
-                               (save-excursion
-                                 (org-back-to-heading t)
-                                 (point)))
-                              (org-clock-out nil t close-at)))))))
-                  (org-mcp--maybe-save-buffer
-                   buf active-file was-modified)
-                  ;; Only an edit that reached BUF can stay unsaved, and
-                  ;; it has not when a hook saved BUF.
-                  (when (and (/=
-                              tick
-                              (with-current-buffer buf
-                                (buffer-chars-modified-tick)))
-                             (buffer-modified-p buf))
-                    (setq org-mcp--unsaved-change-p t)))))
-          ;; Non-allowed file: close via org-clock-out
-          (let ((buf (marker-buffer org-clock-marker)))
-            (when buf
-              (let ((was-modified
-                     (with-current-buffer buf
-                       (buffer-modified-p)))
-                    (tick
-                     (with-current-buffer buf
-                       (buffer-chars-modified-tick))))
-                (with-current-buffer buf
-                  (org-clock-out nil t close-at))
-                (unless was-modified
-                  (with-current-buffer buf
-                    (when (buffer-modified-p)
-                      (save-buffer))))
-                ;; Only an edit that reached BUF can stay unsaved, and
-                ;; it has not when a hook saved BUF.
-                (when (and (/=
-                            tick
-                            (with-current-buffer buf
-                              (buffer-chars-modified-tick)))
-                           (buffer-modified-p buf))
-                  (setq org-mcp--unsaved-change-p t))))))))
+                      (alist-get 'file active) file-path)
+                     (<= (car subtree)
+                         (alist-get 'marker active)
+                         (cdr subtree)))))
+      (let* ((marker (alist-get 'marker active))
+             (buf (marker-buffer marker))
+             (was-modified (buffer-modified-p buf))
+             (tick (buffer-chars-modified-tick buf)))
+        (org-clock-clock-out
+         (cons
+          marker (org-time-string-to-time (alist-get 'start active)))
+         t (org-mcp--clock-round-time (or explicit-start now)))
+        (org-mcp--maybe-save-buffer
+         buf (alist-get 'file active) was-modified)
+        ;; Only an edit that reached BUF can stay unsaved, and it has
+        ;; not when a hook saved BUF.
+        (when (and (/= tick (buffer-chars-modified-tick buf))
+                   (buffer-modified-p buf))
+          (setq org-mcp--unsaved-change-p t))))
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously (not explicit-start))
@@ -3540,7 +3577,7 @@ MCP Parameters:
                                       `((resolved
                                          . ,resolved-count))))
           (org-mcp--goto-heading target)
-          (when (equal resolve "true")
+          (when resolve
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
           (org-mcp--clock-insert-entry clock-start))))))
 
@@ -4549,8 +4586,15 @@ Returns JSON object:
    :id "org-clock-in"
    :description
    (concat
-    "Clock in to the specified heading.  If another clock is active,
-it is automatically closed first.
+    "Clock in to the specified heading.
+
+Only one clock runs at a time.  While one runs, the call must name it
+in clock_out, and that clock is closed first, at the new clock's
+start.  Without clock_out, or with one naming another heading, the
+call is refused and changes nothing; the refusal names the running
+clock's heading by title and link, so ask the user before clocking
+out of it.  A clock running outside the allowed files cannot be
+named: ask the user to clock out of it.
 
 When org-clock-continuously is enabled and no explicit start_time
 is given, the new clock may start at the previous clock's end time
@@ -4565,16 +4609,22 @@ Parameters:
     "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
                If omitted, uses current time (or continuous time)
-  resolve - When 'true', delete dangling (unclosed) CLOCK lines
-            under the heading before clocking in (string, optional)
+  resolve - true or \"true\" to delete dangling (unclosed) CLOCK
+            lines under the heading before clocking in, the running
+            clock too when it lies there (boolean, optional); false,
+            \"false\" and null mean not to
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-read.  Not used for clock_out
+  clock_out - Link to the heading of the running clock (string);
+              required while a clock runs, refused while none does.
+              An id: link is looked up in the running clock's file;
+              null, false and \"\" mean no link
 
 Returns JSON object:
   success - Always true on success (boolean)
-  saved - False when a change, including closing the other active
-          clock, is only in the user's open Emacs buffer, not on disk;
-          tell the user it needs saving (boolean)
+  saved - False when a change, including closing the running clock
+          in its own file, is only in the user's open Emacs buffer,
+          not on disk; tell the user it needs saving (boolean)
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
   heading - The heading title (string)

@@ -424,6 +424,10 @@ named.
   the parent's file, with or without =files=, since the sibling must be a
   child of the parent, so =after_link= may be any link, such as the
   =file:= link org-mcp returns for a child without an =ID=.
+- =org-clock-in= looks the =id:= link of =link= up in =files=, which applies
+  to =link= only.  It looks the =id:= link of =clock_out= up in the running
+  clock's file, with or without =files=, since =clock_out= must name the
+  running clock.
 
 #+begin_src json
 {
@@ -503,7 +507,7 @@ the file on disk: org-mcp saved the buffer (no existing buffer, or a clean
 one), or a hook of the user's saved it during the call. It is =false= when the
 change sits only in a buffer that already had unsaved edits. A client that
 receives =false= should tell the user that the buffer needs saving.
-=org-clock-in= also reports =false= when the active clock it closes stays
+=org-clock-in= also reports =false= when the running clock it closes stays
 unsaved in such a buffer, even though the file it clocks in to reaches disk.
 
 A write that fails leaves the buffer and the file as they were. When the edit
@@ -519,7 +523,7 @@ made, so a client does not repeat the call.
 
 A failed write puts back text only: a clock that =org-todo= stopped
 (=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
-stays closed and unsaved in its buffer. =org-clock-in= closes the active clock
+stays closed and unsaved in its buffer. =org-clock-in= closes the running clock
 before it opens the new one; a failure while opening the new clock leaves the
 old one closed.
 
@@ -1157,20 +1161,32 @@ Example responses:
 #+end_src
 
 *** org-clock-in
-- *Description:* Clock in to the specified heading. If another clock is active, it is automatically closed first. Supports continuous clocking and time rounding
+- *Description:* Clock in to the specified heading. Supports continuous clocking and time rounding. Only one clock runs at a time: while one runs, the call must name it in =clock_out=, and that clock is closed at the new clock's start before the new one opens. Naming it makes sure the client knows which clock it closes, so it can ask the user first
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[*Addressing headings with links]])
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies)
-  - =resolve= (string, optional): When ="true"=, delete dangling (unclosed) CLOCK entries under the heading before clocking in
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[*Naming the file of an ID]]
+  - =resolve= (boolean or string, optional): =true= or ="true"= deletes dangling (unclosed) CLOCK entries under the heading before clocking in. When the running clock lies under the heading, it is deleted with them rather than closed. =false=, ="false"=, =null= and =""= mean no; any other value is refused
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[*Naming the file of an ID]]
+  - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. An =id:= link is looked up in the running clock's file
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
+
+Every check runs before anything changes, so a refused call changes no file, no buffer's text and not the running clock. A call is refused when:
+
+- a clock runs and =clock_out= is missing or names another heading.  The error names the running clock's heading by its title and link, so the client can ask the user whether to clock out of it:
+  #+begin_example
+  A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report).  Ask the user whether to clock out of it, then send its link as clock_out
+  #+end_example
+- a clock runs in a file outside the allowed files.  org-mcp reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.
+- no clock runs and =clock_out= is given.
+- =link= names no heading.
 
 Example:
 #+begin_src json
-# Request:
+# Request while a clock runs on "Write the report":
 {
   "link": "id:550e8400-e29b-41d4-a716-446655440000",
-  "start_time": "2026-03-23T14:30:00"
+  "start_time": "2026-03-23T14:30:00",
+  "clock_out": "file:~/org/tasks.org::*Write the report"
 }
 
 # Success response:
