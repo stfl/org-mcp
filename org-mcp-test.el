@@ -7211,6 +7211,30 @@ heading's body, and the response links to Parent."
    "\\'")
   "Regex matching the whole sibling file after appending to Parent.")
 
+(defconst org-mcp-test--content-body-mixed-case
+  "* Task\nFoo bar first.\nThen foo bar again.\n"
+  "Task whose body holds old_body once as written and once capitalized.")
+
+(defconst org-mcp-test--regex-body-mixed-case-replaced
+  (concat
+   "\\`\\* Task\n"
+   "Foo bar first\\.\n"
+   "Then baz again\\.\n"
+   "\\'")
+  "Regex matching the whole file once the lowercase occurrence is replaced.")
+
+(ert-deftest org-mcp-test-edit-body-replace-matches-case ()
+  "Replacing old_body changes the occurrence that matches it in case.
+The body holds \"foo bar\" once, after a capitalized \"Foo bar\", so the
+unique occurrence is the lowercase one, and only it changes, whatever
+`case-fold-search' is in the buffer."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-body-mixed-case))
+    (let ((link (org-mcp-test--file-link test-file "*Task")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file link "foo bar" "baz"
+       org-mcp-test--regex-body-mixed-case-replaced nil link))))
+
 (ert-deftest org-mcp-test-edit-body-append-before-sibling ()
   "Appending to a body followed by a sibling adds the text after it.
 The text goes on the line after the body's last line, and the blank

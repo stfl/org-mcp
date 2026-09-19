@@ -2045,8 +2045,11 @@ BODY-CONTENT is the current body content string.
 BODY-BEGIN is the buffer position where body starts.
 BODY-END is the buffer position where body ends."
   (let ((new-body-content
+         ;; Case matters, as when the caller counted the occurrences.
          (let ((pos
-                (string-match (regexp-quote old-body) body-content)))
+                (let ((case-fold-search nil))
+                  (string-match
+                   (regexp-quote old-body) body-content))))
            (if pos
                (concat
                 (substring body-content 0 pos)
