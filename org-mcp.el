@@ -778,9 +778,9 @@ read widened.  No identifier is created.
 
 A link made before the first heading searches for the text of its
 line.  org-mcp cannot resolve it: its resolver accepts only a search
-that ends on a heading.  Every write links the heading it changed, so
-only a read of a file whose preamble holds a line starting with `* '
-inside a block, which that read lists as a heading, returns one.
+that ends on a heading.  No tool links such a position: every write
+links the heading it changed, and every read lists the headings Org's
+parser finds.
 
 Throws a tool error when `org-store-link' changes the buffer, or makes
 anything but an `id:' link or a `file:' link searching for the
@@ -994,28 +994,33 @@ Returns alist with all heading properties and lightweight children."
 
 (defun org-mcp--extract-structured-file (file-path)
   "Extract structured JSON for FILE-PATH.
-Returns alist with file path, preamble content, and top-level children."
+Returns alist with file path, preamble content, and top-level children.
+The children are the level-1 headings Org's parser finds, as in
+`org-mcp--extract-headings', and the preamble runs up to the first of
+them.  A line starting with `* ' is a heading wherever it stands, as
+Org parses it, even between the lines opening and closing a block."
   (org-mcp--with-org-file file-path
-    (let ((preamble-end
-           (save-excursion
-             (if (re-search-forward "^\\* " nil t)
-                 (line-beginning-position)
-               (point-max))))
-          (children '()))
-      ;; Extract preamble (content before first heading)
-      (let ((content
-             (buffer-substring-no-properties
-              (point-min) preamble-end)))
-        (goto-char preamble-end)
-        ;; Extract top-level headings
-        (while (re-search-forward "^\\* " nil t)
-          (push (org-mcp--extract-heading-child) children)
-          (org-end-of-subtree t t))
-        `((file . ,file-path)
-          ,@
-          (when (and content (not (string-blank-p content)))
-            `((content . ,(string-trim content))))
-          (children . ,(vconcat (nreverse children))))))))
+    (let* ((headings
+            (org-element-map
+             (org-element-parse-buffer 'headline) 'headline
+             (lambda (h)
+               (when (= (org-element-property :level h) 1)
+                 (org-element-property :begin h)))
+             nil nil 'headline))
+           (content
+            (buffer-substring-no-properties
+             (point-min) (or (car headings) (point-max))))
+           (children
+            (mapcar
+             (lambda (begin)
+               (goto-char begin)
+               (org-mcp--extract-heading-child))
+             headings)))
+      `((file . ,file-path)
+        ,@
+        (when (and content (not (string-blank-p content)))
+          `((content . ,(string-trim content))))
+        (children . ,(vconcat children))))))
 
 ;; Links
 

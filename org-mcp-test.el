@@ -8219,6 +8219,64 @@ to send.  A refusal for a file that exists carries no such hint."
         (org-mcp-test--call-tool-expecting-error
          other-file "org-read-headline" `((link . ,outside))))))))
 
+(defconst org-mcp-test--content-block-star-line
+  (concat
+   ":PROPERTIES:\n:ID:       file-level-id\n:END:\n#+TITLE: Block\n"
+   "#+begin_example\n* In block\n#+end_example\n"
+   "* Real\nReal body.\n")
+  "File whose preamble opens a block holding a line starting with `* '.
+Org parses that line as a heading, which ends the block unclosed.")
+
+(defconst org-mcp-test--content-block-escaped-preamble
+  (concat
+   ":PROPERTIES:\n:ID:       file-level-id\n:END:\n#+TITLE: Block\n"
+   "#+begin_example\n,* Escaped\n#+end_example\n")
+  "Preamble holding a block whose `* ' line is escaped with a comma.")
+
+(defconst org-mcp-test--content-block-escaped
+  (concat org-mcp-test--content-block-escaped-preamble "* Real\nReal body.\n")
+  "File whose only heading follows a block with an escaped `* ' line.")
+
+(ert-deftest org-mcp-test-read-lists-headings-org-parses ()
+  "org-read lists a file's top-level headings as Org's parser finds them.
+It agrees with org-read-outline.  A line starting with `* ' is a
+heading even inside a block, as Org parses it, and is listed.  A line
+escaped with a comma, as Org writes one inside a block, is no heading:
+it stays in the preamble, and a title link to it is refused by a read
+and by a write, leaving the file unchanged."
+  (org-mcp-test--with-temp-org-files
+      ((star-file org-mcp-test--content-block-star-line)
+       (escaped-file org-mcp-test--content-block-escaped))
+    (cl-flet
+        ((titles
+          (headings)
+          (mapcar (lambda (heading) (alist-get 'title heading)) headings))
+         (read-file
+          (file)
+          (json-read-from-string
+           (org-mcp-test--call-read (concat "file:" file)))))
+      (pcase-dolist (`(,file ,expected)
+                     `((,star-file ("In block" "Real"))
+                       (,escaped-file ("Real"))))
+        (should (equal (titles (alist-get 'children (read-file file)))
+                       expected))
+        (should
+         (equal (titles
+                 (alist-get 'headings (org-mcp-test--call-read-outline file)))
+                expected)))
+      (should
+       (equal (alist-get 'content (read-file escaped-file))
+              (string-trim org-mcp-test--content-block-escaped-preamble)))
+      (let ((escaped (org-mcp-test--file-link escaped-file "*Escaped")))
+        (org-mcp-test--call-tool-refused
+         "org-read-headline" `((link . ,escaped))
+         (concat "\\`Cannot resolve link " (regexp-quote escaped))
+         escaped-file)
+        (org-mcp-test--call-tool-refused
+         "org-set-tags" `((link . ,escaped) (tags . "oops"))
+         (concat "\\`Cannot resolve link " (regexp-quote escaped))
+         escaped-file)))))
+
 (ert-deftest org-mcp-test-link-refuses-regexp-search ()
   "A regexp search is refused, since Org answers it with a sparse tree."
   (org-mcp-test--with-temp-org-files
