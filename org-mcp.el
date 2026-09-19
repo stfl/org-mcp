@@ -2011,11 +2011,14 @@ Throws validation error if the sibling is not found under the parent."
             (org-back-to-heading t)
             (point)))))
    (parent-level
-    ;; No sibling named: insert at end of parent's subtree
+    ;; No sibling named: insert at end of parent's subtree.  With
+    ;; TO-HEADING, `org-end-of-subtree' stops at the start of the next
+    ;; heading or at the end of the buffer.  At a heading, go back one
+    ;; char to be at the end of the parent's content.  No heading
+    ;; predicate is asked: at the end of the buffer, the last line may
+    ;; be the parent's own heading, with no newline after it.
     (org-end-of-subtree t t)
-    ;; If we're at the start of a sibling, go back one char
-    ;; to be at the end of parent's content
-    (when (looking-at "^\\*+ ")
+    (unless (eobp)
       (backward-char 1)))))
 
 (defun org-mcp--ensure-newline ()
@@ -2044,11 +2047,12 @@ After insertion, point is left on the heading line at end-of-line."
         (insert title))
     ;; Top-level heading
     ;; Check if there are no headlines yet (empty buffer or only
-    ;; headers before us)
+    ;; headers before us).  `outline-next-heading' moves past a
+    ;; heading at point, so the first line is asked on its own.
     (let ((has-headline
            (save-excursion
              (goto-char (point-min))
-             (re-search-forward "^\\*+ " nil t))))
+             (or (org-at-heading-p) (outline-next-heading)))))
       (if (not has-headline)
           (progn
             (org-mcp--ensure-newline)

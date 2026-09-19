@@ -3984,6 +3984,26 @@ after_link, the TODO goes after that heading, as in any file."
        test-file
        expected))))
 
+(defconst org-mcp-test--content-parent-last-line "* Parent"
+  "File whose only line is its heading, with no newline after it.")
+
+(defconst org-mcp-test--regex-parent-last-line-child-added
+  "\\`\\* Parent\n\\*\\* TODO New\n\\'"
+  "Regex matching the whole last-line file with New as Parent's child.")
+
+(ert-deftest org-mcp-test-add-todo-child-of-heading-ending-file ()
+  "A child goes below a parent heading that ends the file without a newline.
+The parent's heading line stays intact."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-parent-last-line
+    (org-mcp-test--add-todo-and-check
+     "New" "TODO" nil nil
+     (org-mcp-test--file-link test-file "*Parent")
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--regex-parent-last-line-child-added)))
+
 (ert-deftest org-mcp-test-add-todo-invalid-state ()
   "Test that adding TODO with invalid state throws error."
   (org-mcp-test--with-add-todo-setup test-file
