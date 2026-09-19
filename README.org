@@ -510,12 +510,14 @@ A write that fails leaves the buffer and the file as they were. When the edit
 or the save signals an error, org-mcp undoes its edit, in a buffer with undo
 turned off as well, and a buffer that was clean reads unmodified again, so the
 next write saves it as usual. When a hook saved that buffer partway through the
-call, org-mcp saves it once more to put the file back. One failure keeps the
-change: when the save has written the file and a function it runs afterwards,
-such as one on =after-save-hook=, fails, buffer and file hold the change, and
-the error says that the change was made, so a client does not repeat the call.
+call, org-mcp saves it once more to put the file back. When the buffer already
+held the user's unsaved edits, or that second save fails, the file keeps what
+the hook wrote. One failure keeps the change: when the save has written the
+file and a function it runs afterwards, such as one on =after-save-hook=,
+fails, buffer and file hold the change, and the error says that the change was
+made, so a client does not repeat the call.
 
-A failed write puts back the buffer's text only. A clock that =org-todo= stopped
+A failed write puts back text only: a clock that =org-todo= stopped
 (=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
 stays closed and unsaved in its buffer. =org-clock-in= closes the active clock
 before it opens the new one; a failure while opening the new clock leaves the

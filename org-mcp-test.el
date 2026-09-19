@@ -7146,6 +7146,37 @@ the buffer reads unmodified."
               (should-not (buffer-modified-p))))
         (kill-buffer buffer)))))
 
+(ert-deftest org-mcp-test-failed-write-after-hook-save-keeps-user-edits ()
+  "Test a failed write does not save a buffer the user changed to undo a hook.
+The buffer holds the user's unsaved edit.  A hook saves it once FIRST
+is written, and the call fails on SECOND.  The buffer is put back to
+the user's edit alone and still reads modified, and org-mcp does not
+save it again, so the file keeps what the hook wrote."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((buffer (find-file-noselect test-file))
+          (org-property-changed-functions
+           '(org-mcp-test--save-on-first-fail-on-second)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "\n* TODO Other Task\n"))
+            (org-mcp-test--call-tool-refused
+             "org-set-properties"
+             `((link
+                . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (properties . ((FIRST . "1") (SECOND . "2"))))
+             "Property hook failed")
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--pattern-bare-todo-with-user-edit)
+            (with-current-buffer buffer
+              (should (buffer-modified-p)))
+            (org-mcp-test--verify-file-matches
+             test-file
+             org-mcp-test--pattern-set-first-property-with-user-edit))
+        (kill-buffer buffer)))))
+
 (ert-deftest org-mcp-test-failed-after-save-hook-keeps-saved-change ()
   "Test a failure after the file was written keeps the change and says so.
 A buffer-local `after-save-hook' fails once the file holds the change.
