@@ -144,7 +144,9 @@ among the allowed files, and a remote directory in the list permits nothing.
 =org-ql-query=, =org-get-tag-candidates= and =org-clock-find-dangling= take a
 =files= parameter naming the files to work on.  The named set replaces the
 allowed files for that call; without it, the call works on the allowed files.
-Each entry is an absolute path to an Org file or to a directory:
+A blank value, =null=, =false=, =""= or =[]=, counts as no =files=, since some
+clients fill every optional parameter.  Each entry is an absolute path to an
+Org file or to a directory:
 
 - a file is checked like any file a call names: one outside the allowed files
   is accepted only as far as =org-mcp-file-scope-override= permits;
@@ -345,7 +347,7 @@ Every tool that names a heading takes a =files= parameter for this: an array
 of absolute paths to Org files and directories.  With it, the ID of an =id:=
 link is looked up in the named files instead, in the order given, with
 =org-id-find-id-in-file=, which reads each file, or the buffer visiting it.
-The ID index is neither consulted nor rescanned, and nothing is added to it,
+The lookup neither consults nor rescans the ID index and adds nothing to it,
 so a heading in a file Emacs never indexed is reachable once its file is
 named.
 
@@ -354,8 +356,13 @@ named.
   as far as =org-mcp-file-scope-override= permits, for that call alone.
 - The first file that holds the ID wins.  An ID none of them holds is an
   error naming the ID and the entries as sent.
-- =files= applies only to an =id:= link.  A call sending it with a =file:=
-  link, which names its file already, or with a bare address is refused.
+- =files= applies only to an =id:= link.  A call sending it with any other
+  address, such as a =file:= link, which names its file already, or a bare
+  address, is refused before any file is opened.  A blank value, =null=,
+  =false=, =""= or =[]=, counts as no =files=.
+- =org-add-todo= looks the =id:= link of =parentUri= up in =files=, and the
+  =id:= link of =afterUri= in the parent's file, since the sibling must be a
+  child of the parent.
 
 #+begin_src json
 {
@@ -605,7 +612,7 @@ Example:
   - =parentUri= (string, required): link to the parent item (see [[*Addressing headings with links]]) or its bare URI. Use =file:/path/to/file.org= or =/path/to/file.org#= for top-level items in a file
   - =afterUri= (string, optional): link to, or bare ID of, the sibling to insert after; it must be a direct child of the parent. If not given, append as last child of parent
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable address from the call that creates it. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todoState=, =tags= and the dedicated tools instead
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parentUri= or =afterUri= in, instead of the ID index; see [[*Naming the file of an ID]]
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parentUri= in, instead of the ID index; an =id:= link in =afterUri= is then looked up in the parent's file. See [[*Naming the file of an ID]]
 - *Returns:* Object with success status, =saved= flag, new item URI (built from the =ID= in =properties= when one is given), file name, and title
 
 Example:

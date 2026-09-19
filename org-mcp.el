@@ -666,16 +666,25 @@ returns the file of the restriction, not the binding."
            #'file-exists-p (org-mcp--expanded-allowed-files))))
      ,@body))
 
+(defun org-mcp--files-given (files)
+  "Return FILES, a call's `files' parameter, or nil when it is blank.
+Clients may fill an optional parameter they do not use with an empty
+value, so JSON null, false, \"\" and [] all mean that the call names
+no files.  Every tool taking `files' reads it through here."
+  (unless (member files '(nil "" [] :json-false))
+    files))
+
 (defmacro org-mcp--with-file-set (files &rest body)
   "Run BODY over the files a call names in FILES, or the allowed files.
-FILES is the call's `files' parameter.  When it is non-nil,
-`org-mcp--named-file-set' checks and expands it, and the resulting
-set replaces the allowed files for BODY through `org-mcp--file-set'.
-When it is nil, BODY runs over the allowed files.  Either way BODY
-runs inside `org-mcp--with-allowed-agenda-files', so
-`org-agenda-files' holds the existing files it works on."
+FILES is the call's `files' parameter.  Unless it is blank, see
+`org-mcp--files-given', `org-mcp--named-file-set' checks and expands
+it, and the resulting set replaces the allowed files for BODY through
+`org-mcp--file-set'.  When it is blank, BODY runs over the allowed
+files.  Either way BODY runs inside
+`org-mcp--with-allowed-agenda-files', so `org-agenda-files' holds the
+existing files it works on."
   (declare (indent 1) (debug (form body)))
-  (macroexp-let2 nil files files
+  (macroexp-let2 nil files `(org-mcp--files-given ,files)
     `(let ((org-mcp--file-set
             (if ,files
                 (org-mcp--named-file-set ,files)
@@ -1214,14 +1223,26 @@ as the call sent them."
              files
            (mapconcat #'identity files ", "))))))
 
-(defun org-mcp--files-not-applicable-error (address)
-  "Throw the error for a `files' parameter sent with ADDRESS.
-ADDRESS names its file, or is a bare address rather than a link."
-  (org-mcp--tool-validation-error
-   "files applies only to a link that names no file, such as id:{id}: %s"
-   address))
+(defun org-mcp--check-files (address files)
+  "Return FILES, sent with ADDRESS, or nil when it is blank.
+FILES is the call's `files' parameter, read through
+`org-mcp--files-given'.  It applies only to an `id:' link, the one
+link that names no file, so with any other ADDRESS a FILES that is
+not blank is refused here, before any file is opened: with a `file:'
+link, which names its file already, a bare address, or a link of
+another type."
+  (when-let* ((files (org-mcp--files-given files)))
+    (unless (and (org-mcp--link-p address)
+                 (equal
+                  (org-element-property
+                   :type (org-mcp--link-parse (string-trim address)))
+                  "id"))
+      (org-mcp--tool-validation-error
+       "files applies only to an id: link: %s"
+       address))
+    files))
 
-(defun org-mcp--link-target (link &optional files)
+(defun org-mcp--link-target (link &optional files id-file)
   "Return the target of native Org LINK, visiting no buffer.
 The value is a plist: `:link' is LINK, `:file' the allowed file it
 names, `:id' the ID of an `id:' link, and `:search' the part after
@@ -1229,10 +1250,12 @@ names, `:id' the ID of an `id:' link, and `:search' the part after
 link type is refused here, before any file is opened, and so is a link
 that names no file, such as `[[#custom-id]]' or `[[*Title]]'.
 
-FILES is the call's `files' parameter.  When it is non-nil, the ID of
-an `id:' link is looked up in those files by
-`org-mcp--link-id-in-files' rather than through Org's ID index, and a
-`file:' link, which names its file already, is refused."
+FILES is the call's `files' parameter as `org-mcp--check-files'
+returns it for LINK.  When it is non-nil, the ID of an `id:' link is
+looked up in those files by `org-mcp--link-id-in-files' rather than
+through Org's ID index.  ID-FILE, when non-nil, is a file the call
+already reaches: the ID of an `id:' link is taken to be in it, with no
+lookup, and the caller finds the ID in that file's buffer."
   (let*
       ((link (string-trim link))
        (object (org-mcp--link-parse link))
@@ -1253,15 +1276,16 @@ an `id:' link is looked up in those files by
              (list
               :link link
               :file
-              (if files
-                  (org-mcp--link-id-in-files id files)
-                (org-mcp--link-id-file id link))
+              (cond
+               (id-file
+                id-file)
+               (files
+                (org-mcp--link-id-in-files id files))
+               (t
+                (org-mcp--link-id-file id link)))
               :id id
               :search search)))
-          ("file"
-           (when files
-             (org-mcp--files-not-applicable-error link))
-           (list
+          ("file" (list
             :link link
             :file (org-mcp--link-file object link)
             :search (org-element-property :search-option object)))
@@ -1324,21 +1348,18 @@ heading."
 The value is a plist as from `org-mcp--link-target'.  For a bare
 address it holds `:id' for a bare ID, or `:olp', the outline path of
 titles, for a `file#headline' path.  FILES is the call's `files'
-parameter, which `org-mcp--link-target' applies to a link; a bare
-address with FILES is refused."
+parameter, checked by `org-mcp--check-files' and applied by
+`org-mcp--link-target'."
   (org-mcp--reject-uri-prefix address)
-  (cond
-   ((org-mcp--link-p address)
-    (org-mcp--link-target address files))
-   (files
-    (org-mcp--files-not-applicable-error address))
-   (t
-    (let ((parsed (org-mcp--parse-resource-uri address)))
-      (append
-       (list :link address :file (car parsed))
-       (if (org-mcp--uri-is-id-based address)
-           (list :id (cadr parsed))
-         (list :olp (cdr parsed))))))))
+  (let ((files (org-mcp--check-files address files)))
+    (if (org-mcp--link-p address)
+        (org-mcp--link-target address files)
+      (let ((parsed (org-mcp--parse-resource-uri address)))
+        (append
+         (list :link address :file (car parsed))
+         (if (org-mcp--uri-is-id-based address)
+             (list :id (cadr parsed))
+           (list :olp (cdr parsed))))))))
 
 (defun org-mcp--target-heading-p (target)
   "Return non-nil when TARGET names a heading rather than a whole file."
@@ -1367,7 +1388,8 @@ visits its file, widened."
 READ-HEADING is called with no arguments and point at the heading
 LINK names.  READ-FILE is called with the file when LINK names a
 whole file, that is a `file:' link with no search part.  FILES is
-the call's `files' parameter; see `org-mcp--link-target'."
+the call's `files' parameter as `org-mcp--check-files' returns it;
+see `org-mcp--link-target'."
   (let* ((target (org-mcp--link-target link files))
          (file (plist-get target :file)))
     (if (org-mcp--target-heading-p target)
@@ -1952,9 +1974,10 @@ unless TARGET names a direct child of the heading at point."
 AFTER-URI is an optional link to, or bare ID of, a sibling to insert
 after.
 PARENT-END is the end position of the parent's subtree.
-FILES is the call's `files' parameter, applied to an AFTER-URI link
-as `org-mcp--link-target' applies it; a bare AFTER-URI with FILES is
-refused.
+FILES is the call's `files' parameter as `org-mcp--check-files'
+returns it for AFTER-URI, which is then an `id:' link.  The sibling
+must be a child of the parent, so with FILES its ID is looked up in
+the parent's buffer, the current one, not in the files again.
 Assumes point is at parent heading.
 If AFTER-URI is non-nil, positions after that sibling.
 If nil, positions at end of parent's subtree.
@@ -1962,9 +1985,8 @@ Throws validation error if AFTER-URI is invalid or sibling not found."
   (if (and after-uri (not (string-empty-p after-uri)))
       (if (org-mcp--link-p after-uri)
           (org-mcp--goto-after-child
-           (org-mcp--link-target after-uri files))
-        (when files
-          (org-mcp--files-not-applicable-error after-uri))
+           (org-mcp--link-target after-uri
+                                 nil (and files (buffer-file-name))))
         ;; Parse afterUri to get the ID
         (let ((after-id (org-mcp--extract-id-from-uri after-uri))
               (found nil))
@@ -2283,8 +2305,9 @@ TAGS is an optional single tag string or list of tag strings.
 AFTER_URI is optional URI of sibling to insert after.
 PROPERTIES is an optional alist of property names and values, checked
 by `org-mcp--validate-properties' like those of `org-set-properties'.
-FILES, when non-nil, names the files an `id:' link in PARENT_URI or
-AFTER_URI is looked up in; see `org-mcp--link-target'.
+FILES, when not blank, names the files an `id:' link in PARENT_URI is
+looked up in; see `org-mcp--link-target'.  An `id:' link in
+AFTER_URI is then looked up in the parent's file.
 
 MCP Parameters:
   title - The headline text
@@ -2316,14 +2339,20 @@ MCP Parameters:
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
   files - Files and directories to look up an id: link of parent_uri
-          or after_uri in, in order, instead of Emacs's ID index
-          (array of strings, optional); refused with any other address"
+          in, in order, instead of Emacs's ID index (array of
+          strings, optional); an id: link of after_uri is then looked
+          up in the parent's file; refused with any other address"
   (org-mcp--validate-headline-title title)
   (let* ((tag-list (org-mcp--validate-and-normalize-tags tags))
          (property-list
           (and properties
                (not (equal properties ""))
                (org-mcp--validate-properties properties)))
+         ;; Both addresses must take FILES before either is resolved.
+         (files
+          (prog1 (org-mcp--check-files parent_uri files)
+            (when (and after_uri (not (string-empty-p after_uri)))
+              (org-mcp--check-files after_uri files))))
          (parent (list :link parent_uri))
          file-path)
 
@@ -2331,8 +2360,6 @@ MCP Parameters:
     ;; A link that names a whole file means top level.
     (if (org-mcp--link-p parent_uri)
         (setq parent (org-mcp--link-target parent_uri files))
-      (when files
-        (org-mcp--files-not-applicable-error parent_uri))
       (org-mcp--with-uri-dispatch
           parent_uri
         ;; Handle org:// URIs
@@ -2436,9 +2463,10 @@ ADDRESS is a native Org link, read through `org-mcp--read-link', or a
 bare address: an absolute path, a path with an outline path after
 `#', or an ID.  The org-read tool and the org://{link} resource both
 read through here, so they resolve an address the same way.  FILES is
-the org-read tool's `files' parameter, which `org-mcp--link-target'
-applies to a link; a bare address with FILES is refused.  The
+the org-read tool's `files' parameter, checked by
+`org-mcp--check-files' and applied by `org-mcp--link-target'.  The
 resource passes none."
+  (setq files (org-mcp--check-files address files))
   (if (org-mcp--link-p address)
       (org-mcp--read-link address
                           (lambda ()
@@ -2448,8 +2476,6 @@ resource passes none."
                             (json-encode
                              (org-mcp--extract-structured-file file)))
                           files)
-    (when files
-      (org-mcp--files-not-applicable-error address))
     (let ((parsed (org-mcp--detect-uri-type address)))
       (pcase (plist-get parsed :type)
         (`id
@@ -3365,12 +3391,11 @@ MCP Parameters:
           instead of Emacs's ID index (array of strings, optional);
           refused with any other address"
   (org-mcp--reject-uri-prefix uri)
+  (setq files (org-mcp--check-files uri files))
   (if (org-mcp--link-p uri)
       (org-mcp--read-link
        uri #'org-mcp--extract-headline-content #'org-mcp--read-file
        files)
-    (when files
-      (org-mcp--files-not-applicable-error uri))
     (org-mcp--handle-headline-resource `(("uri" . ,uri)))))
 
 ;; Clock tools
@@ -3852,7 +3877,8 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial result.
+          total is an error, never a partial result.  null, false,
+          \"\" and [] mean no files.
 
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
@@ -4017,7 +4043,8 @@ Parameters:
                DEADLINE, etc.) are forbidden - use the other
                parameters and dedicated tools
   files - Files and directories to look up an id: link of parent_uri
-          or after_uri in (array of strings, optional); see org-read
+          in (array of strings, optional); see org-read.  An id: link
+          of after_uri is then looked up in the parent's file.
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4357,9 +4384,11 @@ Parameters:
           allowed files is reached only as far as
           org-mcp-file-scope-override permits, and a directory is
           searched as that tool searches it.  An ID none of the files
-          holds is an error.  Refused with a file: link, which names
-          its file already, and with a bare address.  Every tool that
-          names a heading takes files in the same way.
+          holds is an error.  Refused with any address but an id:
+          link, such as a file: link, which names its file already,
+          or a bare address.  null, false, \"\" and [] mean no files.
+          Every tool that names a heading takes files in the same
+          way.
 
 Returns: JSON object with structured data:
   For files:
@@ -4463,7 +4492,8 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.
+          total is an error, never a partial search.  null, false,
+          \"\" and [] mean no files.
 
 Returns JSON object:
   matches - Array of matched entries, each with:
@@ -4758,7 +4788,8 @@ Parameters:
           Any other directory is not read: it stands for the allowed
           files under it, and is refused when there are none.  More
           than org-mcp-max-files files and searched directories in
-          total is an error, never a partial search.
+          total is an error, never a partial search.  null, false,
+          \"\" and [] mean no files.
 
 Returns JSON object:
   open_clocks - Array of open clocks, each with:

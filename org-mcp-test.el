@@ -2734,11 +2734,34 @@ which none exists, for the GTD queries too."
         (kill-buffer buffer)))))
 
 (ert-deftest org-mcp-test-file-set-validates-parameter ()
-  "`files' is a non-empty array of absolute paths, or a single path."
+  "`files' is an array of absolute paths, or a single path.
+A blank value, which some clients send for every optional parameter
+they do not use, means no files: with null, false, \"\" or [] each
+tool runs over the allowed files."
   (org-mcp-test--with-scope-dirs t
-    (let ((beta (org-mcp-test--write-set-file outside "beta.org" "beta")))
+    (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha)))
       (should (equal (org-mcp-test--scan-files beta) '("beta")))
-      (org-mcp-test--assert-files-refused [] "non-empty array of paths")
+      (dolist (blank '("" [] :json-false))
+        (should (equal (org-mcp-test--scan-files blank) '("alpha"))))
+      ;; JSON null, sent as a present parameter.
+      (pcase-dolist (`(,tool . ,params)
+                     '(("org-ql-query" (query . "(todo)"))
+                       ("org-get-tag-candidates")
+                       ("org-clock-find-dangling")))
+        (should
+         (equal
+          (org-mcp-test--call-with-files tool params nil)
+          (org-mcp-test--call-with-files
+           tool (append params '((files))) nil))))
+      (should
+       (equal
+        (alist-get
+         'files_searched
+         (org-mcp-test--call-with-files
+          "org-ql-query" '((query . "(todo)") (files)) nil))
+        1))
       (org-mcp-test--assert-files-refused [1] "non-empty array of paths")
       (let ((default-directory outside))
         (org-mcp-test--assert-files-refused
@@ -8670,12 +8693,15 @@ opened or changed, and the remote path opens no connection."
 While BODY runs, `org-id-find', `org-id-find-id-file' and
 `org-id-update-id-locations', which consult or rescan the index,
 record each call and fail loudly; no call may be recorded.
-`org-id-locations' must hold the same entries afterwards as before."
+`org-id-locations' and `org-id-files' must hold the same entries
+afterwards as before."
   (declare (indent 0) (debug t))
   (let ((calls (make-symbol "calls"))
-        (before (make-symbol "before")))
+        (before (make-symbol "before"))
+        (files-before (make-symbol "files-before")))
     `(let ((,calls nil)
-           (,before (org-mcp-test--id-locations)))
+           (,before (org-mcp-test--id-locations))
+           (,files-before (copy-sequence org-id-files)))
        (cl-letf ,(mapcar
                   (lambda (fn)
                     `((symbol-function ',fn)
@@ -8686,7 +8712,8 @@ record each call and fail loudly; no call may be recorded.
                     org-id-find-id-file org-id-update-id-locations))
          ,@body)
        (should (null ,calls))
-       (should (equal (org-mcp-test--id-locations) ,before)))))
+       (should (equal (org-mcp-test--id-locations) ,before))
+       (should (equal org-id-files ,files-before)))))
 
 (defun org-mcp-test--assert-id-task-permitted (file files)
   "Assert that Task in FILE is read and then made DONE by its `id:' link.
@@ -8874,16 +8901,22 @@ Emacs's index, in an allowed file, and is not looked up there."
 (ert-deftest org-mcp-test-file-set-refused-with-address-naming-file ()
   "`files' applies only to an `id:' link; any other address refuses it.
 A `file:' link and a bare path name their file already, and a bare ID
-is not a link.  Each is refused for a read, a write, and as the parent
-of org-add-todo before its file is opened, and as the sibling once the
-parent is found.  The file stays unchanged."
+and a custom ID search are no `id:' links.  Each is refused, before
+any file is opened, for a read, a write, and as the parent of
+org-add-todo, and as its sibling next to an `id:' parent.  The file
+stays unchanged."
   (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
     (org-mcp-test--with-scope-dirs t
       (let* ((file (org-mcp-test--write-file
                     outside "task.org"
                     org-mcp-test--scope-task-with-id-content))
              (files (vector file))
-             (refusal "\\`files applies only to a link that names no file"))
+             (refusal
+              (lambda (address)
+                (concat
+                 "\\`files applies only to an id: link: "
+                 (regexp-quote address)
+                 "\\'"))))
         (org-mcp-test--with-id-tracking
             (list file)
             `((,org-mcp-test--content-with-id-id . ,file))
@@ -8893,7 +8926,8 @@ parent is found.  The file stays unchanged."
                     (format "[[file:%s::*Task][Task]]" file)
                     (format "file:%s" file)
                     (format "%s#Task" file)
-                    org-mcp-test--content-with-id-id))
+                    org-mcp-test--content-with-id-id
+                    "[[#task-slug]]"))
             (dolist (call
                      `(("org-read-headline" (uri . ,address))
                        ("org-update-todo-state"
@@ -8906,9 +8940,8 @@ parent is found.  The file stays unchanged."
               (org-mcp-test--call-tool-refused
                (car call)
                (append (cdr call) `((files . ,files)))
-               refusal
+               (funcall refusal address)
                file)))
-          (should-not (find-buffer-visiting file))
           (dolist (after
                    (list
                     (format "file:%s::*Task" file)
@@ -8921,8 +8954,9 @@ parent is found.  The file stays unchanged."
                (parent_uri . ,org-mcp-test--scope-id-link)
                (after_uri . ,after)
                (files . ,files))
-             refusal
-             file)))))))
+             (funcall refusal after)
+             file))
+          (should-not (find-buffer-visiting file)))))))
 
 (ert-deftest org-mcp-test-file-set-every-heading-tool ()
   "Every tool that names a heading looks an `id:' link up in the files named.
@@ -9000,6 +9034,143 @@ serves org-add-todo's parent and the sibling it inserts after."
                  (string= (org-mcp-test--read-file test-file) before))
                 (org-mcp-test--verify-file-matches
                  test-file org-mcp-test--regex-links-beta-changed)))))))))
+
+(defconst org-mcp-test--scope-task-with-id-child-added-regex
+  (concat
+   "\\`\\* DONE Task\n"
+   ":PROPERTIES:\n"
+   ":ID:       " (regexp-quote org-mcp-test--content-with-id-id) "\n"
+   ":END:\n"
+   "Body\n"
+   "\n?"
+   "\\*\\* TODO New Task *\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +new-task-id\n"
+   " *:END:\n"
+   "\\'")
+  "Regex matching the ID scope-test file with Task DONE and a new child.")
+
+(ert-deftest org-mcp-test-file-set-blank-means-none ()
+  "A blank `files' on a heading tool means the call names no files.
+Some clients send null, false, \"\" or [] for every optional parameter
+they do not use.  With each, an `id:' link, a `file:' link, a bare
+outline path and a bare ID resolve as without `files', for a read, a
+write and the parent of org-add-todo."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (dolist (blank '(null "" [] :json-false))
+      (org-mcp-test--with-scope-dirs nil
+        (let* ((file (org-mcp-test--write-file
+                      outside "task.org"
+                      org-mcp-test--scope-task-with-id-content))
+               (param
+                `((files
+                   .
+                   ,(unless (eq blank 'null)
+                      blank)))))
+          (org-mcp-test--with-id-tracking
+              (list file)
+              `((,org-mcp-test--content-with-id-id . ,file))
+            (dolist (address
+                     (list
+                      org-mcp-test--scope-id-link
+                      (format "file:%s::*Task" file)
+                      (format "%s#Task" file)
+                      org-mcp-test--content-with-id-id))
+              (should
+               (string=
+                (mcp-server-lib-ert-call-tool
+                 "org-read-headline" `((uri . ,address) ,@param))
+                (string-trim-right
+                 org-mcp-test--scope-task-with-id-content)))
+              (should
+               (equal
+                (alist-get
+                 'title
+                 (json-read-from-string
+                  (mcp-server-lib-ert-call-tool
+                   "org-read" `((uri . ,address) ,@param))))
+                "Task")))
+            (mcp-server-lib-ert-call-tool
+             "org-update-todo-state"
+             `((uri . ,org-mcp-test--scope-id-link)
+               (new_state . "DONE")
+               ,@param))
+            (mcp-server-lib-ert-call-tool
+             "org-add-todo"
+             `((title . "New Task")
+               (todo_state . "TODO")
+               (body . nil)
+               (parent_uri . ,org-mcp-test--scope-id-link)
+               (after_uri . "")
+               (properties . ((ID . "new-task-id")))
+               ,@param))
+            (org-mcp-test--verify-file-matches
+             file org-mcp-test--scope-task-with-id-child-added-regex)))))))
+
+(defconst org-mcp-test--content-sibling-parent
+  "* Parent
+:PROPERTIES:
+:ID:       file-set-parent-id
+:END:
+** Sibling
+:PROPERTIES:
+:ID:       file-set-sibling-id
+:END:
+** Last
+"
+  "File holding a parent and its child Sibling, both with an ID.")
+
+(defconst org-mcp-test--content-sibling-elsewhere
+  "* Sibling elsewhere
+:PROPERTIES:
+:ID:       file-set-sibling-id
+:END:
+"
+  "File holding a heading with the ID of Sibling in another file.")
+
+(defconst org-mcp-test--regex-sibling-parent-added
+  (concat
+   "\\`"
+   (regexp-quote
+    (string-remove-suffix "** Last\n" org-mcp-test--content-sibling-parent))
+   "\n?"
+   "\\*\\* TODO New Task *\n"
+   " *:PROPERTIES:\n"
+   " *:ID: +new-task-id\n"
+   " *:END:\n"
+   "\\*\\* Last\n"
+   "\\'")
+  "Regex matching the parent file after adding a TODO after Sibling.")
+
+(ert-deftest org-mcp-test-file-set-after-link-in-parent-file ()
+  "With `files', org-add-todo looks the sibling's ID up in the parent's file.
+The sibling must be a child of the parent, so the other file holding
+the same ID, named first, is not searched for it.  No ID index is
+used."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-scope-dirs nil
+      (let ((a-file (org-mcp-test--write-file
+                     root "a.org" org-mcp-test--content-sibling-parent))
+            (b-file (org-mcp-test--write-file
+                     outside "b.org"
+                     org-mcp-test--content-sibling-elsewhere)))
+        (org-mcp-test--with-id-tracking (list a-file b-file) nil
+          (org-mcp-test--without-id-index
+            (mcp-server-lib-ert-call-tool
+             "org-add-todo"
+             `((title . "New Task")
+               (todo_state . "TODO")
+               (body . nil)
+               (parent_uri . "id:file-set-parent-id")
+               (after_uri . "id:file-set-sibling-id")
+               (properties . ((ID . "new-task-id")))
+               (files . ,(vector b-file a-file)))))
+          (org-mcp-test--verify-file-matches
+           a-file org-mcp-test--regex-sibling-parent-added)
+          (should
+           (string=
+            (org-mcp-test--read-file b-file)
+            org-mcp-test--content-sibling-elsewhere)))))))
 
 ;;; Script installation tests
 
