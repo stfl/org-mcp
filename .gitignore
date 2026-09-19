@@ -4,6 +4,7 @@
 *-autoloads.el
 .claude/
 .eask/
+.elisp-autofmt-cache/
 dist/
 .direnv/
 .omc/

@@ -25,7 +25,11 @@ Run `just fmt` inside the Nix devshell to auto-format Elisp and shell code:
 nix develop --command just fmt
 ```
 
-This runs `elisp-autofmt` on `.el` files and `shfmt` on shell scripts.
+This runs `elisp-autofmt` on `org-mcp.el` and `shfmt` on shell scripts. The
+Elisp layout depends on the Emacs and elisp-autofmt versions, which the
+devshell pins; `scripts/elisp-autofmt.el` refuses an Emacs other than 31 or
+one without elisp-autofmt. The pre-commit hook formats too, so commit from
+inside the devshell.
 
 ## Project Overview
 

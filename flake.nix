@@ -37,9 +37,12 @@
 
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            # Emacs / eask
-            emacs31
+            # Emacs / eask.  elisp-autofmt comes with Emacs, and python3
+            # runs its formatter, so `just fmt` gives the same layout on
+            # every machine.
+            ((emacsPackagesFor emacs31).emacsWithPackages (epkgs: [epkgs.elisp-autofmt]))
             eask-cli
+            python3
 
             # CI runner
             act

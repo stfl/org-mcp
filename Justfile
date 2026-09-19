@@ -10,8 +10,9 @@ check: fmt lint test
 
 fmt: elisp-autofmt shfmt
 
+# Format org-mcp.el with the devshell's Emacs and elisp-autofmt.
 elisp-autofmt:
-    @scripts/quiet.sh eask format elisp-autofmt
+    @scripts/quiet.sh emacs -Q --batch -l scripts/elisp-autofmt.el org-mcp.el
 
 shfmt:
     @shfmt -i 4 -l -w scripts/quiet.sh scripts/run-tests.sh
