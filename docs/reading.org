@@ -5,6 +5,99 @@ the three read tools, and the tools that report what Emacs has configured.
 Changing content is [[file:writing.org][Changing Org content]]; the [[file:../README.org][README]] introduces the server
 itself.
 
+* The node
+
+A node is a file or a heading, and both come back in the same shape: from
+=org-node-read=, from the =org://{link}= resource, as a child inside another
+node, and as a query result (see [[file:queries.org][Searching and GTD queries]]). One vocabulary
+walks a whole outline.
+
+A field the node has no value for is left out rather than sent as =null=.
+
+| Field        | Carries                                                                             |
+|--------------+-------------------------------------------------------------------------------------|
+| =title=      | the heading's title, or a file's =#+TITLE:= and its own file name when it sets none  |
+| =todo=       | the TODO state                                                                      |
+| =priority=   | the priority letter                                                                 |
+| =tags=       | the tags in effect on the heading                                                   |
+| =local_tags= | the tags written on the heading itself                                              |
+| =scheduled=  | the =SCHEDULED:= timestamp                                                          |
+| =deadline=   | the =DEADLINE:= timestamp                                                           |
+| =closed=     | the =CLOSED:= timestamp                                                             |
+| =file=       | the absolute path of the file the node lives in                                     |
+| =id=         | the ID the node's =link= names                                                      |
+| =level=      | the heading level, =0= for a file                                                   |
+| =link=       | the link that names this node again (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]])              |
+| =content=    | the body text, or a file's preamble before its first heading                        |
+| =properties= | the Org property drawer                                                             |
+| =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
+
+A file's =link= is the =id:= link of its own property drawer when the file has
+one, and =file:/path/to/file.org= otherwise; either names the whole file in a
+later call. A heading's title leaves out its TODO keyword, its priority, its
+statistics cookie and its tags, and runs of whitespace in it collapse to one
+space — the same title Org matches a =::*title= link against, so a heading a
+link reaches is a heading a write addressed the same way can change.
+
+Which of the fields a response carries depends on the call: =org-node-read= and
+the resource return every one but =properties=, a query result every one but
+=content= and =children=, and a child every node carries returns =title=,
+=todo=, =level= and =link=.
+
+Example, a heading:
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work", "urgent"],
+  "local_tags": ["urgent"],
+  "scheduled": "<2026-03-26 Thu>",
+  "deadline": "<2026-04-01 Wed>",
+  "file": "/home/user/org/projects.org",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "content": "Body text here...",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "link": "file:~/org/projects.org::*Subtask"}
+  ]
+}
+#+end_src
+
+Example, a file:
+#+begin_src json
+{
+  "title": "Projects",
+  "file": "/home/user/org/projects.org",
+  "level": 0,
+  "link": "file:/home/user/org/projects.org",
+  "content": "#+TITLE: Projects",
+  "children": [
+    {"title": "Project Alpha", "todo": "TODO", "level": 1,
+     "link": "id:550e8400-e29b-41d4-a716-446655440000"}
+  ]
+}
+#+end_src
+
+** The two tag fields
+
+=tags= is the set of tags in effect on the heading; =local_tags= is the part of
+it written on the heading itself — /local/ to the heading, not to this machine.
+Which of a parent's or a file's tags reach a heading is Org's decision, not
+org-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
+=nil=, a list of tags or a regexp, and =org-tags-exclude-from-inheritance=
+names the tags no heading inherits whatever the first says.
+=org-config-tags= reports both values, so a client can tell which policy
+produced what it reads. With inheritance off the two fields carry the same
+tags.
+
+Either field is absent when its list is empty, as the other optional fields
+are. =org-node-set-tags= replaces the tags written on the heading and leaves
+inherited ones where they are, so =local_tags= is the field to work from when
+changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
+
 * Available MCP Resources
 
 ** org://{link}
@@ -18,7 +111,7 @@ itself.
   files; to reach an ID in another file, call =org-node-read= with =files= (see
   [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
-- *Returns:* Structured JSON with file or headline data including metadata
+- *Returns:* the node the link names (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -48,27 +141,6 @@ it. The =link= fields of tool and resource /responses/ carry native Org
 links (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]): a tool takes one back as it is,
 and the resource takes it percent-encoded, as in the table above.
 
-Example response for a headline:
-#+begin_src json
-{
-  "title": "Project Alpha",
-  "todo": "TODO",
-  "priority": "A",
-  "tags": ["work", "urgent"],
-  "local_tags": ["urgent"],
-  "scheduled": "<2026-03-26 Thu>",
-  "deadline": "<2026-04-01 Mon>",
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "level": 1,
-  "link": "id:550e8400-e29b-41d4-a716-446655440000",
-  "content": "Body text here...",
-  "children": [
-    {"title": "Subtask", "todo": "NEXT", "level": 2,
-     "link": "file:~/org/projects.org::*Subtask"}
-  ]
-}
-#+end_src
-
 * Read Tools
 
 These read-only tools let the model read what the resource above serves. The
@@ -86,47 +158,8 @@ the same data as the resource for the same link; =org-read-outline= and
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Structured JSON with file or headline data including metadata
+- *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
-
-Example response for a headline:
-#+begin_src json
-{
-  "title": "Project Alpha",
-  "todo": "TODO",
-  "priority": "A",
-  "tags": ["work", "urgent"],
-  "local_tags": ["urgent"],
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "level": 1,
-  "link": "id:550e8400-e29b-41d4-a716-446655440000",
-  "content": "Body text...",
-  "children": [
-    {"title": "Subtask", "todo": "NEXT", "level": 2,
-     "link": "file:~/org/projects.org::*Subtask"}
-  ]
-}
-#+end_src
-
-=id= is the ID the heading's =link= names, so it is absent when =link= is a
-=file:= link.
-
-*** The two tag fields
-
-=tags= is the set of tags in effect on the heading; =local_tags= is the part of
-it written on the heading itself — /local/ to the heading, not to this machine.
-Which of a parent's or a file's tags reach a heading is Org's decision, not
-org-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
-=nil=, a list of tags or a regexp, and =org-tags-exclude-from-inheritance=
-names the tags no heading inherits whatever the first says.
-=org-config-tags= reports both values, so a client can tell which policy
-produced what it reads. With inheritance off the two fields carry the same
-tags.
-
-Either field is absent when its list is empty, as the other optional fields
-are. =org-node-set-tags= replaces the tags written on the heading and leaves
-inherited ones where they are, so =local_tags= is the field to work from when
-changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
 
 ** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline
@@ -136,21 +169,20 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
     =file:/path/to/file.org=. An =id:= link, even one to a file-level drawer,
     and a =file:= link with a search part are refused without being looked
     up, and so is a string starting with =org://=
-- *Returns:* JSON object with hierarchical outline structure: the top-level
-  headings and their direct children, each with its =title=, =level=, =link=
-  (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]) and =children=; deeper headings are left out
+- *Returns:* JSON object with a =children= array: the top-level headings, each
+  a node (see [[*The node][The node]]) carrying its own =children=, the level-2 headings.
+  Deeper headings are left out, and so are the fields a whole read carries
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 Example response:
 #+begin_src json
 {
-  "headings": [
+  "children": [
     {"title": "Projects", "level": 1,
      "link": "file:~/org/projects.org::*Projects",
      "children": [
-       {"title": "Project Alpha", "level": 2,
-        "link": "id:550e8400-e29b-41d4-a716-446655440000",
-        "children": []}
+       {"title": "Project Alpha", "todo": "TODO", "level": 2,
+        "link": "id:550e8400-e29b-41d4-a716-446655440000"}
      ]}
   ]
 }

@@ -11,7 +11,7 @@ itself.
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[file:file-access.org::*Querying other files][Querying other files]]
-- *Returns:* JSON object with a =matches= array, each match carrying its heading's link as =link=, the =total= count, and the =files_searched= count
+- *Returns:* JSON object with a =children= array of the matching nodes (see [[file:reading.org::*The node][The node]]), the =total= count, and the =files_searched= count
 
 Example:
 #+begin_src json
@@ -22,15 +22,15 @@ Example:
 
 # Response:
 {
-  "matches": [
+  "children": [
     {
       "title": "Urgent task",
-      "level": 1,
-      "file": "/home/user/org/tasks.org",
       "todo": "TODO",
       "priority": "C",
-      "parent-priority": "A",
-      "link": "file:~/org/tasks.org::*Urgent task"
+      "file": "/home/user/org/tasks.org",
+      "level": 1,
+      "link": "file:~/org/tasks.org::*Urgent task",
+      "parent-priority": "A"
     }
   ],
   "total": 1,
@@ -38,11 +38,11 @@ Example:
 }
 #+end_src
 
-A match's =tags= are the tags in effect on its heading, inherited ones included
-where Org is configured to inherit them, and are the same tags =org-node-read=
-returns for that heading (see [[file:reading.org::*The two tag fields][The two tag fields]]). A match carries no
-=local_tags=, so a client about to replace a heading's tags reads the heading
-first.
+A result is the node =org-node-read= returns for the same heading, without its
+=content= and its =children= — a match list would read every matched subtree to
+fill those — and with the heading's Org property drawer as =properties=. Both
+tag fields come with it, so a client about to replace a heading's tags works
+from =local_tags= without reading the heading again (see [[file:reading.org::*The two tag fields][The two tag fields]]).
 
 ** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
@@ -90,4 +90,4 @@ Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= an
         (rank . my-rank-fn)))
 #+end_src
 
-Each function is called at point with no arguments during result extraction.  Non-nil return values are included in the JSON result under the given key.
+Each function is called at point with no arguments while a result is built.  Non-nil return values are appended to the node under the given key.

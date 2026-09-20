@@ -112,16 +112,21 @@ files, name that file in =files= on each call that sends the link, as far as
 * Links org-mcp returns
 
 Every =link= field org-mcp returns is a native Org link: a write returns the
-link to the heading it changed, and every heading in a read result, a query
-result or an outline carries its own. The link is the one =org-store-link=
-makes when it may only use the identifiers a heading already has, chosen in
-this order:
+link to the heading it changed, and every node in a read result, a query result
+or an outline carries its own (see [[file:reading.org::*The node][The node]]). For a heading it is the link
+=org-store-link= makes when it may only use the identifiers the heading already
+has, chosen in this order:
 
-| Heading                              | Returned link               |
+| Node                                 | Returned link               |
 |--------------------------------------+-----------------------------|
-| has an =ID=                          | =id:<id>=                   |
-| has a =CUSTOM_ID= and no =ID=        | =file:<path>::#<custom-id>= |
-| has neither                          | =file:<path>::*<title>=     |
+| heading with an =ID=                 | =id:<id>=                   |
+| heading with a =CUSTOM_ID= and no =ID= | =file:<path>::#<custom-id>= |
+| heading with neither                 | =file:<path>::*<title>=     |
+| file with an =ID= of its own         | =id:<id>=                   |
+| file with none                       | =file:<path>=               |
+
+A file's =ID= is the one in its own property drawer, above the first heading,
+where org-roam puts the ID of a file node.
 
 =<path>= is the file name as Org writes it, with =~= for your home directory. A
 title link leaves out the TODO keyword, the priority, statistics cookies and the
