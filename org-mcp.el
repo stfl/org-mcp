@@ -1162,6 +1162,42 @@ refusing the call a link has just resolved."
               (split-string (org-link--normalize-string title)))))
     (equal (words a) (words b))))
 
+(defun org-mcp--statistics-cookie (title)
+  "Return the statistics cookie in TITLE, or nil when it has none.
+Org's own parser decides what one is: a cookie is a
+`statistics-cookie' object of a headline's title, so asking
+`org-element-parse-secondary-string' for that one object type
+applies the rule Org applies when it updates a cookie, rather than
+adding a regexp that would be a second definition of it.  A title
+carrying more than one answers with the first."
+  (car
+   (org-element-map
+    (org-element-parse-secondary-string
+     title '(statistics-cookie))
+    'statistics-cookie
+    (lambda (cookie) (org-element-property :value cookie)))))
+
+(defun org-mcp--title-keeping-cookie (after)
+  "Return the text a rename to AFTER writes on the heading at point.
+A statistics cookie is no part of a title: `org-mcp--title-at-point'
+normalizes it away, which is half of what makes one title serve
+every caller.  So a client composing AFTER from what it read has no
+cookie to send back, and writing AFTER verbatim would take the
+heading's cookie away for good -- `org-update-statistics-cookies'
+refreshes a cookie that is there and never adds one, so the parent's
+progress display would not come back.  The heading is therefore read
+as written, cookie and all, and the cookie is carried over.
+
+It goes at the end of the title, wherever it stood before: AFTER is
+new text, with no position in it to put the cookie back into.  An
+AFTER naming a cookie of its own keeps that one, because the client
+asked for it."
+  (let ((cookie
+         (org-mcp--statistics-cookie (org-get-heading t t t t))))
+    (if (or (null cookie) (org-mcp--statistics-cookie after))
+        after
+      (concat after " " cookie))))
+
 (defun org-mcp--heading-metadata-at-point ()
   "Return canonical heading metadata at point as a plist.
 
@@ -3803,8 +3839,12 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  before - Current title without TODO state or tags
-  after - New title without TODO state or tags
+  before - Current title without TODO state or tags, compared as Org
+           compares titles: letter case, runs of whitespace and
+           statistics cookies make no difference, so the title a
+           read returned is always accepted
+  after - New title without TODO state or tags.  A statistics cookie
+          on the headline is kept unless after names one of its own
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -3826,7 +3866,7 @@ MCP Parameters:
           (org-mcp--state-mismatch-error
            before actual-title "Title")))
 
-      (org-edit-headline after))))
+      (org-edit-headline (org-mcp--title-keeping-cookie after)))))
 
 (defun org-mcp--tool-node-set-content
     (link before after &optional append files)

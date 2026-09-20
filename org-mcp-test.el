@@ -9172,6 +9172,37 @@ return that effective set."
                test-file "Tagged Parent" 'local_tags)
               '("ptag"))))))
 
+(ert-deftest org-mcp-test-tags-agree-on-a-child-inside-a-node ()
+  "A child expanded inside its parent carries the tags a read gives it.
+The third read path is a walk: `depth' expands a child in place, and
+that child is built by the same builder from the same
+`org-get-tags' call, so what the walk shows and what a read of the
+child shows are one answer rather than two that agree by accident."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (let* ((parent
+              (json-parse-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-read"
+                `((link
+                   . ,(org-mcp-test--file-link
+                       test-file "*Tagged Parent"))
+                  (depth . 1)))
+               :object-type 'alist))
+             (child (aref (alist-get 'children parent) 0)))
+        (should (equal (alist-get 'title child) "Tagged Child"))
+        (should
+         (equal (alist-get 'tags child) ["filetag" "ptag" "ctag"]))
+        (should (equal (alist-get 'local_tags child) ["ctag"]))
+        (should
+         (equal (alist-get 'tags child)
+                (alist-get
+                 'tags
+                 (org-mcp-test--read-structured
+                  test-file "Tagged Child"))))))))
+
 (ert-deftest org-mcp-test-read-local-tags-equal-tags-without-inheritance ()
   "With inheritance off, `tags' and `local_tags' are the same list."
   (org-mcp-test--with-temp-org-files
@@ -14397,8 +14428,22 @@ no depth serves, over a file that has three generations to expand."
   "A heading whose title carries doubled whitespace and a cookie.")
 
 (defconst org-mcp-test--regex-cookie-title-renamed
-  "\\`\\* TODO \\[#A\\] Ship v3\nBody\\.\n\\'"
-  "Regex matching the cookie-title file after the rename.")
+  "\\`\\* TODO \\[#A\\] Ship v3 \\[1/3\\]\nBody\\.\n\\'"
+  "Regex matching the cookie-title file after the rename.
+The cookie outlives the rename: a read normalized it away, so the
+new title cannot carry it, and Org never puts a cookie back.")
+
+(defconst org-mcp-test--content-plain-title
+  "* TODO Ship v2\nBody.\n"
+  "A heading whose title carries no statistics cookie.")
+
+(defconst org-mcp-test--regex-plain-title-renamed
+  "\\`\\* TODO Ship v3\nBody\\.\n\\'"
+  "Regex matching the plain-title file after the rename.")
+
+(defconst org-mcp-test--regex-cookie-title-replaced
+  "\\`\\* TODO \\[#A\\] Ship v3 \\[2/5\\]\nBody\\.\n\\'"
+  "Regex matching the cookie-title file renamed with a new cookie.")
 
 (ert-deftest org-mcp-test-title-normalization-is-org-s ()
   "The title a node reports is normalized by Org's own predicate.
@@ -14432,6 +14477,43 @@ resolved."
       (org-mcp-test--call-rename-headline-and-check
        link "SHIP  V2" "Ship v3" test-file
        org-mcp-test--regex-cookie-title-renamed))))
+
+(ert-deftest org-mcp-test-rename-keeps-the-statistics-cookie ()
+  "A rename carries the heading's statistics cookie over.
+A read normalizes the cookie away, so `after' has none to send back,
+and writing it verbatim would take the cookie off the heading for
+good: Org refreshes a cookie that is there and never adds one, so
+the parent's progress display would not come back.  A heading that
+carried none gains none, and an `after' naming a cookie of its own
+is written as it stands."
+  (org-mcp-test--with-temp-org-files
+      ((kept org-mcp-test--content-cookie-title)
+       (none org-mcp-test--content-plain-title)
+       (named org-mcp-test--content-cookie-title))
+    (org-mcp-test--call-rename-headline-and-check
+     (org-mcp-test--file-link kept "*Ship v2")
+     "Ship v2" "Ship v3" kept
+     org-mcp-test--regex-cookie-title-renamed)
+    (org-mcp-test--call-rename-headline-and-check
+     (org-mcp-test--file-link none "*Ship v2")
+     "Ship v2" "Ship v3" none
+     org-mcp-test--regex-plain-title-renamed)
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-title"
+             `((link . ,(org-mcp-test--file-link named "*Ship v2"))
+               (before . "Ship v2")
+               (after . "Ship v3 [2/5]"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) "Ship v2"))
+      (should (equal (alist-get 'after result) "Ship v3 [2/5]"))
+      (should
+       (equal (alist-get 'link result)
+              (org-mcp-test--file-link named "*Ship v3")))
+      (org-mcp-test--verify-file-matches
+       named org-mcp-test--regex-cookie-title-replaced))))
 
 ;;; Taking a whole node away
 
