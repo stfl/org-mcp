@@ -17,10 +17,11 @@
 ;; - cl-macs is loaded and named in `elisp-autofmt-load-packages-local',
 ;;   so the formatter indents cl-defun, cl-flet and cl-labels as they
 ;;   declare.
-;; - Directory-local variables are off.  Batch Emacs refuses
-;;   .dir-locals.el as a whole anyway, because it holds a variable not
-;;   marked safe, so the code is laid out for Emacs's default
-;;   `fill-column' of 70.
+;; - `fill-column' is 70, the width the code is laid out for, and
+;;   .dir-locals.el says the same for an editing session.  Batch Emacs
+;;   refuses that file as a whole, because it holds a variable not
+;;   marked safe, so directory-local variables are off here and the
+;;   width is set directly.
 ;;
 ;; A file that is not formatted, because it is missing or because
 ;; elisp-autofmt complains about it, exits non-zero.
@@ -72,6 +73,7 @@ the buffer as it is.  Its complaints all begin with \"elisp-autofmt:
   (let ((enable-local-variables nil))
     (with-current-buffer (find-file-noselect file)
       (setq-local elisp-autofmt-load-packages-local '("cl-macs"))
+      (setq-local fill-column 70)
       (org-mcp-format--buffer)
       (let ((save-silently t))
         (save-buffer))
