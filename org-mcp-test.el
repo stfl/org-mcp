@@ -15452,5 +15452,51 @@ disk.  `saved' answers for both files, so it is false."
            (string=
             (org-mcp-test--read-file other-file) other-before)))))))
 
+(defconst org-mcp-test--verbs-tagged-content
+  (concat
+   "* TODO Tagged :work:urgent:\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":END:\n"
+   "** Descendant :deep:\n"
+   "* TODO Home\n"
+   "** Child\n")
+  "A tagged node with a tagged descendant, and a parent two levels down.
+Refiling it under Child shifts both headings by two levels, so a
+paste that left the tags where they were is visible.")
+
+(ert-deftest org-mcp-test-node-refile-aligns-the-tags-it-shifts ()
+  "A refiled heading's tags are aligned for the level it lands at.
+Org shifts the subtree by promoting or demoting every heading in it,
+and that is what aligns the tags, so a heading arrives with its tags
+at `org-tags-column' rather than at the column its old level put
+them.  The descendant is checked too: the shift reaches all of them."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--verbs-tagged-content
+      (list org-mcp-test--verbs-target-id)
+    (let ((link (concat "id:" org-mcp-test--verbs-target-id)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-refile"
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest link))
+         (parent . ,(org-mcp-test--file-link test-file "*Child"))))
+      (let ((served (org-mcp-test--verbs-served-text test-file)))
+        ;; Both headings are two levels deeper than they were.
+        (should
+         (string-match-p "^\\*\\*\\* TODO Tagged " served))
+        (should (string-match-p "^\\*\\*\\*\\* Descendant " served))
+        ;; And both carry their tags at the configured column, which
+        ;; right-aligns the tag string to end there.
+        (dolist (heading '("TODO Tagged" "Descendant"))
+          (let ((line
+                 (car
+                  (seq-filter
+                   (lambda (line)
+                     (string-match-p (concat "\\* " heading " ") line))
+                   (split-string served "\n")))))
+            (should line)
+            (should (string-suffix-p ":" line))
+            (should (= (length line) (abs org-tags-column)))))))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
