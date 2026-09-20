@@ -1877,21 +1877,6 @@ is the node a read of its link returns; see
    file-node
    (list org-mcp-read-max-nodes)))
 
-(defun org-mcp--generate-outline (file-path)
-  "Return the outline of FILE-PATH: its headings and theirs.
-The file node's `children' alone, each child carrying its own
-children, so the answer is the top-level headings and their direct
-ones.  The generation below those is left out, as are the fields a
-whole read carries: the file node is read one generation deep, and
-the tool answers with that one key of it."
-  (org-mcp--with-org-file file-path
-    (list
-     (assq
-      'children
-      (org-mcp--node-at-point (append
-                               org-mcp--node-child-fields '(children))
-                              1 t)))))
-
 ;; Links
 
 (defconst org-mcp--link-forms-hint
@@ -4345,42 +4330,6 @@ MCP Parameters:
                             computed
                             files))
 
-(defun org-mcp--tool-read-outline (file)
-  "Tool handler for org-read-outline.
-FILE is the absolute path to an Org file, or a `file:' link to it with
-no search part, such as file:/path/to/file.org.  Either way the file
-must pass the scope gate, `org-mcp--find-allowed-file', as a file the
-call names.  An `id:' link, even one to a file-level drawer, and a
-`file:' link with a search part are refused without being looked up,
-as parsed.  A string starting with `org://' is refused as no link, the
-way the link tools refuse it.
-
-MCP Parameters:
-  file - Absolute path to an Org file, or a file: link to it with no
-         search part"
-  (json-encode
-   (org-mcp--generate-outline
-    (cond
-     ((and (stringp file)
-           (string-prefix-p "org://" (string-trim file)))
-      (org-mcp--not-a-link-error file))
-     ((org-mcp--link-written-p file)
-      (let ((object (org-mcp--link-parse file)))
-        (when (or (equal (org-element-property :type object) "id")
-                  (org-element-property :search-option object))
-          (org-mcp--tool-validation-error
-           "org-read-outline takes a file's path or file: link, not an \
-id: link or a search: %s"
-           file))
-        (plist-get (org-mcp--link-target file) :file)))
-     (t
-      (unless (and (stringp file) (file-name-absolute-p file))
-        (org-mcp--tool-validation-error "Path must be absolute: %s"
-                                        file))
-      (expand-file-name
-       (or (org-mcp--find-allowed-file file t)
-           (org-mcp--tool-file-access-error file))))))))
-
 (defun org-mcp--tool-node-text (link &optional files)
   "Tool handler for org-node-text.
 LINK is a native Org link to a heading or a whole file.
@@ -5505,28 +5454,6 @@ the call asked for.
      org-mcp--node-description "
 File must be in the allowed files, or permitted by
 org-mcp-file-scope-override.")
-    :read-only t)
-   (list
-    #'org-mcp--tool-read-outline
-    :id "org-read-outline"
-    :description
-    "Get hierarchical structure of Org file as JSON outline. Returns
-   the titles of the top-level headlines and of their direct
-   children; deeper headlines are left out. File must be in the
-   allowed files, or permitted by org-mcp-file-scope-override.
-
-Parameters:
-  file - Absolute path to Org file, or a file: link to it with no
-         search part, bare or bracketed, such as file:/path/to/file.org
-         (string, required)
-         An id: link, even one to a file-level drawer, and a file:
-         link with a search part are refused without being looked
-         up, and so is an org:// resource URI.
-
-Returns: JSON object with hierarchical outline structure:
-  children - Array of top-level headings, each a node carrying title,
-             todo, level, link and its own children, the level-2
-             headings; those carry no children of their own"
     :read-only t)
    (list
     #'org-mcp--tool-node-text
