@@ -1277,8 +1277,8 @@ response returns as it is."
     (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
     (should (eq (alist-get 'saved result) t))
-    (should (equal (alist-get 'previous_state result) old-state))
-    (should (equal (alist-get 'new_state result) new-state))
+    (should (equal (alist-get 'before result) old-state))
+    (should (equal (alist-get 'after result) new-state))
     (should
      (equal (alist-get 'link result)
             (or expected-link
@@ -1309,8 +1309,8 @@ is an `id:' link with no search part, else by its new title."
     (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
     (should (eq (alist-get 'saved result) t))
-    (should (equal (alist-get 'previous_title result) current-title))
-    (should (equal (alist-get 'new_title result) new-title))
+    (should (equal (alist-get 'before result) current-title))
+    (should (equal (alist-get 'after result) new-title))
     (should
      (equal result-link
             (if (string-match-p "\\`id:[^:]*\\'" link)
@@ -2117,7 +2117,7 @@ is DONE."
     (let ((result
            (org-mcp-test--call-update-todo-state link "DONE" "TODO")))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_state result) "DONE")))
+      (should (equal (alist-get 'after result) "DONE")))
     (org-mcp-test--verify-file-matches
      file org-mcp-test--scope-task-done-regex)))
 
@@ -3481,7 +3481,7 @@ and the response must report `saved' as false."
                         link "IN-PROGRESS" "TODO")))
                   (should (equal (alist-get 'success result) t))
                   (should (eq (alist-get 'saved result) :json-false))
-                  (should (equal (alist-get 'new_state result) "IN-PROGRESS")))
+                  (should (equal (alist-get 'after result) "IN-PROGRESS")))
                 ;; Buffer must still be modified (never auto-saved)
                 (with-current-buffer buffer
                   (should (buffer-modified-p)))
@@ -3576,8 +3576,8 @@ Another task."))
                   link "IN-PROGRESS")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
-            (should (equal (alist-get 'previous_state result) "TODO"))
-            (should (equal (alist-get 'new_state result) "IN-PROGRESS"))
+            (should (equal (alist-get 'before result) "TODO"))
+            (should (equal (alist-get 'after result) "IN-PROGRESS"))
             (should
              (equal (alist-get 'link result)
                     (org-mcp-test--file-link test-file "*Task One")))
@@ -3598,8 +3598,8 @@ Another task."))
                   link "TODO")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
-            (should (equal (alist-get 'previous_state result) ""))
-            (should (equal (alist-get 'new_state result) "TODO"))
+            (should (equal (alist-get 'before result) ""))
+            (should (equal (alist-get 'after result) "TODO"))
             (should
              (equal (alist-get 'link result)
                     (org-mcp-test--file-link test-file "*Task One")))))))))
@@ -3952,8 +3952,8 @@ Task body."
                                "org-node-set-todo" params))
                  (result (json-read-from-string result-text)))
             (should (equal (alist-get 'success result) t))
-            (should (equal (alist-get 'previous_state result) "TODO"))
-            (should (equal (alist-get 'new_state result) "DONE"))
+            (should (equal (alist-get 'before result) "TODO"))
+            (should (equal (alist-get 'after result) "DONE"))
             (org-mcp-test--verify-file-matches
              test-file
              org-mcp-test--expected-task-one-done-with-note-regex)))))))
@@ -3976,8 +3976,8 @@ LOGBOOK drawer."
                                "org-node-set-todo" params))
                  (result (json-read-from-string result-text)))
             (should (equal (alist-get 'success result) t))
-            (should (equal (alist-get 'previous_state result) "TODO"))
-            (should (equal (alist-get 'new_state result) "DONE"))
+            (should (equal (alist-get 'before result) "TODO"))
+            (should (equal (alist-get 'after result) "DONE"))
             (org-mcp-test--verify-file-matches
              test-file
              org-mcp-test--expected-task-one-done-with-note-no-drawer-regex)))))))
@@ -3994,8 +3994,8 @@ keyword the repeat reset it to, not the done keyword asked for."
              (result (org-mcp-test--call-update-todo-state link "DONE")))
         ;; Response fields
         (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'previous_state result) "TODO"))
-        (should (equal (alist-get 'new_state result) "TODO"))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "TODO"))
         ;; File: repeat fired — state reverted to TODO, SCHEDULED advanced
         (org-mcp-test--verify-file-matches
          test-file
@@ -4012,8 +4012,8 @@ the state Org left the entry in."
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result (org-mcp-test--call-update-todo-state link "DONE")))
         (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'previous_state result) "TODO"))
-        (should (equal (alist-get 'new_state result) "NEXT"))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "NEXT"))
         ;; File: state reverted to NEXT (from REPEAT_TO_STATE)
         (org-mcp-test--verify-file-matches
          test-file
@@ -5353,15 +5353,22 @@ content here."
        (org-mcp-test--file-link test-file "*Third Child #3")))))
 
 (ert-deftest org-mcp-test-edit-body-empty-old-non-empty-body ()
-  "Test error when before is empty but body has content."
+  "An empty before is refused when the node already has content.
+The refusal names the assertion the call made, what the tool found
+instead and what to send in its place, because a client has only the
+message to act on."
   (org-mcp-test--with-id-setup test-file
       org-mcp-test--content-nested-siblings
       `(,org-mcp-test--content-with-id-id)
-    (org-mcp-test--call-edit-body-expecting-error
-     test-file
-     org-mcp-test--content-with-id-link
-     "" ; Empty before
-     "replacement")))
+    (should
+     (string=
+      "An empty before asserts the node has no content, \
+and this node has some; send the part of the content to replace"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-node-set-content"
+       `((link . ,org-mcp-test--content-with-id-link)
+         (before . "")
+         (after . "replacement")))))))
 
 (ert-deftest org-mcp-test-edit-body-empty-with-properties ()
   "Test adding content to empty body with properties drawer.
@@ -8087,9 +8094,9 @@ does when the clock is closed, so both files hold their change."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
-      (should (equal (alist-get 'previous_scheduled result) ""))
+      (should (equal (alist-get 'before result) ""))
       (should (string-match-p "<2026-03-27"
-                              (alist-get 'new_scheduled result)))
+                              (alist-get 'after result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-scheduled-set))))
 
@@ -8105,9 +8112,9 @@ does when the clock is closed, so both files hold their change."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (string-match-p "<2026-03-01"
-                              (alist-get 'previous_scheduled result)))
+                              (alist-get 'before result)))
       (should (string-match-p "<2026-04-15"
-                              (alist-get 'new_scheduled result)))
+                              (alist-get 'after result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-scheduled-update))))
 
@@ -8121,7 +8128,7 @@ does when the clock is closed, so both files hold their change."
             (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_scheduled result) ""))
+      (should (equal (alist-get 'after result) ""))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-scheduled-remove))))
 
@@ -8171,9 +8178,9 @@ does when the clock is closed, so both files hold their change."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
-      (should (equal (alist-get 'previous_deadline result) ""))
+      (should (equal (alist-get 'before result) ""))
       (should (string-match-p "<2026-03-27"
-                              (alist-get 'new_deadline result)))
+                              (alist-get 'after result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-deadline-set))))
 
@@ -8189,9 +8196,9 @@ does when the clock is closed, so both files hold their change."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (string-match-p "<2026-03-15"
-                              (alist-get 'previous_deadline result)))
+                              (alist-get 'before result)))
       (should (string-match-p "<2026-04-15"
-                              (alist-get 'new_deadline result)))
+                              (alist-get 'after result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-deadline-update))))
 
@@ -8205,7 +8212,7 @@ does when the clock is closed, so both files hold their change."
             (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_deadline result) ""))
+      (should (equal (alist-get 'after result) ""))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-deadline-remove))))
 
@@ -8256,7 +8263,7 @@ does when the clock is closed, so both files hold their change."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
-      (should (equal (alist-get 'previous_tags result) []))
+      (should (equal (alist-get 'before result) []))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-set))))
 
@@ -8285,7 +8292,7 @@ does when the clock is closed, so both files hold their change."
             (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_tags result) []))
+      (should (equal (alist-get 'after result) []))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-clear))))
 
@@ -8320,7 +8327,7 @@ not membership in the configured alist."
             (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_tags result) ["nonexistent"])))))
+      (should (equal (alist-get 'after result) ["nonexistent"])))))
 
 (ert-deftest org-mcp-test-set-tags-mutex-violation ()
   "Test that mutually exclusive tags are rejected."
@@ -8369,8 +8376,8 @@ not membership in the configured alist."
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
-      (should (equal (alist-get 'previous_priority result) ""))
-      (should (equal (alist-get 'new_priority result) "A"))
+      (should (equal (alist-get 'before result) ""))
+      (should (equal (alist-get 'after result) "A"))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-priority-set))))
 
@@ -8385,8 +8392,8 @@ not membership in the configured alist."
             (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'previous_priority result) "B"))
-      (should (equal (alist-get 'new_priority result) "C"))
+      (should (equal (alist-get 'before result) "B"))
+      (should (equal (alist-get 'after result) "C"))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-priority-change))))
 
@@ -8400,7 +8407,7 @@ not membership in the configured alist."
             (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'new_priority result) ""))
+      (should (equal (alist-get 'after result) ""))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-priority-remove))))
 
@@ -8489,6 +8496,25 @@ not membership in the configured alist."
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body-empty))))
+
+(ert-deftest org-mcp-test-edit-body-append-empty-after ()
+  "Append mode refuses an empty or whitespace-only after.
+The refusal says what after is on an append call, so a client reading
+it knows which argument to fix and what it is for."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-empty-body))
+    (let ((link (org-mcp-test--file-link test-file "*Empty Body Task")))
+      (dolist (after '("" "  " "\n\t"))
+        (should
+         (string=
+          "after is the content to append and cannot be empty or \
+whitespace-only"
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-node-set-content"
+           `((link . ,link)
+             (before . "")
+             (after . ,after)
+             (append . t)))))))))
 
 (ert-deftest org-mcp-test-edit-body-append-before-children ()
   "Test that appended content goes before child headlines."
@@ -9892,7 +9918,7 @@ file, the buffer of the running clock, nor the running clock changes."
     (let ((result
            (org-mcp-test--call-update-todo-state
             (format "file:%s::*Gamma" test-file) "DONE" "TODO")))
-      (should (equal (alist-get 'previous_state result) "TODO"))
+      (should (equal (alist-get 'before result) "TODO"))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--regex-links-gamma-done))))
 
@@ -10066,7 +10092,7 @@ out of reach until a `file:' link names that file."
       (should
        (equal
         (alist-get
-         'new_state
+         'after
          (org-mcp-test--call-update-todo-state
           (format "[[file:%s::*Task][Task]]" in) "DONE" "TODO"))
         "DONE"))
@@ -10910,7 +10936,7 @@ leave Org's ID index alone."
            (should
             (equal
              (alist-get
-              'new_state
+              'after
               (org-mcp-test--call-update-todo-state
                org-mcp-test--scope-id-link "DONE" "TODO" nil files))
              "DONE")))))
@@ -12738,7 +12764,7 @@ the response reports the state Org left it in."
              (org-mcp-test--call-update-todo-state
               (org-mcp-test--file-link test-file "*Child") "DONE")))
         (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'new_state result) "DONE")))
+        (should (equal (alist-get 'after result) "DONE")))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--expected-unfinished-child-done-regex))))
 
