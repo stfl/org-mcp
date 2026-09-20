@@ -81,6 +81,7 @@ front of the message, and it reads the same whichever path carried it.
 | Marker      | Says                                  | Recovery                           |
 |-------------+---------------------------------------+------------------------------------|
 | =conflict:= | the file is not as you believed it is | read it again and re-plan          |
+| =blocked:=  | Org itself refused the change         | tell the user why Org said no      |
 | /unmarked/  | the call was malformed                | correct the call and send it again |
 
 Unmarked is the default, and it is the largest class: a link org-mcp does not
@@ -93,6 +94,15 @@ moved on from what the call asserted about it. =current_state=, =current_title=
 and the =clock_out= of a running clock are the assertions org-mcp checks, and a
 conflict names what it found instead, so the recovery is to read the heading or
 the active clock again and decide afresh.
+
+A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
+an unchecked checkbox, an ordered subtree — refused the change, nothing was
+written, and the refusal carries Org's reason where Org names one:
+
+#+begin_example
+blocked: TODO state change from TODO to DONE blocked (by "TODO Write the tests")
+blocked: TODO state change from TODO to DONE blocked (by contained checkboxes)
+#+end_example
 
 One refusal stays unmarked on purpose. A link that resolves to no heading —
 =Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
@@ -113,8 +123,14 @@ theirs in [[file:clocking.org][Clock tracking]].
   - =new_state= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, previous and new states, and the link to the updated headline
-- *Refuses with:* =conflict:= when =current_state= is not the state the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =previous_state=, =new_state= and the link to the updated headline
+- *Refuses with:* =conflict:= when =current_state= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+=new_state= reports the state Org left the headline in, which is not always the
+one asked for. Moving a repeating entry to a done keyword makes Org run the
+repeat: the timestamp advances and the entry comes back in its not-done
+keyword, =TODO= or whatever =REPEAT_TO_STATE= names, and that is what the
+response carries.
 
 Example:
 #+begin_src json
@@ -134,9 +150,23 @@ Example:
   "link": "file:~/org/projects.org::*Project Alpha"
 }
 
+# A repeating entry moved to DONE, which Org repeated instead:
+{
+  "success": true,
+  "saved": true,
+  "previous_state": "TODO",
+  "new_state": "TODO",
+  "link": "file:~/org/tasks.org::*Water the plants"
+}
+
 # State mismatch error:
 {
   "error": "conflict: State mismatch: expected 'TODO', found 'IN-PROGRESS'"
+}
+
+# Org vetoed the change:
+{
+  "error": "blocked: TODO state change from TODO to DONE blocked (by \"TODO Write the tests\")"
 }
 #+end_src
 
@@ -186,7 +216,7 @@ Example:
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =blocked:= when Org vetoes =todo_state= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json

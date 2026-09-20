@@ -3983,7 +3983,9 @@ LOGBOOK drawer."
              org-mcp-test--expected-task-one-done-with-note-no-drawer-regex)))))))
 
 (ert-deftest org-mcp-test-update-todo-state-triggers-repeat ()
-  "Test that marking DONE on a task with a repeater triggers the repeat."
+  "Test that marking DONE on a task with a repeater triggers the repeat.
+The response reports the state Org left the entry in, the not-done
+keyword the repeat reset it to, not the done keyword asked for."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-task-scheduled-repeat))
     (let ((org-log-repeat nil)
@@ -3993,14 +3995,16 @@ LOGBOOK drawer."
         ;; Response fields
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'previous_state result) "TODO"))
-        (should (equal (alist-get 'new_state result) "DONE"))
+        (should (equal (alist-get 'new_state result) "TODO"))
         ;; File: repeat fired — state reverted to TODO, SCHEDULED advanced
         (org-mcp-test--verify-file-matches
          test-file
          org-mcp-test--expected-weekly-task-repeat-triggered-regex)))))
 
 (ert-deftest org-mcp-test-update-todo-state-repeat-to-state ()
-  "Test that REPEAT_TO_STATE is respected when repeat triggers."
+  "Test that REPEAT_TO_STATE is respected when repeat triggers.
+The response reports the keyword `REPEAT_TO_STATE' named, which is
+the state Org left the entry in."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-task-scheduled-repeat-to-state))
     (let ((org-log-repeat nil)
@@ -4009,7 +4013,7 @@ LOGBOOK drawer."
              (result (org-mcp-test--call-update-todo-state link "DONE")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'previous_state result) "TODO"))
-        (should (equal (alist-get 'new_state result) "DONE"))
+        (should (equal (alist-get 'new_state result) "NEXT"))
         ;; File: state reverted to NEXT (from REPEAT_TO_STATE)
         (org-mcp-test--verify-file-matches
          test-file
@@ -12449,12 +12453,36 @@ link reads back to itself through org-read."
 (defconst org-mcp-test--conflict-marker "conflict: "
   "Marker a stale-belief refusal carries, as a client matches it.")
 
+(defconst org-mcp-test--blocked-marker "blocked: "
+  "Marker an Org-veto refusal carries, as a client matches it.")
+
 (defun org-mcp-test--refusal-class (message)
   "Return the class MESSAGE announces.
-Either `conflict' or `validation', the unmarked default."
-  (if (string-prefix-p org-mcp-test--conflict-marker message)
-      'conflict
-    'validation))
+One of `conflict', `blocked' or `validation', the unmarked default."
+  (cond
+   ((string-prefix-p org-mcp-test--conflict-marker message) 'conflict)
+   ((string-prefix-p org-mcp-test--blocked-marker message) 'blocked)
+   (t 'validation)))
+
+(defconst org-mcp-test--content-unfinished-child
+  "* TODO Parent\n** TODO Child\n"
+  "A parent whose child is unfinished, so Org vetoes finishing it.")
+
+(defconst org-mcp-test--content-unchecked-box
+  "* TODO Task One\n- [ ] Not yet\n"
+  "A task holding an unchecked box, so Org vetoes finishing it.")
+
+(defconst org-mcp-test--content-ordered-parent
+  (concat "* TODO Parent\n"
+          ":PROPERTIES:\n"
+          ":ORDERED: t\n"
+          ":END:\n"
+          "** TODO First\n")
+  "An ordered parent whose first child is unfinished.")
+
+(defconst org-mcp-test--expected-unfinished-child-done-regex
+  "\\`\\* TODO Parent\n\\*\\* DONE Child\n\\'"
+  "Regex matching the whole file once the child is finished.")
 
 (ert-deftest org-mcp-test-refusal-conflict-marks-a-stale-precondition ()
   "A precondition that no longer holds is refused as a conflict.
@@ -12527,6 +12555,91 @@ stays in the validation default."
         (should
          (equal (org-mcp-test--resource-error (concat "org://" link))
                 message))))))
+
+(ert-deftest org-mcp-test-update-todo-state-refuses-an-org-veto ()
+  "A TODO change Org vetoes is refused and nothing is written.
+`org-enforce-todo-dependencies' blocks finishing a parent whose
+child is unfinished.  The refusal carries the veto marker and Org's
+own reason, the blocking heading, so the client can relay it; the
+file and the buffer are untouched, and no save happens."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-unfinished-child))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-enforce-todo-dependencies t)
+          (org-blocker-hook
+           '(org-block-todo-from-children-or-siblings-or-parent)))
+      (should
+       (equal
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-update-todo-state"
+         `((link . ,(org-mcp-test--file-link test-file "*Parent"))
+           (new_state . "DONE")))
+        (concat org-mcp-test--blocked-marker
+                "TODO state change from TODO to DONE blocked "
+                "(by \"TODO Child\")")))
+      (org-mcp-test--verify-no-modified-buffer test-file))))
+
+(ert-deftest org-mcp-test-update-todo-state-refuses-a-checkbox-veto ()
+  "An unchecked box vetoes finishing the task that holds it.
+`org-enforce-todo-checkbox-dependencies' names no heading, so the
+refusal carries the reason Org gives instead."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-unchecked-box))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-enforce-todo-checkbox-dependencies t)
+          (org-blocker-hook '(org-block-todo-from-checkboxes)))
+      (should
+       (equal
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-update-todo-state"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (new_state . "DONE")))
+        (concat org-mcp-test--blocked-marker
+                "TODO state change from TODO to DONE blocked "
+                "(by contained checkboxes)")))
+      (org-mcp-test--verify-no-modified-buffer test-file))))
+
+(ert-deftest org-mcp-test-update-todo-state-unvetoed-change-unaffected ()
+  "With the blocker installed, a change Org allows goes through.
+The child has nothing under it to block on, so it is finished and
+the response reports the state Org left it in."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-unfinished-child))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-enforce-todo-dependencies t)
+          (org-blocker-hook
+           '(org-block-todo-from-children-or-siblings-or-parent)))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Child") "DONE")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'new_state result) "DONE")))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--expected-unfinished-child-done-regex))))
+
+(ert-deftest org-mcp-test-add-todo-refuses-an-org-veto ()
+  "A new heading in a state Org vetoes is refused, and none is added.
+The parent is ordered and its first child is unfinished, so Org
+blocks a second child that arrives already done.  The heading has no
+state to move from, which the refusal says."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-ordered-parent))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-enforce-todo-dependencies t)
+          (org-blocker-hook
+           '(org-block-todo-from-children-or-siblings-or-parent)))
+      (should
+       (string-prefix-p
+        (concat org-mcp-test--blocked-marker
+                "TODO state change from (no state) to DONE blocked (by ")
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-add-todo"
+         `((title . "Second")
+           (todo_state . "DONE")
+           (body . nil)
+           (parent_link
+            . ,(org-mcp-test--file-link test-file "*Parent"))))))
+      (org-mcp-test--verify-no-modified-buffer test-file))))
 
 ;;; Script installation tests
 

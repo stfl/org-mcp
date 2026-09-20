@@ -179,6 +179,11 @@ The recovery is to read the file again and re-plan; sending the same
 call again refuses it again.  Only `org-mcp--tool-conflict-error'
 writes it.")
 
+(defconst org-mcp--refusal-blocked "blocked: "
+  "Marker on a refusal Org itself made, such as a vetoed TODO change.
+The recovery is to tell the user why Org said no.  Only
+`org-mcp--tool-blocked-error' writes it.")
+
 (defun org-mcp--id-not-found-error (id)
   "Throw error for ID not found.
 The refusal is unmarked, the validation class: an ID org-mcp cannot
@@ -198,6 +203,13 @@ A conflict says the file is not as the client believed it to be, so
 the recovery is to read it again and re-plan rather than to retry."
   (mcp-server-lib-tool-throw
    (concat org-mcp--refusal-conflict (apply #'format message args))))
+
+(defun org-mcp--tool-blocked-error (message &rest args)
+  "Throw Org-veto refusal MESSAGE with ARGS, marked `blocked:'.
+Org refused the change itself, so neither reading again nor
+correcting the call helps; the user decides what to do next."
+  (mcp-server-lib-tool-throw
+   (concat org-mcp--refusal-blocked (apply #'format message args))))
 
 (defun org-mcp--state-mismatch-error (expected found context)
   "Throw a conflict refusal for a precondition that no longer holds.
@@ -2023,6 +2035,77 @@ inside `org-mcp--modify-and-save')."
      "Invalid TODO state: '%s' - valid states: %s"
      state (mapconcat #'identity org-todo-keywords-1 ", "))))
 
+(defun org-mcp--todo-block-reason (from to)
+  "Return what Org names for vetoing the change FROM to TO, or nil.
+Point is on the heading.  FROM is its TODO keyword, or nil when it
+has none; TO is the keyword the call asks for.  A non-nil result
+means Org refuses the change: the blocker it names, as a string, or
+t when it names none.
+
+`org-todo' runs `org-blocker-hook' itself, but called from Lisp it
+reports a veto only by leaving the entry alone and writing a
+message, which no caller can read.  The hook is therefore asked here
+first, with the change plist `org-todo' builds and under the same
+`org-inhibit-blocking' and `NOBLOCKING' exemptions, so that the veto
+is known before anything is written.  Org has no function that
+answers for one named transition: `org-entry-blocked-p' asks only
+whether the entry may be finished.  `org-todo' asks the hook again
+for a change that goes through, which is why the hook is a predicate
+and not a place for side effects."
+  (when (and org-blocker-hook
+             (not org-inhibit-blocking)
+             (not (org-entry-get nil "NOBLOCKING")))
+    (let ((org-blocked-by-checkboxes nil)
+          (position
+           (save-excursion
+             (org-back-to-heading t)
+             (point))))
+      (unless (save-excursion
+                (save-match-data
+                  (org-with-wide-buffer
+                   (run-hook-with-args-until-failure
+                    'org-blocker-hook
+                    (list
+                     :type 'todo-state-change
+                     :from from
+                     :to to
+                     :position position)))))
+        (cond
+         (org-blocked-by-checkboxes
+          "contained checkboxes")
+         ((org-string-nw-p org-block-entry-blocking)
+          (format "\"%s\"" org-block-entry-blocking))
+         (t
+          t))))))
+
+(defun org-mcp--set-todo-state (state)
+  "Set the TODO state of the heading at point to STATE.
+Returns the state Org left the heading in, which is read back rather
+than assumed: `org-auto-repeat-maybe' resets a repeating entry moved
+to a done keyword to its not-done keyword, and `REPEAT_TO_STATE'
+picks which one.
+
+A change Org vetoes -- a TODO dependency, an unchecked checkbox, an
+ordered subtree -- is refused before anything is written, so the
+heading keeps the state it had and the caller saves nothing.  The
+refusal carries Org's own reason for it where Org names one."
+  (let ((previous (org-get-todo-state)))
+    (when-let* ((blocker (org-mcp--todo-block-reason previous state)))
+      (org-mcp--tool-blocked-error
+       "TODO state change from %s to %s blocked%s"
+       (or previous "(no state)")
+       state
+       (if (stringp blocker)
+           (format " (by %s)" blocker)
+         "")))
+    ;; Bind `post-command-hook' to nil so that any interactive log-note
+    ;; hook `org-todo' may schedule (e.g. when `org-log-done' is set)
+    ;; cannot fire later -- org-mcp attaches its own note explicitly
+    ;; through `org-mcp--insert-log-note'.
+    (let ((post-command-hook nil))
+      (org-todo state))
+    (or (org-get-todo-state) "")))
+
 (defun org-mcp--mutex-tag-groups (alist)
   "Return mutex tag groups from ALIST as a list of lists of tag strings.
 A mutex group is delimited by `:startgroup' / `:endgroup' tokens.
@@ -2454,7 +2537,11 @@ lists those roots as absolute paths."
 (defun org-mcp--tool-update-todo-state
     (link new_state &optional current_state note files)
   "Update the TODO state of the headline LINK names.
-Returns the link to the updated headline.
+Returns the link to the updated headline, and as `new_state' the
+state Org left it in, which is the state asked for unless Org made
+another of it: a repeating entry moved to a done keyword comes back
+in its not-done keyword.  A change Org vetoes is refused and nothing
+is written; see `org-mcp--set-todo-state'.
 NEW_STATE is the new TODO state to set.
 CURRENT_STATE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
@@ -2480,10 +2567,11 @@ MCP Parameters:
           refused with any other link"
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
-         (actual-prev nil))
+         (actual-prev nil)
+         (actual-new nil))
     (org-mcp--modify-and-save file-path "update"
                               `((previous_state . ,actual-prev)
-                                (new_state . ,new_state))
+                                (new_state . ,actual-new))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (org-mcp--validate-todo-state new_state)
@@ -2501,12 +2589,9 @@ MCP Parameters:
            (or (org-get-todo-state) "(no state)")
            "State")))
 
-      ;; Update the state.  Bind `post-command-hook' to nil so that any
-      ;; interactive log-note hook `org-todo' may schedule (e.g. when
-      ;; `org-log-done' is set) cannot fire later -- we attach our own
-      ;; note explicitly via `org-mcp--insert-log-note' below.
-      (let ((post-command-hook nil))
-        (org-todo new_state))
+      ;; Update the state, refusing a change Org vetoes and reading
+      ;; back what Org made of the one it took.
+      (setq actual-new (org-mcp--set-todo-state new_state))
 
       ;; Add note to state transition if provided
       (when (and note (not (string-empty-p (string-trim note))))
@@ -2528,7 +2613,10 @@ MCP Parameters:
 Returns the new headline's link; no identifier is created, so the
 link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
-TODO_STATE is the TODO state from `org-todo-keywords'.
+TODO_STATE is the TODO state from `org-todo-keywords'.  A state Org
+vetoes for the new heading, such as a done keyword under an ordered
+parent whose earlier siblings are unfinished, is refused and no
+heading is added; see `org-mcp--set-todo-state'.
 BODY is optional body text.
 PARENT_LINK is the link to the parent item, or to a whole file for
 its top level.
@@ -2627,7 +2715,7 @@ MCP Parameters:
         ;; Insert the new heading
         (org-mcp--insert-heading title parent-level)
 
-        (org-todo todo_state)
+        (org-mcp--set-todo-state todo_state)
 
         (when tag-list
           (org-set-tags tag-list))
