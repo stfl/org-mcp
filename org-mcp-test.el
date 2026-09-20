@@ -3029,7 +3029,10 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-config-tags"
     "org-config-todo"
     "org-node-add-note"
+    "org-node-archive"
     "org-node-create"
+    "org-node-delete"
+    "org-node-move"
     "org-node-read"
     "org-node-set-content"
     "org-node-set-deadline"
@@ -14510,6 +14513,439 @@ resolved."
       (org-mcp-test--call-rename-headline-and-check
        link "SHIP  V2" "Ship v3" test-file
        org-mcp-test--regex-cookie-title-renamed))))
+
+;;; Taking a whole node away
+
+;; org-node-delete, org-node-archive and org-node-move each remove a
+;; node from where it is, and each one asserts the subtree it is about
+;; to move by echoing the `digest' a read handed the client.  These
+;; tests call them the way a client calls them: read the node for a
+;; token, then send the token back.
+
+(defconst org-mcp-test--verbs-target-id
+  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  "ID of Target in `org-mcp-test--verbs-content'.")
+
+(defconst org-mcp-test--verbs-content
+  (concat
+   "* TODO Keep :work:\n"
+   "Keep body.\n"
+   "* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on [2026-03-20 Fri 09:00] \\\\\n"
+   "  Decided this one.\n"
+   ":END:\n"
+   "Target body.\n"
+   "** Child\n"
+   "*** Grandchild\n"
+   "* TODO Home\n"
+   "Home body.\n"
+   "** First child\n"
+   "** Second child\n")
+  "A file with a node to take away and a node to take it to.
+Target carries an ID, a LOGBOOK, a body and two generations of
+descendants, so a verb that drops part of a subtree is caught.  Home
+has two children, so a move can name a position among them.")
+
+(defconst org-mcp-test--verbs-target-gone
+  (concat
+   "\\`\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* Second child\n"
+   "\\'")
+  "The complete file after Target has left it.")
+
+(defconst org-mcp-test--verbs-target-drawers
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "- Note taken on \\[2026-03-20 Fri 09:00\\] \\\\\\\\\n"
+   "  Decided this one\\.\n"
+   ":END:\n"
+   "Target body\\.\n")
+  "Regexp matching everything Target carries below its heading line.
+It is the same at every level, so a move that drops a drawer or the
+LOGBOOK on the way fails wherever the node lands.")
+
+(defconst org-mcp-test--verbs-target-moved
+  (concat
+   "\\`\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\*\\*\\* Child\n"
+   "\\*\\*\\*\\* Grandchild\n"
+   "\\*\\* Second child\n"
+   "\\'")
+  "The complete file after Target moves under Home, after First child.
+Every generation is one level deeper than it was and the LOGBOOK
+travels with the node.")
+
+(defconst org-mcp-test--verbs-target-last-child
+  (concat
+   "\\`\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* Second child\n"
+   "\\*\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\*\\*\\* Child\n"
+   "\\*\\*\\*\\* Grandchild\n"
+   "\\'")
+  "The complete file after Target moves under Home naming no sibling.")
+
+(defconst org-mcp-test--verbs-target-at-top
+  (concat
+   "\\`\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\*\\* Child\n"
+   "\\*\\*\\* Grandchild\n"
+   "\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* Second child\n"
+   "\\'")
+  "The complete file after Target moves to the top level of its file.")
+
+(defun org-mcp-test--verbs-link ()
+  "Return the link to Target in `org-mcp-test--verbs-content'."
+  (concat "id:" org-mcp-test--verbs-target-id))
+
+(defun org-mcp-test--verbs-digest (&optional link)
+  "Return the `digest' a read of LINK returns, as a client reads it.
+LINK defaults to Target's."
+  (alist-get
+   'digest
+   (org-mcp-test--read-fields
+    (or link (org-mcp-test--verbs-link)) ["digest"])))
+
+(defmacro org-mcp-test--with-verbs-file (file-var &rest body)
+  "Bind FILE-VAR to a temp file of `org-mcp-test--verbs-content' for BODY."
+  (declare (indent 1) (debug t))
+  `(org-mcp-test--with-id-setup ,file-var org-mcp-test--verbs-content
+       (list org-mcp-test--verbs-target-id)
+     ,@body))
+
+(ert-deftest org-mcp-test-node-delete-takes-the-whole-subtree ()
+  "org-node-delete takes the node and every generation under it.
+The response carries the link the node had, read while it was still
+there, so a client can say which node it lost."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((link (org-mcp-test--verbs-link))
+           (result
+            (mcp-server-lib-ert-call-tool
+             "org-node-delete"
+             `((link . ,link)
+               (before . ,(org-mcp-test--verbs-digest))))))
+      (let ((response (json-read-from-string result)))
+        (should (eq (alist-get 'success response) t))
+        (should (eq (alist-get 'saved response) t))
+        (should (equal (alist-get 'link response) link)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-gone))))
+
+(ert-deftest org-mcp-test-node-delete-refuses-a-stale-digest ()
+  "A token the node no longer carries refuses the delete, file untouched.
+The refusal is a conflict: the call was well formed and the file has
+moved on from what it asserted."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-title"
+       `((link . ,link) (before . "Target") (after . "Target renamed")))
+      (org-mcp-test--call-tool-refused
+       "org-node-delete"
+       `((link . ,link) (before . ,stale))
+       "\\`conflict: Subtree mismatch: .*nothing was deleted\\'"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-delete-refuses-after-a-descendant-moves ()
+  "A change to a grandchild the client never read makes its token stale.
+The read asked for the token alone, no children and no depth, and
+the token still covers them: what a verb takes away is the subtree
+entire, so that is what it asserts."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-tags"
+       `((link . ,(org-mcp-test--file-link test-file "*Grandchild"))
+         (after . ["later"])))
+      (org-mcp-test--call-tool-refused
+       "org-node-delete"
+       `((link . ,link) (before . ,stale))
+       "\\`conflict: Subtree mismatch:"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-verbs-refuse-a-token-of-no-such-form ()
+  "A value that is no digest is a malformed call, not a conflict.
+A conflict would send the client back to read the same file and
+assert with the same value again; naming the call malformed sends it
+back for a token."
+  (org-mcp-test--with-verbs-file test-file
+    (dolist (tool '("org-node-delete" "org-node-archive"))
+      (org-mcp-test--call-tool-refused
+       tool
+       `((link . ,(org-mcp-test--verbs-link))
+         (before . "e3b0c44298fc1c14"))
+       "\\`before must be the digest"
+       test-file))
+    (org-mcp-test--call-tool-refused
+     "org-node-move"
+     `((link . ,(org-mcp-test--verbs-link))
+       (before . "e3b0c44298fc1c14")
+       (parent . ,(org-mcp-test--file-link test-file "*Home")))
+     "\\`before must be the digest"
+     test-file)))
+
+(ert-deftest org-mcp-test-node-verbs-refuse-a-link-naming-a-file ()
+  "A whole file is no node for these verbs to take away.
+`org-mcp--goto-heading' refuses the link before anything is read or
+written, so the file is as it was."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((file-link (concat "file:" test-file)))
+      (org-mcp-test--call-tool-refused
+       "org-node-delete"
+       `((link . ,file-link)
+         (before . ,(org-mcp-test--verbs-digest file-link)))
+       "\\`Link does not point to a heading:"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-delete-description-points-at-archive ()
+  "The delete tool's description steers a client toward archiving.
+A page a model never opens steers nothing, so the pointer is where a
+model reads: in the tool's own description."
+  (org-mcp-test--with-verbs-file _test-file
+    (should
+     (string-match-p
+      "org-node-archive"
+      (org-mcp-test--registered-tool-description "org-node-delete")))))
+
+(ert-deftest org-mcp-test-node-move-carries-the-subtree-and-a-position ()
+  "org-node-move puts the node under a new parent, after a named sibling.
+The LOGBOOK travels with the node, and Org shifts every generation
+to the level of the node's new place."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((link (org-mcp-test--verbs-link))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-move"
+              `((link . ,link)
+                (before . ,(org-mcp-test--verbs-digest))
+                (parent . ,(org-mcp-test--file-link test-file "*Home"))
+                (previous_sibling
+                 .
+                 ,(org-mcp-test--file-link
+                   test-file "*First child")))))))
+      (should (eq (alist-get 'success result) t))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-moved))))
+
+(ert-deftest org-mcp-test-node-move-without-a-sibling-appends ()
+  "Naming no sibling puts the node last under its new parent.
+`previous_sibling' means on a move what it means on org-node-create,
+so a caller that knows one knows the other."
+  (org-mcp-test--with-verbs-file test-file
+    (mcp-server-lib-ert-call-tool
+     "org-node-move"
+     `((link . ,(org-mcp-test--verbs-link))
+       (before . ,(org-mcp-test--verbs-digest))
+       (parent . ,(org-mcp-test--file-link test-file "*Home"))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--verbs-target-last-child)))
+
+(ert-deftest org-mcp-test-node-move-to-the-top-level-of-a-file ()
+  "A parent naming a whole file moves the node to that file's top level.
+The node lands before every heading already there, where a node
+created at the top level lands, and Org shifts it to level 1."
+  (org-mcp-test--with-verbs-file test-file
+    (mcp-server-lib-ert-call-tool
+     "org-node-move"
+     `((link . ,(org-mcp-test--verbs-link))
+       (before . ,(org-mcp-test--verbs-digest))
+       (parent . ,(concat "file:" test-file))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--verbs-target-at-top)))
+
+(ert-deftest org-mcp-test-node-move-refuses-a-stale-digest ()
+  "A stale token refuses the move and leaves the file where it was."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-add-note"
+       `((link . ,link) (note . "Something happened here.")))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,link)
+         (before . ,stale)
+         (parent . ,(org-mcp-test--file-link test-file "*Home")))
+       "\\`conflict: Subtree mismatch: .*nothing was moved\\'"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-move-names-the-file-of-the-id-it-moves ()
+  "`files' finds the node to move, and the parent is read from its file.
+A parent that is not an `id:' link is not a parameter `files'
+applies to, so sending both has to be taken rather than refused."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--verbs-content))
+    (org-mcp-test--with-id-tracking (list test-file) nil
+      (let ((link (org-mcp-test--verbs-link))
+            (files (vector test-file)))
+        (mcp-server-lib-ert-call-tool
+         "org-node-move"
+         `((link . ,link)
+           (before
+            .
+            ,(alist-get
+              'digest
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-read"
+                `((link . ,link)
+                  (fields . ["digest"])
+                  (files . ,files))))))
+           (parent . ,(org-mcp-test--file-link test-file "*Home"))
+           (files . ,files)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--verbs-target-last-child)))))
+
+(ert-deftest org-mcp-test-node-move-refuses-its-own-descendant ()
+  "A node cannot be moved under itself or under one of its children.
+The destination is found before anything is cut, so the refusal
+costs the file nothing."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((link (org-mcp-test--verbs-link)))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest))
+         (parent . ,(org-mcp-test--file-link test-file "*Child")))
+       "\\`parent .* is the node being moved, or a node under it\\'"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-move-refuses-a-parent-in-another-file ()
+  "A move stays within one file, and says so when a parent is elsewhere."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--verbs-content)
+       (other-file "* Elsewhere\n"))
+    (org-mcp-test--with-id-tracking
+     (list test-file other-file)
+     (list (cons org-mcp-test--verbs-target-id test-file))
+     (org-mcp-test--call-tool-refused
+      "org-node-move"
+      `((link . ,(org-mcp-test--verbs-link))
+        (before . ,(org-mcp-test--verbs-digest))
+        (parent . ,(org-mcp-test--file-link other-file "*Elsewhere")))
+      "\\`A move stays within one file:"
+      test-file))))
+
+(ert-deftest org-mcp-test-node-archive-writes-where-the-node-came-from ()
+  "org-node-archive moves the node out and records where it was.
+Org writes the origin file, the outline path and the TODO state the
+node held into it as ARCHIVE_ properties, which is what makes an
+archive the one relocation a reader can follow backwards.  The
+response names the file it went to."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((archive (concat test-file "_archive"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-archive"
+              `((link . ,(org-mcp-test--verbs-link))
+                (before . ,(org-mcp-test--verbs-digest)))))))
+      (unwind-protect
+          (progn
+            (should (eq (alist-get 'success result) t))
+            (should (eq (alist-get 'saved result) t))
+            (should
+             (equal
+              (alist-get 'archive_file result)
+              (abbreviate-file-name archive)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--verbs-target-gone)
+            (let ((archived (org-mcp-test--read-file archive)))
+              (should (string-match-p "\\* TODO Target" archived))
+              (should (string-match-p ":ARCHIVE_FILE:" archived))
+              (should (string-match-p ":ARCHIVE_TODO: *TODO" archived))
+              (should (string-match-p "\\*\\*\\* Grandchild" archived))
+              (should (string-match-p "Decided this one\\." archived))))
+        (when (file-exists-p archive)
+          (delete-file archive))))))
+
+(ert-deftest org-mcp-test-node-archive-leaves-a-dirty-archive-unsaved ()
+  "An archive file the user is editing is written but not saved.
+Org would save it itself, which would commit the user's own unsaved
+edits as a side effect of an MCP call.  org-mcp saves it the way it
+saves any buffer it writes to, so the edits stay the user's to
+persist and `saved' says the change has not reached disk."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((archive (concat test-file "_archive"))
+           (buffer nil))
+      (unwind-protect
+          (progn
+            (with-temp-file archive
+              (insert "* Already archived\n"))
+            (setq buffer (find-file-noselect archive))
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "The user was typing here.\n")
+              (should (buffer-modified-p)))
+            (let ((result
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-node-archive"
+                     `((link . ,(org-mcp-test--verbs-link))
+                       (before . ,(org-mcp-test--verbs-digest)))))))
+              (should (eq (alist-get 'saved result) :json-false)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--verbs-target-gone)
+            (should-not
+             (string-match-p
+              "Target" (org-mcp-test--read-file archive)))
+            (org-mcp-test--verify-buffer-matches
+             buffer "\\* TODO Target"))
+        (when buffer
+          (with-current-buffer buffer
+            (set-buffer-modified-p nil))
+          (kill-buffer buffer))
+        (when (file-exists-p archive)
+          (delete-file archive))))))
+
+(ert-deftest org-mcp-test-node-archive-refuses-a-stale-digest ()
+  "A stale token refuses the archive, and no archive file is written.
+Archiving writes two files, so a refusal has to leave both alone."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link))
+          (archive (concat test-file "_archive")))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-todo"
+       `((link . ,link) (before . "TODO") (after . "DONE")))
+      (org-mcp-test--call-tool-refused
+       "org-node-archive"
+       `((link . ,link) (before . ,stale))
+       "\\`conflict: Subtree mismatch: .*nothing was archived\\'"
+       test-file)
+      (should-not (file-exists-p archive)))))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

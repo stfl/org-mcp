@@ -85,6 +85,22 @@ among the allowed files, and a remote directory in the list permits nothing.
 
 =org-config-allowed-files= reports the policy to clients.
 
+* The archive file
+
+=org-node-archive= writes a second file: the one your =org-archive-location=,
+or an =:ARCHIVE:= property above the node, sends archived subtrees to. That
+file is reached whether or not it is among the allowed files, and it is created
+if it does not exist.
+
+The destination is yours, not a caller's: it comes from your Emacs
+configuration or from a property in your own file, and no parameter of the call
+can name it or change it. A client can only decide /which node/ goes there.
+If you would rather the archive stayed inside the allowed files, point
+=org-archive-location= at a file that is.
+
+The tool answers with =archive_file=, the file it wrote to, so a client can
+tell you where a node went (see [[file:writing.org::*org-node-archive][org-node-archive]]).
+
 * Querying other files
 
 =org-query=, =org-config-tag-candidates= and =org-clock-dangling= take a
@@ -168,6 +184,10 @@ named.
   to =link= only.  It looks the =id:= link of =clock_out= up in the running
   clock's file, with or without =files=, since =clock_out= must name the
   running clock.
+- =org-node-move= looks the =id:= link of =link= up in =files=, which applies
+  to =link= only.  It looks =parent= and =previous_sibling= up in the file
+  =link= named, with or without =files=, since a move stays within one file,
+  so either of them may be any link.
 
 An =org-node-set-todo= call that names the file holding the ID:
 
