@@ -236,6 +236,14 @@ Example:
 - *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline
 - *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
 
+A statistics cookie on the headline survives the rename. A read leaves the
+cookie out of the title it returns, so an =after= composed from one carries
+none, and a cookie written away would not come back: Org refreshes a cookie
+that is already there and never adds one, which would cost the headline its
+progress display for good. The kept cookie goes at the end of the new title.
+An =after= that names a cookie of its own is written as it stands, cookie
+included — that one was asked for.
+
 Example:
 #+begin_src json
 # Request:
