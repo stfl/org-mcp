@@ -14468,6 +14468,42 @@ no depth serves, over a file that has three generations to expand."
         (mcp-server-lib-ert-call-tool
          "org-node-read" `((link . ,link) (depth . 0))))))))
 
+(defun org-mcp-test--headings-under (node)
+  "Return every heading NODE carries, in document order.
+Each is (TITLE TODO LEVEL LINK), the four fields a reference
+carries, so two answers reporting the same headings compare equal
+however much else either of them carries."
+  (mapcan
+   (lambda (child)
+     (cons
+      (list
+       (alist-get 'title child)
+       (alist-get 'todo child)
+       (alist-get 'level child)
+       (alist-get 'link child))
+      (org-mcp-test--headings-under child)))
+   (append (alist-get 'children node) nil)))
+
+(ert-deftest org-mcp-test-depth-one-level-read-is-the-outline ()
+  "A file read one generation deep reports the outline's headings.
+Heading for heading, in document order, each addressed by the same
+link, over a file whose headings are addressed by ID and by title
+alike.  The read carries more besides -- the body text an outline
+entry never had -- so it subsumes `org-read-outline' rather than
+merely matching it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((outline (org-mcp-test--call-read-outline test-file))
+           (node
+            (org-mcp-test--read-depth (concat "file:" test-file) 1))
+           (headings (org-mcp-test--headings-under outline)))
+      (should (= (length headings) 4))
+      (should (equal headings (org-mcp-test--headings-under node)))
+      (should
+       (equal
+        (alist-get 'content (aref (alist-get 'children node) 0))
+        "Project body.")))))
+
 ;;; One definition of a title
 
 (defconst org-mcp-test--content-cookie-title
