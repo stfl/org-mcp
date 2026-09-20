@@ -3032,8 +3032,8 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-node-archive"
     "org-node-create"
     "org-node-delete"
-    "org-node-move"
     "org-node-read"
+    "org-node-refile"
     "org-node-set-content"
     "org-node-set-deadline"
     "org-node-set-priority"
@@ -14516,7 +14516,7 @@ resolved."
 
 ;;; Taking a whole node away
 
-;; org-node-delete, org-node-archive and org-node-move each remove a
+;; org-node-delete, org-node-archive and org-node-refile each take a
 ;; node from where it is, and each one asserts the subtree it is about
 ;; to move by echoing the `digest' a read handed the client.  These
 ;; tests call them the way a client calls them: read the node for a
@@ -14575,7 +14575,7 @@ has two children, so a move can name a position among them.")
 It is the same at every level, so a move that drops a drawer or the
 LOGBOOK on the way fails wherever the node lands.")
 
-(defconst org-mcp-test--verbs-target-moved
+(defconst org-mcp-test--verbs-target-refiled
   (concat
    "\\`\\* TODO Keep :work:\n"
    "Keep body\\.\n"
@@ -14790,7 +14790,7 @@ back for a token."
        "\\`before must be the digest"
        test-file))
     (org-mcp-test--call-tool-refused
-     "org-node-move"
+     "org-node-refile"
      `((link . ,(org-mcp-test--verbs-link))
        (before . "e3b0c44298fc1c14")
        (parent . ,(org-mcp-test--file-link test-file "*Home")))
@@ -14810,7 +14810,7 @@ destroys something the caller did not name."
        "before"
        test-file))
     (org-mcp-test--call-tool-refused
-     "org-node-move"
+     "org-node-refile"
      `((link . ,(org-mcp-test--verbs-link))
        (parent . ,(org-mcp-test--file-link test-file "*Home")))
      "before"
@@ -14839,8 +14839,8 @@ model reads: in the tool's own description."
       "org-node-archive"
       (org-mcp-test--registered-tool-description "org-node-delete")))))
 
-(ert-deftest org-mcp-test-node-move-carries-the-subtree-and-a-position ()
-  "org-node-move puts the node under a new parent, after a named sibling.
+(ert-deftest org-mcp-test-node-refile-carries-the-subtree-and-a-position ()
+  "org-node-refile puts the node under a new parent, after a named sibling.
 The LOGBOOK travels with the node, and Org shifts every generation
 to the level of the node's new place."
   (org-mcp-test--with-verbs-file test-file
@@ -14848,7 +14848,7 @@ to the level of the node's new place."
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
-              "org-node-move"
+              "org-node-refile"
               `((link . ,link)
                 (before . ,(org-mcp-test--verbs-digest))
                 (parent . ,(org-mcp-test--file-link test-file "*Home"))
@@ -14859,35 +14859,35 @@ to the level of the node's new place."
       (should (eq (alist-get 'success result) t))
       (should (equal (alist-get 'link result) link))
       (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--verbs-target-moved))))
+       test-file org-mcp-test--verbs-target-refiled))))
 
-(ert-deftest org-mcp-test-node-move-without-a-sibling-appends ()
+(ert-deftest org-mcp-test-node-refile-without-a-sibling-appends ()
   "Naming no sibling puts the node last under its new parent.
 `previous_sibling' means on a move what it means on org-node-create,
 so a caller that knows one knows the other."
   (org-mcp-test--with-verbs-file test-file
     (mcp-server-lib-ert-call-tool
-     "org-node-move"
+     "org-node-refile"
      `((link . ,(org-mcp-test--verbs-link))
        (before . ,(org-mcp-test--verbs-digest))
        (parent . ,(org-mcp-test--file-link test-file "*Home"))))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--verbs-target-last-child)))
 
-(ert-deftest org-mcp-test-node-move-to-the-top-level-of-a-file ()
+(ert-deftest org-mcp-test-node-refile-to-the-top-level-of-a-file ()
   "A parent naming a whole file moves the node to that file's top level.
 The node lands before every heading already there, where a node
 created at the top level lands, and Org shifts it to level 1."
   (org-mcp-test--with-verbs-file test-file
     (mcp-server-lib-ert-call-tool
-     "org-node-move"
+     "org-node-refile"
      `((link . ,(org-mcp-test--verbs-link))
        (before . ,(org-mcp-test--verbs-digest))
        (parent . ,(concat "file:" test-file))))
     (org-mcp-test--verify-file-matches
      test-file org-mcp-test--verbs-target-at-top)))
 
-(ert-deftest org-mcp-test-node-move-refuses-a-stale-digest ()
+(ert-deftest org-mcp-test-node-refile-refuses-a-stale-digest ()
   "A stale token refuses the move and leaves the file where it was."
   (org-mcp-test--with-verbs-file test-file
     (let ((stale (org-mcp-test--verbs-digest))
@@ -14896,14 +14896,14 @@ created at the top level lands, and Org shifts it to level 1."
        "org-node-add-note"
        `((link . ,link) (note . "Something happened here.")))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,link)
          (before . ,stale)
          (parent . ,(org-mcp-test--file-link test-file "*Home")))
-       "\\`conflict: Subtree mismatch: .*nothing was moved\\'"
+       "\\`conflict: Subtree mismatch: .*nothing was refiled\\'"
        test-file))))
 
-(ert-deftest org-mcp-test-node-move-names-the-file-of-the-id-it-moves ()
+(ert-deftest org-mcp-test-node-refile-names-the-file-of-the-id-it-moves ()
   "`files' finds the node to move, and the parent is read from its file.
 A parent that is not an `id:' link is not a parameter `files'
 applies to, so sending both has to be taken rather than refused."
@@ -14913,7 +14913,7 @@ applies to, so sending both has to be taken rather than refused."
       (let ((link (org-mcp-test--verbs-link))
             (files (vector test-file)))
         (mcp-server-lib-ert-call-tool
-         "org-node-move"
+         "org-node-refile"
          `((link . ,link)
            (before
             .
@@ -14930,21 +14930,21 @@ applies to, so sending both has to be taken rather than refused."
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--verbs-target-last-child)))))
 
-(ert-deftest org-mcp-test-node-move-refuses-its-own-descendant ()
+(ert-deftest org-mcp-test-node-refile-refuses-its-own-descendant ()
   "A node cannot be moved under itself or under one of its children.
 The destination is found before anything is cut, so the refusal
 costs the file nothing."
   (org-mcp-test--with-verbs-file test-file
     (let ((link (org-mcp-test--verbs-link)))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,link)
          (before . ,(org-mcp-test--verbs-digest))
          (parent . ,(org-mcp-test--file-link test-file "*Child")))
-       "\\`parent .* is the node being moved, or a node under it\\'"
+       "\\`parent .* is the node being refiled, or a node under it\\'"
        test-file))))
 
-(ert-deftest org-mcp-test-node-move-crosses-files ()
+(ert-deftest org-mcp-test-node-refile-crosses-files ()
   "A node moves into another file, its whole subtree with it.
 This is the filing a GTD workflow is made of: an item leaves the
 inbox for a project.  The subtree arrives under its new parent with
@@ -14954,7 +14954,7 @@ its LOGBOOK and its drawers, and it is gone from the file it left."
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
-              "org-node-move"
+              "org-node-refile"
               `((link . ,link)
                 (before . ,(org-mcp-test--verbs-digest))
                 (parent
@@ -14969,14 +14969,14 @@ its LOGBOOK and its drawers, and it is gone from the file it left."
       (org-mcp-test--verify-file-matches
        other-file org-mcp-test--verbs-other-with-target))))
 
-(ert-deftest org-mcp-test-node-move-crosses-files-to-a-top-level ()
+(ert-deftest org-mcp-test-node-refile-crosses-files-to-a-top-level ()
   "A parent naming another file moves the node to that file's top level.
 It lands after the preamble and before every heading there, where a
 node created at the top level lands, so `parent' means the same on a
 move as on org-node-create wherever the file is."
   (org-mcp-test--with-verbs-files test-file other-file
     (mcp-server-lib-ert-call-tool
-     "org-node-move"
+     "org-node-refile"
      `((link . ,(org-mcp-test--verbs-link))
        (before . ,(org-mcp-test--verbs-digest))
        (parent . ,(concat "file:" other-file))))
@@ -14985,7 +14985,7 @@ move as on org-node-create wherever the file is."
     (org-mcp-test--verify-file-matches
      other-file org-mcp-test--verbs-other-with-target-at-top)))
 
-(ert-deftest org-mcp-test-node-move-across-files-keeps-the-id-resolving ()
+(ert-deftest org-mcp-test-node-refile-across-files-keeps-the-id-resolving ()
   "An `id:' link to a node that changed file still finds it.
 Org re-registers the IDs in a pasted subtree against the file they
 land in, so a client holding the link it moved the node by can read
@@ -14993,7 +14993,7 @@ the node straight back."
   (org-mcp-test--with-verbs-files test-file other-file
     (let ((link (org-mcp-test--verbs-link)))
       (mcp-server-lib-ert-call-tool
-       "org-node-move"
+       "org-node-refile"
        `((link . ,link)
          (before . ,(org-mcp-test--verbs-digest))
          (parent
@@ -15001,7 +15001,7 @@ the node straight back."
           ,(org-mcp-test--file-link other-file "*Project One"))))
       (org-mcp-test--should-resolve-to link "Target"))))
 
-(ert-deftest org-mcp-test-node-move-across-files-reports-both-saves ()
+(ert-deftest org-mcp-test-node-refile-across-files-reports-both-saves ()
   "`saved' answers for the file the node arrives in as well.
 The destination is written like any file org-mcp writes and left
 unsaved when the user already had edits in its buffer, so a client
@@ -15017,7 +15017,7 @@ told the move was saved can believe it of both files."
             (let ((result
                    (json-read-from-string
                     (mcp-server-lib-ert-call-tool
-                     "org-node-move"
+                     "org-node-refile"
                      `((link . ,(org-mcp-test--verbs-link))
                        (before . ,(org-mcp-test--verbs-digest))
                        (parent
@@ -15039,7 +15039,7 @@ told the move was saved can believe it of both files."
             (set-buffer-modified-p nil))
           (kill-buffer buffer))))))
 
-(ert-deftest org-mcp-test-node-move-across-files-refuses-a-stale-digest ()
+(ert-deftest org-mcp-test-node-refile-across-files-refuses-a-stale-digest ()
   "A stale token refuses a cross-file move and leaves both files alone.
 Two files are at stake, and a refusal has to be worth nothing to
 either of them."
@@ -15051,25 +15051,25 @@ either of them."
        "org-node-set-title"
        `((link . ,link) (before . "Target") (after . "Target renamed")))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,link)
          (before . ,stale)
          (parent
           .
           ,(org-mcp-test--file-link other-file "*Project One")))
-       "\\`conflict: Subtree mismatch: .*nothing was moved\\'"
+       "\\`conflict: Subtree mismatch: .*nothing was refiled\\'"
        test-file)
       (should
        (string= (org-mcp-test--read-file other-file) other-before)))))
 
-(ert-deftest org-mcp-test-node-move-refuses-a-parent-out-of-reach ()
+(ert-deftest org-mcp-test-node-refile-refuses-a-parent-out-of-reach ()
   "A move is no way to write a file a call may not reach.
 The destination is checked like any file a call names, before
 anything is cut, so the node stays where it is."
   (org-mcp-test--with-verbs-files test-file other-file
     (let ((org-mcp-allowed-files (list test-file)))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,(org-mcp-test--verbs-link))
          (before . ,(org-mcp-test--verbs-digest))
          (parent
@@ -15078,7 +15078,7 @@ anything is cut, so the node stays where it is."
        "the referenced file not in allowed list"
        test-file))))
 
-(ert-deftest org-mcp-test-node-move-refuses-a-parent-heading-not-there ()
+(ert-deftest org-mcp-test-node-refile-refuses-a-parent-heading-not-there ()
   "A parent naming a heading that is not there refuses the move.
 The search runs in the file the parent names, and a search that ends
 on nothing is refused rather than left to land the node at some
@@ -15086,7 +15086,7 @@ other place in that file.  Neither file is written."
   (org-mcp-test--with-verbs-files test-file other-file
     (let ((other-before (org-mcp-test--read-file other-file)))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,(org-mcp-test--verbs-link))
          (before . ,(org-mcp-test--verbs-digest))
          (parent
@@ -15097,7 +15097,7 @@ other place in that file.  Neither file is written."
       (should
        (string= (org-mcp-test--read-file other-file) other-before)))))
 
-(ert-deftest org-mcp-test-node-move-refuses-an-unknown-id-parent ()
+(ert-deftest org-mcp-test-node-refile-refuses-an-unknown-id-parent ()
   "An `id:' parent Emacs's ID index does not hold refuses the move.
 `files' says where to find the node the call moves, never where to
 put it, so an `id:' parent is looked for in the index and refused by
@@ -15105,7 +15105,7 @@ name when it is not there.  Neither file is written."
   (org-mcp-test--with-verbs-files test-file other-file
     (let ((other-before (org-mcp-test--read-file other-file)))
       (org-mcp-test--call-tool-refused
-       "org-node-move"
+       "org-node-refile"
        `((link . ,(org-mcp-test--verbs-link))
          (before . ,(org-mcp-test--verbs-digest))
          (parent . "id:99999999-8888-7777-6666-555555555555")

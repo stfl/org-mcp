@@ -3165,8 +3165,8 @@ SIBLING-TARGET, when non-nil, is the child of that parent the subtree
 is to follow; without one the subtree becomes the parent's last
 child, or, when PARENT-TARGET names a whole file, the first heading
 in it.  Both are resolved by the functions org-node-create resolves
-them with, so `parent' and `previous_sibling' put a node that moves
-where they put a node that is made.
+them with, so `parent' and `previous_sibling' put a node that is
+refiled where they put a node that is made.
 
 Org shifts the pasted subtree to the level of its new place, every
 descendant under it with it, and leaves point on its heading.  An
@@ -3189,7 +3189,7 @@ is."
        1)
      text)))
 
-(defun org-mcp--move-subtree-to (text parent-target sibling-target)
+(defun org-mcp--refile-subtree-to (text parent-target sibling-target)
   "Put TEXT, a subtree just cut from this buffer, under PARENT-TARGET.
 Returns the link to the node where it lands.  SIBLING-TARGET is the
 child of that parent the node is to follow, or nil; see
@@ -3283,14 +3283,14 @@ response's `saved' answers for the archive file too."
 
 (defun org-mcp--assert-destination-outside
     (bounds parent-target sibling-target)
-  "Refuse a move whose destination lies inside the subtree BOUNDS covers.
+  "Refuse a refile whose destination lies inside the subtree BOUNDS covers.
 PARENT-TARGET and SIBLING-TARGET come from `org-mcp--link-target'; a
 nil SIBLING-TARGET names no sibling, and a PARENT-TARGET naming a
 whole file is always outside.
 
 A node cannot become a child of itself or of one of its own
 descendants, and it cannot be asked to follow itself: the heading the
-move is addressed to goes away with the node, and the paste is left
+call is addressed to goes away with the node, and the paste is left
 with nowhere to land.  Both headings are found before anything is
 cut, so the refusal leaves the file as it was.
 
@@ -3312,7 +3312,7 @@ and is not looked for here, where only this buffer can be searched."
                    (>= position (car bounds))
                    (< position (cdr bounds)))
           (org-mcp--tool-validation-error
-           "%s %s is the node being moved, or a node under it"
+           "%s %s is the node being refiled, or a node under it"
            name (plist-get target :link)))))))
 
 ;; Tool handlers
@@ -4218,7 +4218,7 @@ MCP Parameters:
 ;; The whole-node verbs
 ;;
 ;; Each of the three takes the node away from where it is, so each
-;; asserts the subtree it is about to move with `before', the digest
+;; asserts the subtree it is about to take with `before', the digest
 ;; token a read of the node handed the client.  There is no `after' to
 ;; go with it: the verb is the change.  The guard is not graded by how
 ;; recoverable the verb is — an optional guard is an off guard, and it
@@ -4303,15 +4303,17 @@ MCP Parameters:
       (setq archived (org-mcp--link-at-point))
       (setq archive-file (org-mcp--archive-subtree-at-point)))))
 
-(defun org-mcp--tool-node-move
+(defun org-mcp--tool-node-refile
     (link before parent &optional previous_sibling files)
-  "Move the node LINK names under PARENT, its whole subtree with it.
+  "Refile the node LINK names under PARENT, its whole subtree with it.
+The call names where the node goes; it does not shift the node one
+step from where it is.
 BEFORE is the digest of the subtree, as a read of the node returned
 it; the call is refused when the subtree no longer carries it, see
 `org-mcp--assert-subtree'.
 PARENT is the link to the node's new parent, or to a whole file for
 its top level.  It may name a node in any file a call reaches, and
-the node moves to that file; see `org-mcp--move-subtree-to'.
+the node goes to that file; see `org-mcp--refile-subtree-to'.
 PREVIOUS_SIBLING is an optional link to the child of that parent the
 node is to follow, looked up in the parent's file; see
 `org-mcp--paste-subtree-under'.
@@ -4323,11 +4325,11 @@ names its own file, and an `id:' one is looked up in Emacs's ID index
 and refused by name when the index does not hold it.
 
 The subtree arrives whole, its LOGBOOK with it, and nothing in it
-records where it was: a move is undone by moving it back, by a
+records where it was: a refile is undone by refiling it back, by a
 caller that knows where back is.
 
 MCP Parameters:
-  link - Link to the node to move
+  link - Link to the node to refile
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -4358,17 +4360,17 @@ MCP Parameters:
             (org-mcp--link-target sibling
                                   nil
                                   (plist-get parent-target :file))))
-         (moved nil)
-         ;; A move to another file writes that file's buffer too;
+         (refiled nil)
+         ;; A refile into another file writes that file's buffer too;
          ;; `saved' covers that write as well.
          (org-mcp--unsaved-change-p nil))
-    (org-mcp--modify-and-save file-path "move" `((link . ,moved))
+    (org-mcp--modify-and-save file-path "refile" `((link . ,refiled))
       (org-mcp--goto-heading target)
-      (org-mcp--assert-subtree digest "nothing was moved")
+      (org-mcp--assert-subtree digest "nothing was refiled")
       (org-mcp--assert-destination-outside
        (org-mcp--subtree-bounds) parent-target sibling-target)
-      (setq moved
-            (org-mcp--move-subtree-to
+      (setq refiled
+            (org-mcp--refile-subtree-to
              (org-mcp--cut-subtree-at-point)
              parent-target
              sibling-target)))))
@@ -5897,24 +5899,28 @@ Returns JSON object:
   archive_file - The file the node was archived to (string)")
     :read-only nil)
    (list
-    #'org-mcp--tool-node-move
-    :id "org-node-move"
+    #'org-mcp--tool-node-refile
+    :id "org-node-refile"
     :description
     (concat
-     "Move an Org node, and every descendant under it, under a different
-parent.  The parent may be in another file, and the node then moves
-to that file: an inbox item filed into a project is one call.
+     "Refile an Org node, and every descendant under it, under a
+different parent.  The parent may be in another file, and the node
+goes to that file: filing an inbox item into a project is one call.
+
+The call names the destination - the parent the node goes under, and
+optionally the sibling it follows there.  It does not shift a node
+one step from where it is; every call says where the node lands.
 
 The subtree arrives whole, its LOGBOOK and its drawers with it, and
 Org shifts it to the level of its new place.  An id: link to the
-node, or to anything under it, keeps working across the move.
-Nothing in the node records where it was: a move is undone by moving
-it back, by a caller that knows where back is.  Use org-node-archive
+node, or to anything under it, keeps working afterwards.  Nothing in
+the node records where it was: a refile is undone by refiling it
+back, by a caller that knows where back is.  Use org-node-archive
 when the node is being retired, since that writes the node's origin
 into it.
 
 Parameters:
-  link - Link to the node to move (string, required)
+  link - Link to the node to refile (string, required)
 "
      org-mcp--heading-link-formats
      "  before - The node's digest (string, required)
@@ -5928,7 +5934,7 @@ Parameters:
            form link takes, or file:{absolute-path} for the top
            level of that file, as org-node-create's parent takes it.
            It may name a node in any file this server may reach; the
-           node moves to that file
+           node goes to that file
   previous_sibling - Link to the child of parent the node is to
                      follow (string, optional), in any form link
                      takes, looked up in the parent's file.
@@ -5938,7 +5944,7 @@ Parameters:
   files - Files and directories to look up the id: link in link in
           (array of strings, optional); see org-node-read.  It
           applies to link only - it says where to find the node the
-          call moves - and is refused unless link is an id: link.
+          call refiles - and is refused unless link is an id: link.
           parent and previous_sibling are resolved without it, so an
           id: parent must be one Emacs's ID index holds, and is
           refused by name when it is not
@@ -5946,7 +5952,7 @@ Parameters:
 Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in an open Emacs buffer, not
-          on disk; when the node moved to another file, it answers
+          on disk; when the node went to another file, it answers
           for both files (boolean)
   link - Link to the node in its new place (string): id:{id} when it
          has an ID, else file:{path}::#{custom-id} when it has a
