@@ -21,7 +21,7 @@ shfmt:
 
 # Run the full lint suite (silent on success; failing stage writes
 # .lint-output.txt and exits non-zero, short-circuiting the rest).
-lint: install-deps byte-compile elisp-lint org-lint shellcheck zizmor
+lint: install-deps byte-compile elisp-lint script-compile org-lint shellcheck zizmor
     @echo "lint: OK"
 
 # --- Individual lint stages -------------------------------------------------
@@ -38,6 +38,11 @@ byte-compile: install-deps
 elisp-lint:
     @rm -f ./*.elc
     @scripts/quiet.sh eask lint elisp-lint; rc=$?; rm -f ./*.elc; exit $rc
+
+# Byte-compile the scripts, which the package linters do not see, and
+# take any warning as a failure.
+script-compile:
+    @scripts/quiet.sh emacs -Q --batch --eval '(progn (require (quote bytecomp)) (setq byte-compile-error-on-warn t) (dolist (file (file-expand-wildcards "scripts/*.el")) (unless (byte-compile-file file) (kill-emacs 1))))'; rc=$?; rm -f scripts/*.elc; exit $rc
 
 org-lint:
     @scripts/quiet.sh eask run script org-lint
