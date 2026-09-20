@@ -12,7 +12,7 @@
 
   outputs = inputs @ {flake-parts, ...}:
     flake-parts.lib.mkFlake {inherit inputs;} {
-      imports = [inputs.git-hooks-nix.flakeModule];
+      imports = [inputs.git-hooks.flakeModule];
 
       systems = [
         "x86_64-linux"
