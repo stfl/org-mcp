@@ -3221,30 +3221,6 @@ After insertion, point is left on the heading line at end-of-line."
         (org-insert-heading nil t t))
       (insert title))))
 
-(defun org-mcp--replace-body-content
-    (old-body new-body body-content body-begin body-end)
-  "Replace body content in the current buffer.
-OLD-BODY is the non-empty substring to replace.
-NEW-BODY is the replacement text.
-BODY-CONTENT is the current body content string.
-BODY-BEGIN is the buffer position where body starts.
-BODY-END is the buffer position where body ends."
-  (let ((new-body-content
-         ;; Case matters, as when the caller counted the occurrences.
-         (let ((pos
-                (let ((case-fold-search nil))
-                  (string-match
-                   (regexp-quote old-body) body-content))))
-           (if pos
-               (concat
-                (substring body-content 0 pos)
-                new-body
-                (substring body-content (+ pos (length old-body))))
-             body-content))))
-    (delete-region body-begin body-end)
-    (goto-char body-begin)
-    (insert new-body-content)))
-
 (defmacro org-mcp--with-private-kill-ring (&rest body)
   "Run BODY with a kill ring of its own, leaving the user's alone.
 Org relocates a subtree through the kill ring: `org-cut-subtree'
@@ -3932,18 +3908,33 @@ MCP Parameters:
 
       (org-edit-headline (org-mcp--title-keeping-cookie after)))))
 
-(defun org-mcp--body-occurrences (text body)
-  "Return the number of times TEXT occurs in BODY.
-Letter case matters, as it does in the replacement that follows, so
-a body and an assertion differing only in case are two different
-strings here."
+(defun org-mcp--sole-occurrence (text body)
+  "Return where TEXT begins in BODY, refusing unless it is there once.
+Letter case matters, so a body and an assertion differing only in
+case are two different strings here.  Finding the one occurrence and
+refusing the calls that have none or several is the same pass over
+BODY, so what a caller receives is the place to splice at.
+
+Both refusals answer a `before' the client believed it read — the
+part it named has gone, or something has been written that repeats
+it — so both are conflicts."
   (let ((case-fold-search nil)
+        (at nil)
         (count 0)
         (from 0))
     (while (string-match (regexp-quote text) body from)
+      (unless at
+        (setq at (match-beginning 0)))
       (setq count (1+ count))
       (setq from (match-end 0)))
-    count))
+    (cond
+     ((= count 0)
+      (org-mcp--tool-conflict-error "Body text not found: %s" text))
+     ((> count 1)
+      (org-mcp--tool-conflict-error
+       "Text appears %d times (must be unique)"
+       count)))
+    at))
 
 (defun org-mcp--replace-whole-body (bounds digest after)
   "Replace the body region BOUNDS covers with AFTER, asserting DIGEST.
@@ -3992,17 +3983,13 @@ and this node has some; send the part of the content to replace"))
      (blank
       (org-mcp--tool-conflict-error "Node has no body content"))
      (t
-      (let ((occurrences (org-mcp--body-occurrences before body)))
-        (cond
-         ((= occurrences 0)
-          (org-mcp--tool-conflict-error "Body text not found: %s"
-                                        before))
-         ((> occurrences 1)
-          (org-mcp--tool-conflict-error
-           "Text appears %d times (must be unique)"
-           occurrences)))
-        (org-mcp--replace-body-content
-         before after body begin end))))))
+      (let ((at (org-mcp--sole-occurrence before body)))
+        (delete-region begin end)
+        (goto-char begin)
+        (insert
+         (substring body 0 at)
+         after
+         (substring body (+ at (length before)))))))))
 
 (defun org-mcp--append-to-body (link after files)
   "Append AFTER to the body of the node LINK names.
