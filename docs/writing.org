@@ -9,11 +9,11 @@ the server itself.
 Write tools create no identifiers. Each write response carries, as =link=, the
 link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]).
 
-Write tools (e.g. =org-update-todo-state=, =org-edit-body=, =org-clock-in=,
-=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-set-tags=,
-=org-set-priority=, =org-set-properties=, =org-update-scheduled=,
-=org-update-deadline=, =org-add-todo=, =org-rename-headline=,
-=org-add-logbook-note=) operate on the canonical Emacs buffer visiting the
+Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
+=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-set-tags=,
+=org-node-set-priority=, =org-node-set-properties=, =org-node-set-scheduled=,
+=org-node-set-deadline=, =org-node-create=, =org-node-set-title=,
+=org-node-add-note=) operate on the canonical Emacs buffer visiting the
 file, preserving any unsaved edits the user may have. The auto-save behaviour
 depends on the buffer state:
 
@@ -86,14 +86,14 @@ front of the message, and it reads the same whichever path carried it.
 
 Unmarked is the default, and it is the largest class: a link org-mcp does not
 take, a state that is no TODO keyword, a timestamp that will not parse, a
-=priority= outside the configured range. Sending the same call again refuses it
+priority outside the configured range. Sending the same call again refuses it
 again, so something in the call has to change.
 
 A =conflict:= says the opposite: the call was well formed, and the file has
-moved on from what the call asserted about it. =current_state=, =current_title=
-and the =clock_out= of a running clock are the assertions org-mcp checks, and a
-conflict names what it found instead, so the recovery is to read the heading or
-the active clock again and decide afresh.
+moved on from what the call asserted about it. The =before= of a state or a
+title change, and the =clock_out= of a running clock, are the assertions
+org-mcp checks, and a conflict names what it found instead, so the recovery is
+to read the heading or the active clock again and decide afresh.
 
 A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
 an unchecked checkbox, an ordered subtree — refused the change, nothing was
@@ -115,16 +115,16 @@ theirs in [[file:clocking.org][Clock tracking]].
 
 * Write tools
 
-** org-update-todo-state
+** org-node-set-todo
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =current_state= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
-  - =new_state= (string, required): New TODO state (must be valid in org-todo-keywords)
+  - =before= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
+  - =after= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_state=, =new_state= and the link to the updated headline
-- *Refuses with:* =conflict:= when =current_state= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 =new_state= reports the state Org left the headline in, which is not always the
 one asked for. Moving a repeating entry to a done keyword makes Org run the
@@ -137,8 +137,8 @@ Example:
 # Request:
 {
   "link": "file:/home/user/org/projects.org::*Project Alpha",
-  "current_state": "TODO",
-  "new_state": "IN-PROGRESS"
+  "before": "TODO",
+  "after": "IN-PROGRESS"
 }
 
 # Success response:
@@ -170,23 +170,23 @@ Example:
 }
 #+end_src
 
-** org-rename-headline
+** org-node-set-title
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =current_title= (string, required): Current headline title (without TODO state or tags) - must match actual title
-  - =new_title= (string, required): New headline title (without TODO state or tags)
+  - =before= (string, required): Current headline title (without TODO state or tags) - must match actual title
+  - =after= (string, required): New headline title (without TODO state or tags)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
-- *Refuses with:* =conflict:= when =current_title= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
 # Request:
 {
   "link": "file:/home/user/org/projects.org::*Original Task",
-  "current_title": "Original Task",
-  "new_title": "Updated Task Name"
+  "before": "Original Task",
+  "after": "Updated Task Name"
 }
 
 # Success response:
@@ -204,29 +204,29 @@ Example:
 }
 #+end_src
 
-** org-add-todo
+** org-node-create
 - *Description:* Add a new TODO item to an Org file
 - *Parameters:*
   - =title= (string, required): The headline text
-  - =todo_state= (string, required): TODO state from =org-todo-keywords=
+  - =todo= (string, required): TODO state from =org-todo-keywords=
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
-  - =body= (string, optional): Body text content to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =parent_link= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
-  - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
+  - =content= (string, optional): Body text to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
+  - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent= in, instead of the ID index; it applies to =parent= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
-- *Refuses with:* =blocked:= when Org vetoes =todo_state= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =blocked:= when Org vetoes =todo= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
 # Request:
 {
   "title": "Implement new feature",
-  "todo_state": "TODO",
+  "todo": "TODO",
   "tags": ["work", "urgent"],
-  "body": "This feature needs to be completed by end of week.",
-  "parent_link": "file:/home/user/org/projects.org",
+  "content": "This feature needs to be completed by end of week.",
+  "parent": "file:/home/user/org/projects.org",
   "properties": {
     "ID": "550e8400-e29b-41d4-a716-446655440001",
     "EFFORT": "2:00"
@@ -245,39 +245,39 @@ Example:
 # Child inserted after a sibling:
 {
   "title": "Review the budget",
-  "todo_state": "TODO",
-  "parent_link": "id:550e8400-e29b-41d4-a716-446655440001",
-  "after_link": "file:/home/user/org/projects.org::*Draft the plan"
+  "todo": "TODO",
+  "parent": "id:550e8400-e29b-41d4-a716-446655440001",
+  "previous_sibling": "file:/home/user/org/projects.org::*Draft the plan"
 }
 
 # Top-level item inserted after a top-level heading:
 {
   "title": "Plan the offsite",
-  "todo_state": "TODO",
-  "parent_link": "file:/home/user/org/projects.org",
-  "after_link": "id:550e8400-e29b-41d4-a716-446655440001"
+  "todo": "TODO",
+  "parent": "file:/home/user/org/projects.org",
+  "previous_sibling": "id:550e8400-e29b-41d4-a716-446655440001"
 }
 #+end_src
 
-** org-edit-body
+** org-node-set-content
 - *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =old_body= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
-  - =new_body= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =new_body= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
+  - =before= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
+  - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
-- *Special behavior (replace mode):* When =old_body= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
+- *Special behavior (replace mode):* When =before= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
 #+begin_src json
 # Replace mode:
 {
   "link": "id:abc-123",
-  "old_body": "This is a placeholder.",
-  "new_body": "Implementation started - using Strategy pattern."
+  "before": "This is a placeholder.",
+  "after": "Implementation started - using Strategy pattern."
 }
 
 # Success response:
@@ -290,23 +290,23 @@ Example:
 # Append mode:
 {
   "link": "id:abc-123",
-  "new_body": "Additional notes from meeting.",
+  "after": "Additional notes from meeting.",
   "append": true
 }
 
 # Adding content to empty node (replace mode):
 {
   "link": "file:/home/user/org/projects.org::*New task",
-  "old_body": "",
-  "new_body": "Initial task description."
+  "before": "",
+  "after": "Initial task description."
 }
 #+end_src
 
-** org-set-properties
+** org-node-set-properties
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do, so =false= keeps the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =after= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do, so =false= keeps the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
@@ -316,7 +316,7 @@ Example:
 # Set and delete properties:
 {
   "link": "id:abc-123",
-  "properties": {
+  "after": {
     "EFFORT": "2:00",
     "OWNER": null
   }
@@ -332,11 +332,11 @@ Example:
 }
 #+end_src
 
-** org-update-scheduled
+** org-node-set-scheduled
 - *Description:* Update the SCHEDULED timestamp on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
@@ -346,21 +346,21 @@ Example:
 # Set scheduled:
 {
   "link": "id:abc-123",
-  "scheduled": "2026-03-27"
+  "after": "2026-03-27"
 }
 
 # Remove scheduled:
 {
   "link": "id:abc-123",
-  "scheduled": ""
+  "after": ""
 }
 #+end_src
 
-** org-update-deadline
+** org-node-set-deadline
 - *Description:* Update the DEADLINE timestamp on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
@@ -370,21 +370,21 @@ Example:
 # Set deadline:
 {
   "link": "id:abc-123",
-  "deadline": "2026-04-15"
+  "after": "2026-04-15"
 }
 
 # Remove deadline:
 {
   "link": "id:abc-123",
-  "deadline": ""
+  "after": ""
 }
 #+end_src
 
-** org-set-tags
+** org-node-set-tags
 - *Description:* Set tags on an Org headline, replacing any existing tags
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =after= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
@@ -398,7 +398,7 @@ Example:
 # Set tags:
 {
   "link": "id:abc-123",
-  "tags": ["work", "urgent"]
+  "after": ["work", "urgent"]
 }
 
 # Clear all tags:
@@ -407,11 +407,11 @@ Example:
 }
 #+end_src
 
-** org-set-priority
+** org-node-set-priority
 - *Description:* Set or remove priority on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
+  - =after= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. Omit or empty string to remove priority
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
@@ -421,17 +421,17 @@ Example:
 # Set priority:
 {
   "link": "id:abc-123",
-  "priority": "A"
+  "after": "A"
 }
 
 # Remove priority:
 {
   "link": "id:abc-123",
-  "priority": ""
+  "after": ""
 }
 #+end_src
 
-** org-add-logbook-note
+** org-node-add-note
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])

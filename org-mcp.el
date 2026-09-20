@@ -1157,28 +1157,28 @@ Point should be at the heading. Does not recurse into children."
   "Extract full structured JSON for current heading.
 Point should be at the heading.
 Returns alist with all heading properties and lightweight children."
-  (let* ((meta (org-mcp--heading-metadata-at-point))
-         (title (plist-get meta :title))
-         (todo (plist-get meta :todo))
-         (priority (plist-get meta :priority))
-         (tags (plist-get meta :tags))
-         (local-tags (plist-get meta :local-tags))
-         (level (plist-get meta :level))
-         (scheduled (plist-get meta :scheduled))
-         (deadline (plist-get meta :deadline))
-         (closed (plist-get meta :closed))
-         (link (org-mcp--link-at-point))
-         ;; The ID the link names, so `id' and `link' always agree; a
-         ;; blank :ID: gives neither.
-         (id (and (string-prefix-p "id:" link) (substring link 3)))
-         (children '())
-         ;; The body as org-edit-body bounds it, before any child.
-         (body-content
-          (let ((bounds (org-mcp--body-bounds)))
-            (buffer-substring-no-properties
-             (car bounds) (cdr bounds))))
-         ;; Extract direct children
-         (child-level (1+ level)))
+  (let*
+      ((meta (org-mcp--heading-metadata-at-point))
+       (title (plist-get meta :title))
+       (todo (plist-get meta :todo))
+       (priority (plist-get meta :priority))
+       (tags (plist-get meta :tags))
+       (local-tags (plist-get meta :local-tags))
+       (level (plist-get meta :level))
+       (scheduled (plist-get meta :scheduled))
+       (deadline (plist-get meta :deadline))
+       (closed (plist-get meta :closed))
+       (link (org-mcp--link-at-point))
+       ;; The ID the link names, so `id' and `link' always agree; a
+       ;; blank :ID: gives neither.
+       (id (and (string-prefix-p "id:" link) (substring link 3)))
+       (children '())
+       ;; The body as org-node-set-content bounds it, before any child.
+       (body-content
+        (let ((bounds (org-mcp--body-bounds)))
+          (buffer-substring-no-properties (car bounds) (cdr bounds))))
+       ;; Extract direct children
+       (child-level (1+ level)))
     ;; Collect direct children via sibling navigation.
     (save-excursion
       (org-back-to-heading t)
@@ -2345,21 +2345,21 @@ is only ever looked for here."
      (plist-get target :link)))
   (org-end-of-subtree t t))
 
-(defun org-mcp--position-for-new-child (after parent-level)
+(defun org-mcp--position-for-new-child (previous-sibling parent-level)
   "Position point where a new heading goes under its parent.
 PARENT-LEVEL is the parent's level, with point at the parent heading,
 or nil for the top level of the file, with point past the file's
-preamble, where the heading goes when AFTER is nil.
-AFTER is nil or the target, from `org-mcp--link-target', of the
-sibling to insert after: a direct child of the parent, or a heading
-with no parent at the top level.
-If AFTER is non-nil, positions after that sibling's subtree.
+preamble, where the heading goes when PREVIOUS-SIBLING is nil.
+PREVIOUS-SIBLING is nil or the target, from `org-mcp--link-target',
+of the sibling to insert after: a direct child of the parent, or a
+heading with no parent at the top level.
+If PREVIOUS-SIBLING is non-nil, positions after that sibling's subtree.
 If nil, positions at end of parent's subtree.
 Throws validation error if the sibling is not found under the parent."
   (cond
-   (after
+   (previous-sibling
     (org-mcp--goto-after-child
-     after
+     previous-sibling
      (and parent-level
           (progn
             (org-back-to-heading t)
@@ -2391,7 +2391,7 @@ After insertion, point is left on the heading line at end-of-line."
       ;; We're inside a parent.  Pass the explicit LEVEL argument to
       ;; `org-insert-heading' so the new heading lands at parent + 1
       ;; regardless of what heading point currently sits inside (e.g.
-      ;; at the end of a sibling subtree positioned via after_link).
+      ;; at the end of a sibling subtree positioned via previous_sibling).
       ;; This is what avoids the "creates a sibling of the parent
       ;; instead of a child" pitfall of bare `org-insert-heading' when
       ;; the parent has no children.
@@ -2443,7 +2443,7 @@ BODY-END is the buffer position where body ends."
 
 ;; Tool handlers
 
-(defun org-mcp--tool-get-todo-config ()
+(defun org-mcp--tool-config-todo ()
   "Return the TODO keyword configuration.
 Walks `org-todo-keywords' directly rather than the parsed
 `org-todo-keywords-1' / `org-done-keywords' so the response can
@@ -2482,7 +2482,7 @@ fields, and the parsed siblings discard them."
      `((sequences . ,(vconcat (nreverse seq-list)))
        (semantics . ,(vconcat (nreverse sem-list)))))))
 
-(defun org-mcp--tool-get-tag-config ()
+(defun org-mcp--tool-config-tags ()
   "Return the tag configuration as literal Elisp strings."
   (json-encode
    `((org-use-tag-inheritance
@@ -2494,7 +2494,7 @@ fields, and the parsed siblings discard them."
      (org-tag-persistent-alist
       . ,(prin1-to-string org-tag-persistent-alist)))))
 
-(defun org-mcp--tool-get-tag-candidates (&optional files)
+(defun org-mcp--tool-config-tag-candidates (&optional files)
   "Return the union of all candidate tags across a set of files.
 The files are the ones FILES names, see `org-mcp--with-file-set',
 or the allowed files when FILES is nil.
@@ -2533,14 +2533,14 @@ MCP Parameters:
                table)))))
       (json-encode `((tags . ,(vconcat (sort tags #'string<))))))))
 
-(defun org-mcp--tool-get-priority-config ()
+(defun org-mcp--tool-config-priority ()
   "Return the priority configuration."
   (json-encode
    `((highest . ,(char-to-string org-priority-highest))
      (lowest . ,(char-to-string org-priority-lowest))
      (default . ,(char-to-string org-priority-default)))))
 
-(defun org-mcp--tool-get-allowed-files ()
+(defun org-mcp--tool-config-allowed-files ()
   "Return the allowed Org files and the scope override policy.
 Each file is returned as an absolute path; relative entries in
 `org-mcp-allowed-files' are resolved against `org-directory'.
@@ -2560,16 +2560,16 @@ lists those roots as absolute paths."
        (when roots
          `((override_roots . ,(vconcat roots))))))))
 
-(defun org-mcp--tool-update-todo-state
-    (link new_state &optional current_state note files)
+(defun org-mcp--tool-node-set-todo
+    (link after &optional before note files)
   "Update the TODO state of the headline LINK names.
 Returns the link to the updated headline, and as `new_state' the
 state Org left it in, which is the state asked for unless Org made
 another of it: a repeating entry moved to a done keyword comes back
 in its not-done keyword.  A change Org vetoes is refused and nothing
 is written; see `org-mcp--set-todo-state'.
-NEW_STATE is the new TODO state to set.
-CURRENT_STATE, when provided, is checked against the actual state.
+AFTER is the new TODO state to set.
+BEFORE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -2581,10 +2581,10 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  new_state - New TODO state (must be in `org-todo-keywords')
-  current_state - Expected current TODO state (string, optional)
-                  When provided, must match actual state or tool will error
-                  Omit to skip the state check
+  after - New TODO state (must be in `org-todo-keywords')
+  before - Expected current TODO state (string, optional)
+           When provided, must match the actual state or the tool
+           errors; omit to skip the check
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
@@ -2600,7 +2600,7 @@ MCP Parameters:
                                 (new_state . ,actual-new))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
-      (org-mcp--validate-todo-state new_state)
+      (org-mcp--validate-todo-state after)
       (org-mcp--goto-heading target)
 
       ;; Capture actual previous state
@@ -2608,77 +2608,75 @@ MCP Parameters:
       (setq actual-prev (or (org-get-todo-state) ""))
 
       ;; Check current state matches (only when caller provided it)
-      (when current_state
-        (unless (string= actual-prev current_state)
+      (when before
+        (unless (string= actual-prev before)
           (org-mcp--state-mismatch-error
-           current_state
-           (or (org-get-todo-state) "(no state)")
-           "State")))
+           before (or (org-get-todo-state) "(no state)") "State")))
 
       ;; Update the state, refusing a change Org vetoes and reading
       ;; back what Org made of the one it took.
-      (setq actual-new (org-mcp--set-todo-state new_state))
+      (setq actual-new (org-mcp--set-todo-state after))
 
       ;; Add note to state transition if provided
       (when (and note (not (string-empty-p (string-trim note))))
-        (org-mcp--insert-log-note note 'state
-                                  new_state
-                                  actual-prev)))))
+        (org-mcp--insert-log-note note 'state after actual-prev)))))
 
-(defun org-mcp--tool-add-todo
+(defun org-mcp--tool-node-create
     (title
-     todo_state
-     body
-     parent_link
+     todo
+     content
+     parent
      &optional
      tags
-     after_link
+     previous_sibling
      properties
      files)
   "Add a new TODO item to an Org file.
 Returns the new headline's link; no identifier is created, so the
 link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
-TODO_STATE is the TODO state from `org-todo-keywords'.  A state Org
+TODO is the TODO state from `org-todo-keywords'.  A state Org
 vetoes for the new heading, such as a done keyword under an ordered
 parent whose earlier siblings are unfinished, is refused and no
 heading is added; see `org-mcp--set-todo-state'.
-BODY is optional body text.
-PARENT_LINK is the link to the parent item, or to a whole file for
+CONTENT is the optional body text.
+PARENT is the link to the parent item, or to a whole file for
 its top level.
 TAGS is an optional single tag string or list of tag strings.
-AFTER_LINK is an optional link to the sibling to insert after: a
+PREVIOUS_SIBLING is an optional link to the sibling to insert after: a
 direct child of the parent, or a heading with no parent when
-PARENT_LINK names a whole file.  An `id:' AFTER_LINK is looked up in
+PARENT names a whole file.  An `id:' PREVIOUS_SIBLING is looked up in
 the parent's file.
 PROPERTIES is an optional alist of property names and values, checked
-by `org-mcp--validate-properties' like those of `org-set-properties'.
+by `org-mcp--validate-properties' like those of `org-node-set-properties'.
 A blank PROPERTIES, see `org-mcp--blank-param-p', sets none.
-FILES, when not blank, names the files an `id:' PARENT_LINK is looked
-up in; see `org-mcp--link-target'.  It applies to PARENT_LINK only.
+FILES, when not blank, names the files an `id:' PARENT is looked
+up in; see `org-mcp--link-target'.  It applies to PARENT only.
 
 MCP Parameters:
   title - The headline text
-  todo_state - TODO state from `org-todo-keywords'
-  body - Optional body text content
-  parent_link - Link to the parent item
-                Formats:
-                  - id:{id}
-                  - file:{absolute-path}::#{custom-id}
-                  - file:{absolute-path}::*{title} (first match)
-                  - file:{absolute-path} (top level of the file)
-                  - id:{id} of the file-level property drawer (top
-                    level of the file)
-                  - any of these as [[link]] or [[link][description]]
+  todo - TODO state from `org-todo-keywords'
+  content - Optional body text
+  parent - Link to the parent item
+           Formats:
+             - id:{id}
+             - file:{absolute-path}::#{custom-id}
+             - file:{absolute-path}::*{title} (first match)
+             - file:{absolute-path} (top level of the file)
+             - id:{id} of the file-level property drawer (top level
+               of the file)
+             - any of these as [[link]] or [[link][description]]
   tags - Tags to add (optional, single string or array of strings)
-  after_link - Link to the sibling to insert after (optional), a
-               direct child of the parent, or a top-level heading of
-               the file when parent_link names a whole file
-               Formats:
-                 - id:{id}
-                 - file:{absolute-path}::#{custom-id}
-                 - file:{absolute-path}::*{title} (first match)
-                 - any of these as [[link]] or [[link][description]]
+  previous_sibling - Link to the sibling to insert after (optional),
+                     a direct child of the parent, or a top-level
+                     heading of the file when parent names a whole
+                     file
+                     Formats:
+                       - id:{id}
+                       - file:{absolute-path}::#{custom-id}
+                       - file:{absolute-path}::*{title} (first match)
+                       - any of these as [[link]] or
+                         [[link][description]]
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
                Values are single-line strings or numbers, written as
@@ -2688,9 +2686,9 @@ MCP Parameters:
                forbidden
                properties itself given as null, false, \"\" or {}
                means no properties
-  files - Files and directories to look up an id: link of parent_link
+  files - Files and directories to look up an id: link of parent
           in, in order, instead of Emacs's ID index (array of
-          strings, optional); refused with any other parent_link"
+          strings, optional); refused with any other parent"
   (org-mcp--validate-headline-title title)
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
@@ -2698,16 +2696,16 @@ MCP Parameters:
         (unless (org-mcp--blank-param-p properties)
           (org-mcp--validate-properties properties)))
        ;; A link that names a whole file means top level.
-       (parent (org-mcp--link-target parent_link files))
-       (file-path (plist-get parent :file))
+       (parent-target (org-mcp--link-target parent files))
+       (file-path (plist-get parent-target :file))
        ;; The sibling can only be a child of the parent, or a heading
        ;; with no parent at the top level, so its `id:' link is taken
        ;; to be in the parent's file: no ID index is consulted, and
        ;; neither are FILES.  Resolving it here refuses a bad link
        ;; before the parent's buffer is changed.
-       (after
-        (when-let* ((after-link (org-mcp--link-given after_link)))
-          (org-mcp--link-target after-link nil file-path))))
+       (sibling-target
+        (when-let* ((sibling (org-mcp--link-given previous_sibling)))
+          (org-mcp--link-target sibling nil file-path))))
 
     ;; Add the TODO item
     (org-mcp--modify-and-save file-path "add TODO"
@@ -2717,12 +2715,12 @@ MCP Parameters:
                                 (title . ,title))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
-      (org-mcp--validate-todo-state todo_state)
+      (org-mcp--validate-todo-state todo)
       (let ((parent-level
-             (org-mcp--navigate-to-parent-or-top parent)))
+             (org-mcp--navigate-to-parent-or-top parent-target)))
 
         ;; Handle positioning after navigation to parent
-        (org-mcp--position-for-new-child after parent-level)
+        (org-mcp--position-for-new-child sibling-target parent-level)
 
         ;; Validate body before inserting heading
         ;; Calculate the target level for validation
@@ -2734,24 +2732,24 @@ MCP Parameters:
                  1)))
 
           ;; Validate body content if provided
-          (when body
-            (org-mcp--validate-body-no-headlines body target-level)
-            (org-mcp--validate-body-no-unbalanced-blocks body)))
+          (when content
+            (org-mcp--validate-body-no-headlines content target-level)
+            (org-mcp--validate-body-no-unbalanced-blocks content)))
 
         ;; Insert the new heading
         (org-mcp--insert-heading title parent-level)
 
-        (org-mcp--set-todo-state todo_state)
+        (org-mcp--set-todo-state todo)
 
         (when tag-list
           (org-set-tags tag-list))
 
         ;; Add body if provided
-        (if body
+        (if content
             (progn
               (end-of-line)
-              (insert "\n" body)
-              (unless (string-suffix-p "\n" body)
+              (insert "\n" content)
+              (unless (string-suffix-p "\n" content)
                 (insert "\n"))
               ;; Move back to the heading, where the properties go
               (org-back-to-heading t))
@@ -2772,8 +2770,8 @@ MCP Parameters:
 
 (defun org-mcp--read-structured (link &optional files)
   "Return structured JSON for what LINK, a native Org link, points to.
-The org-read tool and the org://{link} resource both read through
-here, so they resolve a link the same way.  FILES is the org-read
+The org-node-read tool and the org://{link} resource both read through
+here, so they resolve a link the same way.  FILES is the org-node-read
 tool's `files' parameter; see `org-mcp--link-target'.  The resource
 passes none."
   (org-mcp--read-link link
@@ -2793,7 +2791,7 @@ percent-encoding is undone here, exactly once, by
 `org-mcp--percent-decode', so a URI that mixes raw non-ASCII
 characters with encoded ones decodes to the same link.
 
-The link is then read as the org-read tool reads it, and a tool error,
+The link is then read as the org-node-read tool reads it, and a tool error,
 such as the refusal of a link, becomes a resource error with the same
 message."
   (let ((link
@@ -2805,9 +2803,9 @@ message."
        (mcp-server-lib-resource-signal-error
         mcp-server-lib-jsonrpc-error-invalid-params (cadr err))))))
 
-(defun org-mcp--tool-rename-headline
-    (link current_title new_title &optional files)
-  "Rename the headline LINK names from CURRENT_TITLE to NEW_TITLE.
+(defun org-mcp--tool-node-set-title
+    (link before after &optional files)
+  "Rename the headline LINK names from BEFORE to AFTER.
 Preserves the current TODO state and tags.
 Returns the link to the renamed headline.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -2820,39 +2818,39 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  current_title - Current title without TODO state or tags
-  new_title - New title without TODO state or tags
+  before - Current title without TODO state or tags
+  after - New title without TODO state or tags
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (org-mcp--validate-headline-title new_title)
+  (org-mcp--validate-headline-title after)
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file)))
 
     ;; Rename the headline in the file
     (org-mcp--modify-and-save file-path "rename"
-                              `((previous_title . ,current_title)
-                                (new_title . ,new_title))
+                              `((previous_title . ,before)
+                                (new_title . ,after))
       ;; Navigate to the headline
       (org-mcp--goto-heading target)
 
       ;; Verify current title matches
       (beginning-of-line)
       (let ((actual-title (org-get-heading t t t t)))
-        (unless (string= actual-title current_title)
+        (unless (string= actual-title before)
           (org-mcp--state-mismatch-error
-           current_title actual-title "Title")))
+           before actual-title "Title")))
 
-      (org-edit-headline new_title))))
+      (org-edit-headline after))))
 
-(defun org-mcp--tool-edit-body
-    (link old_body new_body &optional append files)
+(defun org-mcp--tool-node-set-content
+    (link before after &optional append files)
   "Edit or append to body content of an Org node.
 LINK is the link to the node to edit.
-OLD_BODY is the substring to search for (replace mode only).
-NEW_BODY is the replacement or appended text.
-APPEND if non-nil, append NEW_BODY to end of body instead of replacing.
+BEFORE is the substring to search for (replace mode only).
+AFTER is the replacement or appended text.
+APPEND if non-nil, append AFTER to end of body instead of replacing.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -2863,10 +2861,10 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  old_body - Substring to replace within the body (replace mode only).
-             Must be unique.  Use \"\" to add to empty nodes.
-             Ignored when append is true.
-  new_body - Replacement or appended text
+  before - Substring to replace within the body (replace mode only).
+           Must be unique.  Use \"\" to add to empty nodes.
+           Ignored when append is true.
+  after - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
            default false); true or \"true\" append, false, \"false\"
            and null replace, and any other value is refused
@@ -2877,13 +2875,13 @@ MCP Parameters:
     (if append
         ;; Append mode
         (progn
-          (when (or (null new_body)
-                    (string-empty-p new_body)
-                    (string-match-p "\\`[[:space:]]*\\'" new_body))
+          (when (or (null after)
+                    (string-empty-p after)
+                    (string-match-p "\\`[[:space:]]*\\'" after))
             (org-mcp--tool-validation-error
-             "new_body cannot be empty or whitespace-only"))
+             "after cannot be empty or whitespace-only"))
 
-          (org-mcp--validate-body-no-unbalanced-blocks new_body)
+          (org-mcp--validate-body-no-unbalanced-blocks after)
 
           (let* ((target (org-mcp--link-target link files))
                  (file-path (plist-get target :file)))
@@ -2892,17 +2890,17 @@ MCP Parameters:
               (org-mcp--goto-heading target)
 
               (org-mcp--validate-body-no-headlines
-               new_body (org-current-level))
+               after (org-current-level))
 
               ;; Save the heading position for the response's link
               (let ((heading-pos (point)))
                 (goto-char (cdr (org-mcp--body-bounds)))
-                (org-mcp--insert-body-text new_body)
+                (org-mcp--insert-body-text after)
                 ;; Return to the heading for the response's link
                 (goto-char heading-pos)))))
 
       ;; Replace mode
-      (org-mcp--validate-body-no-unbalanced-blocks new_body)
+      (org-mcp--validate-body-no-unbalanced-blocks after)
 
       (let*
           ((target (org-mcp--link-target link files))
@@ -2917,7 +2915,7 @@ MCP Parameters:
           (setq heading (point-marker))
 
           (org-mcp--validate-body-no-headlines
-           new_body (org-current-level))
+           after (org-current-level))
 
           ;; Get body boundaries
           (let* ((bounds (org-mcp--body-bounds))
@@ -2930,8 +2928,8 @@ MCP Parameters:
 
             ;; Check if body is empty
             (when (string-match-p "\\`[[:space:]]*\\'" body-content)
-              ;; Empty oldBody + empty body -> add content
-              (if (string= old_body "")
+              ;; Empty BEFORE + empty body -> add content
+              (if (string= before "")
                   ;; Treat as single replacement
                   (setq occurrence-count 1)
                 (org-mcp--tool-validation-error
@@ -2939,18 +2937,18 @@ MCP Parameters:
 
             ;; Count occurrences (unless already handled above)
             (unless (= occurrence-count 1)
-              ;; Empty oldBody with non-empty body is an error
-              (if (and (string= old_body "")
+              ;; Empty BEFORE with non-empty body is an error
+              (if (and (string= before "")
                        (not
                         (string-match-p
                          "\\`[[:space:]]*\\'" body-content)))
                   (org-mcp--tool-validation-error
-                   "Cannot use empty old_body with non-empty body")
+                   "Cannot use empty before with non-empty body")
                 ;; Normal occurrence counting
                 (let ((case-fold-search nil)
                       (search-pos 0))
                   (while (string-match
-                          (regexp-quote old_body) body-content
+                          (regexp-quote before) body-content
                           search-pos)
                     (setq occurrence-count (1+ occurrence-count))
                     (setq search-pos (match-end 0))))))
@@ -2960,21 +2958,21 @@ MCP Parameters:
              ((= occurrence-count 0)
               (org-mcp--tool-validation-error
                "Body text not found: %s"
-               old_body))
+               before))
              ((> occurrence-count 1)
               (org-mcp--tool-validation-error
                "Text appears %d times (must be unique)"
                occurrence-count)))
 
-            ;; Perform replacement.  An empty OLD_BODY got here only with
-            ;; a blank body, which NEW_BODY replaces as a whole.
-            (if (string= old_body "")
+            ;; Perform replacement.  An empty BEFORE got here only with
+            ;; a blank body, which AFTER replaces as a whole.
+            (if (string= before "")
                 (progn
                   (delete-region body-begin body-end)
                   (goto-char body-begin)
-                  (org-mcp--insert-body-text new_body))
+                  (org-mcp--insert-body-text after))
               (org-mcp--replace-body-content
-               old_body new_body body-content body-begin body-end)))
+               before after body-content body-begin body-end)))
 
           (goto-char heading)
           (set-marker heading nil))))))
@@ -2995,7 +2993,7 @@ MCP Parameters:
     "CLOCKSUM_T"
     "TIMESTAMP"
     "TIMESTAMP_IA")
-  "Org special properties that cannot be set via `org-set-properties'.")
+  "Org special properties that cannot be set via `org-node-set-properties'.")
 
 (defun org-mcp--validate-properties (properties)
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
@@ -3062,9 +3060,9 @@ here."
           value)))))
    properties))
 
-(defun org-mcp--tool-set-properties (link properties &optional files)
+(defun org-mcp--tool-node-set-properties (link after &optional files)
   "Set or delete properties on the headline LINK names.
-PROPERTIES is an alist of property name-value pairs.
+AFTER is an alist of property name-value pairs.
 String, number and boolean values set the property; null/empty values
 delete it.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -3077,19 +3075,19 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  properties - JSON object of property name-value pairs (required)
-               String or number value: set property to that value;
-               it must be a single line
-               true or false: set property to the text t or nil;
-               false keeps the property
-               null or empty string: delete the property
-               ID and CUSTOM_ID are accepted and written as given
-               Special properties (TODO, TAGS, PRIORITY, etc.) are
-               forbidden
+  after - JSON object of property name-value pairs (required)
+          String or number value: set property to that value;
+          it must be a single line
+          true or false: set property to the text t or nil;
+          false keeps the property
+          null or empty string: delete the property
+          ID and CUSTOM_ID are accepted and written as given
+          Special properties (TODO, TAGS, PRIORITY, etc.) are
+          forbidden
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (setq properties (org-mcp--validate-properties properties))
+  (setq after (org-mcp--validate-properties after))
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          (set-props nil)
@@ -3100,7 +3098,7 @@ MCP Parameters:
                                 (properties_deleted . ,deleted-props))
       (org-mcp--goto-heading target)
 
-      (pcase-dolist (`(,key . ,val) properties)
+      (pcase-dolist (`(,key . ,val) after)
         (if val
             (progn
               (org-set-property key val)
@@ -3110,9 +3108,9 @@ MCP Parameters:
       (setq set-props (nreverse set-props))
       (setq deleted-props (nreverse deleted-props)))))
 
-(defun org-mcp--tool-update-scheduled (link &optional scheduled files)
+(defun org-mcp--tool-node-set-scheduled (link &optional after files)
   "Update SCHEDULED timestamp on the headline LINK names.
-SCHEDULED is an ISO date string or nil/empty to remove.
+AFTER is an ISO date string or nil/empty to remove.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -3123,9 +3121,9 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  scheduled - ISO date string (optional)
-              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-              nil or empty string removes the timestamp
+  after - ISO date string (optional)
+          Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+          nil or empty string removes the timestamp
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -3143,20 +3141,20 @@ MCP Parameters:
       (setq previous-scheduled
             (or (org-entry-get (point) "SCHEDULED") ""))
 
-      (if (or (null scheduled) (equal scheduled ""))
+      (if (or (null after) (equal after ""))
           ;; Remove scheduled
           (progn
             (org-schedule '(4))
             (setq new-scheduled ""))
         ;; Validate date format before calling org-schedule
-        (org-mcp--validate-date-string scheduled)
-        (org-schedule nil scheduled)
+        (org-mcp--validate-date-string after)
+        (org-schedule nil after)
         (setq new-scheduled
               (or (org-entry-get (point) "SCHEDULED") ""))))))
 
-(defun org-mcp--tool-update-deadline (link &optional deadline files)
+(defun org-mcp--tool-node-set-deadline (link &optional after files)
   "Update DEADLINE timestamp on the headline LINK names.
-DEADLINE is an ISO date string or nil/empty to remove.
+AFTER is an ISO date string or nil/empty to remove.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -3167,9 +3165,9 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  deadline - ISO date string (optional)
-             Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-             nil or empty string removes the timestamp
+  after - ISO date string (optional)
+          Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+          nil or empty string removes the timestamp
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -3187,20 +3185,20 @@ MCP Parameters:
       (setq previous-deadline
             (or (org-entry-get (point) "DEADLINE") ""))
 
-      (if (or (null deadline) (equal deadline ""))
+      (if (or (null after) (equal after ""))
           ;; Remove deadline
           (progn
             (org-deadline '(4))
             (setq new-deadline ""))
         ;; Validate date format before calling org-deadline
-        (org-mcp--validate-date-string deadline)
-        (org-deadline nil deadline)
+        (org-mcp--validate-date-string after)
+        (org-deadline nil after)
         (setq new-deadline
               (or (org-entry-get (point) "DEADLINE") ""))))))
 
-(defun org-mcp--tool-set-tags (link &optional tags files)
+(defun org-mcp--tool-node-set-tags (link &optional after files)
   "Set tags on the headline LINK names.
-TAGS can be a string, list of strings, or nil/empty to clear all tags.
+AFTER is a string, a list of strings, or nil/empty to clear all tags.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -3211,11 +3209,11 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  tags - Tags to set (string or array, optional)
-         Single tag: \"work\"
-         Multiple tags: [\"work\", \"urgent\"]
-         nil or empty to clear all tags
-         Validated against org-tag-alist if configured
+  after - Tags to set (string or array, optional)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          nil or empty to clear all tags
+          Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -3226,9 +3224,9 @@ MCP Parameters:
 
     ;; Validate tags if provided
     (let ((tag-list
-           (if (or (null tags) (equal tags "") (equal tags []))
+           (if (or (null after) (equal after "") (equal after []))
                nil
-             (org-mcp--validate-and-normalize-tags tags))))
+             (org-mcp--validate-and-normalize-tags after))))
 
       (org-mcp--modify-and-save file-path "set tags"
                                 `((previous_tags
@@ -3243,9 +3241,9 @@ MCP Parameters:
 
         (setq new-tags (vconcat (org-get-tags nil t)))))))
 
-(defun org-mcp--tool-set-priority (link &optional priority files)
+(defun org-mcp--tool-node-set-priority (link &optional after files)
   "Set priority on the headline LINK names.
-PRIORITY is a single-character string or nil/empty to remove.
+AFTER is a single-character string or nil/empty to remove.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -3256,24 +3254,24 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  priority - Priority character (string, optional)
-             Must be within org-priority-highest to org-priority-lowest
-             nil or empty string removes the priority
+  after - Priority character (string, optional)
+          Must be within org-priority-highest to org-priority-lowest
+          nil or empty string removes the priority
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   ;; Validate priority if provided
-  (when (and priority (not (equal priority "")))
-    (unless (= (length priority) 1)
+  (when (and after (not (equal after "")))
+    (unless (= (length after) 1)
       (org-mcp--tool-validation-error
        "Priority must be a single character, got '%s'"
-       priority))
-    (let ((char (string-to-char priority)))
+       after))
+    (let ((char (string-to-char after)))
       (unless (and (>= char org-priority-highest)
                    (<= char org-priority-lowest))
         (org-mcp--tool-validation-error
          "Priority '%s' out of range ('%c' to '%c')"
-         priority org-priority-highest org-priority-lowest))))
+         after org-priority-highest org-priority-lowest))))
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
@@ -3294,17 +3292,17 @@ MCP Parameters:
                   (char-to-string p)
                 "")))
 
-      (if (or (null priority) (equal priority ""))
+      (if (or (null after) (equal after ""))
           ;; Remove priority
           (progn
             (org-priority 'remove)
             (setq new-priority ""))
         ;; Set priority
-        (org-priority (string-to-char priority))
-        (setq new-priority priority)))))
+        (org-priority (string-to-char after))
+        (setq new-priority after)))))
 
 
-(defun org-mcp--tool-add-logbook-note (link note &optional files)
+(defun org-mcp--tool-node-add-note (link note &optional files)
   "Add a timestamped note to the LOGBOOK of the headline LINK names.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -3397,7 +3395,7 @@ Extra properties from `org-mcp-ql-extra-properties' are appended."
           (push (cons (car extra) val) result))))
     (nreverse result)))
 
-(defun org-mcp--tool-ql-query (query &optional files)
+(defun org-mcp--tool-query (query &optional files)
   "Search Org files using an org-ql QUERY expression.
 QUERY is a string containing an org-ql query sexp.
 FILES names the files and directories to search, replacing the
@@ -3450,7 +3448,7 @@ A GTD query always runs over the allowed files: its tools take no
 `files' parameter, and mcp-server-lib refuses a call passing one
 with an \"Unexpected parameter\" error before any handler runs.
 Uses `org-mcp-query-sort-fn' for sorting when set.
-Returns JSON-encoded results in the same format as org-ql-query."
+Returns JSON-encoded results in the same format as org-query."
   (org-mcp--with-file-set nil
     (let*
         ((target-files org-agenda-files)
@@ -3494,7 +3492,7 @@ Returns JSON-encoded results in the same format as org-ql-query."
 
 MCP Parameters: None
 
-Returns: Same format as org-ql-query tool, sorted by
+Returns: Same format as org-query tool, sorted by
 `org-mcp-query-sort-fn' when configured."
   (org-mcp--run-gtd-query (funcall org-mcp-query-inbox-fn)))
 
@@ -3504,7 +3502,7 @@ Returns: Same format as org-ql-query tool, sorted by
 MCP Parameters:
   tag - Tag string to filter by (string, optional)
 
-Returns: Same format as org-ql-query tool, sorted by
+Returns: Same format as org-query tool, sorted by
 `org-mcp-query-sort-fn' when configured."
   (let ((tag-filter
          (when (and tag (not (string-empty-p tag)))
@@ -3518,7 +3516,7 @@ Returns: Same format as org-ql-query tool, sorted by
 MCP Parameters:
   tag - Tag string to filter by (string, optional)
 
-Returns: Same format as org-ql-query tool, sorted by
+Returns: Same format as org-query tool, sorted by
 `org-mcp-query-sort-fn' when configured."
   (let ((tag-filter
          (when (and tag (not (string-empty-p tag)))
@@ -3528,8 +3526,8 @@ Returns: Same format as org-ql-query tool, sorted by
 
 ;; Read tools
 
-(defun org-mcp--tool-read (link &optional files)
-  "Tool handler for org-read.
+(defun org-mcp--tool-node-read (link &optional files)
+  "Tool handler for org-node-read.
 LINK is a native Org link to a heading or a whole file.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -3586,8 +3584,8 @@ id: link or a search: %s"
        (or (org-mcp--find-allowed-file file t)
            (org-mcp--tool-file-access-error file))))))))
 
-(defun org-mcp--tool-read-headline (link &optional files)
-  "Tool handler for org-read-headline.
+(defun org-mcp--tool-node-text (link &optional files)
+  "Tool handler for org-node-text.
 LINK is a native Org link to a heading or a whole file.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -3613,7 +3611,7 @@ MCP Parameters:
 
 ;; Clock tools
 
-(defun org-mcp--tool-get-clock-config ()
+(defun org-mcp--tool-config-clock ()
   "Return the clock configuration.
 
 MCP Parameters: None"
@@ -3629,7 +3627,7 @@ MCP Parameters: None"
      (org_mcp_clock_continuous_threshold
       . ,org-mcp-clock-continuous-threshold))))
 
-(defun org-mcp--tool-clock-find-dangling (&optional files)
+(defun org-mcp--tool-clock-dangling (&optional files)
   "Find all open (unclosed) clocks in a set of Org files.
 The files are the ones FILES names, see `org-mcp--with-file-set',
 or the allowed files when FILES is nil.
@@ -3669,7 +3667,7 @@ MCP Parameters:
          `((open_clocks . ,(vconcat (nreverse all-clocks)))
            (total . ,total)))))))
 
-(defun org-mcp--tool-clock-get-active ()
+(defun org-mcp--tool-clock-active ()
   "Return the currently active clock entry, if any.
 
 MCP Parameters: None"
@@ -3804,7 +3802,7 @@ MCP Parameters:
 A clock running in a file outside the allowed files is refused, as
 clocking in refuses it: org-mcp writes no file outside them, and the
 refusal names neither that file nor the heading and start of the clock
-it holds, which `org-mcp--tool-clock-get-active' withholds too.
+it holds, which `org-mcp--tool-clock-active' withholds too.
 The clock is closed through Org, so Emacs's own clock stops with it
 and Org's clock-out settings decide what the file ends up holding:
 `org-clock-out-remove-zero-time-clocks' deletes a CLOCK line of no
@@ -4009,7 +4007,7 @@ Tool descriptions `concat' it after the parameter's first line.")
           directory; a relative path is refused.  A file outside the
           allowed files is accepted only as far as
           org-mcp-file-scope-override permits; see
-          org-get-allowed-files.  A directory the setting permits is
+          org-config-allowed-files.  A directory the setting permits is
           searched recursively for the Org files Org takes from a
           directory in org-agenda-files (by default every .org file,
           no archive), skipping hidden and unreadable directories,
@@ -4026,8 +4024,8 @@ Tool descriptions `concat' it after the parameter's first lines.")
 (defconst org-mcp--core-tool-specs
   (list
    (list
-    #'org-mcp--tool-get-todo-config
-    :id "org-get-todo-config"
+    #'org-mcp--tool-config-todo
+    :id "org-config-todo"
     :description
     "Get the TODO keyword configuration from the current Emacs
 Org-mode settings.  Returns information about task state sequences
@@ -4053,8 +4051,8 @@ Use this tool to understand the available task states in the Org
 configuration before creating or updating TODO items."
     :read-only t)
    (list
-    #'org-mcp--tool-get-tag-config
-    :id "org-get-tag-config"
+    #'org-mcp--tool-config-tags
+    :id "org-config-tags"
     :description
     "Get tag-related configuration from the current Emacs Org-mode
 settings.  Returns literal Elisp variable values as strings for tag
@@ -4085,8 +4083,8 @@ This helps validate tag usage and understand tag semantics before
 adding or modifying tags on TODO items."
     :read-only t)
    (list
-    #'org-mcp--tool-get-tag-candidates
-    :id "org-get-tag-candidates"
+    #'org-mcp--tool-config-tag-candidates
+    :id "org-config-tag-candidates"
     :description
     (concat
      "Return all candidate tags the user might want to use across the
@@ -4109,11 +4107,11 @@ Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
 
 Use this when suggesting or completing tags rather than
-`org-get-tag-config', which only exposes the static configuration.")
+`org-config-tags', which only exposes the static configuration.")
     :read-only t)
    (list
-    #'org-mcp--tool-get-priority-config
-    :id "org-get-priority-config"
+    #'org-mcp--tool-config-priority
+    :id "org-config-priority"
     :description
     "Get priority configuration from the current Emacs Org-mode
 settings.  Returns the priority range and default as single-character
@@ -4130,8 +4128,8 @@ Use this tool to understand the valid priority range before setting
 or interpreting priorities on TODO items."
     :read-only t)
    (list
-    #'org-mcp--tool-get-allowed-files
-    :id "org-get-allowed-files"
+    #'org-mcp--tool-config-allowed-files
+    :id "org-config-allowed-files"
     :description
     "Get the list of Org files accessible through the org-mcp
 server, and whether a call may name Org files outside them.  Returns
@@ -4176,8 +4174,8 @@ Use cases:
     work correctly?"
     :read-only t)
    (list
-    #'org-mcp--tool-update-todo-state
-    :id "org-update-todo-state"
+    #'org-mcp--tool-node-set-todo
+    :id "org-node-set-todo"
     :description
     (concat
      "Update the TODO state of an Org headline.  Changes the task state
@@ -4187,16 +4185,16 @@ Parameters:
   link - Link to the headline to update (string, required)
 "
      org-mcp--heading-link-formats
-     "  current_state - Expected current TODO state (string, optional)
-                  When provided, must match actual state or tool will error
-                  Omit to skip the state check
-  new_state - New TODO state to set (string, required)
-              Must be valid keyword from org-todo-keywords
+     "  before - Expected current TODO state (string, optional)
+           When provided, must match actual state or tool will error
+           Omit to skip the state check
+  after - New TODO state to set (string, required)
+          Must be valid keyword from org-todo-keywords
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4209,8 +4207,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-add-todo
-    :id "org-add-todo"
+    #'org-mcp--tool-node-create
+    :id "org-node-create"
     :description
     "Add a new TODO item to an Org file at a specified location.
 Creates the headline with TODO state, optional tags, optional body
@@ -4221,32 +4219,31 @@ Parameters:
   title - Headline text without TODO state or tags (string, required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
-  todo_state - TODO keyword from org-todo-keywords (string, required)
+  todo - TODO keyword from org-todo-keywords (string, required)
   tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
-  body - Body content under the headline (string, optional)
-         Cannot contain headlines at same or higher level as new item
-         If #+BEGIN/#+END blocks are present, they must be balanced
-  parent_link - Link to the parent (string, required)
-                For top-level: file:{absolute-path}
-                               or id:{id} of the file-level
-                               property drawer
-                For child: id:{parent-id}
-                           or file:{absolute-path}::#{custom-id}
-                           or file:{absolute-path}::*{title} (first match)
-                Links may be bracketed: [[link]] or
-                [[link][description]]
-  after_link - Link to the sibling to insert after (string, optional),
-               in any form parent_link takes for a child: a direct
-               child of the parent, or a top-level heading of the file
-               when parent_link names the whole file.  Its id: link is
-               looked up in the parent's file.  null, false and \"\"
-               mean none.
-               If omitted, appends as last child of parent
+  content - Body content under the headline (string, optional)
+            Cannot contain headlines at same or higher level as new
+            item
+            If #+BEGIN/#+END blocks are present, they must be balanced
+  parent - Link to the parent (string, required)
+           For top-level: file:{absolute-path}
+                          or id:{id} of the file-level property drawer
+           For child: id:{parent-id}
+                      or file:{absolute-path}::#{custom-id}
+                      or file:{absolute-path}::*{title} (first match)
+           Links may be bracketed: [[link]] or [[link][description]]
+  previous_sibling - Link to the sibling to insert after (string,
+                     optional), in any form parent takes for a child:
+                     a direct child of the parent, or a top-level
+                     heading of the file when parent names the whole
+                     file.  Its id: link is looked up in the parent's
+                     file.  null, false and \"\" mean none.
+                     If omitted, appends as last child of parent
   properties - Properties for the new headline (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
@@ -4262,10 +4259,10 @@ Parameters:
                parameters and dedicated tools
                properties itself given as null, false, \"\" or {}
                means no properties
-  files - Files and directories to look up an id: link of
-          parent_link in (array of strings, optional); see org-read.
-          It applies to parent_link only, and is refused unless
-          parent_link is an id: link.
+  files - Files and directories to look up an id: link of parent in
+          (array of strings, optional); see org-node-read.  It
+          applies to parent only, and is refused unless parent is an
+          id: link.
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4278,19 +4275,19 @@ Returns JSON object:
   title - The headline title that was created
 
 Positioning behavior:
-  - With parent_link only: Appends as last child of parent
-  - With parent_link + after_link: Inserts immediately after specified
+  - With parent only: Appends as last child of parent
+  - With parent + previous_sibling: Inserts immediately after that
 sibling and its subtree
-  - Top-level (parent_link naming only the file): Adds after the
+  - Top-level (parent naming only the file): Adds after the
 file's preamble (a file-level property drawer, keyword lines such as
 #+TITLE and any text before the first heading), before every existing
 heading
-  - Top-level + after_link: Inserts immediately after that top-level
-heading and its subtree"
+  - Top-level + previous_sibling: Inserts immediately after that
+top-level heading and its subtree"
     :read-only nil)
    (list
-    #'org-mcp--tool-rename-headline
-    :id "org-rename-headline"
+    #'org-mcp--tool-node-set-title
+    :id "org-node-set-title"
     :description
     (concat
      "Rename an Org headline's title while preserving its TODO state,
@@ -4300,15 +4297,15 @@ Parameters:
   link - Link to the headline to rename (string, required)
 "
      org-mcp--heading-link-formats
-     "  current_title - Expected current title without TODO/tags (string,
-required)
-                  Must match actual title or tool will error
-                  Used to prevent race conditions
-  new_title - New title without TODO state or tags (string, required)
-              Cannot be empty or whitespace-only
-              Cannot contain newlines
+     "  before - Expected current title without TODO/tags (string,
+           required)
+           Must match actual title or tool will error
+           Used to prevent race conditions
+  after - New title without TODO state or tags (string, required)
+          Cannot be empty or whitespace-only
+          Cannot contain newlines
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4321,8 +4318,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-edit-body
-    :id "org-edit-body"
+    #'org-mcp--tool-node-set-content
+    :id "org-node-set-content"
     :description
     (concat
      "Edit or append to the body content of an Org headline.  In replace
@@ -4334,19 +4331,20 @@ Parameters:
   link - Link to the headline to edit (string, required)
 "
      org-mcp--heading-link-formats
-     "  old_body - Substring to find and replace (string, required in
-             replace mode, ignored when append is true)
-             Must appear exactly once in the body
-             Use empty string \"\" only for adding to empty nodes
-  new_body - Replacement or appended text (string, required)
-             Cannot introduce headlines at same or higher level
-             Must maintain balanced #+BEGIN/#+END blocks
-  append - Append new_body to end of body instead of replacing
-           (optional, default false): true or \"true\" append; false,
-           \"false\" and null replace; any other value is refused
-           When true, old_body is ignored
+     "  before - Substring to find and replace (string, required in
+           replace mode, ignored when append is true)
+           Must appear exactly once in the body
+           Use empty string \"\" only for adding to empty nodes
+  after - Replacement or appended text (string, required)
+          Cannot introduce headlines at same or higher level
+          Must maintain balanced #+BEGIN/#+END blocks
+  append - Append instead of replacing (optional, default false):
+           true or \"true\" append; false, \"false\" and null
+           replace; any other value is refused
+           When true, after goes at the end of the body and before
+           is ignored
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4356,16 +4354,16 @@ Returns JSON object:
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
 
-Special behavior - Empty old_body (replace mode):
-  When old_body is \"\", the tool adds content to empty nodes:
+Special behavior - Empty before (replace mode):
+  When before is \"\", the tool adds content to empty nodes:
   - Only works if node body is empty or whitespace-only
   - Error if node already has content
   - Useful for adding initial content to newly created headlines")
     :read-only nil)
    ;; Entry update tools
    (list
-    #'org-mcp--tool-set-properties
-    :id "org-set-properties"
+    #'org-mcp--tool-node-set-properties
+    :id "org-node-set-properties"
     :description
     (concat
      "Set or delete properties on an Org headline.  Updates the
@@ -4376,19 +4374,19 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  properties - JSON object of property name-value pairs (required)
-               String value (numbers and booleans are accepted):
-               set the property; it must be a single line
-               true or false writes the text t or nil (false keeps
-               the property; null deletes it)
-               null or empty string: delete the property
-               ID and CUSTOM_ID can be set; values are written as
-               given and not otherwise checked, and an ID is not
-               added to Org's ID index
-               Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
-               DEADLINE, etc.) are forbidden - use dedicated tools
+     "  after - JSON object of property name-value pairs (required)
+          String value (numbers and booleans are accepted):
+          set the property; it must be a single line
+          true or false writes the text t or nil (false keeps
+          the property; null deletes it)
+          null or empty string: delete the property
+          ID and CUSTOM_ID can be set; values are written as
+          given and not otherwise checked, and an ID is not
+          added to Org's ID index
+          Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
+          DEADLINE, etc.) are forbidden - use dedicated tools
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4401,8 +4399,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-update-scheduled
-    :id "org-update-scheduled"
+    #'org-mcp--tool-node-set-scheduled
+    :id "org-node-set-scheduled"
     :description
     (concat
      "Update the SCHEDULED timestamp on an Org headline.
@@ -4411,11 +4409,11 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  scheduled - ISO date string (string, optional)
-              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-              Omit or empty string to remove the timestamp
+     "  after - ISO date string (string, optional)
+          Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+          Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4428,8 +4426,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-update-deadline
-    :id "org-update-deadline"
+    #'org-mcp--tool-node-set-deadline
+    :id "org-node-set-deadline"
     :description
     (concat
      "Update the DEADLINE timestamp on an Org headline.
@@ -4438,11 +4436,11 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  deadline - ISO date string (string, optional)
-             Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-             Omit or empty string to remove the timestamp
+     "  after - ISO date string (string, optional)
+          Examples: \"2026-03-27\", \"2026-03-27 09:00\"
+          Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4455,8 +4453,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-set-tags
-    :id "org-set-tags"
+    #'org-mcp--tool-node-set-tags
+    :id "org-node-set-tags"
     :description
     (concat
      "Set tags on an Org headline, replacing any existing tags.
@@ -4465,15 +4463,15 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  tags - Tags to set (string or array, optional)
-         Single tag: \"work\"
-         Multiple tags: [\"work\", \"urgent\"]
-         Omit or empty to clear all tags
-         Validated against org-tag-alist if configured
-         Must follow Org tag rules (alphanumeric, _, @)
-         Respects mutually exclusive tag groups
+     "  after - Tags to set (string or array, optional)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          Omit or empty to clear all tags
+          Validated against org-tag-alist if configured
+          Must follow Org tag rules (alphanumeric, _, @)
+          Respects mutually exclusive tag groups
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4486,8 +4484,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-set-priority
-    :id "org-set-priority"
+    #'org-mcp--tool-node-set-priority
+    :id "org-node-set-priority"
     :description
     (concat
      "Set or remove priority on an Org headline.
@@ -4496,12 +4494,12 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  priority - Priority character (string, optional)
-             Must be in the configured range (default \"A\" to \"C\")
-             Use org-get-priority-config to check the valid range
-             Omit or empty string to remove priority
+     "  after - Priority character (string, optional)
+          Must be in the configured range (default \"A\" to \"C\")
+          Use org-config-priority to check the valid range
+          Omit or empty string to remove priority
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4514,8 +4512,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-add-logbook-note
-    :id "org-add-logbook-note"
+    #'org-mcp--tool-node-add-note
+    :id "org-node-add-note"
     :description
     (concat
      "Add a timestamped note to the LOGBOOK drawer of an Org headline.
@@ -4530,7 +4528,7 @@ Parameters:
          Multi-line notes are properly indented in the LOGBOOK
          Note is inserted at the top of the LOGBOOK drawer
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4541,8 +4539,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-read
-    :id "org-read"
+    #'org-mcp--tool-node-read
+    :id "org-node-read"
     :description
     (concat
      "Read Org file or headline with structured JSON output.  Takes a
@@ -4562,7 +4560,7 @@ Parameters:
           looked up in these files instead, in the order given,
           rather than in Emacs's ID index: a heading in a file Emacs
           never indexed is found, and no index rescan runs.  Entries
-          are checked as for org-ql-query, so a file outside the
+          are checked as for org-query, so a file outside the
           allowed files is reached only as far as
           org-mcp-file-scope-override permits, and a directory is
           searched as that tool searches it.  An ID none of the files
@@ -4585,9 +4583,9 @@ Returns: JSON object with structured data:
            Which of a parent's or a file's tags reach it is Org's
            decision, from org-use-tag-inheritance and
            org-tags-exclude-from-inheritance, both of which
-           org-get-tag-config reports.
+           org-config-tags reports.
     local_tags - The tags written on the heading itself (array, if
-           present), which is the set org-set-tags replaces.
+           present), which is the set org-node-set-tags replaces.
            Identical to tags when inheritance is off.
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
@@ -4629,8 +4627,8 @@ Returns: JSON object with hierarchical outline structure:
          file:{path}::*{title}"
     :read-only t)
    (list
-    #'org-mcp--tool-read-headline
-    :id "org-read-headline"
+    #'org-mcp--tool-node-text
+    :id "org-node-text"
     :description
     (concat
      "Read Org headline or file as plain text.  Takes a native Org link.
@@ -4641,15 +4639,15 @@ Parameters:
   link - Link to a heading or a file (string, required)
 "
      org-mcp--read-link-formats
-     "         Any other string is refused, as in org-read.
+     "         Any other string is refused, as in org-node-read.
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns: Plain text content of the headline and its subtree (or file)")
     :read-only t)
    (list
-    #'org-mcp--tool-ql-query
-    :id "org-ql-query"
+    #'org-mcp--tool-query
+    :id "org-query"
     :description
     (concat
      "Search Org files using org-ql query expressions.  Supports
@@ -4680,7 +4678,7 @@ Returns JSON object:
            none), inherited ones included as
            org-use-tag-inheritance and
            org-tags-exclude-from-inheritance direct.  The same tags
-           org-read returns for that heading.
+           org-node-read returns for that heading.
     link - Link to the heading (string): id:{id} when it has an ID,
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
            else file:{path}::*{title}
@@ -4710,11 +4708,11 @@ never sees a GTD tool that cannot answer.  The functions are
        "Query inbox items using the configured GTD workflow.
 Returns items matching the inbox query, sorted by rank when
 a sort function is configured.  Always runs over the allowed files;
-naming files is an error.  Use org-ql-query to search other files.
+naming files is an error.  Use org-query to search other files.
 
 Parameters: None
 
-Returns: Same format as org-ql-query tool"
+Returns: Same format as org-query tool"
        :read-only t)))
    (when org-mcp-query-next-fn
      (list
@@ -4725,12 +4723,12 @@ Returns: Same format as org-ql-query tool"
        "Query next action items using the configured GTD workflow.
 Returns actionable items sorted by rank when a sort function
 is configured.  Always runs over the allowed files; naming files is
-an error.  Use org-ql-query to search other files.
+an error.  Use org-query to search other files.
 
 Parameters:
   tag - Tag string to filter results (string, optional)
 
-Returns: Same format as org-ql-query tool"
+Returns: Same format as org-query tool"
        :read-only t)))
    (when org-mcp-query-backlog-fn
      (list
@@ -4741,19 +4739,19 @@ Returns: Same format as org-ql-query tool"
        "Query backlog items (projects and standalone actions) using
 the configured GTD workflow.  Returns items sorted by rank when
 a sort function is configured.  Always runs over the allowed files;
-naming files is an error.  Use org-ql-query to search other files.
+naming files is an error.  Use org-query to search other files.
 
 Parameters:
   tag - Tag string to filter results (string, optional)
 
-Returns: Same format as org-ql-query tool"
+Returns: Same format as org-query tool"
        :read-only t)))))
 
 (defconst org-mcp--clock-tool-specs
   (list
    (list
-    #'org-mcp--tool-get-clock-config
-    :id "org-get-clock-config"
+    #'org-mcp--tool-config-clock
+    :id "org-config-clock"
     :description
     "Get the clock configuration from the current Emacs Org-mode
 settings.  Returns clock-related settings.
@@ -4771,8 +4769,8 @@ Use this tool to understand clock settings before clocking
 in or out."
     :read-only t)
    (list
-    #'org-mcp--tool-clock-get-active
-    :id "org-clock-get-active"
+    #'org-mcp--tool-clock-active
+    :id "org-clock-active"
     :description
     "Get the currently active clock, if any.  Searches all allowed
 files for an unclosed CLOCK entry.  Also detects native Emacs clocks
@@ -4829,7 +4827,7 @@ Parameters:
             the running clock is closed, never deleted; false,
             \"false\" and null mean not to; any other value is refused
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read.  Not used for clock_out
+          strings, optional); see org-node-read.  Not used for clock_out
   clock_out - Link to the heading of the running clock (string);
               required while a clock runs, refused while none does.
               The link a refusal names for it is accepted as sent;
@@ -4883,7 +4881,7 @@ Parameters:
              Example: 2026-03-23T16:45:00
              If omitted, uses current time
   files - Files and directories to look up an id: link in
-          (array of strings, optional); see org-read
+          (array of strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4919,7 +4917,7 @@ Parameters:
         Example: 2026-03-23T16:45:00
         Must be after start time
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4951,7 +4949,7 @@ Parameters:
           (string, required)
           Example: 2026-03-23T14:30:00
   files - Files and directories to look up an id: link in (array of
-          strings, optional); see org-read
+          strings, optional); see org-node-read
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -4966,8 +4964,8 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-clock-find-dangling
-    :id "org-clock-find-dangling"
+    #'org-mcp--tool-clock-dangling
+    :id "org-clock-dangling"
     :description
     (concat
      "Find all open (unclosed) clocks in allowed Org files, or in the
@@ -5001,7 +4999,7 @@ Same spec format as `org-mcp--core-tool-specs\='.")
     :name "Org resource (structured JSON)"
     :description
     "Read an Org file or heading as structured JSON.  The URI is
-org:// followed by a native Org link, the same link the org-read
+org:// followed by a native Org link, the same link the org-node-read
 tool takes, percent-encoded as in any URI.
 
 URI format: org://{link}
@@ -5037,9 +5035,9 @@ Returns: JSON object with structured data:
            Which of a parent's or a file's tags reach it is Org's
            decision, from org-use-tag-inheritance and
            org-tags-exclude-from-inheritance, both of which
-           org-get-tag-config reports.
+           org-config-tags reports.
     local_tags - The tags written on the heading itself (array, if
-           present), which is the set org-set-tags replaces.
+           present), which is the set org-node-set-tags replaces.
            Identical to tags when inheritance is off.
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
@@ -5052,7 +5050,7 @@ Returns: JSON object with structured data:
     content - Body text (if present)
     children - Array of direct children (title, todo, level, link)
 
-A link resolves, and is refused, exactly as in the org-read tool.
+A link resolves, and is refused, exactly as in the org-node-read tool.
 The file must be in the allowed files, or permitted by
 org-mcp-file-scope-override."
     :mime-type "application/json"))

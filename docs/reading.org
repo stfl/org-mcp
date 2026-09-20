@@ -9,13 +9,13 @@ itself.
 
 ** org://{link}
 - *Description:* Read an Org file or heading as structured JSON, the same data
-  =org-read= returns for the same link
+  =org-node-read= returns for the same link
 - *URI Pattern:* =org://{link}=, where link is a native Org link (see
   [[file:links.org::*Addressing headings with links][Addressing headings with links]]), bare or bracketed, with or without a
   description. The link resolves, and is refused, exactly as it is in
-  =org-read=, and a refusal carries the same message. A resource URI carries
+  =org-node-read=, and a refusal carries the same message. A resource URI carries
   no =files= parameter, so an =id:= link resolves only within the allowed
-  files; to reach an ID in another file, call =org-read= with =files= (see
+  files; to reach an ID in another file, call =org-node-read= with =files= (see
   [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* Structured JSON with file or headline data including metadata
@@ -35,12 +35,12 @@ as well. Non-ASCII characters may be sent encoded as UTF-8 or raw. A literal
 | =file:/home/user/org/Ärger.org::*Größe=                      | =org://file:/home/user/org/%C3%84rger.org::*Gr%C3%B6%C3%9Fe=                     |
 
 Anything after =org://= that is not a link, such as a bare ID or a bare path,
-is refused as =org-read= refuses it.
+is refused as =org-node-read= refuses it.
 
 *Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
 the MCP /resource/ layer — it is the URI scheme of the =org://{link}=
-resource template above. Tool calls (e.g. =org-read=,
-=org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
+resource template above. Tool calls (e.g. =org-node-read=,
+=org-node-text=, =org-node-set-todo=, =org-node-add-note=)
 take a native Org link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) in
 their =link= parameter, passed as is with no percent-encoding and
 *without* the =org://= prefix; a tool refuses a string that starts with
@@ -75,11 +75,11 @@ These read-only tools let the model read what the resource above serves. The
 =org://{link}= resource is /application-controlled/: it is surfaced through
 the MCP client's @-mention / resource picker UI and requires the user (or
 client heuristics) to select it. Tools, by contrast, are /model-controlled/:
-the LLM can invoke them directly without user mediation. =org-read= returns
+the LLM can invoke them directly without user mediation. =org-node-read= returns
 the same data as the resource for the same link; =org-read-outline= and
-=org-read-headline= are tool-only variants with no resource counterpart.
+=org-node-text= are tool-only variants with no resource counterpart.
 
-** org-read
+** org-node-read
 - *Description:* Read Org file or headline with structured JSON output
 - *Parameters:*
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
@@ -119,14 +119,14 @@ Which of a parent's or a file's tags reach a heading is Org's decision, not
 org-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
 =nil=, a list of tags or a regexp, and =org-tags-exclude-from-inheritance=
 names the tags no heading inherits whatever the first says.
-=org-get-tag-config= reports both values, so a client can tell which policy
+=org-config-tags= reports both values, so a client can tell which policy
 produced what it reads. With inheritance off the two fields carry the same
 tags.
 
 Either field is absent when its list is empty, as the other optional fields
-are. =org-set-tags= replaces the tags written on the heading and leaves
+are. =org-node-set-tags= replaces the tags written on the heading and leaves
 inherited ones where they are, so =local_tags= is the field to work from when
-changing them (see [[file:writing.org::*org-set-tags][org-set-tags]]).
+changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
 
 ** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline
@@ -156,7 +156,7 @@ Example response:
 }
 #+end_src
 
-** org-read-headline
+** org-node-text
 - *Description:* Read Org headline or file as plain text
 - *Parameters:*
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
@@ -169,7 +169,7 @@ Example response:
 
 * Configuration and discovery tools
 
-** org-get-todo-config
+** org-config-todo
 - *Description:* Get TODO keyword configuration for understanding task states
 - *Parameters:* None
 - *Returns:* JSON object with =sequences= and =semantics=
@@ -192,7 +192,7 @@ Example response:
 }
 #+end_src
 
-** org-get-tag-config
+** org-config-tags
 - *Description:* Get tag configuration as literal Elisp variable values
 - *Parameters:* None
 - *Returns:* JSON object with literal Elisp strings for all tag-related variables
@@ -207,7 +207,7 @@ Example return value:
 }
 #+end_src
 
-** org-get-tag-candidates
+** org-config-tag-candidates
 - *Description:* Get every tag a user might want to set on a headline,
   combining configured tags with the tags actually present in allowed
   files, or in the files named in =files=.  Mirrors what Org's interactive
@@ -234,10 +234,10 @@ Example return value:
 #+end_src
 
 Use this when suggesting or completing tag names; use
-=org-get-tag-config= when you need the raw static configuration
+=org-config-tags= when you need the raw static configuration
 (group structure, key bindings, inheritance settings).
 
-** org-get-priority-config
+** org-config-priority
 - *Description:* Get priority configuration for understanding the valid priority range
 - *Parameters:* None
 - *Returns:* JSON object with =highest=, =lowest=, and =default= priority characters
@@ -251,7 +251,7 @@ Example response:
 }
 #+end_src
 
-** org-get-allowed-files
+** org-config-allowed-files
 - *Description:* Get the list of Org files accessible through the org-mcp
   server, and whether a call may name Org files outside them
 - *Parameters:* None
