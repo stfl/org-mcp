@@ -3148,15 +3148,27 @@ BODY cut."
          (interprogram-paste-function nil))
      ,@body))
 
+(declare-function org-inlinetask-remove-END-maybe "org-inlinetask" ())
+
 (defun org-mcp--cut-subtree-at-point ()
   "Cut the subtree of the heading at point, and return its text.
 Everything under the heading goes with it, its drawers and its
 LOGBOOK included, because `org-cut-subtree' takes the region Org
 gives the headline rather than one measured here.  The text comes
 back, so that a caller putting the subtree down elsewhere pastes what
-it cut and a caller that only removes it lets it go."
-  (org-mcp--with-private-kill-ring
-    (org-cut-subtree)))
+it cut and a caller that only removes it lets it go.
+
+The cut ends the way Org ends its own: `org-archive-subtree' and
+`org-refile' both call `org-inlinetask-remove-END-maybe' after
+removing a subtree, guarded by `featurep' so the feature is not
+loaded for a user who does not use inline tasks.  org-node-archive
+reaches that cleanup through `org-archive-subtree'; org-node-delete
+and org-node-refile reach it here, so the three verbs leave a file
+in the same state."
+  (prog1 (org-mcp--with-private-kill-ring
+           (org-cut-subtree))
+    (when (featurep 'org-inlinetask)
+      (org-inlinetask-remove-END-maybe))))
 
 (defun org-mcp--paste-subtree-under
     (text parent-target sibling-target)
