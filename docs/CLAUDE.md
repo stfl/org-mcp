@@ -1,8 +1,13 @@
 # docs/
 
-The user-facing reference. Every page here is addressed to a human reading
-about org-mcp, not to an agent changing it, and that decides what may go in and
-which way the links run.
+The user-facing reference. Every `.org` page here is addressed to a human
+reading about org-mcp, not to an agent changing it, and that decides what may go
+in and which way the links run.
+
+Two Markdown subdirectories sit outside that rule and are described at the
+bottom of this file: `adr/`, for why the interface is shaped as it is, and
+`agents/`, the configuration the engineering skills read. Neither is linked
+from a user-facing page, and `just lint` does not touch them.
 
 ## Routing
 
@@ -68,3 +73,12 @@ written in the present tense, and nothing links to them from the user-facing
 pages — they are for whoever asks why the interface is shaped this way. A
 decision that survives a design discussion belongs here; the discussion itself
 belongs in `.omc/plans/`, which is not committed.
+
+## docs/agents/
+
+The issue tracker, the triage label vocabulary and the domain-doc rules the
+engineering skills read, one Markdown file each. They are addressed to an agent,
+so nothing in `README.org`, `CONTRIBUTING.org` or the `.org` pages here links to
+them; the root `CLAUDE.md` does, under "Agent skills". The skills resolve these
+paths themselves, so a file here is renamed only alongside the skill that reads
+it.
