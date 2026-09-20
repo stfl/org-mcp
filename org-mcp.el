@@ -4883,7 +4883,14 @@ Each element is a `mcp-server-lib-register-server\=' `:resources\=' spec,
 `{link}\=' in the URI makes it a resource template.")
 
 (defun org-mcp-enable ()
-  "Enable the org-mcp server."
+  "Enable the org-mcp server.
+Registers every tool and the org:// resource template under
+`org-mcp--server-id'.  Which GTD query tools are among them depends
+on `org-mcp-query-inbox-fn' and its siblings at the time of the call.
+
+Registrations are reference counted, so a second call needs a second
+`org-mcp-disable' before anything is removed, and a spec that is
+already registered keeps the properties it was registered with."
   (mcp-server-lib-register-server
    :id org-mcp--server-id
    :tools
@@ -4895,7 +4902,13 @@ Each element is a `mcp-server-lib-register-server\=' `:resources\=' spec,
 
 
 (defun org-mcp-disable ()
-  "Disable the org-mcp server."
+  "Disable the org-mcp server.
+Drops one reference to everything registered under
+`org-mcp--server-id', removing whatever reaches zero.  It works on
+what is registered at the time of the call, not on what a particular
+`org-mcp-enable' added: an inner enable that configured fewer GTD
+query tools than an enclosing one takes the enclosing call's away
+when it is undone."
   (mcp-server-lib-unregister-server org-mcp--server-id))
 
 
