@@ -22,9 +22,16 @@
 ;;   marked safe, so the code is laid out for Emacs's default
 ;;   `fill-column' of 70.
 ;;
+;; A file that is not formatted, because it is missing or because
+;; elisp-autofmt complains about it, exits non-zero.
+;;
 ;; The formatter keeps its cache in .elisp-autofmt-cache/.
 
 ;;; Code:
+
+;; What went wrong is in the error message; a backtrace of this script
+;; only buries it.
+(setq backtrace-on-error-noninteractive nil)
 
 (defvar elisp-autofmt-cache-directory)
 (defvar elisp-autofmt-load-packages-local)
@@ -39,12 +46,35 @@
 (setq elisp-autofmt-cache-directory
       (expand-file-name ".elisp-autofmt-cache"))
 
+(defun org-mcp-format--buffer ()
+  "Format the current buffer, signaling when elisp-autofmt complains.
+`elisp-autofmt-buffer' reports a failure, such as unbalanced
+parentheses or a formatter that will not run, by `message' and leaves
+the buffer as it is.  Its complaints all begin with \"elisp-autofmt:
+\", so they are collected here and raised, which is what makes
+`just fmt' fail on a file it did not format."
+  (let ((complaints nil)
+        (message-fn (symbol-function 'message)))
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (when format-string
+                   (let ((text (apply #'format-message format-string args)))
+                     (when (string-prefix-p "elisp-autofmt: " text)
+                       (push text complaints))))
+                 (apply message-fn format-string args))))
+      (elisp-autofmt-buffer))
+    (when complaints
+      (error "%s" (mapconcat #'identity (nreverse complaints) "\n")))))
+
 (dolist (file command-line-args-left)
+  (unless (file-readable-p file)
+    (error "No such file: %s" file))
   (let ((enable-local-variables nil))
     (with-current-buffer (find-file-noselect file)
       (setq-local elisp-autofmt-load-packages-local '("cl-macs"))
-      (elisp-autofmt-buffer)
-      (save-buffer)
+      (org-mcp-format--buffer)
+      (let ((save-silently t))
+        (save-buffer))
       (kill-buffer))))
 
 ;; The files are formatted; keep Emacs from visiting them as well.
