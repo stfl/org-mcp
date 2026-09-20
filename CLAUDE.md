@@ -26,10 +26,13 @@ A failing lint stage leaves `.lint-output.txt`; the test run always leaves
 
 ## What a change is obliged to keep true
 
-- **An added, removed or renamed MCP tool, resource template or `defcustom`
-  updates its documentation page in the same commit.** `CONTRIBUTING.org`, "What
-  a change owes the documentation", maps each kind of change to its page. The
-  README changes only when what org-mcp *is* or what it costs to run changes.
+- **A change to anything a client or an Emacs user can observe updates its
+  documentation page in the same commit.** Tools, resource templates and
+  `defcustom`s are the obvious ones; a public variable, what the `initialize`
+  handshake reports, and a refusal message a client acts on count too.
+  `CONTRIBUTING.org`, "What a change owes the documentation", maps each to its
+  page. The README changes only when what org-mcp *is* or what it costs to run
+  changes.
 - **Human-facing documents never link into this file** or into any `AGENTS.md`,
   and never into `.claude/`. `README.org`, `CONTRIBUTING.org` and `docs/*.org`
   link to each other; this file links out to them. A fact a human needs belongs

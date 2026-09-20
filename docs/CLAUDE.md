@@ -11,7 +11,7 @@ owns the question, never to a second page that repeats it:
 
 | Page | Owns |
 |---|---|
-| `installation.org` | installing the package and the shims, registering a client, the dependency versions |
+| `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports |
 | `file-access.org` | the allowed files, `org-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
 | `links.org` | the link forms a call takes, what is refused, the link every response carries |
 | `reading.org` | the `org://{link}` resource, `org-read`, `org-read-outline`, `org-read-headline`, and the five configuration and discovery tools |

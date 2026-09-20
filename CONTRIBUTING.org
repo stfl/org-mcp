@@ -99,8 +99,12 @@ was looking at.
 
 * What a change owes the documentation
 
-A change that adds, removes or renames an MCP tool, a resource template or a
-=defcustom= updates the page that documents it in the same commit:
+A change to anything a client or an Emacs user can observe updates the page that
+documents it, in the same commit. An MCP tool, a resource template and a
+=defcustom= are the obvious ones; so are a public variable, what the =initialize=
+handshake reports, and the text of a refusal a client is meant to act on. The
+test is whether someone outside =org-mcp.el= can see the difference, not which
+kind of thing changed:
 
 | Change                                    | Page                                              |
 |-------------------------------------------+---------------------------------------------------|
@@ -111,6 +115,7 @@ A change that adds, removes or renames an MCP tool, a resource template or a
 | which files a call may reach              | [[file:docs/file-access.org][Which files a call reaches]]       |
 | link forms taken or returned              | [[file:docs/links.org][Addressing headings with links]]   |
 | installing, or registering with a client  | [[file:docs/installation.org][Installing org-mcp]]               |
+| what the =initialize= handshake reports   | [[file:docs/installation.org][Installing org-mcp]]               |
 
 The README changes only when what org-mcp /is/ changes, or what it costs to run:
 the tool count, the quickstart, a new limit. Everything else belongs to a page
