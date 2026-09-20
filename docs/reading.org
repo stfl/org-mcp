@@ -191,6 +191,9 @@ and they arrive together, under one key of the node:
 }
 #+end_src
 
+A file is a node, so =properties= reaches a file's own top-level drawer the
+same way it reaches a heading's.
+
 Property names are matched the way Org matches them, ignoring case, and come
 back under the name Org keeps, which is upper case. A property the node does
 not carry is left out, exactly as a field with no value is, so an answer says

@@ -13368,6 +13368,20 @@ neither has anything to say about the other."
        "org-node-read" `((link . ,link) (fields . ["TITLE"]))
        "Unknown node field: TITLE\\.  Valid fields: title, todo, "))))
 
+(ert-deftest org-mcp-test-properties-file-drawer-is-a-drawer ()
+  "A file's own property drawer is a drawer like any other.
+A file is a node, so the properties parameter reaches its top-level
+drawer the way it reaches a heading's."
+  (org-mcp-test--with-id-setup
+      test-file org-mcp-test--content-file-node-id
+      (list org-mcp-test--node-shape-file-id)
+    (should
+     (equal
+      (org-mcp-test--read-properties (concat "file:" test-file) "all")
+      `((title . ,(file-name-nondirectory test-file))
+        (properties
+         . ((ID . ,org-mcp-test--node-shape-file-id))))))))
+
 (ert-deftest org-mcp-test-properties-default-is-the-endpoint-s ()
   "What a call carries unasked is what that endpoint is for.
 A read carries the whole node and no drawer: a drawer holds what the
