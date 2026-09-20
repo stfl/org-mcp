@@ -150,8 +150,9 @@ When nil, no sorting is applied."
   (eval-when-compile
     (require 'lisp-mnt)
     ;; `byte-compile-current-file' names the file while the compiler
-    ;; runs; `bound-and-true-p' because bytecomp is not loaded when this
-    ;; file is loaded from source.
+    ;; runs.  Loading from source binds it only when some dependency has
+    ;; already pulled in bytecomp, which is not ours to rely on, so read
+    ;; it defensively.
     (lm-version
      (or (bound-and-true-p byte-compile-current-file)
          load-file-name
@@ -4834,7 +4835,7 @@ Returns JSON object:
            else file:{path}::*{title}
   total - Number of open clocks found (number)")
     :read-only t))
-  "Specs for the clock tools, in `org-mcp--tool-specs\=' order.
+  "Specs for the clock tools, registered after the GTD query tools.
 Same spec format as `org-mcp--core-tool-specs\='.")
 
 (defconst org-mcp--resource-specs
@@ -4903,9 +4904,9 @@ Registers every tool and the org:// resource template under
 `org-mcp--server-id'.  Which GTD query tools are among them depends
 on `org-mcp-query-inbox-fn' and its siblings at the time of the call.
 
-Registrations are reference counted, so a second call needs a second
-`org-mcp-disable' before anything is removed, and a spec that is
-already registered keeps the properties it was registered with."
+Registrations are reference counted: a spec registered twice needs
+two `org-mcp-disable' calls before it goes, and the second
+registration keeps the properties of the first."
   (mcp-server-lib-register-server
    :id org-mcp--server-id
    :version org-mcp-version
