@@ -4275,7 +4275,7 @@ The text is gone from the file and org-mcp keeps no copy of it.  The
 response carries the link the node had, read while it was still
 there, so a client can say which node it lost.
 
-A node the running clock is in is refused instead, see
+A node the running clock is in is refused rather than deleted, see
 `org-mcp--assert-clock-outside-subtree': the open CLOCK line would go
 with the text and leave Emacs clocking a node that is not there.
 Call org-clock-out first, then delete it.
