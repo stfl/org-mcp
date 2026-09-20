@@ -164,6 +164,16 @@ CONTEXT describes what is being compared."
    (format "%s mismatch: expected '%s', found '%s'"
            context expected found)))
 
+(defun org-mcp--saved-then-failed-error (what err)
+  "Throw an error for a save that wrote the file and then failed.
+WHAT names, as a clause, the change the file holds, so that a client
+reading the message repeats neither the change nor the save.  ERR is
+the error a function the save ran, such as one on `after-save-hook',
+signalled."
+  (org-mcp--tool-validation-error
+   "%s, but a function run by the save failed: %s"
+   what (error-message-string err)))
+
 (defun org-mcp--tool-file-access-error (locator &optional hint)
   "Throw file access error for tool operations.
 LOCATOR is the link or path the call sent, naming the file it may not
@@ -784,10 +794,8 @@ OPERATION, and RESPONSE-ALIST as variables."
                               ;; holds the change.
                               (unless (buffer-modified-p)
                                 (setq ,done t)
-                                (org-mcp--tool-validation-error
-                                 "The change was made and saved, but a \
-function run by the save failed: %s"
-                                 (error-message-string err)))
+                                (org-mcp--saved-then-failed-error
+                                 "The change was made and saved" err))
                               (signal (car err) (cdr err))))))
                        (setq ,done t))
                    (if ,done
@@ -1705,6 +1713,28 @@ clock out of it, then send its link as clock_out"
                   "clock_out does not name the running clock: %s.  \
 The clock runs on %s"
                   clock-out running)))))))))))
+
+(defun org-mcp--clock-save-closed (buf file preexisting-modified-p)
+  "Save BUF, which holds the clock org-mcp closed, and report a failed save.
+FILE is the file BUF visits.  A non-nil PREEXISTING-MODIFIED-P leaves
+BUF unsaved with the user's own edits in it, see
+`org-mcp--maybe-save-buffer'.
+
+Closing the clock also stopped Emacs's own clock, which undo cannot
+start again, so a failed save is not undone the way
+`org-mcp--modify-and-save' undoes one.  The call fails instead with a
+message saying that the clock was closed and whether the file holds
+the close, so a client neither closes the clock a second time nor
+takes it for still running."
+  (condition-case err
+      (org-mcp--maybe-save-buffer buf file preexisting-modified-p)
+    (error
+     (if (buffer-modified-p buf)
+         (org-mcp--tool-validation-error
+          "The running clock was closed but not saved: %s"
+          (error-message-string err))
+       (org-mcp--saved-then-failed-error
+        "The running clock was closed and saved" err)))))
 
 (defun org-mcp--clock-find-last-closed ()
   "Return the most recent closed-clock end time across allowed files.
@@ -3500,7 +3530,8 @@ While a clock runs, CLOCK_OUT must name its heading, see
 `org-mcp--clock-check-clock-out', and that clock is closed first, at
 the new clock's start, which must not precede its own.  LINK,
 START_TIME, RESOLVE and CLOCK_OUT are all checked before that, so a
-refused call changes nothing.
+refused call changes nothing.  Once that clock is closed, a save of it
+that fails ends the call saying so, see `org-mcp--clock-save-closed'.
 When `org-clock-continuously' is non-nil and no explicit START_TIME
 is given, the new clock may start at the previous clock's end time
 if it is within `org-mcp-clock-continuous-threshold' minutes.
@@ -3561,7 +3592,7 @@ MCP Parameters:
              (was-modified (buffer-modified-p buf))
              (tick (buffer-chars-modified-tick buf)))
         (org-clock-clock-out (cons marker running-start) t close-at)
-        (org-mcp--maybe-save-buffer
+        (org-mcp--clock-save-closed
          buf (alist-get 'file active) was-modified)
         ;; Only an edit that reached BUF can stay unsaved, and it has
         ;; not when a hook saved BUF.

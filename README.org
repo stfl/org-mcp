@@ -528,7 +528,15 @@ A failed write puts back text only: a clock that =org-todo= stopped
 stays closed and unsaved in its buffer. Closing a clock also stops the Emacs
 clock the CLOCK line belongs to, and putting the line back open does not start
 it again. =org-clock-in= closes the running clock before it opens the new one;
-a failure while opening the new clock leaves the old one closed.
+a failure while opening the new clock leaves the old one closed. When saving
+that close fails, the call fails saying the clock was closed, and whether the
+file holds the close, so a client neither closes it a second time nor takes it
+for still running:
+
+#+begin_example
+The running clock was closed and saved, but a function run by the save failed: ...
+The running clock was closed but not saved: ...
+#+end_example
 
 *** org-get-todo-config
 - *Description:* Get TODO keyword configuration for understanding task states

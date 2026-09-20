@@ -6753,6 +6753,71 @@ clock_out."
         (org-mcp-test--verify-file-matches
          allowed-file org-mcp-test--clock-in-at-eleven-expected-regex)))))
 
+(ert-deftest org-mcp-test-clock-in-close-failed-after-save-hook ()
+  "Test a save failing after the close reached the file says the close was made.
+A buffer-local `after-save-hook' fails once the running clock's file
+holds the close.  The clock stays closed there, in buffer and on disk,
+and the Emacs clock stays stopped; no new clock opens, and the error
+says the clock was closed and saved, so a client does not close it a
+second time."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content)
+       (running-file org-mcp-test--clock-running-elsewhere-content))
+    (org-mcp-test--with-session-clock running-file
+      (let ((buffer (find-buffer-visiting running-file)))
+        (with-current-buffer buffer
+          (add-hook 'after-save-hook
+                    (lambda () (error "Save hook failed"))
+                    nil t))
+        (org-mcp-test--call-tool-refused
+         "org-clock-in"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (start_time . "2026-01-01T10:00:00")
+           (clock_out
+            . ,(org-mcp-test--file-link running-file "*Running Task")))
+         "\\`The running clock was closed and saved, but .*Save hook failed"
+         test-file)
+        (with-current-buffer buffer
+          (kill-local-variable 'after-save-hook))
+        (org-mcp-test--verify-file-matches
+         running-file org-mcp-test--clock-running-elsewhere-closed-regex)
+        (org-mcp-test--verify-buffer-matches
+         buffer org-mcp-test--clock-running-elsewhere-closed-regex)
+        (org-mcp-test--verify-no-modified-buffer running-file)
+        (should-not (org-clock-is-active))))))
+
+(ert-deftest org-mcp-test-clock-in-close-failed-save ()
+  "Test a save failing before it wrote the file says the close is unsaved.
+A buffer-local `write-contents-functions' fails, so the close of the
+running clock reaches its buffer alone.  The error says the clock was
+closed but not saved, the buffer keeps the close and stays modified,
+the file keeps its open CLOCK line, and no new clock opens."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content)
+       (running-file org-mcp-test--clock-running-elsewhere-content))
+    (org-mcp-test--with-session-clock running-file
+      (let ((buffer (find-buffer-visiting running-file)))
+        (with-current-buffer buffer
+          (add-hook 'write-contents-functions
+                    (lambda () (error "Save hook failed"))
+                    nil t))
+        (org-mcp-test--call-tool-refused
+         "org-clock-in"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (start_time . "2026-01-01T10:00:00")
+           (clock_out
+            . ,(org-mcp-test--file-link running-file "*Running Task")))
+         "\\`The running clock was closed but not saved: .*Save hook failed"
+         test-file)
+        (with-current-buffer buffer
+          (kill-local-variable 'write-contents-functions)
+          (should (buffer-modified-p)))
+        (org-mcp-test--verify-buffer-matches
+         buffer org-mcp-test--clock-running-elsewhere-closed-regex)
+        (should (string= (org-mcp-test--read-file running-file)
+                         org-mcp-test--clock-running-elsewhere-content))
+        (should-not (org-clock-is-active))))))
+
 (ert-deftest org-mcp-test-clock-in-refuses-without-clock-out ()
   "Test clock-in refuses while a clock runs and clock_out is not sent.
 The refusal names the running clock's heading by title and link, so
