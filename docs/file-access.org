@@ -1,0 +1,178 @@
+#+TITLE: Which files a call reaches
+
+This page answers which Org files org-mcp may read and write: the allowed
+files, how a single call names a file outside them, and how a call points an
+=id:= link at a file Emacs has not indexed. The [[file:../README.org][README]] introduces the
+server itself.
+
+* Configuring allowed files
+
+Once you read and internalized the [[file:../README.org][warning about write access]], decide which
+Org files MCP clients may touch.
+
+By default, =org-mcp-allowed-files= is nil and org-mcp falls back to
+=org-agenda-files=.  If your agenda already lists the right files, no extra
+configuration is needed.  Set =org-mcp-allowed-files= explicitly to expose a
+different (or narrower) set:
+
+#+begin_src emacs-lisp
+;; Default: nil — org-mcp uses `org-agenda-files'
+
+;; Absolute paths
+(setq org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
+
+;; Relative paths (resolved against `org-directory', same convention as
+;; `org-agenda-files'; tilde and environment variables also expand)
+(setq org-directory "~/org")
+(setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+#+end_src
+
+Absolute and relative entries allow a file alike, and either way a call
+reaches it through a =file:= link with its absolute path; a link with a
+relative path is refused.
+
+Every entry names a file.  A directory listed in =org-mcp-allowed-files= is
+ignored and makes none of the files under it reachable.  Directories in
+=org-agenda-files= work as they do for the agenda: Org expands each one into
+the Org files directly inside it, and those files are allowed.
+
+* Configuring the scope override
+
+A call can name an Org file outside the allowed files by passing its path.
+=org-mcp-file-scope-override= decides whether that is permitted:
+
+- =nil= (the default) :: refuse.  Only the allowed files are reachable.
+- a list of directories :: permit any Org file under one of these directories.
+  Relative entries resolve against =org-directory=.
+- =t= :: permit any Org file.  *Every Org file the Emacs process can read and
+  write becomes readable and writable by MCP clients.*  Prefer a list of
+  directories.
+
+#+begin_src emacs-lisp
+;; Default: refuse files outside the allowed files
+(setq org-mcp-file-scope-override nil)
+
+;; Permit Org files under these directories
+(setq org-mcp-file-scope-override '("~/decisions" "~/src"))
+
+;; Permit every Org file Emacs can read and write
+(setq org-mcp-file-scope-override t)
+#+end_src
+
+The setting governs reading and writing alike.  The permission lasts for the
+one call that names the file; nothing carries over to later calls.
+A call names a file through a =file:= link (see
+[[file:links.org::*Addressing headings with links][Addressing headings with links]]), the =file= parameter of
+=org-read-outline=, or a =files= parameter (see [[*Naming the file of an ID]]
+and [[*Querying other files]]).  An =id:= link names none, so without =files=
+it resolves only within the allowed files, and the file of the running clock
+is not named either, so the setting does not change what the clock tools
+reach.
+
+A named file outside the allowed files must also meet these conditions:
+
+- it is an existing =.org= or =.org_archive= file; encrypted =.org.gpg= files
+  and files with other extensions are refused;
+- symlinks are resolved, for the file and for each directory in the list, and
+  the resolved file must lie under a resolved directory, so a symlink pointing
+  out of a permitted directory is refused.
+
+Whatever the setting, a path that names a remote (TRAMP) file is refused before
+TRAMP can open a connection for it.  That covers a path that is remote as
+written, one that becomes remote once =.=, =..= or =~= is expanded, and a
+symlink whose target is remote.  A remote file cannot be named even when it is
+among the allowed files, and a remote directory in the list permits nothing.
+
+=org-get-allowed-files= reports the policy to clients.
+
+* Querying other files
+
+=org-ql-query=, =org-get-tag-candidates= and =org-clock-find-dangling= take a
+=files= parameter naming the files to work on.  The named set replaces the
+allowed files for that call; without it, the call works on the allowed files.
+A blank value, =null=, =false=, =""= or =[]=, counts as no =files=, since some
+clients fill every optional parameter.  Each entry is an absolute path to an
+Org file or to a directory, and a relative path is refused, since it has no
+directory to resolve against but whichever buffer is current in Emacs:
+
+- a file is checked like any file a call names: one outside the allowed files
+  is accepted only as far as =org-mcp-file-scope-override= permits;
+- a directory the setting permits, anywhere under =t= or inside a listed
+  directory, is searched recursively for the Org files Org takes from a
+  directory in =org-agenda-files=: names matching =org-agenda-file-regexp=, by
+  default every =.org= file and no archive.  Hidden files and directories,
+  whose names start with =.=, are skipped, and so are subdirectories that
+  cannot be read, symlinks to directories, and anything that is not a regular
+  file, such as a dangling symlink.  Every file found is checked like a named
+  file;
+- any other directory, as every directory under =nil=, is not read at all.  It
+  stands for the allowed files under it, so naming =~/org= narrows a query to
+  the allowed files there, and it is refused when none of them is.
+
+A refused entry or found file makes the whole call fail, and so does a named
+directory that cannot be read, or any directory that fails while it is
+searched, such as one removed meanwhile: the call never searches only part of
+the set.  The error names the directory by the entry and the path below it.
+
+A directory search has no size limit and runs in Emacs's single thread: Emacs
+does not respond until the call has walked the tree and read every Org file in
+it.  Under =t= a call can name a tree as large as your home directory, so
+prefer a list of narrow directories.
+
+The call visits each file of the set in an Emacs buffer and closes the buffers
+it opened once it is done, so your buffer list stays as it was.  A buffer that
+was already open stays open.  Without =files=, a query leaves the buffers it
+opens for the allowed files open, as the agenda does.
+
+The GTD queries (=query-inbox=, =query-next=, =query-backlog=) always run over
+the allowed files and refuse a =files= parameter.
+
+* Naming the file of an ID
+
+An =id:= link names no file, so org-mcp finds the ID through Emacs's ID index
+and reaches it only in the allowed files.  An ID in a file Emacs has not
+indexed is not found that way, and looking up an ID the index lacks makes
+org-mcp rescan the index, as Org does, reading every file Org knows, which can
+freeze Emacs for seconds.
+
+Every tool that names a heading takes a =files= parameter for this: an array
+of absolute paths to Org files and directories.  With it, the ID of an =id:=
+link is looked up in the named files instead, in the order given, with
+=org-id-find-id-in-file=, which reads each file, or the buffer visiting it.
+The lookup neither consults nor rescans the ID index and adds nothing to it,
+so a heading in a file Emacs never indexed is reachable once its file is
+named.
+
+- Entries are checked, and directories searched, as for the query tools (see
+  [[*Querying other files]]): a file outside the allowed files is reached only
+  as far as =org-mcp-file-scope-override= permits, for that call alone.
+- The first file that holds the ID wins.  Files are tried in the order of the
+  entries.  A searched directory's files come depth first: each
+  subdirectory's files before the files beside them, and each directory's
+  names in alphabetical order.  A directory that is not searched gives its
+  allowed files in the order of the allowed files.  An ID none of them holds
+  is an error naming the ID and the entries as sent.
+- The lookup visits none of the named files in a buffer of its own: Org reads
+  a file no buffer visits into a hidden work buffer.  The tool then works on
+  the file holding the ID like on any other, and leaves its buffer open.
+- =files= applies only to an =id:= link.  A call sending it with any other
+  link, such as a =file:= link, which names its file already, is refused
+  before any file is opened.  A blank value, =null=, =false=, =""= or =[]=,
+  counts as no =files=.
+- =org-add-todo= looks the =id:= link of =parent_link= up in =files=, which
+  applies to =parent_link= only.  It looks the sibling of =after_link= up in
+  the parent's file, with or without =files=, since the sibling must be a
+  child of the parent, so =after_link= may be any link, such as the
+  =file:= link org-mcp returns for a child without an =ID=.
+- =org-clock-in= looks the =id:= link of =link= up in =files=, which applies
+  to =link= only.  It looks the =id:= link of =clock_out= up in the running
+  clock's file, with or without =files=, since =clock_out= must name the
+  running clock.
+
+#+begin_src json
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "files": ["/home/user/decisions/loop.org"],
+  "new_state": "DONE"
+}
+#+end_src

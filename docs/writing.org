@@ -1,0 +1,372 @@
+#+TITLE: Changing Org content
+
+This page answers what a write does to your buffers and your files, and what
+each write tool takes. Reading is [[file:reading.org][Reading Org content]]; the [[file:../README.org][README]] introduces
+the server itself.
+
+* How a write reaches disk
+
+Write tools create no identifiers. Each write response carries, as =link=, the
+link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]).
+
+Write tools (e.g. =org-update-todo-state=, =org-edit-body=, =org-clock-in=,
+=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-set-tags=,
+=org-set-priority=, =org-set-properties=, =org-update-scheduled=,
+=org-update-deadline=, =org-add-todo=, =org-rename-headline=,
+=org-add-logbook-note=) operate on the canonical Emacs buffer visiting the
+file, preserving any unsaved edits the user may have. The auto-save behaviour
+depends on the buffer state:
+
+- *No existing buffer:* org-mcp opens the file's canonical visited buffer,
+  performs the edit, and saves the buffer to disk.
+- *Clean buffer already visiting the file:* org-mcp edits the buffer and saves
+  it to disk.
+- *Dirty (modified) buffer:* org-mcp edits the buffer in place but does /not/
+  auto-save. The user's unsaved changes are preserved, and the file on disk
+  remains unchanged. The buffer stays modified.
+
+This is deliberate: saving a dirty buffer would also commit the user's own
+in-progress edits to disk as a side effect of an unrelated MCP write, so the
+editing session is left undisturbed and the decision to persist stays with
+the user. In that case, the change lives only in the buffer and is not on
+disk — another process, a backup, or git will not see it until the buffer is
+saved. To make writes reach disk reliably, enable Emacs' built-in
+=auto-save-visited-mode= (tunable via =auto-save-visited-interval=), which
+saves file-visiting buffers to their own files on an idle timer. Plain
+=auto-save-mode= (=auto-save-default=) does not help here: it writes to a
+separate recovery file, never to the visited file itself.
+
+Every write tool response carries a =saved= boolean next to =success=, so a
+client can tell these outcomes apart. =saved= is =true= when the change reached
+the file on disk: org-mcp saved the buffer (no existing buffer, or a clean
+one), or a hook of the user's saved it during the call. It is =false= when the
+change sits only in a buffer that already had unsaved edits. A client that
+receives =false= should tell the user that the buffer needs saving.
+=org-clock-in= also reports =false= when the running clock it closes stays
+unsaved in such a buffer, even though the file it clocks in to reaches disk.
+
+A write that fails leaves the buffer and the file as they were. When the edit
+or the save signals an error, org-mcp undoes its edit, in a buffer with undo
+turned off as well, and a buffer that was clean reads unmodified again, so the
+next write saves it as usual. When a hook saved that buffer partway through the
+call, org-mcp saves it once more to put the file back. When the buffer already
+held the user's unsaved edits, or that second save fails, the file keeps what
+the hook wrote. One failure keeps the change: when the save has written the
+file and a function it runs afterwards, such as one on =after-save-hook=,
+fails, buffer and file hold the change, and the error says that the change was
+made, so a client does not repeat the call.
+
+A failed write puts back text only: a clock that =org-todo= stopped
+(=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
+stays closed and unsaved in its buffer. =org-clock-in= closes the running clock
+before it opens the new one; a failure while opening the new clock leaves the
+old one closed.
+
+* Write tools
+
+** org-update-todo-state
+- *Description:* Update the TODO state of a specific headline
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =current_state= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
+  - =new_state= (string, required): New TODO state (must be valid in org-todo-keywords)
+  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, previous and new states, and the link to the updated headline
+
+Example:
+#+begin_src json
+# Request:
+{
+  "link": "file:/home/user/org/projects.org::*Project Alpha",
+  "current_state": "TODO",
+  "new_state": "IN-PROGRESS"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "previous_state": "TODO",
+  "new_state": "IN-PROGRESS",
+  "link": "file:~/org/projects.org::*Project Alpha"
+}
+
+# State mismatch error:
+{
+  "error": "State mismatch: expected 'TODO', found 'IN-PROGRESS'"
+}
+#+end_src
+
+** org-rename-headline
+- *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =current_title= (string, required): Current headline title (without TODO state or tags) - must match actual title
+  - =new_title= (string, required): New headline title (without TODO state or tags)
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
+
+Example:
+#+begin_src json
+# Request:
+{
+  "link": "file:/home/user/org/projects.org::*Original Task",
+  "current_title": "Original Task",
+  "new_title": "Updated Task Name"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "previous_title": "Original Task",
+  "new_title": "Updated Task Name",
+  "link": "file:~/org/projects.org::*Updated Task Name"
+}
+
+# Title mismatch error:
+{
+  "error": "Title mismatch: expected 'Original Task', found 'Different Task'"
+}
+#+end_src
+
+** org-add-todo
+- *Description:* Add a new TODO item to an Org file
+- *Parameters:*
+  - =title= (string, required): The headline text
+  - =todo_state= (string, required): TODO state from =org-todo-keywords=
+  - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
+  - =body= (string, optional): Body text content to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =parent_link= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
+  - =after_link= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent_link= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
+- *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
+
+Example:
+#+begin_src json
+# Request:
+{
+  "title": "Implement new feature",
+  "todo_state": "TODO",
+  "tags": ["work", "urgent"],
+  "body": "This feature needs to be completed by end of week.",
+  "parent_link": "file:/home/user/org/projects.org",
+  "properties": {
+    "ID": "550e8400-e29b-41d4-a716-446655440001",
+    "EFFORT": "2:00"
+  }
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:550e8400-e29b-41d4-a716-446655440001",
+  "file": "projects.org",
+  "title": "Implement new feature"
+}
+
+# Child inserted after a sibling:
+{
+  "title": "Review the budget",
+  "todo_state": "TODO",
+  "parent_link": "id:550e8400-e29b-41d4-a716-446655440001",
+  "after_link": "file:/home/user/org/projects.org::*Draft the plan"
+}
+
+# Top-level item inserted after a top-level heading:
+{
+  "title": "Plan the offsite",
+  "todo_state": "TODO",
+  "parent_link": "file:/home/user/org/projects.org",
+  "after_link": "id:550e8400-e29b-41d4-a716-446655440001"
+}
+#+end_src
+
+** org-edit-body
+- *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
+- *Parameters:*
+  - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =old_body= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
+  - =new_body= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =new_body= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, and the link to the updated node
+- *Special behavior (replace mode):* When =old_body= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
+
+Example:
+#+begin_src json
+# Replace mode:
+{
+  "link": "id:abc-123",
+  "old_body": "This is a placeholder.",
+  "new_body": "Implementation started - using Strategy pattern."
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:abc-123"
+}
+
+# Append mode:
+{
+  "link": "id:abc-123",
+  "new_body": "Additional notes from meeting.",
+  "append": true
+}
+
+# Adding content to empty node (replace mode):
+{
+  "link": "file:/home/user/org/projects.org::*New task",
+  "old_body": "",
+  "new_body": "Initial task description."
+}
+#+end_src
+
+** org-set-properties
+- *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do, so =false= keeps the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus the headline's link
+
+Example:
+#+begin_src json
+# Set and delete properties:
+{
+  "link": "id:abc-123",
+  "properties": {
+    "EFFORT": "2:00",
+    "OWNER": null
+  }
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "properties_set": ["EFFORT"],
+  "properties_deleted": ["OWNER"],
+  "link": "id:abc-123"
+}
+#+end_src
+
+** org-update-scheduled
+- *Description:* Update the SCHEDULED timestamp on an Org headline
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and the headline's link
+
+Example:
+#+begin_src json
+# Set scheduled:
+{
+  "link": "id:abc-123",
+  "scheduled": "2026-03-27"
+}
+
+# Remove scheduled:
+{
+  "link": "id:abc-123",
+  "scheduled": ""
+}
+#+end_src
+
+** org-update-deadline
+- *Description:* Update the DEADLINE timestamp on an Org headline
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and the headline's link
+
+Example:
+#+begin_src json
+# Set deadline:
+{
+  "link": "id:abc-123",
+  "deadline": "2026-04-15"
+}
+
+# Remove deadline:
+{
+  "link": "id:abc-123",
+  "deadline": ""
+}
+#+end_src
+
+** org-set-tags
+- *Description:* Set tags on an Org headline, replacing any existing tags
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
+
+Example:
+#+begin_src json
+# Set tags:
+{
+  "link": "id:abc-123",
+  "tags": ["work", "urgent"]
+}
+
+# Clear all tags:
+{
+  "link": "id:abc-123"
+}
+#+end_src
+
+** org-set-priority
+- *Description:* Set or remove priority on an Org headline
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and the headline's link
+
+Example:
+#+begin_src json
+# Set priority:
+{
+  "link": "id:abc-123",
+  "priority": "A"
+}
+
+# Remove priority:
+{
+  "link": "id:abc-123",
+  "priority": ""
+}
+#+end_src
+
+** org-add-logbook-note
+- *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, and the headline's link
+
+Example:
+#+begin_src json
+# Add a note:
+{
+  "link": "id:abc-123",
+  "note": "Discussed with team - approved approach B."
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:abc-123"
+}
+#+end_src

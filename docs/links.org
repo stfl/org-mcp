@@ -1,0 +1,138 @@
+#+TITLE: Addressing headings with links
+
+This page answers how a call names a heading, which links org-mcp refuses,
+and which link it gives back. The [[file:../README.org][README]] introduces the server itself.
+
+* Addressing headings with links
+
+Every tool that names a heading takes a native Org link, the text Org
+resolves inside =[[…]]=, and nothing else, so a link copied out of Emacs
+works unchanged:
+
+| Link                               | Addresses                                  |
+|------------------------------------+--------------------------------------------|
+| =id:<id>=                          | the heading with that =ID= property        |
+| =file:/abs/path.org::#<custom-id>= | the heading with that =CUSTOM_ID= property |
+| =file:/abs/path.org::*<title>=     | the first heading with that title          |
+| =file:/abs/path.org=               | the whole file                             |
+| =id:<id>= (file-level drawer)      | the whole file                             |
+
+- A link may be bare or bracketed, with or without a description:
+  =id:abc=, =[[id:abc]]= and =[[id:abc][Project Alpha]]= name the same
+  heading.
+- org-mcp resolves a link with Org's own lookup. For an ID, that is Emacs's ID
+  index, read with =org-id-find-id-file=, or =org-id-find-id-in-file= in each
+  file a call names in =files= (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). The file
+  the index names must be one of the allowed files before org-mcp reads it, so
+  an index entry for a remote or outside file is refused without touching that
+  file. When the index lacks the ID, or names a file that does not hold it,
+  org-mcp rescans the index once, as =org-id-find= does. For the part after
+  =::=, it is =org-link-search=. The search part of an =id:= link, as in
+  =id:<id>::*Review=, runs within that heading's subtree; a =file:= link
+  searches the whole file. A title that matches several headings resolves to
+  the first, as it does in Org, and =::<n>= in a =file:= link goes to line /n/.
+  A search that matches nothing is an error; org-mcp never offers to create
+  the heading.
+- A heading is whatever Org's parser takes for one. A line that starts with
+  stars and a space is a heading even inside a block such as
+  =#+begin_example= or =#+begin_src=, and the block breaks there: reads list
+  that line as a heading, and a title link reaches it. Inside a block, Org
+  escapes such a line with a comma, as =,* Note=; that line is no heading, and
+  reads return it with its comma. =org-add-todo= and =org-edit-body= refuse a
+  body with an unescaped star line inside a block; send it escaped.
+- A link is resolved, never followed: your windows, narrowing, point, folding
+  and marks stay as they were, even when the buffer is narrowed to another
+  subtree, and so do the buffers you have open. A tool works in the buffer
+  visiting the heading's file; when no buffer visits it, the tool opens one and
+  leaves it open.
+- A =file:= link names its file, so it reaches the allowed files and any Org
+  file =org-mcp-file-scope-override= permits (see
+  [[file:file-access.org::*Configuring the scope override][Configuring the scope override]]). An =id:= link names no file and
+  resolves only within the allowed files, unless the call names its file in
+  =files=.
+- An =id:= link whose =ID= sits in a file-level property drawer, before the
+  first heading, where org-roam keeps the =ID= of a file node, addresses the
+  whole file, as =org-id-open= opens the file at its top. In =org-read=,
+  =org-read-headline= and the =org://{link}= resource it reads exactly as the
+  file's =file:= link without a search part does. With a search part, as in
+  =id:<id>::*Review=, it searches the whole file.
+- =org-add-todo= reads a link to a whole file, a =file:= link without a search
+  part or an =id:= link to a file-level property drawer, as the top level of
+  that file. A tool that needs a heading refuses either.
+
+org-mcp refuses:
+
+- every other link type, such as =shell:=, =elisp:=, =https:=, =help:= and
+  =file+sys:=, before any file is opened. org-mcp never runs or opens a link.
+- a link that names no local file by its full path: a relative path
+  (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
+  =[[Title]]=) and a remote TRAMP path, including one that becomes remote only
+  once =.=, =..= or =~= is expanded. Send the full local path instead. No
+  connection is opened for a remote path.
+- a regexp search (=::/regexp/=), which Org answers by building a sparse tree
+  in your buffer.
+- a string that is no link: a bare ID, a bare path, a path with an outline
+  path such as =/home/user/org/projects.org#Parent/Child=, a title on its own,
+  or a link behind =org://=. The error names the link forms to send instead,
+  and nothing is looked up. Bracketed, as =[[/home/user/org/projects.org#Parent/Child]]=,
+  such a path is a link to a file that does not exist, refused as outside the
+  allowed files with the same hint.
+
+* Stable links
+
+A title link, =file:<path>::*<title>=, is a convenience. It resolves as it
+does in Org, to the first heading of the file whose title matches, letter case
+aside and with the TODO keyword, the priority, statistics cookies and the tags
+left out. It is ambiguous when two headings share a title, since it always
+reaches the first of them, and it breaks when the heading is renamed.
+
+For a stable address, give the heading an identifier:
+
+- An =ID=, such as a UUID, in a file Emacs's ID index covers, for example an
+  agenda file. The link is =id:<id>=.
+- A =CUSTOM_ID=, unique within its file, in any other file. The link is
+  =file:<path>::#<custom-id>=.
+
+org-mcp adds neither on its own. Set one with the =properties= parameter of
+=org-add-todo= when the heading is created, or with =org-set-properties=
+afterwards. Once a heading has one, every link org-mcp returns for it is the
+stable one (see [[*Links org-mcp returns]]).
+
+An =id:= link names no file, so on its own it resolves only within the allowed
+files, through Emacs's ID index. org-mcp does not add a new =ID= to that index,
+so the first lookup of it rescans the index; a call that names the heading's
+file in =files= avoids the rescan. For an ID in a file outside the allowed
+files, name that file in =files= on each call that sends the link, as far as
+=org-mcp-file-scope-override= permits (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
+
+* Links org-mcp returns
+
+Every =link= field org-mcp returns is a native Org link: a write returns the
+link to the heading it changed, and every heading in a read result, a query
+result or an outline carries its own. The link is the one =org-store-link=
+makes when it may only use the identifiers a heading already has, chosen in
+this order:
+
+| Heading                              | Returned link               |
+|--------------------------------------+-----------------------------|
+| has an =ID=                          | =id:<id>=                   |
+| has a =CUSTOM_ID= and no =ID=        | =file:<path>::#<custom-id>= |
+| has neither                          | =file:<path>::*<title>=     |
+
+=<path>= is the file name as Org writes it, with =~= for your home directory. A
+title link leaves out the TODO keyword, the priority, statistics cookies and the
+tags. It reaches the first heading with that title and breaks on rename; see
+[[*Stable links]] for a link that does neither.
+
+org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
+heading, and a read leaves the file byte-for-byte unchanged, whether or not a
+buffer visits it. A client that wants a stable link sets the identifier itself.
+
+Your link settings do not change the returned link. org-mcp calls
+=org-store-link= non-interactively and, for that call only, binds
+=org-id-link-to-org-use-id= to =use-existing=, keeps =id:= links free of an
+inherited ID and a search part, keeps the heading's search on =file:= links, and
+ignores the active region, file search functions and other packages' link store
+functions. Advice on =org-store-link= still runs. When it makes a link of
+another type or edits the buffer, the call fails with an error that says so; a
+write then reports that its change was made.

@@ -1,0 +1,273 @@
+#+TITLE: Reading Org content
+
+This page answers how a client reads Org files: the =org://{link}= resource,
+the three read tools, and the tools that report what Emacs has configured.
+Changing content is [[file:writing.org][Changing Org content]]; the [[file:../README.org][README]] introduces the server
+itself.
+
+* Available MCP Resources
+
+** org://{link}
+- *Description:* Read an Org file or heading as structured JSON, the same data
+  =org-read= returns for the same link
+- *URI Pattern:* =org://{link}=, where link is a native Org link (see
+  [[file:links.org::*Addressing headings with links][Addressing headings with links]]), bare or bracketed, with or without a
+  description. The link resolves, and is refused, exactly as it is in
+  =org-read=, and a refusal carries the same message. A resource URI carries
+  no =files= parameter, so an =id:= link resolves only within the allowed
+  files; to reach an ID in another file, call =org-read= with =files= (see
+  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
+- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
+- *Returns:* Structured JSON with file or headline data including metadata
+
+The link is percent-encoded like any URI path, and org-mcp decodes it exactly
+once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
+=%3F=, spaces, =[= and =]=; encoding more, as =encodeURIComponent= does, works
+as well. Non-ASCII characters may be sent encoded as UTF-8 or raw. A literal
+=%= in a title is sent as =%25=, so =%41= in a title is sent as =%2541=.
+
+| Link                                                         | Resource URI                                                                     |
+|--------------------------------------------------------------+----------------------------------------------------------------------------------|
+| =id:550e8400-e29b-41d4-a716-446655440000=                    | =org://id:550e8400-e29b-41d4-a716-446655440000=                                  |
+| =file:/home/user/org/projects.org::#alpha=                   | =org://file:/home/user/org/projects.org::%23alpha=                               |
+| =file:/home/user/org/projects.org::*50% Done=                | =org://file:/home/user/org/projects.org::*50%25%20Done=                          |
+| =[[id:550e8400-e29b-41d4-a716-446655440000][Project Alpha]]= | =org://%5B%5Bid:550e8400-e29b-41d4-a716-446655440000%5D%5BProject%20Alpha%5D%5D= |
+| =file:/home/user/org/Ärger.org::*Größe=                      | =org://file:/home/user/org/%C3%84rger.org::*Gr%C3%B6%C3%9Fe=                     |
+
+Anything after =org://= that is not a link, such as a bare ID or a bare path,
+is refused as =org-read= refuses it.
+
+*Note (tool inputs vs. resource URIs):* The =org://= prefix belongs to
+the MCP /resource/ layer — it is the URI scheme of the =org://{link}=
+resource template above. Tool calls (e.g. =org-read=,
+=org-read-headline=, =org-update-todo-state=, =org-add-logbook-note=)
+take a native Org link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) in
+their =link= parameter, passed as is with no percent-encoding and
+*without* the =org://= prefix; a tool refuses a string that starts with
+it. The =link= fields of tool and resource /responses/ carry native Org
+links (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]): a tool takes one back as it is,
+and the resource takes it percent-encoded, as in the table above.
+
+Example response for a headline:
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work", "urgent"],
+  "scheduled": "<2026-03-26 Thu>",
+  "deadline": "<2026-04-01 Mon>",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "content": "Body text here...",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "link": "file:~/org/projects.org::*Subtask"}
+  ]
+}
+#+end_src
+
+* Read Tools
+
+These read-only tools let the model read what the resource above serves. The
+=org://{link}= resource is /application-controlled/: it is surfaced through
+the MCP client's @-mention / resource picker UI and requires the user (or
+client heuristics) to select it. Tools, by contrast, are /model-controlled/:
+the LLM can invoke them directly without user mediation. =org-read= returns
+the same data as the resource for the same link; =org-read-outline= and
+=org-read-headline= are tool-only variants with no resource counterpart.
+
+** org-read
+- *Description:* Read Org file or headline with structured JSON output
+- *Parameters:*
+  - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
+    - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
+    - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Structured JSON with file or headline data including metadata
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+
+Example response for a headline:
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work"],
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "content": "Body text...",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "link": "file:~/org/projects.org::*Subtask"}
+  ]
+}
+#+end_src
+
+=id= is the ID the heading's =link= names, so it is absent when =link= is a
+=file:= link.
+
+** org-read-outline
+- *Description:* Get hierarchical structure of an Org file as JSON outline
+- *Parameters:*
+  - =file= (string, required): Absolute path to an Org file, or a =file:=
+    link to it with no search part, bare or bracketed, such as
+    =file:/path/to/file.org=. An =id:= link, even one to a file-level drawer,
+    and a =file:= link with a search part are refused without being looked
+    up, and so is a string starting with =org://=
+- *Returns:* JSON object with hierarchical outline structure: the top-level
+  headings and their direct children, each with its =title=, =level=, =link=
+  (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]) and =children=; deeper headings are left out
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+
+Example response:
+#+begin_src json
+{
+  "headings": [
+    {"title": "Projects", "level": 1,
+     "link": "file:~/org/projects.org::*Projects",
+     "children": [
+       {"title": "Project Alpha", "level": 2,
+        "link": "id:550e8400-e29b-41d4-a716-446655440000",
+        "children": []}
+     ]}
+  ]
+}
+#+end_src
+
+** org-read-headline
+- *Description:* Read Org headline or file as plain text
+- *Parameters:*
+  - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
+    - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
+    - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - returns entire file
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Plain text content of the file or headline subtree
+- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+- *Note:* Use this when you need plain text instead of structured JSON
+
+* Configuration and discovery tools
+
+** org-get-todo-config
+- *Description:* Get TODO keyword configuration for understanding task states
+- *Parameters:* None
+- *Returns:* JSON object with =sequences= and =semantics=
+
+Example response:
+#+begin_src json
+{
+  "sequences": [
+    {
+      "type": "sequence",
+      "keywords": ["TODO", "NEXT", "|", "DONE", "CANCELLED"]
+    }
+  ],
+  "semantics": [
+    {"state": "TODO", "isFinal": false, "sequenceType": "sequence"},
+    {"state": "NEXT", "isFinal": false, "sequenceType": "sequence"},
+    {"state": "DONE", "isFinal": true, "sequenceType": "sequence"},
+    {"state": "CANCELLED", "isFinal": true, "sequenceType": "sequence"}
+  ]
+}
+#+end_src
+
+** org-get-tag-config
+- *Description:* Get tag configuration as literal Elisp variable values
+- *Parameters:* None
+- *Returns:* JSON object with literal Elisp strings for all tag-related variables
+
+Example return value:
+#+begin_src json
+{
+  "org-use-tag-inheritance": "t",
+  "org-tags-exclude-from-inheritance": "(\"urgent\")",
+  "org-tag-alist": "((\"work\" . 119) (\"urgent\" . 117) (:startgroup) (\"@office\" . 111) (\"@home\" . 104) (\"@errand\" . 101) (:endgroup) (:startgrouptag) (\"project\") (:grouptags) (\"proj_a\") (\"proj_b\") (:endgrouptag))",
+  "org-tag-persistent-alist": "nil"
+}
+#+end_src
+
+** org-get-tag-candidates
+- *Description:* Get every tag a user might want to set on a headline,
+  combining configured tags with the tags actually present in allowed
+  files, or in the files named in =files=.  Mirrors what Org's interactive
+  tag completion (=C-c C-q=) offers.
+- *Parameters:*
+  - =files= (array of strings, optional): Files and directories to collect
+    tags from, replacing the allowed files for this call.  Directories are
+    searched recursively.  See [[file:file-access.org::*Querying other files][Querying other files]]
+- *Returns:* JSON object with =tags= array (sorted, deduplicated).
+
+The union covers:
+- =org-tag-alist= and =org-tag-persistent-alist=
+- Per-file =#+TAGS:= / =#+FILETAGS:=
+- Every tag present on any headline across those files
+
+Group keywords (=:startgroup=, =:endgroup=, =:startgrouptag=,
+=:grouptags=, =:endgrouptag=) are filtered out.
+
+Example return value:
+#+begin_src json
+{
+  "tags": ["@home", "@office", "personal", "project", "urgent", "work"]
+}
+#+end_src
+
+Use this when suggesting or completing tag names; use
+=org-get-tag-config= when you need the raw static configuration
+(group structure, key bindings, inheritance settings).
+
+** org-get-priority-config
+- *Description:* Get priority configuration for understanding the valid priority range
+- *Parameters:* None
+- *Returns:* JSON object with =highest=, =lowest=, and =default= priority characters
+
+Example response:
+#+begin_src json
+{
+  "highest": "A",
+  "lowest": "C",
+  "default": "B"
+}
+#+end_src
+
+** org-get-allowed-files
+- *Description:* Get the list of Org files accessible through the org-mcp
+  server, and whether a call may name Org files outside them
+- *Parameters:* None
+- *Returns:* JSON object with:
+  - =files=: array of absolute paths of the allowed Org files
+  - =override_allowed=: whether =org-mcp-file-scope-override= permits a call
+    to name an Org file outside the allowed files
+  - =override_roots=: absolute paths of the directories under which a named
+    Org file is permitted; present only when the setting is a list of
+    directories.  When =override_allowed= is true and =override_roots= is
+    absent, any Org file is permitted
+
+Use cases:
+- Discovery: "What Org files can I access through MCP?"
+- Link Construction: "I need to build a =file:= link - what's the exact path?"
+- Access Troubleshooting: "Why is my file access failing?"
+- Configuration Verification: "Did my org-mcp-allowed-files setting work correctly?"
+
+Example response:
+#+begin_src json
+{
+  "files": [
+    "/home/user/org/tasks.org",
+    "/home/user/org/projects.org",
+    "/home/user/notes/daily.org"
+  ],
+  "override_allowed": true,
+  "override_roots": ["/home/user/decisions"]
+}
+#+end_src
+
+Empty configuration returns:
+#+begin_src json
+{
+  "files": [],
+  "override_allowed": false
+}
+#+end_src

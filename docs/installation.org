@@ -1,0 +1,91 @@
+#+TITLE: Installing org-mcp
+
+This page has the full install: the package itself, the stdio shims, and
+registering the server with an MCP client. The [[file:../README.org][README]] has the short
+version.
+
+* Installing the package
+
+Requires Emacs 30.1 or later. CI covers Emacs 30.2 and 31.1 on Linux and macOS.
+
+From [[https://melpa.org/#/org-mcp][MELPA]] or [[https://stable.melpa.org/#/org-mcp][MELPA Stable]]:
+
+=M-x package-install RET org-mcp RET=
+
+* Doom Emacs
+
+To install this fork in Doom Emacs, add to =packages.el=:
+
+#+begin_src emacs-lisp
+(package! org-mcp
+  :recipe (:host github :repo "stfl/org-mcp"
+           :files (:defaults "org-mcp-stdio.sh")))
+#+end_src
+
+Then configure in =config.el=:
+
+#+begin_src emacs-lisp
+(use-package org-mcp
+  :after org
+  ;; By default org-mcp falls back to `org-agenda-files' when
+  ;; `org-mcp-allowed-files' is nil, so no extra setup is needed
+  ;; if you already have an agenda configured.  Set
+  ;; `org-mcp-allowed-files' explicitly to expose a different (or
+  ;; narrower) set of files to MCP.  Entries may be absolute or
+  ;; relative; relative paths resolve against `org-directory'.
+  ;; :custom
+  ;; (org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+  ;; Optional: let a call name Org files under these directories too
+  ;; (default nil refuses; t permits every Org file Emacs can reach)
+  ;; (org-mcp-file-scope-override '("~/decisions"))
+  ;; Optional: maximum minutes gap for continuous clocking (default 30)
+  ;; (org-mcp-clock-continuous-threshold 15)
+  :config
+  (unless (file-exists-p (org-mcp--installed-script-path))
+    (org-mcp-install))
+  (if mcp-server-lib--running
+      (message "org-mcp: MCP server already running, skipping start")
+    (mcp-server-lib-start)))
+#+end_src
+
+* Registering with an MCP Client
+
+org-mcp ships a thin wrapper, =org-mcp-stdio.sh=, that injects the
+correct =--server-id=, =--init-function=, and =--stop-function= so
+client configs only need to point at the script.  Install both shims
+into =mcp-server-lib-install-directory= (defaults to
+=user-emacs-directory=):
+
+#+begin_example
+M-x mcp-server-lib-install RET   ;; installs emacs-mcp-stdio.sh
+M-x org-mcp-install RET          ;; installs org-mcp-stdio.sh
+#+end_example
+
+The actual install path depends on your Emacs setup, since
+=user-emacs-directory= varies:
+
+- Vanilla Emacs: =~/.emacs.d/=
+- XDG-style Emacs (29+): =~/.config/emacs/=
+- Doom Emacs: =~/.config/emacs/.local/cache/= (Doom rebinds
+  =user-emacs-directory= to keep state separate from config). To pin
+  the shims somewhere predictable like =~/.config/emacs/bin/=, set
+  =mcp-server-lib-install-directory= explicitly, e.g.
+  =(setq mcp-server-lib-install-directory (expand-file-name "bin/" doom-emacs-dir))=
+  before =mcp-server-lib= loads.
+
+=org-mcp-stdio.sh= resolves =emacs-mcp-stdio.sh= relative to its own
+directory, so co-locating both shims in the same directory (the
+default) requires no extra configuration.  Then register =org-mcp=
+with your MCP client (adjust the path to match your install
+directory):
+
+#+begin_src bash
+claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
+#+end_src
+
+Extra arguments are forwarded to =emacs-mcp-stdio.sh=, so callers can
+still pass =--socket=...= or override defaults if needed.
+
+Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib-start=. Stop it with =M-x mcp-server-lib-stop= when done.
+
+To remove the installed wrapper, run =M-x org-mcp-uninstall=.

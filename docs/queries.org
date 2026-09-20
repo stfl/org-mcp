@@ -1,0 +1,87 @@
+#+TITLE: Searching and GTD queries
+
+This page answers how to search Org files with org-ql through org-mcp, and how
+to wire up the three GTD query tools. The [[file:../README.org][README]] introduces the server
+itself.
+
+* Query tools
+
+** org-ql-query
+- *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
+- *Parameters:*
+  - =query= (string, required): org-ql query sexp as a string
+  - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[file:file-access.org::*Querying other files][Querying other files]]
+- *Returns:* JSON object with a =matches= array, each match carrying its heading's link as =link=, the =total= count, and the =files_searched= count
+
+Example:
+#+begin_src json
+# Request:
+{
+  "query": "(and (todo \"TODO\") (priority \"A\"))"
+}
+
+# Response:
+{
+  "matches": [
+    {
+      "title": "Urgent task",
+      "level": 1,
+      "file": "/home/user/org/tasks.org",
+      "todo": "TODO",
+      "priority": "C",
+      "parent-priority": "A",
+      "link": "file:~/org/tasks.org::*Urgent task"
+    }
+  ],
+  "total": 1,
+  "files_searched": 3
+}
+#+end_src
+
+** query-inbox
+- *Description:* Query inbox items using the configured GTD workflow
+- *Parameters:* None
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
+
+** query-next
+- *Description:* Query next action items using the configured GTD workflow
+- *Parameters:*
+  - =tag= (string, optional): Tag string to filter results
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
+
+** query-backlog
+- *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
+- *Parameters:*
+  - =tag= (string, optional): Tag string to filter results
+- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
+- *Scope:* Always runs over the allowed files; a =files= parameter is refused
+
+* Configuring GTD Query Tools
+
+The GTD query tools are opt-in.  Set the query functions and an optional sort comparator:
+
+#+begin_src emacs-lisp
+(setq org-mcp-query-inbox-fn   #'my-inbox-query
+      org-mcp-query-backlog-fn #'my-backlog-query
+      org-mcp-query-next-fn    #'my-next-actions-query
+      org-mcp-query-sort-fn    #'my-rank-comparator)
+#+end_src
+
+Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= and =org-mcp-query-next-fn= receive an optional tag-filter argument (an org-ql sexp or =nil=).  =org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=.
+
+* Configuring Extra Query Properties
+
+=org-mcp-ql-extra-properties= lets you append computed values to every org-ql query result:
+
+#+begin_src emacs-lisp
+(setq org-mcp-ql-extra-properties
+      '((parent-priority . my-parent-priority-fn)
+        (rank . my-rank-fn)))
+#+end_src
+
+Each function is called at point with no arguments during result extraction.  Non-nil return values are included in the JSON result under the given key.
