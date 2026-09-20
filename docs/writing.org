@@ -104,10 +104,10 @@ priority outside the configured range. Sending the same call again refuses it
 again, so something in the call has to change.
 
 A =conflict:= says the opposite: the call was well formed, and the file has
-moved on from what the call asserted about it. The =before= of a state or a
-title change, and the =clock_out= of a running clock, are the assertions
-org-mcp checks, and a conflict names what it found instead, so the recovery is
-to read the heading or the active clock again and decide afresh.
+moved on from what the call asserted about it. The =before= a write carries,
+and the =clock_out= of a running clock, are the assertions org-mcp checks, and
+a conflict names what it found instead, so the recovery is to read the heading
+or the active clock again and decide afresh.
 
 A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
 an unchecked checkbox, an ordered subtree — refused the change, nothing was
@@ -148,12 +148,23 @@ token goes stale for reasons a client causes itself (see [[file:reading.org::*Th
 
 Which token to ask for follows what you are about to change, because what you
 assert is what you would destroy. A field change carries the field's own value,
-which is what =before= holds on =org-node-set-todo= and =org-node-set-title=: a
-heading that has grown a clock line since you read it is still the heading
-whose state you meant to change, and a token over its subtree would refuse that
-write for nothing. A body rewritten whole is the =content_digest= region, the
-one =org-node-set-content= works inside. A subtree is =digest=, because
-everything under the node goes with it.
+which is what =before= holds on =org-node-set-todo=, =org-node-set-title=,
+=org-node-set-scheduled=, =org-node-set-deadline=, =org-node-set-priority= and
+=org-node-set-properties=: a heading that has grown a clock line since you read
+it is still the heading whose state you meant to change, and a token over its
+subtree would refuse that write for nothing. A body rewritten whole is the
+=content_digest= region, the one =org-node-set-content= works inside. A subtree
+is =digest=, because everything under the node goes with it.
+
+On =org-node-set-scheduled=, =org-node-set-deadline=, =org-node-set-priority=
+and =org-node-set-properties= the =before= is required, and an empty one is a
+value rather than a parameter left out: it asserts the field held nothing. That
+is how you say "this heading has no deadline", and if one has appeared since
+you read it the write is refused rather than quietly replacing it. Send the
+field as a read returned it — for a timestamp that is the raw Org string,
+brackets, repeater and delay included, and not the ISO shorthand =after= also
+takes, because comparing an input spelling against a stored one would refuse
+writes over a difference the file does not have.
 
 The three tools that take a whole node away require it. =digest= is what their
 =before= holds, and they take no =after=: the verb is the change. Nothing
@@ -166,8 +177,8 @@ carries now. The current token is the only value that would make the same call
 succeed, and a call asserting a digest you never read asserts nothing; what the
 refusal tells you is that the node has moved on from the read you planned from,
 and the way forward is to read it again. A =before= over a field is different:
-the state or the title such a refusal reports is a fact about the node, and it
-is yours to act on.
+the value such a refusal reports — the state, the title, the date, the priority,
+the property — is a fact about the node, and it is yours to act on.
 
 * Write tools
 
@@ -396,16 +407,24 @@ Example:
 - *Description:* Set or delete properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. =null= or an empty string asserts the property is absent. Values take the same forms =after= takes, so the values a read handed back can be echoed, and names are matched without regard to case, as Org reads them
   - =after= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do, so =false= keeps the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus the headline's link
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the value a property holds, unmarked validation otherwise — a =before= naming other properties than =after= writes among them (see [[*How a refusal is classed]])
+
+Every assertion is checked before the first property is written, so a call
+refused over its second property has not written its first.
 
 Example:
 #+begin_src json
 # Set and delete properties:
 {
   "link": "id:abc-123",
+  "before": {
+    "EFFORT": "1:00",
+    "OWNER": "ada"
+  },
   "after": {
     "EFFORT": "2:00",
     "OWNER": null
@@ -420,52 +439,121 @@ Example:
   "properties_deleted": ["OWNER"],
   "link": "id:abc-123"
 }
+
+# Add a property no heading carried before:
+{
+  "link": "id:abc-123",
+  "before": { "OWNER": "" },
+  "after": { "OWNER": "ada" }
+}
+
+# A property has moved on since the read:
+{
+  "error": "conflict: Property 'EFFORT' mismatch: expected '1:00', found '3:00'"
+}
+
+# The call writes a property it did not assert:
+{
+  "error": "before does not name the property 'OWNER' this call writes"
+}
 #+end_src
 
 ** org-node-set-scheduled
-- *Description:* Update the SCHEDULED timestamp on an Org headline
+- *Description:* Move the SCHEDULED timestamp of an Org headline from one date to another
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater and delay included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+=before= and =after= are the two ends of a move, not the two ends of a range:
+=before= is the date the headline carries today and =after= the date it is to
+carry instead. Rescheduling a repeating entry keeps its repeater, which is one
+reason =before= is the whole Org string rather than a date.
 
 Example:
 #+begin_src json
-# Set scheduled:
+# Move a task from Sunday the 20th to Sunday the 27th:
 {
   "link": "id:abc-123",
+  "before": "<2026-09-20 Sun>",
+  "after": "2026-09-27"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "before": "<2026-09-20 Sun>",
+  "after": "<2026-09-27 Sun>",
+  "link": "id:abc-123"
+}
+
+# Schedule a task that has no date yet:
+{
+  "link": "id:abc-123",
+  "before": "",
   "after": "2026-03-27"
 }
 
-# Remove scheduled:
+# Remove a scheduled date:
 {
   "link": "id:abc-123",
+  "before": "<2026-03-27 Fri>",
   "after": ""
+}
+
+# The date has moved on since the read:
+{
+  "error": "conflict: SCHEDULED mismatch: expected '<2026-09-20 Sun>', found '<2026-09-21 Mon>'"
 }
 #+end_src
 
 ** org-node-set-deadline
-- *Description:* Update the DEADLINE timestamp on an Org headline
+- *Description:* Move the DEADLINE timestamp of an Org headline from one date to another
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
+  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater and delay included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+=before= and =after= are the two ends of a move, not the two ends of a range:
+=before= is the date the headline carries today and =after= the date it is to
+carry instead.
 
 Example:
 #+begin_src json
-# Set deadline:
+# Push a deadline from Sunday the 20th to Sunday the 27th:
 {
   "link": "id:abc-123",
+  "before": "<2026-09-20 Sun>",
+  "after": "2026-09-27"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "before": "<2026-09-20 Sun>",
+  "after": "<2026-09-27 Sun>",
+  "link": "id:abc-123"
+}
+
+# Give a task its first deadline:
+{
+  "link": "id:abc-123",
+  "before": "",
   "after": "2026-04-15"
 }
 
-# Remove deadline:
+# Remove a deadline:
 {
   "link": "id:abc-123",
+  "before": "<2026-04-15 Wed>",
   "after": ""
 }
 #+end_src
@@ -501,23 +589,47 @@ Example:
 - *Description:* Set or remove priority on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =after= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. Omit or empty string to remove priority
+  - =before= (string, required): the priority character the headline carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority
+  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. Empty string removes the priority
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
-# Set priority:
+# Raise a task from B to A:
 {
   "link": "id:abc-123",
+  "before": "B",
   "after": "A"
 }
 
-# Remove priority:
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "before": "B",
+  "after": "A",
+  "link": "id:abc-123"
+}
+
+# Give a task its first priority:
 {
   "link": "id:abc-123",
+  "before": "",
+  "after": "A"
+}
+
+# Remove a priority:
+{
+  "link": "id:abc-123",
+  "before": "A",
   "after": ""
+}
+
+# The priority has moved on since the read:
+{
+  "error": "conflict: Priority mismatch: expected 'B', found 'C'"
 }
 #+end_src
 

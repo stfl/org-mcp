@@ -1208,17 +1208,20 @@ title link, since the new heading has no identifier."
     (should-not (and buffer (buffer-modified-p buffer)))))
 
 (defun org-mcp-test--call-set-properties-expecting-error
-    (test-file link properties)
+    (test-file link properties asserted)
   "Call org-node-set-properties expecting an error, verify nothing changed.
 TEST-FILE is the file that must stay unchanged on disk and in any
 buffer visiting it.  LINK is the link to the headline.  PROPERTIES is the
-alist sent as the properties parameter."
+alist sent as the `after' parameter and ASSERTED the one sent as
+`before'."
   (org-mcp-test--assert-error-and-file
    test-file
    (let* ((request
            (mcp-server-lib-create-tools-call-request
             "org-node-set-properties" nil
-            `((link . ,link) (after . ,properties))))
+            `((link . ,link)
+              (before . ,asserted)
+              (after . ,properties))))
           (response
            (mcp-server-lib-process-jsonrpc-parsed
             request mcp-server-lib-ert-server-id))
@@ -3181,6 +3184,19 @@ NEW-TITLE is the invalid new title that should be rejected."
     (alist-get 'inputSchema (org-mcp-test--registered-tool id)))
    nil))
 
+(defun org-mcp-test--registered-tool-required (id)
+  "Return the parameter names the published schema of tool ID requires."
+  (append
+   (alist-get
+    'required
+    (alist-get
+     'inputSchema
+     (cl-find
+      id (org-mcp-test--registered-tools)
+      :key (lambda (tool) (alist-get 'name tool))
+      :test #'string=)))
+   nil))
+
 (defun org-mcp-test--registered-tool-ids ()
   "Return the ids in the tools/list response, sorted.
 Sorted because `mcp-server-lib' leaves the response order
@@ -3193,17 +3209,24 @@ control."
    #'string<))
 
 (ert-deftest org-mcp-test-guarded-writes-publish-before-as-required ()
-  "The three guarded write tools publish `before' as required.
+  "Every guarded write tool publishes `before\=' among its required parameters.
 A client discovers the guard from the schema and never from the
 handler, so a parameter published as optional is a guard that is
 off, whatever the handler then does with it."
   (org-mcp-test--with-enabled
     (dolist (id
-             '("org-node-set-todo"
+             '("org-node-set-content"
+               "org-node-set-deadline"
+               "org-node-set-priority"
+               "org-node-set-properties"
+               "org-node-set-scheduled"
                "org-node-set-title"
-               "org-node-set-content"))
-      (should
-       (member "before" (org-mcp-test--registered-tool-required id))))))
+               "org-node-set-todo"))
+      (let ((required (org-mcp-test--registered-tool-required id)))
+        (should (member "link" required))
+        (should (member "before" required))
+        (should (member "after" required))
+        (should-not (member "files" required))))))
 
 (ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
@@ -3771,11 +3794,26 @@ keyword reads `(no state)'; the value that asserts it is \"\"."
 Some body."
   "TODO task with existing user properties.")
 
+(defconst org-mcp-test--content-todo-with-two-props
+  "* TODO Task with Two Properties
+:PROPERTIES:
+:EFFORT:   1:00
+:OWNER:    ada
+:END:
+Some body."
+  "TODO task with two properties this server may write.")
+
 (defconst org-mcp-test--content-todo-with-scheduled
   "* TODO Scheduled Task
 SCHEDULED: <2026-03-01 Sun>
 Task body."
   "TODO task with a SCHEDULED timestamp.")
+
+(defconst org-mcp-test--content-repeating-scheduled
+  "* TODO Repeating Task
+SCHEDULED: <2026-06-20 Sat +1w -3d>
+Task body."
+  "TODO task whose SCHEDULED carries a repeater and a delay.")
 
 (defconst org-mcp-test--content-todo-with-deadline
   "* TODO Deadline Task
@@ -3836,6 +3874,16 @@ Task body."
    "Some body\\.\n?\\'")
   "Pattern after deleting EFFORT property.")
 
+(defconst org-mcp-test--pattern-set-properties-one-of-two
+  (concat
+   "\\`\\* TODO Task with Two Properties\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +3:00\n"
+   " *:OWNER: +ada\n"
+   " *:END:\n"
+   "Some body\\.\n?\\'")
+  "Pattern after EFFORT alone is written and OWNER left alone.")
+
 (defconst org-mcp-test--pattern-set-properties-booleans
   (concat
    "\\`\\* TODO Task with Properties\n"
@@ -3881,6 +3929,14 @@ The heading carries the client's ID and no other.")
    "\\`\\* TODO Scheduled Task\n"
    "Task body\\.\n?\\'")
   "Pattern after removing SCHEDULED.")
+
+(defconst org-mcp-test--pattern-repeating-scheduled-moved
+  (concat
+   "\\`\\* TODO Repeating Task\n"
+   "SCHEDULED: <2026-06-27 [^ ]+ \\+1w -3d>\n"
+   "Task body\\.\n?\\'")
+  "Pattern after the repeating SCHEDULED is moved a week on.
+Org carries the repeater and the delay to the new date.")
 
 (defconst org-mcp-test--pattern-deadline-set
   (concat
@@ -5124,7 +5180,7 @@ fails and leaves the file unchanged."
      test-file org-mcp-test--pattern-flagged-task-and-bare-todo)
     (org-mcp-test--call-set-properties-expecting-error
      test-file (org-mcp-test--file-link test-file "*Simple Task")
-     '((ITEMS . ["a" "b"])))))
+     '((ITEMS . ["a" "b"])) '((ITEMS . "")))))
 
 (ert-deftest org-mcp-test-rename-headline-simple ()
   "Test renaming a simple TODO headline."
@@ -7600,6 +7656,7 @@ line as contents, so the drawer stays."
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
            (params `((link . ,link)
+                     (before . ((EFFORT . "")))
                      (after . ((EFFORT . "2:00")))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -7618,6 +7675,7 @@ line as contents, so the drawer stays."
       ((test-file org-mcp-test--content-todo-with-props))
     (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
            (params `((link . ,link)
+                     (before . ((EFFORT . "1:00")))
                      (after . ((EFFORT . "2:30")))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -7632,6 +7690,7 @@ line as contents, so the drawer stays."
       ((test-file org-mcp-test--content-todo-with-props))
     (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
            (params `((link . ,link)
+                     (before . ((EFFORT . "1:00")))
                      (after . ((EFFORT)))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -7651,6 +7710,12 @@ written as given."
             `((link
                .
                ,(org-mcp-test--file-link test-file "*Task with Properties"))
+              (before
+               .
+               ((EFFORT . "1:00")
+                (ENABLED . nil)
+                (LITERAL_T . nil)
+                (LITERAL_NIL . nil)))
               (after
                .
                ((EFFORT . :json-false)
@@ -7679,6 +7744,7 @@ written as given."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-properties" 1
                 `((link . ,link)
+                  (before . ((TODO . "")))
                   (after . ((TODO . "DONE"))))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -7693,6 +7759,7 @@ written as given."
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
+                    (before . ((EFFORT . "")))
                     (after . ((EFFORT . "1:00")))))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -7710,6 +7777,7 @@ addresses it by that ID, and the ID is not added to
     (org-mcp-test--with-id-tracking (list test-file) nil
       (let* ((params
               `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+                (before . ((ID . "") (CUSTOM_ID . "")))
                 (after
                  .
                  ((ID . ,org-mcp-test--client-id)
@@ -7740,7 +7808,7 @@ with one is refused all the same."
     (with-syntax-table emacs-lisp-mode-syntax-table
       (org-mcp-test--call-set-properties-expecting-error
        test-file (org-mcp-test--file-link test-file "*Simple Task")
-       '((OK . "1") ("A\nB" . "v"))))))
+       '((OK . "1") ("A\nB" . "v")) '((OK . "") ("A\nB" . ""))))))
 
 (ert-deftest org-mcp-test-set-properties-multiline-value ()
   "Test a line break in a property value refuses the call."
@@ -7748,7 +7816,98 @@ with one is refused all the same."
       ((test-file org-mcp-test--content-bare-todo))
     (org-mcp-test--call-set-properties-expecting-error
      test-file (org-mcp-test--file-link test-file "*Simple Task")
-     '((FOO . "x\r* Injected heading")))))
+     '((FOO . "x\r* Injected heading")) '((FOO . "")))))
+
+(ert-deftest org-mcp-test-set-properties-asserts-only-what-it-writes ()
+  "A call names the one property it writes and leaves the other alone.
+OWNER is a property the tool could write, and this call neither
+asserts nor writes it, so it survives untouched."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-properties"
+             `((link
+                .
+                ,(org-mcp-test--file-link
+                  test-file "*Task with Two Properties"))
+               (before . ((EFFORT . "1:00")))
+               (after . ((EFFORT . "3:00"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'properties_set result) ["EFFORT"]))
+      (should-not (alist-get 'properties_deleted result))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-one-of-two))))
+
+(ert-deftest org-mcp-test-set-properties-before-mismatch-refuses ()
+  "A property whose asserted value is stale refuses the whole call.
+EFFORT is asserted correctly and OWNER is not.  Every assertion is
+checked before the first write, so EFFORT is not written either."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        .
+        ,(org-mcp-test--file-link
+          test-file "*Task with Two Properties"))
+       (before . ((EFFORT . "1:00") (OWNER . "grace")))
+       (after . ((EFFORT . "3:00") (OWNER . "ada"))))
+     "\\`conflict: Property 'OWNER' mismatch: expected 'grace', \
+found 'ada'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-empty-before-asserts-absent ()
+  "An empty `before\=' asserts the property is not on the heading."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        . ,(org-mcp-test--file-link test-file "*Task with Properties"))
+       (before . ((EFFORT . "")))
+       (after . ((EFFORT . "3:00"))))
+     "\\`conflict: Property 'EFFORT' mismatch: expected '', \
+found '1:00'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-before-names-every-write ()
+  "A property the call writes and `before\=' omits refuses the call.
+The write would destroy a value no one vouched for, which is the one
+thing the assertion exists to stop."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        .
+        ,(org-mcp-test--file-link
+          test-file "*Task with Two Properties"))
+       (before . ((EFFORT . "1:00")))
+       (after . ((EFFORT . "3:00") (OWNER . "grace"))))
+     "\\`before does not name the property 'OWNER' this call \
+writes\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-before-names-nothing-else ()
+  "A property `before\=' names and the call does not write refuses it.
+Asserting a property the call leaves alone misstates what the call
+can touch."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        .
+        ,(org-mcp-test--file-link
+          test-file "*Task with Two Properties"))
+       (before . ((EFFORT . "1:00") (OWNER . "ada")))
+       (after . ((EFFORT . "3:00"))))
+     "\\`before names the property 'OWNER', which this call does \
+not write\\'"
+     test-file)))
 
 ;;; Tests for failed writes and the saved flag
 
@@ -7830,6 +7989,7 @@ either buffer reads unmodified afterwards with its undo setting kept."
                "org-node-set-properties"
                `((link
                   . ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . ((FIRST . "") (SECOND . "")))
                  (after . ((FIRST . "1") (SECOND . "2"))))
                "Property hook failed" test-file)
               (with-current-buffer buffer
@@ -7858,6 +8018,7 @@ and the file is unchanged."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . ((FIRST . "") (SECOND . "")))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed" test-file)
             (org-mcp-test--verify-buffer-matches
@@ -7881,13 +8042,16 @@ edits of its own when the next call arrives, and that call saves it."
               (org-mcp-test--call-tool-refused
                "org-node-set-properties"
                `((link . ,link)
+                 (before . ((FIRST . "") (SECOND . "")))
                  (after . ((FIRST . "1") (SECOND . "2"))))
                "Property hook failed" test-file))
             (let ((result
                    (json-read-from-string
                     (mcp-server-lib-ert-call-tool
                      "org-node-set-properties"
-                     `((link . ,link) (after . ((FIRST . "1"))))))))
+                     `((link . ,link)
+                       (before . ((FIRST . "")))
+                       (after . ((FIRST . "1"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--pattern-set-first-property)
@@ -7910,6 +8074,7 @@ unmodified and holds no edit a later call would take for the user's."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . ((FIRST . "")))
                (after . ((FIRST . "1"))))
              "Save failed" test-file)
             (with-current-buffer buffer
@@ -7935,6 +8100,7 @@ the buffer reads unmodified."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . ((FIRST . "") (SECOND . "")))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed" test-file)
             (with-current-buffer buffer
@@ -7965,6 +8131,7 @@ save it again, so the file keeps what the hook wrote."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . ((FIRST . "") (SECOND . "")))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed")
             (org-mcp-test--verify-buffer-matches
@@ -7994,7 +8161,9 @@ it.  Once the hook is gone, the next write reports `saved' true."
                         nil t))
             (org-mcp-test--call-tool-refused
              "org-node-set-properties"
-             `((link . ,link) (after . ((FIRST . "1"))))
+             `((link . ,link)
+               (before . ((FIRST . "")))
+               (after . ((FIRST . "1"))))
              "\\`The change was made and saved, but .*Save hook failed")
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--pattern-set-first-property)
@@ -8007,7 +8176,9 @@ it.  Once the hook is gone, the next write reports `saved' true."
                    (json-read-from-string
                     (mcp-server-lib-ert-call-tool
                      "org-node-set-properties"
-                     `((link . ,link) (after . ((SECOND . "2"))))))))
+                     `((link . ,link)
+                       (before . ((SECOND . "")))
+                       (after . ((SECOND . "2"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--pattern-set-first-and-second-property))
@@ -8039,6 +8210,7 @@ on disk, and the response says so."
                          .
                          ,(org-mcp-test--file-link
                            test-file "*Simple Task"))
+                        (before . ((FIRST . "")))
                         (after . ((FIRST . "1"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
@@ -8080,6 +8252,7 @@ does when the clock is closed, so both files hold their change."
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
            (params `((link . ,link)
+                     (before . "")
                      (after . "2026-03-27")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
@@ -8098,6 +8271,7 @@ does when the clock is closed, so both files hold their change."
       ((test-file org-mcp-test--content-todo-with-scheduled))
     (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
            (params `((link . ,link)
+                     (before . "<2026-03-01 Sun>")
                      (after . "2026-04-15")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
@@ -8115,7 +8289,9 @@ does when the clock is closed, so both files hold their change."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-scheduled))
     (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
-           (params `((link . ,link)))
+           (params `((link . ,link)
+                     (before . "<2026-03-01 Sun>")
+                     (after . "")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
            (result (json-read-from-string result-text)))
@@ -8135,6 +8311,7 @@ does when the clock is closed, so both files hold their change."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-scheduled" 1
                 `((link . ,link)
+                  (before . "")
                   (after . "not-a-date"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -8149,12 +8326,85 @@ does when the clock is closed, so both files hold their change."
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
+                    (before . "")
                     (after . "2026-03-27")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'link result) link)))))
+
+(ert-deftest org-mcp-test-set-scheduled-before-is-the-raw-org-timestamp ()
+  "`before\=' is the raw Org SCHEDULED, repeater and delay included.
+The string a read hands back is the string the assertion takes, so a
+repeating entry is rescheduled without the client reconstructing
+anything.  Org carries the repeater on to the new date."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-repeating-scheduled))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Repeating Task"))
+               (before . "<2026-06-20 Sat +1w -3d>")
+               (after . "2026-06-27"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should
+       (equal (alist-get 'before result) "<2026-06-20 Sat +1w -3d>"))
+      (should
+       (string-match-p
+        "\\`<2026-06-27 [^ ]+ \\+1w -3d>\\'"
+        (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-repeating-scheduled-moved))))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-iso-shorthand-in-before ()
+  "`before\=' compares as the stored Org string, never the ISO shorthand.
+The same date written the way `after\=' takes it is not what the file
+holds, and org-mcp says so rather than accepting a second spelling:
+comparing an input format against a stored one manufactures conflicts
+on headings nobody touched."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-repeating-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Repeating Task"))
+       (before . "2026-06-20")
+       (after . "2026-06-27"))
+     "\\`conflict: SCHEDULED mismatch: expected '2026-06-20', \
+found '<2026-06-20 Sat \\+1w -3d>'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-scheduled-before-mismatch-refuses ()
+  "A SCHEDULED the heading does not carry refuses the call."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+       (before . "<2026-03-08 Sun>")
+       (after . "2026-04-15"))
+     "\\`conflict: SCHEDULED mismatch: expected '<2026-03-08 Sun>', \
+found '<2026-03-01 Sun>'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-scheduled-empty-before-asserts-none ()
+  "An empty `before\=' asserts the heading carries no SCHEDULED.
+It is a value the assertion takes, never a parameter the call left
+out, so a heading that does carry one refuses the write."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+       (before . "")
+       (after . "2026-04-15"))
+     "\\`conflict: SCHEDULED mismatch: expected '', \
+found '<2026-03-01 Sun>'\\'"
+     test-file)))
 
 ;;; Tests for org-node-set-deadline
 
@@ -8164,6 +8414,7 @@ does when the clock is closed, so both files hold their change."
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
            (params `((link . ,link)
+                     (before . "")
                      (after . "2026-03-27")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
@@ -8182,6 +8433,7 @@ does when the clock is closed, so both files hold their change."
       ((test-file org-mcp-test--content-todo-with-deadline))
     (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
            (params `((link . ,link)
+                     (before . "<2026-03-15 Sun>")
                      (after . "2026-04-15")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
@@ -8199,7 +8451,9 @@ does when the clock is closed, so both files hold their change."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
     (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
-           (params `((link . ,link)))
+           (params `((link . ,link)
+                     (before . "<2026-03-15 Sun>")
+                     (after . "")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
            (result (json-read-from-string result-text)))
@@ -8219,6 +8473,7 @@ does when the clock is closed, so both files hold their change."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-deadline" 1
                 `((link . ,link)
+                  (before . "")
                   (after . "not-a-date"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -8233,12 +8488,39 @@ does when the clock is closed, so both files hold their change."
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
+                    (before . "")
                     (after . "2026-03-27")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'link result) link)))))
+
+(ert-deftest org-mcp-test-set-deadline-before-mismatch-refuses ()
+  "A DEADLINE the heading does not carry refuses the call."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-deadline"
+     `((link . ,(org-mcp-test--file-link test-file "*Deadline Task"))
+       (before . "<2026-03-22 Sun>")
+       (after . "2026-04-15"))
+     "\\`conflict: DEADLINE mismatch: expected '<2026-03-22 Sun>', \
+found '<2026-03-15 Sun>'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-deadline-empty-before-asserts-none ()
+  "An empty `before\=' asserts the heading carries no DEADLINE."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-deadline"
+     `((link . ,(org-mcp-test--file-link test-file "*Deadline Task"))
+       (before . "")
+       (after . "2026-04-15"))
+     "\\`conflict: DEADLINE mismatch: expected '', \
+found '<2026-03-15 Sun>'\\'"
+     test-file)))
 
 ;;; Tests for org-node-set-tags
 
@@ -8362,6 +8644,7 @@ not membership in the configured alist."
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
            (params `((link . ,link)
+                     (before . "")
                      (after . "A")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
@@ -8379,6 +8662,7 @@ not membership in the configured alist."
       ((test-file org-mcp-test--content-todo-with-priority))
     (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
            (params `((link . ,link)
+                     (before . "B")
                      (after . "C")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
@@ -8394,7 +8678,9 @@ not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
     (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
-           (params `((link . ,link)))
+           (params `((link . ,link)
+                     (before . "B")
+                     (after . "")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
            (result (json-read-from-string result-text)))
@@ -8414,6 +8700,7 @@ not membership in the configured alist."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-priority" 1
                 `((link . ,link)
+                  (before . "")
                   (after . "Z"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -8431,6 +8718,7 @@ not membership in the configured alist."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-priority" 1
                 `((link . ,link)
+                  (before . "")
                   (after . "AB"))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -8445,12 +8733,51 @@ not membership in the configured alist."
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
+                    (before . "")
                     (after . "A")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
           (result (json-read-from-string result-text)))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'link result) link)))))
+
+(ert-deftest org-mcp-test-set-priority-before-mismatch-refuses ()
+  "A priority the heading does not carry refuses the call."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-priority"
+     `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
+       (before . "A")
+       (after . "C"))
+     "\\`conflict: Priority mismatch: expected 'A', found 'B'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-priority-non-string-before-is-malformed ()
+  "A `before\=' that is no kind of value is a malformed call.
+It is refused as validation and not as a conflict: reading the file
+again would not help, because nothing about the file is in question."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-priority"
+     `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
+       (before . 3)
+       (after . "C"))
+     "\\`before must be a string, or null for no value: 3\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-priority-empty-before-asserts-none ()
+  "An empty `before\=' asserts the heading carries no priority."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-priority"
+     `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
+       (before . "")
+       (after . "C"))
+     "\\`conflict: Priority mismatch: expected '', found 'B'\\'"
+     test-file)))
 
 ;;; Tests for org-node-set-content append mode
 
@@ -10182,10 +10509,12 @@ file, the buffer of the running clock, nor the running clock changes."
 (ert-deftest org-mcp-test-link-heading-tools ()
   "Every other tool that changes a heading accepts a link."
   (dolist (case
-           '(("org-node-set-properties" (after . ((FOO . "bar"))))
-             ("org-node-set-scheduled" (after . "2026-03-27"))
-             ("org-node-set-deadline" (after . "2026-03-27"))
-             ("org-node-set-priority" (after . "A"))
+           '(("org-node-set-properties"
+              (before . ((FOO . "")))
+              (after . ((FOO . "bar"))))
+             ("org-node-set-scheduled" (before . "") (after . "2026-03-27"))
+             ("org-node-set-deadline" (before . "") (after . "2026-03-27"))
+             ("org-node-set-priority" (before . "") (after . "A"))
              ("org-node-add-note" (note . "Checked"))))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-links))
@@ -11470,13 +11799,16 @@ up in the parent's file."
                         (after . "Beta appended.")
                         (append . t))
                        ("org-node-set-properties"
-                        (link . ,link) (after . ((EFFORT . "1:00"))))
+                        (link . ,link)
+                        (before . ((EFFORT . "")))
+                        (after . ((EFFORT . "1:00"))))
                        ("org-node-set-scheduled"
-                        (link . ,link) (after . "2026-03-27"))
+                        (link . ,link) (before . "") (after . "2026-03-27"))
                        ("org-node-set-deadline"
-                        (link . ,link) (after . "2026-03-28"))
+                        (link . ,link) (before . "") (after . "2026-03-28"))
                        ("org-node-set-tags" (link . ,link) (after . "work"))
-                       ("org-node-set-priority" (link . ,link) (after . "A"))
+                       ("org-node-set-priority"
+                        (link . ,link) (before . "") (after . "A"))
                        ("org-node-add-note" (link . ,link) (note . "Checked"))
                        ("org-clock-add"
                         (link . ,link)
@@ -12182,7 +12514,10 @@ Other Task's heading line ends with a target.")
   "Set the property SEEN on the heading LINK names and return the response."
   (json-read-from-string
    (mcp-server-lib-ert-call-tool
-    "org-node-set-properties" `((link . ,link) (after . ((SEEN . "yes")))))))
+    "org-node-set-properties"
+    `((link . ,link)
+      (before . ((SEEN . "")))
+      (after . ((SEEN . "yes")))))))
 
 (defun org-mcp-test--links-in (value)
   "Return every `link' string in VALUE, a parsed JSON result, in order."
@@ -15969,6 +16304,7 @@ a replacement that took the whole body with it shows here.")
                `((link
                   .
                   ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . ((FIRST . "")))
                  (after . ((FIRST . "1"))))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-served-matches
@@ -15997,6 +16333,7 @@ a replacement that took the whole body with it shows here.")
                `((link
                   .
                   ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
                  (after . "2026-03-27"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-served-matches
@@ -16025,6 +16362,7 @@ a replacement that took the whole body with it shows here.")
                `((link
                   .
                   ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
                  (after . "2026-04-01"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-served-matches
@@ -16080,6 +16418,7 @@ a replacement that took the whole body with it shows here.")
                `((link
                   .
                   ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
                  (after . "A"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-served-matches
@@ -16167,19 +16506,21 @@ its way out would be visible."
      ((link . ,link) (before . "no such text") (after . "Replaced."))
      "\\`Body text not found: ")
     ("org-node-set-properties"
-     ((link . ,link) (after . ((TODO . "DONE"))))
+     ((link . ,link)
+      (before . ((TODO . "")))
+      (after . ((TODO . "DONE"))))
      "\\`Cannot set special property 'TODO'")
     ("org-node-set-scheduled"
-     ((link . ,link) (after . "not-a-date"))
+     ((link . ,link) (before . "") (after . "not-a-date"))
      "\\`Invalid date format 'not-a-date'")
     ("org-node-set-deadline"
-     ((link . ,link) (after . "not-a-date"))
+     ((link . ,link) (before . "") (after . "not-a-date"))
      "\\`Invalid date format 'not-a-date'")
     ("org-node-set-tags"
      ((link . ,link) (after . "invalid tag!"))
      "\\`Invalid tag name: invalid tag!")
     ("org-node-set-priority"
-     ((link . ,link) (after . "Z"))
+     ((link . ,link) (before . "") (after . "Z"))
      "\\`Priority 'Z' out of range ")
     ("org-node-add-note"
      ((link . ,link) (note . "   "))
