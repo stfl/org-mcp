@@ -35,6 +35,7 @@
 (require 'cl-lib)
 (require 'mcp-server-lib)
 (require 'org)
+(require 'org-archive)
 (require 'org-id)
 (require 'org-ql)
 (require 'org-clock)
@@ -697,35 +698,42 @@ reports it as the `saved' response field.  A tool that also edits
 another buffer binds it around `org-mcp--modify-and-save' so the
 response covers both edits.")
 
+(defun org-mcp--link-of-change ()
+  "Return the link to the heading at point, for a response to report.
+No identifier is created for it.  When no link can be made, whatever
+the error, the tool error says that the change itself was made, so a
+client does not repeat it."
+  (condition-case err
+      (org-mcp--link-at-point)
+    (error
+     (org-mcp--tool-validation-error
+      "The change was made%s, but no link to it could be made: %s"
+      (if org-mcp--unsaved-change-p
+          " and left unsaved"
+        "")
+      (if (eq (car err) 'mcp-server-lib-tool-error)
+          (cadr err)
+        (error-message-string err))))))
+
 (defun org-mcp--complete-and-save (response-alist)
   "Return the JSON response for a change to the heading at point.
 RESPONSE-ALIST is an alist of response fields.  The `link' field is
-the heading's link from `org-mcp--link-at-point'; no identifier is
-created for it.  The `saved' field is false when
-`org-mcp--unsaved-change-p' is non-nil.  When no link can be made,
-whatever the error, the tool error says that the change itself was
-made, so a client does not repeat it."
-  (let
-      ((link
-        (condition-case err
-            (org-mcp--link-at-point)
-          (error
-           (org-mcp--tool-validation-error
-            "The change was made%s, but no link to it could be made: %s"
-            (if org-mcp--unsaved-change-p
-                " and left unsaved"
-              "")
-            (if (eq (car err) 'mcp-server-lib-tool-error)
-                (cadr err)
-              (error-message-string err)))))))
-    (json-encode
-     (append
-      `((success . t)
-        (saved
-         .
-         ,(if org-mcp--unsaved-change-p
-              :json-false t)))
-      response-alist `((link . ,link))))))
+the heading's link from `org-mcp--link-of-change', unless
+RESPONSE-ALIST already carries one: a verb that takes the whole node
+away leaves no heading at point to link to and names the link the
+node had instead, read while the node was still there.  The `saved'
+field is false when `org-mcp--unsaved-change-p' is non-nil."
+  (json-encode
+   (append
+    `((success . t)
+      (saved
+       .
+       ,(if org-mcp--unsaved-change-p
+            :json-false t)))
+    (if (assq 'link response-alist)
+        response-alist
+      (append
+       response-alist `((link . ,(org-mcp--link-of-change))))))))
 
 (defun org-mcp--maybe-save-buffer
     (buf file-path preexisting-modified-p)
@@ -1599,6 +1607,11 @@ descendant under it, whatever depth the call asked to see."
       (cons (point-min) (point-max))
     (org-mcp--subtree-bounds)))
 
+(defconst org-mcp--digest-prefix "sha256:"
+  "The whole of a digest token's prefix, naming the algorithm behind it.
+`org-mcp--digest' writes it, so the form org-mcp hands a client and
+the form org-mcp takes back are one string and cannot drift apart.")
+
 (defun org-mcp--digest (bounds)
   "Return the digest of the buffer region BOUNDS covers.
 BOUNDS is (BEGIN . END) in the current buffer.  The token is
@@ -1617,7 +1630,7 @@ its reader, and a decision made for a reader is not a safety
 boundary.  Every region has a digest, an empty one included, so a
 node asked for a digest always carries one."
   (concat
-   "sha256:"
+   org-mcp--digest-prefix
    (substring (secure-hash
                'sha256
                (encode-coding-string (buffer-substring-no-properties
@@ -1625,6 +1638,42 @@ node asked for a digest always carries one."
                                      'utf-8
                                      t))
               0 16)))
+
+(defun org-mcp--digest-given (before)
+  "Return BEFORE, the subtree digest a whole-node verb asserts with.
+A verb that takes a node away takes every descendant with it, so the
+call says which subtree it means by echoing the `digest' field of the
+read it planned from, the prefix included: an echo is a copy, never a
+token rebuilt from the parts of one.
+
+A value in no such form matches no subtree at all.  Calling that a
+malformed call sends the client back to a read for a token; calling
+it a conflict would send it back to read the same file and assert
+with the same value again."
+  (unless (and (stringp before)
+               (string-prefix-p org-mcp--digest-prefix before))
+    (org-mcp--tool-validation-error
+     "before must be the digest a read of this node returned, starting `%s': %S"
+     org-mcp--digest-prefix before))
+  before)
+
+(defun org-mcp--assert-subtree (digest undone)
+  "Refuse unless DIGEST is the digest of the subtree of the heading at point.
+DIGEST is the token the call sent, compared as a string against the
+one the subtree carries now.  UNDONE names, as a clause, what the
+refusal did not do: the three verbs that assert this way cost their
+caller sharply different things to get wrong, so each says which of
+them did not happen.
+
+The token covers the whole subtree, so an edit to a descendant the
+client never read refuses the call.  That is the point of it: what
+these verbs take away is the subtree entire, and a guard asserts
+what it is about to destroy."
+  (let ((found (org-mcp--digest (org-mcp--subtree-bounds))))
+    (unless (string= digest found)
+      (org-mcp--tool-conflict-error
+       "Subtree mismatch: expected '%s', found '%s'; %s"
+       digest found undone))))
 
 (defun org-mcp--node-properties (names)
   "Return the Org property drawer of the node at point, or nil.
@@ -3057,6 +3106,200 @@ BODY-END is the buffer position where body ends."
     (goto-char body-begin)
     (insert new-body-content)))
 
+(defmacro org-mcp--with-private-kill-ring (&rest body)
+  "Run BODY with a kill ring of its own, leaving the user's alone.
+Org relocates a subtree through the kill ring: `org-cut-subtree'
+pushes the text onto it and `org-paste-subtree' reads it back, and
+`org-archive-subtree' uses both.  That ring is the user's, and a tool
+call is not a yank of theirs, so BODY works on a binding of its own
+and neither the ring nor the system clipboard behind it keeps what
+BODY cut."
+  (declare (indent 0) (debug (body)))
+  `(let ((kill-ring kill-ring)
+         (kill-ring-yank-pointer kill-ring-yank-pointer)
+         (interprogram-cut-function nil)
+         (interprogram-paste-function nil))
+     ,@body))
+
+(declare-function org-inlinetask-remove-END-maybe "org-inlinetask" ())
+
+(defun org-mcp--cut-subtree-at-point ()
+  "Cut the subtree of the heading at point, and return its text.
+Everything under the heading goes with it, its drawers and its
+LOGBOOK included, because `org-cut-subtree' takes the region Org
+gives the headline rather than one measured here.  The text comes
+back, so that a caller putting the subtree down elsewhere pastes what
+it cut and a caller that only removes it lets it go.
+
+The cut ends the way Org ends its own: `org-archive-subtree' and
+`org-refile' both call `org-inlinetask-remove-END-maybe' after
+removing a subtree, guarded by `featurep' so the feature is not
+loaded for a user who does not use inline tasks.  org-node-archive
+reaches that cleanup through `org-archive-subtree'; org-node-delete
+and org-node-refile reach it here, so the three verbs leave a file
+in the same state."
+  (prog1 (org-mcp--with-private-kill-ring
+           (org-cut-subtree))
+    (when (featurep 'org-inlinetask)
+      (org-inlinetask-remove-END-maybe))))
+
+(defun org-mcp--paste-subtree-under
+    (text parent-target sibling-target)
+  "Paste TEXT, a subtree cut from this buffer, under PARENT-TARGET.
+SIBLING-TARGET, when non-nil, is the child of that parent the subtree
+is to follow; without one the subtree becomes the parent's last
+child, or, when PARENT-TARGET names a whole file, the first heading
+in it.  Both are resolved by the functions org-node-create resolves
+them with, so `parent' and `previous_sibling' put a node that is
+refiled where they put a node that is made.
+
+Org shifts the pasted subtree to the level of its new place, every
+descendant under it with it, and leaves point on its heading.  An
+`ID' anywhere in TEXT is re-registered against this buffer's file,
+which `org-paste-subtree' does through `org-id-paste-tracker', so an
+`id:' link to the node or to a descendant resolves to where it now
+is."
+  (let ((parent-level
+         (org-mcp--navigate-to-parent-or-top parent-target)))
+    (org-mcp--position-for-new-child sibling-target parent-level)
+    ;; `org-paste-subtree' pastes before the heading point starts, and
+    ;; walks to the next *visible* heading when point starts none.
+    ;; Point goes to the start of that heading here, so that a heading
+    ;; folded in the user's buffer cannot carry the subtree past it.
+    (unless (bolp)
+      (forward-line 1))
+    (org-paste-subtree
+     (if parent-level
+         (1+ parent-level)
+       1)
+     text)))
+
+(defun org-mcp--refile-subtree-to (text parent-target sibling-target)
+  "Put TEXT, a subtree just cut from this buffer, under PARENT-TARGET.
+Returns the link to the node where it lands.  SIBLING-TARGET is the
+child of that parent the node is to follow, or nil; see
+`org-mcp--paste-subtree-under', which places it.
+
+The parent may be in another file, which is where the subtree then
+goes.  That file's buffer is written like the file the node left and
+saved through `org-mcp--maybe-save-buffer', so a buffer the user has
+edits in is left for the user to save; `org-mcp--unsaved-change-p'
+says when it is, and the response's `saved' answers for both files.
+
+The subtree is cut before it is put down, and only the buffer it was
+cut from is inside the calling change group.  A destination that does
+not resolve therefore refuses with both files as they were, because
+nothing has been written when the search fails; a failure after the
+subtree is down leaves it in both files rather than in neither."
+  (let* ((destination (plist-get parent-target :file))
+         (elsewhere
+          (not
+           (org-mcp--paths-equal-p
+            destination (buffer-file-name (buffer-base-buffer)))))
+         (context
+          (and elsewhere (org-mcp--file-buffer-context destination)))
+         (buffer
+          (if elsewhere
+              (plist-get context :buffer)
+            (current-buffer)))
+         (link nil))
+    (with-current-buffer buffer
+      (org-with-wide-buffer
+       (org-mcp--paste-subtree-under
+        text parent-target sibling-target)
+       (setq link (org-mcp--link-at-point))))
+    (when elsewhere
+      (org-mcp--maybe-save-buffer
+       buffer destination (plist-get context :modified-p))
+      (when (buffer-modified-p buffer)
+        (setq org-mcp--unsaved-change-p t)))
+    link))
+
+(defun org-mcp--archive-location-at-point ()
+  "Return the file `org-archive-subtree' would move the node at point to.
+The location is the `ARCHIVE' property in force at point, or
+`org-archive-location' when no node above it carries one, and Org's
+own `org-archive--compute-location' reads it, so the answer is the
+location Org acts on.  Org publishes no other accessor for it, and
+working the file out here a second way is how a report comes to
+disagree with what happened.  The value is the node's own file when
+the archive is a heading inside it."
+  (car
+   (org-archive--compute-location
+    (or (org-entry-get nil "ARCHIVE" 'inherit)
+        org-archive-location))))
+
+(defun org-mcp--archive-subtree-at-point ()
+  "Archive the subtree of the heading at point, and return the file it went to.
+`org-archive-subtree' relocates the subtree whole and writes into it
+where it came from — the file, the outline path, the category, the
+TODO state it held, its inherited tags, whichever of them
+`org-archive-save-context-info' names.  That record is what makes an
+archive the one relocation a reader can follow backwards.
+
+Org copies into the archive before it cuts from here, so a failure in
+between leaves the node in both files rather than in neither.
+
+The archive file's buffer is saved here rather than by Org, through
+`org-mcp--maybe-save-buffer', so that a buffer the user already has
+edits in is left for the user to save, as every other write here
+leaves one.  When it is, `org-mcp--unsaved-change-p' says so and the
+response's `saved' answers for the archive file too."
+  (let* ((archive-file (org-mcp--archive-location-at-point))
+         (elsewhere
+          (not
+           (org-mcp--paths-equal-p
+            archive-file (buffer-file-name (buffer-base-buffer)))))
+         (context
+          (and elsewhere
+               (org-mcp--file-buffer-context archive-file))))
+    (org-mcp--with-private-kill-ring
+      ;; Org saves the archive file itself, without asking whether the
+      ;; buffer it saves was the user's to save.
+      (let ((org-archive-subtree-save-file-p nil))
+        (org-archive-subtree)))
+    (when elsewhere
+      (let ((buffer (plist-get context :buffer)))
+        (org-mcp--maybe-save-buffer
+         buffer archive-file (plist-get context :modified-p))
+        (when (buffer-modified-p buffer)
+          (setq org-mcp--unsaved-change-p t))))
+    archive-file))
+
+(defun org-mcp--assert-destination-outside
+    (bounds parent-target sibling-target)
+  "Refuse a refile whose destination lies inside the subtree BOUNDS covers.
+PARENT-TARGET and SIBLING-TARGET come from `org-mcp--link-target'; a
+nil SIBLING-TARGET names no sibling, and a PARENT-TARGET naming a
+whole file is always outside.
+
+A node cannot become a child of itself or of one of its own
+descendants, and it cannot be asked to follow itself: the heading the
+call is addressed to goes away with the node, and the paste is left
+with nowhere to land.  Both headings are found before anything is
+cut, so the refusal leaves the file as it was.
+
+A destination in another file is outside the subtree by construction
+and is not looked for here, where only this buffer can be searched."
+  (pcase-dolist (`(,name . ,target)
+                 `(("parent" . ,parent-target)
+                   ("previous_sibling" . ,sibling-target)))
+    (when (and target
+               (org-mcp--paths-equal-p
+                (plist-get target :file)
+                (buffer-file-name (buffer-base-buffer))))
+      (let ((position
+             (save-excursion
+               (when (org-mcp--target-heading-p target)
+                 (org-mcp--goto-heading target)
+                 (point)))))
+        (when (and position
+                   (>= position (car bounds))
+                   (< position (cdr bounds)))
+          (org-mcp--tool-validation-error
+           "%s %s is the node being refiled, or a node under it"
+           name (plist-get target :link)))))))
+
 ;; Tool handlers
 
 (defun org-mcp--tool-config-todo ()
@@ -3956,6 +4199,166 @@ MCP Parameters:
     (org-mcp--modify-and-save file-path "add logbook note" nil
       (org-mcp--goto-heading target)
       (org-mcp--insert-log-note note 'note))))
+
+;; The whole-node verbs
+;;
+;; Each of the three takes the node away from where it is, so each
+;; asserts the subtree it is about to take with `before', the digest
+;; token a read of the node handed the client.  There is no `after' to
+;; go with it: the verb is the change.  The guard is not graded by how
+;; recoverable the verb is — an optional guard is an off guard, and it
+;; would be off at archive, the one whose damage goes unnoticed
+;; longest.  What recoverability does govern is what each tool's
+;; description tells a client it is about to cost.
+
+(defun org-mcp--tool-node-delete (link before &optional files)
+  "Delete the node LINK names, and every descendant under it.
+BEFORE is the digest of the subtree, as a read of the node returned
+it; the call is refused when the subtree no longer carries it, see
+`org-mcp--assert-subtree'.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+The text is gone from the file and org-mcp keeps no copy of it.  The
+response carries the link the node had, read while it was still
+there, so a client can say which node it lost.
+
+MCP Parameters:
+  link - Link to the node to delete
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The node's digest, as the digest field of a read of it
+           returned it, prefix included (string, required)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let ((target (org-mcp--link-target link files))
+        (digest (org-mcp--digest-given before))
+        (deleted nil))
+    (org-mcp--modify-and-save (plist-get target :file) "delete"
+                              `((link . ,deleted))
+      (org-mcp--goto-heading target)
+      (org-mcp--assert-subtree digest "nothing was deleted")
+      (setq deleted (org-mcp--link-at-point))
+      (org-mcp--cut-subtree-at-point))))
+
+(defun org-mcp--tool-node-archive (link before &optional files)
+  "Archive the node LINK names, and every descendant under it.
+BEFORE is the digest of the subtree, as a read of the node returned
+it; the call is refused when the subtree no longer carries it, see
+`org-mcp--assert-subtree'.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+The node moves to the archive file with a record of where it came
+from written into it, see `org-mcp--archive-subtree-at-point'.  The
+response names that file and carries the link the node had in the
+file it left.
+
+MCP Parameters:
+  link - Link to the node to archive
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The node's digest, as the digest field of a read of it
+           returned it, prefix included (string, required)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let ((target (org-mcp--link-target link files))
+        (digest (org-mcp--digest-given before))
+        (archived nil)
+        (archive-file nil)
+        ;; Archiving writes the archive file's buffer as well as this
+        ;; one; `saved' covers that write too.
+        (org-mcp--unsaved-change-p nil))
+    (org-mcp--modify-and-save (plist-get target :file) "archive"
+                              `((link . ,archived)
+                                (archive_file
+                                 .
+                                 ,(abbreviate-file-name
+                                   archive-file)))
+      (org-mcp--goto-heading target)
+      (org-mcp--assert-subtree digest "nothing was archived")
+      (setq archived (org-mcp--link-at-point))
+      (setq archive-file (org-mcp--archive-subtree-at-point)))))
+
+(defun org-mcp--tool-node-refile
+    (link before parent &optional previous_sibling files)
+  "Refile the node LINK names under PARENT, its whole subtree with it.
+The call names where the node goes; it does not shift the node one
+step from where it is.
+BEFORE is the digest of the subtree, as a read of the node returned
+it; the call is refused when the subtree no longer carries it, see
+`org-mcp--assert-subtree'.
+PARENT is the link to the node's new parent, or to a whole file for
+its top level.  It may name a node in any file a call reaches, and
+the node goes to that file; see `org-mcp--refile-subtree-to'.
+PREVIOUS_SIBLING is an optional link to the child of that parent the
+node is to follow, looked up in the parent's file; see
+`org-mcp--paste-subtree-under'.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.  It applies to LINK only, as on every
+other write tool: it says where to find the node the call acts on.
+PARENT and PREVIOUS_SIBLING are resolved without it — a `file:' link
+names its own file, and an `id:' one is looked up in Emacs's ID index
+and refused by name when the index does not hold it.
+
+The subtree arrives whole, its LOGBOOK with it, and nothing in it
+records where it was: a refile is undone by refiling it back, by a
+caller that knows where back is.
+
+MCP Parameters:
+  link - Link to the node to refile
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The node's digest, as the digest field of a read of it
+           returned it, prefix included (string, required)
+  parent - Link to the node's new parent, in any of the forms link
+           takes, or file:{absolute-path} for the file's top level
+  previous_sibling - Link to the child of parent the node is to
+                     follow (string, optional); omitted, the node
+                     becomes the parent's last child
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         (digest (org-mcp--digest-given before))
+         ;; FILES says where to find the node, not where to put it.
+         (parent-target (org-mcp--link-target parent))
+         ;; The sibling is a child of the parent, so it is looked for
+         ;; in the parent's file, wherever that is: no ID index is
+         ;; consulted for it, which lets it be any link the parent's
+         ;; children answer to.
+         (sibling-target
+          (when-let* ((sibling
+                       (org-mcp--link-given previous_sibling)))
+            (org-mcp--link-target sibling
+                                  nil
+                                  (plist-get parent-target :file))))
+         (refiled nil)
+         ;; A refile into another file writes that file's buffer too;
+         ;; `saved' covers that write as well.
+         (org-mcp--unsaved-change-p nil))
+    (org-mcp--modify-and-save file-path "refile" `((link . ,refiled))
+      (org-mcp--goto-heading target)
+      (org-mcp--assert-subtree digest "nothing was refiled")
+      (org-mcp--assert-destination-outside
+       (org-mcp--subtree-bounds) parent-target sibling-target)
+      (setq refiled
+            (org-mcp--refile-subtree-to
+             (org-mcp--cut-subtree-at-point)
+             parent-target
+             sibling-target)))))
 
 ;; org-ql integration
 
@@ -5371,6 +5774,137 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-delete
+    :id "org-node-delete"
+    :description
+    (concat
+     "Delete an Org node, and every descendant under it, from its file.
+
+This is not the tool for a node that is finished.  org-node-archive
+moves such a node to the archive file and writes into it where it
+came from, so the node can be found and put back; use it whenever
+the node is being retired rather than discarded.  A delete keeps no
+copy anywhere: the text leaves the file, org-mcp does not hold it,
+and nothing in the file records that it was ever there.
+
+Parameters:
+  link - Link to the node to delete (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The node's digest (string, required)
+           Send back the digest field of a read of this node, prefix
+           and all, exactly as that read handed it to you
+           Take it from the read you planned this call from, not
+           from a list you kept: the token covers the whole subtree,
+           so an edit to any descendant, a clock line among them,
+           makes it stale
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  link - The link the node had (string); it resolves to nothing now")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-archive
+    :id "org-node-archive"
+    :description
+    (concat
+     "Archive an Org node, and every descendant under it, to the archive
+file Org is configured to use.
+
+This is the tool for a node that is finished rather than mistaken.
+Org writes into the node as it moves it where it came from: the
+file, the outline path, the category, the TODO state it held and its
+inherited tags, as ARCHIVE_* properties.  A node archived by mistake
+can therefore be found in the archive file and put back where those
+properties say it was.
+
+Parameters:
+  link - Link to the node to archive (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The node's digest (string, required)
+           Send back the digest field of a read of this node, prefix
+           and all, exactly as that read handed it to you
+           Take it from the read you planned this call from, not
+           from a list you kept: the token covers the whole subtree,
+           so an edit to any descendant, a clock line among them,
+           makes it stale
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in an open Emacs buffer, not
+          on disk; it answers for the archive file as well as for
+          the file the node left (boolean)
+  link - The link the node had in the file it left (string)
+  archive_file - The file the node was archived to (string)")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-refile
+    :id "org-node-refile"
+    :description
+    (concat
+     "Refile an Org node, and every descendant under it, under a
+different parent.  The parent may be in another file, and the node
+goes to that file: filing an inbox item into a project is one call.
+
+The call names the destination - the parent the node goes under, and
+optionally the sibling it follows there.  It does not shift a node
+one step from where it is; every call says where the node lands.
+
+The subtree arrives whole, its LOGBOOK and its drawers with it, and
+Org shifts it to the level of its new place.  An id: link to the
+node, or to anything under it, keeps working afterwards.  Nothing in
+the node records where it was: a refile is undone by refiling it
+back, by a caller that knows where back is.  Use org-node-archive
+when the node is being retired, since that writes the node's origin
+into it.
+
+Parameters:
+  link - Link to the node to refile (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The node's digest (string, required)
+           Send back the digest field of a read of this node, prefix
+           and all, exactly as that read handed it to you
+           Take it from the read you planned this call from, not
+           from a list you kept: the token covers the whole subtree,
+           so an edit to any descendant, a clock line among them,
+           makes it stale
+  parent - Link to the node's new parent (string, required), in any
+           form link takes, or file:{absolute-path} for the top
+           level of that file, as org-node-create's parent takes it.
+           It may name a node in any file this server may reach; the
+           node goes to that file
+  previous_sibling - Link to the child of parent the node is to
+                     follow (string, optional), in any form link
+                     takes, looked up in the parent's file.
+                     Omitted, null, false or blank, the node becomes
+                     the parent's last child, or, at the top level,
+                     the file's first heading
+  files - Files and directories to look up the id: link in link in
+          (array of strings, optional); see org-node-read.  It
+          applies to link only - it says where to find the node the
+          call refiles - and is refused unless link is an id: link.
+          parent and previous_sibling are resolved without it, so an
+          id: parent must be one Emacs's ID index holds, and is
+          refused by name when it is not
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in an open Emacs buffer, not
+          on disk; when the node went to another file, it answers
+          for both files (boolean)
+  link - Link to the node in its new place (string): id:{id} when it
+         has an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list

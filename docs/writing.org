@@ -19,7 +19,8 @@ Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
 =org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-set-tags=,
 =org-node-set-priority=, =org-node-set-properties=, =org-node-set-scheduled=,
 =org-node-set-deadline=, =org-node-create=, =org-node-set-title=,
-=org-node-add-note=) operate on the canonical Emacs buffer visiting the
+=org-node-add-note=, =org-node-delete=, =org-node-archive=,
+=org-node-refile=) operate on the canonical Emacs buffer visiting the
 file, preserving any unsaved edits the user may have. The auto-save behaviour
 depends on the buffer state:
 
@@ -61,6 +62,13 @@ the hook wrote. One failure keeps the change: when the save has written the
 file and a function it runs afterwards, such as one on =after-save-hook=,
 fails, buffer and file hold the change, and the error says that the change was
 made, so a client does not repeat the call.
+
+=org-node-archive=, and =org-node-refile= when the new parent is in another
+file, write two files. The =saved= flag answers for both: it is =false= when
+either change is sitting in a buffer that already had unsaved edits. Only the
+file the node leaves is put back on a failure, so a failure after the node has
+been written to the other file leaves it in both rather than in neither. A
+refusal happens before either file is written.
 
 A failed write puts back text only: a clock that =org-todo= stopped
 (=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
@@ -141,6 +149,12 @@ whose state you meant to change, and a token over its subtree would refuse that
 write for nothing. A body rewritten whole is the =content_digest= region, the
 one =org-node-set-content= works inside. A subtree is =digest=, because
 everything under the node goes with it.
+
+The three tools that take a whole node away require it. =digest= is what their
+=before= holds, and they take no =after=: the verb is the change. Nothing
+grades the requirement by how recoverable the verb is — an optional guard is an
+off guard, and it would be off at =org-node-archive=, whose damage is the one
+you are least likely to notice.
 
 * Write tools
 
@@ -482,5 +496,153 @@ Example:
   "success": true,
   "saved": true,
   "link": "id:abc-123"
+}
+#+end_src
+
+** Taking a whole node away
+
+Three tools remove a node from where it is, and each one takes the node's
+descendants with it: =org-node-delete=, =org-node-archive= and
+=org-node-refile=. All three take =before= holding the node's =digest= and none
+takes an =after= (see [[*Knowing what you are about to change]]). The assertion
+covers the whole subtree whatever depth the read that produced the token asked
+for, so a change to any descendant — a clock line among them — refuses the call
+and nothing is written.
+
+They cost very different things to get wrong, and that is how to choose between
+them:
+
+| Tool               | If it was the wrong node                                                              |
+|--------------------+---------------------------------------------------------------------------------------|
+| =org-node-delete=  | nothing to undo: the text is gone, and nothing records it was there                   |
+| =org-node-refile=  | refile it back, if you know where back was — the node does not say, and it may now be in another file |
+| =org-node-archive= | find it in the archive file, which carries the outline path it came from              |
+
+** org-node-delete
+- *Description:* Delete a node, and every descendant under it, from its file
+- *Parameters:*
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a whole file is refused: these verbs act on headings
+  - =before= (string, required): the node's =digest=, sent back exactly as the read you planned this call from handed it to you, =sha256:= and all. A value in no such form is refused as a malformed call rather than as a conflict, since reading the file again would not help
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, and =link= — the link the node had, read while it was still there. It resolves to nothing now
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is deleted; unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Recovery:* none. The text leaves the file, org-mcp keeps no copy of it, and nothing in the file records that the node was ever there. For a node that is finished rather than mistaken, use [[*org-node-archive][org-node-archive]], which writes the node's origin into it as it moves it
+
+Example:
+#+begin_src json
+# Read the token, then send it back:
+{
+  "link": "id:abc-123",
+  "before": "sha256:3f9c2a1b8e4d7c05"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:abc-123"
+}
+
+# The subtree moved since that read:
+{
+  "error": "conflict: Subtree mismatch: expected 'sha256:3f9c2a1b8e4d7c05', found 'sha256:e3b0c44298fc1c14'; nothing was deleted"
+}
+#+end_src
+
+** org-node-archive
+- *Description:* Archive a node, and every descendant under it, to the archive file Org is configured to use
+- *Parameters:*
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): the node's =digest=, as for [[*org-node-delete][org-node-delete]]
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =link= — the link the node had in the file it left — and =archive_file=, the file it went to
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and neither file is written; unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Recovery:* the node is in the archive file, and Org has written into it where it came from as =ARCHIVE_FILE=, =ARCHIVE_OLPATH=, =ARCHIVE_CATEGORY=, =ARCHIVE_TODO= and =ARCHIVE_ITAGS= properties — whichever of them your =org-archive-save-context-info= names. Those properties say where to put it back, which is what makes an archive the one relocation here a reader can follow backwards
+
+The destination is yours: =org-archive-location=, or an =:ARCHIVE:= property
+above the node. It is reached whether or not it is among the allowed files,
+and it is created if it does not exist (see [[file:file-access.org::*The archive file][The archive file]]). Whether the
+archived node is also marked done, and whether inherited tags travel with it,
+are Org's own =org-archive-mark-done= and
+=org-archive-subtree-add-inherited-tags=; org-mcp changes neither.
+
+Example:
+#+begin_src json
+# Request:
+{
+  "link": "id:abc-123",
+  "before": "sha256:3f9c2a1b8e4d7c05"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:abc-123",
+  "archive_file": "~/org/projects.org_archive"
+}
+#+end_src
+
+** org-node-refile
+- *Description:* Refile a node, and every descendant under it, under a different parent, in this file or another
+- *Parameters:*
+  - =link= (string, required): link to the node to refile (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): the node's =digest=, as for [[*org-node-delete][org-node-delete]]
+  - =parent= (string, required): link to the node's new parent, in any form that addresses a heading, or =file:/path/to/file.org= for the top level of that file — exactly what =org-node-create= takes. It may name a node in any file a call reaches, and the node then goes to that file
+  - =previous_sibling= (string, optional): link to the child of =parent= the node is to follow, looked up in the parent's file. Omitted, =null=, =false= or blank, the node becomes the parent's last child, or, at the top level, the file's first heading. The same parameter =org-node-create= takes, meaning the same thing
+  - =files= (array of strings, optional): Files and directories to look up the =id:= link in =link= in, instead of the ID index. It applies to =link= only — it says where to find the node the call refiles, never where to put it — so an =id:= =parent= must be one the ID index holds (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]])
+- *Returns:* Success status, =saved= flag, and the link to the node in its new place
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is refiled; unmarked validation otherwise — a =parent= org-mcp cannot reach or cannot find, and a =parent= or =previous_sibling= that is the node itself or a node under it, which would leave the call nowhere to land (see [[*How a refusal is classed]])
+- *Recovery:* refile it back. The subtree arrives whole, its LOGBOOK and its drawers with it, but nothing in it records where it was, so undoing a refile means knowing where the node came from — and across files it means knowing the other file too, since the node and the gap it left are no longer in one place. When the node is being retired rather than rearranged, [[*org-node-archive][org-node-archive]] is the tool that writes that down for you
+
+The call names a destination: the parent the node goes under, and optionally
+the sibling it follows there. Every call says where the node lands; there is
+no spelling that shifts a node one step from where it is.
+
+Org shifts the refiled subtree to the level of its new place, every generation
+under it with it, so a top-level node refiled under a level-2 parent arrives at
+level 3 with its children at level 4. An =id:= link to the node, or to anything
+under it, keeps working across files: Org registers the IDs in the subtree
+against the file they land in.
+
+Refiling here is not Org's own =org-refile= command, and two things that
+command does are not done:
+
+- A =LOGBOOK= entry is not recorded, whatever =org-log-refile= is set to. A
+  refile you make by hand leaves the record that setting asks for; one made
+  through this tool leaves none.
+- =org-after-refile-insert-hook= does not run.
+
+Tags are aligned: the node and every heading under it arrive with their tags at
+=org-tags-column=, because Org shifts the subtree by promoting or demoting each
+heading and that is what aligns them.
+
+A refile into another file writes both files, and both have to be within reach —
+the destination is checked like any file a call names, so a refile is no way to
+write outside the allowed files (see [[file:file-access.org::*Configuring allowed files][Configuring allowed files]]). A refused
+refile writes neither.
+
+Example:
+#+begin_src json
+# Refile a node under a new parent, after a named sibling:
+{
+  "link": "id:abc-123",
+  "before": "sha256:3f9c2a1b8e4d7c05",
+  "parent": "id:550e8400-e29b-41d4-a716-446655440001",
+  "previous_sibling": "file:/home/user/org/projects.org::*Draft the plan"
+}
+
+# Success response:
+{
+  "success": true,
+  "saved": true,
+  "link": "id:abc-123"
+}
+
+# Make it a top-level node of its file, before every existing heading:
+{
+  "link": "id:abc-123",
+  "before": "sha256:3f9c2a1b8e4d7c05",
+  "parent": "file:/home/user/org/projects.org"
 }
 #+end_src

@@ -84,6 +84,33 @@ among the allowed files, and a remote directory in the list permits nothing.
 
 =org-config-allowed-files= reports the policy to clients.
 
+* Writes that reach a second file
+
+=org-node-refile= writes two files when the new parent is in another one. Both
+are checked here like any file a call names: the destination goes through the
+allowed files and =org-mcp-file-scope-override= exactly as the file the node
+came from did, so filing a node into another project cannot become a way to
+write somewhere a call may not reach.
+
+The archive file below is the one exception, and it is the user's own setting
+rather than a caller's parameter.
+
+* The archive file
+
+=org-node-archive= writes a second file: the one your =org-archive-location=,
+or an =:ARCHIVE:= property above the node, sends archived subtrees to. That
+file is reached whether or not it is among the allowed files, and it is created
+if it does not exist.
+
+The destination is yours, not a caller's: it comes from your Emacs
+configuration or from a property in your own file, and no parameter of the call
+can name it or change it. A client can only decide /which node/ goes there.
+If you would rather the archive stayed inside the allowed files, point
+=org-archive-location= at a file that is.
+
+The tool answers with =archive_file=, the file it wrote to, so a client can
+tell you where a node went (see [[file:writing.org::*org-node-archive][org-node-archive]]).
+
 * Querying other files
 
 =org-query=, =org-config-tag-candidates= and =org-clock-dangling= take a
@@ -167,6 +194,13 @@ named.
   to =link= only.  It looks the =id:= link of =clock_out= up in the running
   clock's file, with or without =files=, since =clock_out= must name the
   running clock.
+- =org-node-refile= looks the =id:= link of =link= up in =files=, which applies
+  to =link= only: =files= says where to find the node the call refiles, never
+  where to put it.  An =id:= =parent= is therefore looked up in the ID index
+  like any =id:= link sent without =files=, and refused by name when the index
+  does not hold it.  =previous_sibling= is looked up in the parent's file,
+  with or without =files=, since the sibling must be a child of the parent, so
+  it may be any link.
 
 An =org-node-set-todo= call that names the file holding the ID:
 
