@@ -118,11 +118,16 @@ blocked: TODO state change from TODO to DONE blocked (by "TODO Write the tests")
 blocked: TODO state change from TODO to DONE blocked (by contained checkboxes)
 #+end_example
 
-One refusal stays unmarked on purpose. A link that resolves to no heading —
+Two refusals stay unmarked on purpose. A link that resolves to no heading —
 =Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
 or one that never existed, which is a malformed call, and org-mcp cannot tell
 the two apart. It leaves the refusal in the default class rather than guess,
 and a client that cares reads the file to find out which it was.
+
+The other is a delete of the node the Emacs session's clock is running in. The
+call is well formed and the file is exactly as the client read it, so it is no
+conflict, and reading it again resolves nothing. What resolves it is a
+clock-out, which the refusal names; see [[*org-node-delete][org-node-delete]].
 
 Every tool below names the classes it can refuse with; the clock tools name
 theirs in [[file:clocking.org][Clock tracking]].
