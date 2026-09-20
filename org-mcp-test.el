@@ -2475,7 +2475,7 @@ holding an open clock."
            "org-query" '((query . "(todo)")) files))
          (titles
           (sort (mapcar (lambda (match) (alist-get 'title match))
-                        (alist-get 'matches query))
+                        (alist-get 'children query))
                 #'string<))
          (tags
           (org-mcp-test--call-with-files
@@ -2530,7 +2530,7 @@ The three tools match every TODO heading, so they must agree."
             (sort (mapcar
                    (lambda (match) (alist-get 'title match))
                    (alist-get
-                    'matches
+                    'children
                     (json-read-from-string
                      (mcp-server-lib-ert-call-tool tool nil))))
                   #'string<))
@@ -3156,7 +3156,7 @@ Very deep content."
       ((test-file org-mcp-test--content-outline-depth))
     (let ((headings
            (alist-get
-            'headings (org-mcp-test--call-read-outline test-file))))
+            'children (org-mcp-test--call-read-outline test-file))))
       ;; Check we have the right number of top-level headings
       (should (= (length headings) 2))
       ;; Check first heading
@@ -5606,7 +5606,7 @@ org-node-set-content, and leaves the file unchanged."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-nested-siblings))
     (let* ((result (org-mcp-test--call-read-outline test-file))
-           (headings (alist-get 'headings result)))
+           (headings (alist-get 'children result)))
       (should (= (length headings) 1))
       (should (string= (alist-get 'title (aref headings 0)) "Parent Task")))))
 
@@ -8871,7 +8871,7 @@ QUERY is the org-ql query sexp as a string."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-with-id-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (first-match (aref matches 0))
            (link (alist-get 'link first-match)))
       (should (equal (alist-get 'total result) 1))
@@ -8882,7 +8882,7 @@ QUERY is the org-ql query sexp as a string."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (first-match (aref matches 0))
            (link (alist-get 'link first-match)))
       (should (equal (alist-get 'total result) 1))
@@ -8911,7 +8911,7 @@ Child body."
                      (when p (char-to-string p)))))
              (rank . ,(lambda () 42)))))
       (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'matches result))
+             (matches (alist-get 'children result))
              (match (aref matches 0)))
         (should (equal (alist-get 'parent-priority match) "A"))
         (should (equal (alist-get 'rank match) 42))))))
@@ -8923,7 +8923,7 @@ Child body."
     (let ((org-mcp-ql-extra-properties
            `((nope . ,(lambda () nil)))))
       (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'matches result))
+             (matches (alist-get 'children result))
              (match (aref matches 0)))
         (should-not (assq 'nope match))))))
 
@@ -8937,7 +8937,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (equal (alist-get 'tags match) ["work" "home"])))))
 
@@ -8946,7 +8946,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (stringp (alist-get 'scheduled match)))
       (should (string-match-p "2024-03-15" (alist-get 'scheduled match))))))
@@ -8956,7 +8956,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-tags-scheduled-deadline))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (stringp (alist-get 'deadline match)))
       (should (string-match-p "2024-03-20" (alist-get 'deadline match))))))
@@ -8966,7 +8966,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'tags match)))))
 
@@ -8975,7 +8975,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'scheduled match)))))
 
@@ -8984,7 +8984,7 @@ SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'deadline match)))))
 
@@ -8998,7 +8998,7 @@ CLOSED: [2024-04-01 Mon 15:30]"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-priority-closed))
     (let* ((result (org-mcp-test--call-ql-query "(done)"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (equal (alist-get 'priority match) "A")))))
 
@@ -9007,7 +9007,7 @@ CLOSED: [2024-04-01 Mon 15:30]"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-priority-closed))
     (let* ((result (org-mcp-test--call-ql-query "(done)"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (stringp (alist-get 'closed match)))
       (should (string-match-p "2024-04-01" (alist-get 'closed match))))))
@@ -9017,7 +9017,7 @@ CLOSED: [2024-04-01 Mon 15:30]"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'priority match)))))
 
@@ -9026,7 +9026,7 @@ CLOSED: [2024-04-01 Mon 15:30]"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'closed match)))))
 
@@ -9043,7 +9043,7 @@ CLOSED: [2024-04-01 Mon 15:30]"
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-ql-with-custom-prop))
     (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'matches result))
+           (matches (alist-get 'children result))
            (match (aref matches 0))
            (props (alist-get 'properties match)))
       (should (equal (alist-get 'EFFORT props) "2:00"))
@@ -9205,7 +9205,7 @@ The query matches every TODO heading in the allowed files."
          (match
           (seq-find
            (lambda (m) (equal (alist-get 'title m) title))
-           (alist-get 'matches result))))
+           (alist-get 'children result))))
     (should match)
     (append (alist-get 'tags match) nil)))
 
@@ -9350,7 +9350,7 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
     (let* ((result-text
             (mcp-server-lib-ert-call-tool "query-inbox" nil))
            (result (json-read-from-string result-text))
-           (matches (alist-get 'matches result)))
+           (matches (alist-get 'children result)))
       (should (equal (alist-get 'total result) 1))
       (should (equal (alist-get 'title (aref matches 0))
                      "Inbox item")))))
@@ -9366,7 +9366,7 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
     (let* ((result-text
             (mcp-server-lib-ert-call-tool "query-next" nil))
            (result (json-read-from-string result-text))
-           (matches (alist-get 'matches result)))
+           (matches (alist-get 'children result)))
       (should (equal (alist-get 'total result) 2)))))
 
 (ert-deftest org-mcp-test-query-backlog-tool ()
@@ -9380,7 +9380,7 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
     (let* ((result-text
             (mcp-server-lib-ert-call-tool "query-backlog" nil))
            (result (json-read-from-string result-text))
-           (matches (alist-get 'matches result)))
+           (matches (alist-get 'children result)))
       (should (equal (alist-get 'total result) 3)))))
 
 (ert-deftest org-mcp-test-query-tools-not-registered-when-nil ()
@@ -10233,7 +10233,7 @@ and by a write, leaving the file unchanged."
                        expected))
         (should
          (equal (titles
-                 (alist-get 'headings (org-mcp-test--call-read-outline file)))
+                 (alist-get 'children (org-mcp-test--call-read-outline file)))
                 expected)))
       (should
        (equal (alist-get 'content (read-file escaped-file))
@@ -11943,10 +11943,11 @@ Other Task's heading line ends with a target.")
   "Reads and writes link a heading by its ID, else custom ID, else title.
 A heading with both an ID and a custom ID is linked by the ID, an empty
 ID counts as none, and a title link leaves out the TODO keyword, the
-priority, the statistics cookie and the tags, as Org does.  The form
-does not follow the link the call was sent: every write here is
-addressed by a title link.  org-node-read's `id' field is the ID its `link'
-names."
+priority, the statistics cookie and the tags, as Org does.  The title
+the node reports leaves out the same, so the title a read returns is
+the search a later call sends.  The form does not follow the link the
+call was sent: every write here is addressed by a title link.
+org-node-read's `id' field is the ID its `link' names."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-link-kinds
       (list org-mcp-test--link-beta-id org-mcp-test--link-both-id)
     (let ((expected
@@ -11955,7 +11956,7 @@ names."
              ("Gamma" . ,(org-mcp-test--file-link test-file "*Gamma"))
              ("Both" . ,(concat "id:" org-mcp-test--link-both-id))
              ("Blank ID" . ,(org-mcp-test--file-link test-file "*Blank ID"))
-             ("Decorated [1/2]"
+             ("Decorated"
               . ,(org-mcp-test--file-link test-file "*Decorated")))))
       (should
        (equal
@@ -11968,12 +11969,8 @@ names."
            (org-mcp-test--call-read (format "file:%s" test-file)))))
         expected))
       (pcase-dolist (`(,title . ,link) expected)
-        ;; Org's title search ignores the statistics cookie in the
-        ;; heading but not in the search string.
         (let* ((search
-                (org-mcp-test--file-link
-                 test-file
-                 (concat "*" (string-trim-right title " \\[1/2\\]"))))
+                (org-mcp-test--file-link test-file (concat "*" title)))
                (heading
                 (json-read-from-string (org-mcp-test--call-read search))))
           (should (equal (alist-get 'link heading) link))
@@ -12394,7 +12391,7 @@ unchanged afterwards."
                             ("query-next")))
               (let ((matches
                      (alist-get
-                      'matches
+                      'children
                       (json-read-from-string
                        (mcp-server-lib-ert-call-tool
                         (car call) (cdr call))))))
@@ -12441,8 +12438,9 @@ takes one, and the org://{link} resource with links, encoded and raw.
 Each read runs once with no buffer visiting the file and once with a
 clean one.  Afterwards the file on disk is the before image, the
 buffer is unmodified with its text untouched, and Org's ID locations
-have not grown.  Every heading in a result carries its link, and each
-link reads back to itself through org-node-read."
+have not grown.  Every node in a result carries its link, the file's
+own among them, and each link reads back to itself through
+org-node-read."
   (org-mcp-test--with-gtd-tools
       ((test-file org-mcp-test--content-read-tools))
       ((org-mcp-query-inbox-fn (lambda () '(tags "#inbox")))
@@ -12557,7 +12555,8 @@ link reads back to itself through org-node-read."
             (org-mcp-test--file-link test-file "*Gamma")
             (org-mcp-test--file-link test-file "*Blank ID")
             (org-mcp-test--file-link test-file "*Decorated")
-            (org-mcp-test--file-link test-file "*Clocked"))
+            (org-mcp-test--file-link test-file "*Clocked")
+            (concat "file:" (abbreviate-file-name test-file)))
            #'string<)))
         (dolist (link (delete-dups (copy-sequence links)))
           (should
@@ -12851,6 +12850,282 @@ state to move from, which the refusal says."
             (org-mcp-uninstall))
           (should (file-exists-p target)))
       (delete-directory temp-dir t))))
+
+;;; The node shape
+
+;; A file and a heading come back in the same shape, from every
+;; endpoint that returns either: a heading, a file, a child, a query
+;; result.  These tests pin what each endpoint carries for one file, at
+;; the seam a client calls, so that consolidating the builders behind
+;; them cannot quietly change an answer.
+
+(defconst org-mcp-test--node-shape-parent-id
+  "11111111-2222-3333-4444-555555555555"
+  "ID of Parent in `org-mcp-test--content-node-shape'.")
+
+(defconst org-mcp-test--content-node-shape
+  (concat
+   "#+TITLE: Node Shapes\n"
+   "Preamble text.\n"
+   "\n"
+   "* TODO [#A] Parent :work:\n"
+   "SCHEDULED: <2026-03-26 Thu> DEADLINE: <2026-04-01 Wed>\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--node-shape-parent-id "\n"
+   ":Effort:   1:00\n"
+   ":END:\n"
+   "Parent body.\n"
+   "** DONE Child One :urgent:\n"
+   "CLOSED: [2026-03-20 Fri 10:00]\n"
+   "** Child Two\n"
+   "*** Grandchild\n"
+   "* Second\n")
+  "A file carrying every field a node reports.
+Parent has a TODO state, a priority, a tag of its own, both planning
+timestamps, an ID, a property and a body.  Child One is closed and
+tagged, Child Two carries an inherited tag only and a child of its
+own, and Second is an empty sibling of Parent.")
+
+(defun org-mcp-test--node-shape-read (link)
+  "Return the node `org-node-read' serves for LINK, parsed."
+  (json-read-from-string (org-mcp-test--call-read link)))
+
+(ert-deftest org-mcp-test-node-shape-heading ()
+  "A heading node carries each field the heading has, and no other.
+A field the heading lacks is left out rather than sent as null, which
+`closed' stands for here."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--node-shape-read
+            (concat "id:" org-mcp-test--node-shape-parent-id))))
+      (should (equal (alist-get 'title node) "Parent"))
+      (should (equal (alist-get 'todo node) "TODO"))
+      (should (equal (alist-get 'priority node) "A"))
+      (should (equal (alist-get 'tags node) ["work"]))
+      (should (equal (alist-get 'local_tags node) ["work"]))
+      (should (equal (alist-get 'scheduled node) "<2026-03-26 Thu>"))
+      (should (equal (alist-get 'deadline node) "<2026-04-01 Wed>"))
+      (should-not (alist-get 'closed node))
+      (should
+       (equal (alist-get 'id node) org-mcp-test--node-shape-parent-id))
+      (should (= (alist-get 'level node) 1))
+      (should
+       (equal (alist-get 'link node)
+              (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should (equal (alist-get 'file node) test-file))
+      (should (equal (alist-get 'content node) "Parent body.")))))
+
+(ert-deftest org-mcp-test-node-shape-children ()
+  "A child is a node, asked for with few fields.
+It carries its title, its TODO state when it has one, its level and
+its link — enough to show the outline and to address the child in the
+call that reads it in full."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--node-shape-read
+            (concat "id:" org-mcp-test--node-shape-parent-id))))
+      (should
+       (equal
+        (append (alist-get 'children node) nil)
+        `(((title . "Child One")
+           (todo . "DONE")
+           (level . 2)
+           (link
+            . ,(org-mcp-test--file-link test-file "*Child One")))
+          ((title . "Child Two")
+           (level . 2)
+           (link
+            . ,(org-mcp-test--file-link test-file "*Child Two")))))))))
+
+(ert-deftest org-mcp-test-node-shape-inherited-tag ()
+  "A node reports the tags in effect on it and the tags of its own.
+Child Two has no tag of its own, so `local_tags' is left out while
+`tags' carries the one it inherits from Parent."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--node-shape-read
+            (org-mcp-test--file-link test-file "*Child Two"))))
+      (should (equal (alist-get 'title node) "Child Two"))
+      (should (equal (alist-get 'tags node) ["work"]))
+      (should-not (alist-get 'local_tags node))
+      (should (= (alist-get 'level node) 2))
+      (should-not (alist-get 'content node))
+      (should
+       (equal
+        (append (alist-get 'children node) nil)
+        `(((title . "Grandchild")
+           (level . 3)
+           (link
+            . ,(org-mcp-test--file-link
+                test-file "*Grandchild")))))))))
+
+(ert-deftest org-mcp-test-node-shape-closed ()
+  "A closed node reports its closing timestamp and both tag sets."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--node-shape-read
+            (org-mcp-test--file-link test-file "*Child One"))))
+      (should (equal (alist-get 'todo node) "DONE"))
+      (should (equal (alist-get 'closed node) "[2026-03-20 Fri 10:00]"))
+      (should (equal (alist-get 'tags node) ["work" "urgent"]))
+      (should (equal (alist-get 'local_tags node) ["urgent"]))
+      (should (equal (append (alist-get 'children node) nil) nil)))))
+
+(ert-deftest org-mcp-test-node-shape-file ()
+  "A file is a node: its preamble is its content, its headings its children."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--node-shape-read (concat "file:" test-file))))
+      (should (equal (alist-get 'title node) "Node Shapes"))
+      (should (equal (alist-get 'file node) test-file))
+      (should (= (alist-get 'level node) 0))
+      (should
+       (equal (alist-get 'link node) (concat "file:" test-file)))
+      (should
+       (equal (alist-get 'content node)
+              "#+TITLE: Node Shapes\nPreamble text."))
+      (should
+       (equal
+        (append (alist-get 'children node) nil)
+        `(((title . "Parent")
+           (todo . "TODO")
+           (level . 1)
+           (link . ,(concat "id:" org-mcp-test--node-shape-parent-id)))
+          ((title . "Second")
+           (level . 1)
+           (link
+            . ,(org-mcp-test--file-link test-file "*Second")))))))))
+
+(ert-deftest org-mcp-test-node-shape-resource-is-the-read ()
+  "The org:// resource serves the node org-node-read returns."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+           (response
+            (json-parse-string
+             (mcp-server-lib-process-jsonrpc
+              (mcp-server-lib-create-resources-read-request
+               (concat "org://" link))
+              mcp-server-lib-ert-server-id)
+             :object-type 'alist))
+           (contents
+            (alist-get 'contents (alist-get 'result response))))
+      (should-not (alist-get 'error response))
+      (should
+       (equal (alist-get 'text (aref contents 0))
+              (org-mcp-test--call-read link))))))
+
+(ert-deftest org-mcp-test-node-shape-query-match ()
+  "A query result is a node, carrying the fields a read carries.
+The Org property drawer comes with it, under its own key, with the
+values Org computes rather than stores left out."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((result
+            (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+           (matches (alist-get 'children result))
+           (node (aref matches 0)))
+      (should (= (length matches) 1))
+      (should (= (alist-get 'total result) 1))
+      (should (equal (alist-get 'title node) "Parent"))
+      (should (equal (alist-get 'todo node) "TODO"))
+      (should (equal (alist-get 'priority node) "A"))
+      (should (equal (alist-get 'tags node) ["work"]))
+      (should (equal (alist-get 'local_tags node) ["work"]))
+      (should (equal (alist-get 'scheduled node) "<2026-03-26 Thu>"))
+      (should (equal (alist-get 'deadline node) "<2026-04-01 Wed>"))
+      (should (equal (alist-get 'file node) test-file))
+      (should
+       (equal (alist-get 'id node) org-mcp-test--node-shape-parent-id))
+      (should (= (alist-get 'level node) 1))
+      (should
+       (equal (alist-get 'link node)
+              (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (alist-get 'properties node)
+        `((EFFORT . "1:00")
+          (ID . ,org-mcp-test--node-shape-parent-id)))))))
+
+
+(defconst org-mcp-test--node-shape-file-id
+  "99999999-8888-7777-6666-555555555555"
+  "ID in the file-level drawer of `org-mcp-test--content-file-node-id'.")
+
+(defconst org-mcp-test--content-file-node-id
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--node-shape-file-id "\n"
+   ":END:\n"
+   "* Only\n")
+  "A file whose own property drawer carries an ID and which sets no title.")
+
+(ert-deftest org-mcp-test-node-shape-file-linked-by-its-id ()
+  "A file carrying an ID of its own reports that ID as its link.
+Reading the path and reading the ID return the same node, so a file is
+addressed the way every other node is.  Setting no `#+TITLE:' leaves
+the file's own name as its title."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-file-node-id
+      (list org-mcp-test--node-shape-file-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-file-id))
+           (node (org-mcp-test--node-shape-read link)))
+      (should (equal (alist-get 'link node) link))
+      (should (= (alist-get 'level node) 0))
+      (should
+       (equal (alist-get 'title node)
+              (file-name-nondirectory test-file)))
+      (should (equal (alist-get 'file node) test-file))
+      (should
+       (equal (org-mcp-test--node-shape-read (concat "file:" test-file))
+              node)))))
+
+;;; One definition of a title
+
+(defconst org-mcp-test--content-cookie-title
+  "* TODO [#A] Ship  v2 [1/3]\nBody.\n"
+  "A heading whose title carries doubled whitespace and a cookie.")
+
+(defconst org-mcp-test--regex-cookie-title-renamed
+  "\\`\\* TODO \\[#A\\] Ship v3\nBody\\.\n\\'"
+  "Regex matching the cookie-title file after the rename.")
+
+(ert-deftest org-mcp-test-title-normalization-is-org-s ()
+  "The title a node reports is normalized by Org's own predicate.
+`org-link--normalize-string' removes statistics cookies and collapses
+runs of whitespace, and `org-link-search' normalizes a heading that
+way before matching a `::*title' link against it.  Pinning it here
+makes a change in Org fail loudly rather than drift through every read
+and every write precondition."
+  (should
+   (equal (org-link--normalize-string "Ship  v2 [1/3]") "Ship v2"))
+  (should (equal (org-link--normalize-string "Done [50%]") "Done"))
+  (should (equal (org-link--normalize-string " Ship\tv2 ") "Ship v2"))
+  (should (equal (org-link--normalize-string "50% Done") "50% Done")))
+
+(ert-deftest org-mcp-test-title-resolved-is-title-accepted ()
+  "A title a link resolves by is a title a write accepts.
+The heading is reached by a title link differing from the heading as
+written in letter case, in spacing and by a statistics cookie.  The
+node reports the title Org compares against, and sending a title back
+as `before' renames the heading instead of being refused — the
+refusal a byte-exact comparison produced for a call the link had just
+resolved."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-cookie-title))
+    (let ((link (org-mcp-test--file-link test-file "*ship v2")))
+      (should
+       (equal
+        (alist-get
+         'title (json-read-from-string (org-mcp-test--call-read link)))
+        "Ship v2"))
+      (org-mcp-test--call-rename-headline-and-check
+       link "SHIP  V2" "Ship v3" test-file
+       org-mcp-test--regex-cookie-title-renamed))))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

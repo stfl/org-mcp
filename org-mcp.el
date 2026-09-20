@@ -107,7 +107,7 @@ at the previous clock's end time."
   "Alist of extra properties to include in org-ql query results.
 Each entry is (KEY . FUNCTION) where KEY is a symbol used as the
 JSON key and FUNCTION is called with no arguments at point during
-`org-mcp--ql-extract-match'.  Non-nil return values are included
+`org-mcp--ql-node-at-point'.  Non-nil return values are included
 in the result alist."
   :type '(alist :key-type symbol :value-type function)
   :group 'org-mcp)
@@ -878,47 +878,6 @@ OPERATION, and RESPONSE-ALIST as variables."
          (when ,position
            (set-marker ,position nil))))))
 
-(defun org-mcp--extract-headings ()
-  "Extract heading structure from current org buffer.
-Returns a vector of level-1 heading alists.  Each level-1 heading
-includes its immediate level-2 children; deeper levels are not
-included.  Each heading carries its link as `link'."
-  (cl-flet
-      ((link
-        (headline)
-        ;; The parse tree is walked without moving point, and the link
-        ;; is made at point.
-        (save-excursion
-          (goto-char (org-element-property :begin headline))
-          (org-mcp--link-at-point))))
-    (vconcat
-     (org-element-map
-      (org-element-parse-buffer 'headline) 'headline
-      (lambda (h)
-        (when (= (org-element-property :level h) 1)
-          `((title . ,(org-element-property :raw-value h))
-            (level . 1) (link . ,(link h))
-            (children
-             .
-             ,(vconcat
-               (org-element-map
-                (org-element-contents h) 'headline
-                (lambda (child)
-                  (when (= (org-element-property :level child) 2)
-                    `((title
-                       . ,(org-element-property :raw-value child))
-                      (level . 2)
-                      (link . ,(link child))
-                      (children . []))))
-                nil nil 'headline))))))
-      nil nil 'headline))))
-
-(defun org-mcp--generate-outline (file-path)
-  "Generate JSON outline structure for FILE-PATH."
-  (org-mcp--with-org-file file-path
-    (let ((headings (org-mcp--extract-headings)))
-      `((headings . ,headings)))))
-
 (defun org-mcp--percent-decode (string)
   "Return STRING with its percent-encoding undone once.
 The escapes are UTF-8 bytes, as `url-hexify-string' writes them, and
@@ -927,7 +886,7 @@ decodes to its byte, `%0A' and `%0D' included."
   (decode-coding-string
    (url-unhex-string (encode-coding-string string 'utf-8) t) 'utf-8))
 
-(defun org-mcp--extract-headline-content ()
+(defun org-mcp--node-text-at-point ()
   "Extract content of current headline including the headline itself.
 Point should be at the headline."
   (let ((start (line-beginning-position)))
@@ -1063,6 +1022,38 @@ Org reports inheritance, not something a caller should have to know."
       (cl-remove-if
        (lambda (tag) (get-text-property 0 'inherited tag)) tags)))))
 
+(defun org-mcp--title-at-point ()
+  "Return the title of the heading at point, as Org reads it.
+`org-get-heading' drops the TODO keyword, the priority cookie, the
+tags and the COMMENT keyword, and Org's own
+`org-link--normalize-string' then drops statistics cookies and
+collapses runs of whitespace.  That is the normalization
+`org-link-search' applies to a heading before matching a `::*title'
+link against it, so every read, every write precondition and Org's
+own link resolution agree on what a heading is called.
+
+`ol.el' exports no public equivalent, and this private function is
+load-bearing in seven places inside `ol.el' itself.  A test pins its
+behaviour, so a change in Org fails the suite loudly instead of
+drifting through every read; reimplementing the rule here with a
+regexp would be the second definition this one exists to remove."
+  (org-link--normalize-string (org-get-heading t t t t)))
+
+(defun org-mcp--titles-equal-p (a b)
+  "Return non-nil when A and B name the same heading to Org.
+The comparison is the one `org-link-search' makes when it resolves a
+`::*title' link: both titles are normalized as
+`org-mcp--title-at-point' normalizes a heading, split into words and
+compared letter case aside.  A write precondition therefore accepts
+every title that reaches the heading through a link, rather than
+refusing the call a link has just resolved."
+  (cl-flet ((words
+             (title)
+             (mapcar
+              #'upcase
+              (split-string (org-link--normalize-string title)))))
+    (equal (words a) (words b))))
+
 (defun org-mcp--heading-metadata-at-point ()
   "Return canonical heading metadata at point as a plist.
 
@@ -1093,7 +1084,7 @@ locale-dependent reformatting)."
          (deadl (org-element-property :deadline el))
          (clsd (org-element-property :closed el)))
     (list
-     :title (org-element-property :raw-value el)
+     :title (org-mcp--title-at-point)
      :todo (org-element-property :todo-keyword el)
      :priority (and priority-char (char-to-string priority-char))
      :tags (car tag-sets)
@@ -1138,116 +1129,243 @@ it unless TEXT ends in one or a line break follows point."
   (unless (or (bolp) (eq (char-after) ?\n))
     (insert "\n")))
 
-(defun org-mcp--extract-heading-child ()
-  "Extract lightweight child entry at current heading.
-Returns an alist with title, todo, level, and link.
-Point should be at the heading. Does not recurse into children."
-  (let* ((meta (org-mcp--heading-metadata-at-point))
-         (title (plist-get meta :title))
-         (todo (plist-get meta :todo))
-         (level (plist-get meta :level))
-         (link (org-mcp--link-at-point)))
-    `((title . ,title)
-      ,@
-      (when todo
-        `((todo . ,todo)))
-      (level . ,level) (link . ,link))))
+(defconst org-mcp--special-properties
+  '("TODO"
+    "TAGS"
+    "ALLTAGS"
+    "PRIORITY"
+    "SCHEDULED"
+    "DEADLINE"
+    "CLOSED"
+    "CATEGORY"
+    "ITEM"
+    "FILE"
+    "BLOCKED"
+    "CLOCKSUM"
+    "CLOCKSUM_T"
+    "TIMESTAMP"
+    "TIMESTAMP_IA")
+  "Org special properties that cannot be set via `org-node-set-properties'.")
 
-(defun org-mcp--extract-structured-heading ()
-  "Extract full structured JSON for current heading.
-Point should be at the heading.
-Returns alist with all heading properties and lightweight children."
-  (let*
-      ((meta (org-mcp--heading-metadata-at-point))
-       (title (plist-get meta :title))
-       (todo (plist-get meta :todo))
-       (priority (plist-get meta :priority))
-       (tags (plist-get meta :tags))
-       (local-tags (plist-get meta :local-tags))
-       (level (plist-get meta :level))
-       (scheduled (plist-get meta :scheduled))
-       (deadline (plist-get meta :deadline))
-       (closed (plist-get meta :closed))
-       (link (org-mcp--link-at-point))
-       ;; The ID the link names, so `id' and `link' always agree; a
-       ;; blank :ID: gives neither.
-       (id (and (string-prefix-p "id:" link) (substring link 3)))
-       (children '())
-       ;; The body as org-node-set-content bounds it, before any child.
-       (body-content
-        (let ((bounds (org-mcp--body-bounds)))
-          (buffer-substring-no-properties (car bounds) (cdr bounds))))
-       ;; Extract direct children
-       (child-level (1+ level)))
-    ;; Collect direct children via sibling navigation.
-    (save-excursion
-      (org-back-to-heading t)
-      (when (org-goto-first-child)
-        (cl-loop
-         do
-         (when (= (org-current-level) child-level)
-           (push (org-mcp--extract-heading-child) children))
-         while (org-get-next-sibling))))
-    ;; Build result alist
-    `((title . ,title)
-      ,@
-      (when todo
-        `((todo . ,todo)))
-      ,@
-      (when priority
-        `((priority . ,priority)))
-      ,@
-      (when tags
-        `((tags . ,(vconcat tags))))
-      ,@
-      (when local-tags
-        `((local_tags . ,(vconcat local-tags))))
-      ,@
-      (when scheduled
-        `((scheduled . ,scheduled)))
-      ,@
-      (when deadline
-        `((deadline . ,deadline)))
-      ,@
-      (when closed
-        `((closed . ,closed)))
-      ,@
-      (when id
-        `((id . ,id)))
-      (level . ,level) (link . ,link) ,@
-      (when (and body-content (not (string-blank-p body-content)))
-        `((content . ,(string-trim body-content))))
-      (children . ,(vconcat (nreverse children))))))
 
-(defun org-mcp--extract-structured-file (file-path)
-  "Extract structured JSON for FILE-PATH.
-Returns alist with file path, preamble content, and top-level children.
-The children are the level-1 headings Org's parser finds, as in
-`org-mcp--extract-headings', and the preamble runs up to the first of
-them.  A line starting with `* ' is a heading wherever it stands, as
-Org parses it, even between the lines opening and closing a block."
+;; Nodes
+
+(defconst org-mcp--node-child-fields '(title todo level link)
+  "The fields a child node carries.
+A child is a node like any other, asked for with few fields: its
+title and TODO state show the outline, and its link addresses it in
+the call that reads it in full.")
+
+(defconst org-mcp--node-read-fields
+  '(title
+    todo
+    priority
+    tags
+    local_tags
+    scheduled
+    deadline
+    closed
+    file
+    id
+    level
+    link
+    content
+    children)
+  "The fields the org-node-read tool and the org://{link} resource carry.")
+
+(defconst org-mcp--node-query-fields
+  '(title
+    todo
+    priority
+    tags
+    local_tags
+    scheduled
+    deadline
+    closed
+    file
+    id
+    level
+    link
+    properties)
+  "The fields a query result carries.
+The same node a read returns, without the body and the children a
+match list would read every matched subtree to fill, and with the Org
+property drawer a query is asked about.")
+
+(defun org-mcp--file-title ()
+  "Return the title of the file the current buffer visits.
+It is the `#+TITLE:' keyword, which `org-get-title' reads, and the
+file's own name when the file sets none, so every node has a title."
+  (or (org-get-title) (file-name-nondirectory (buffer-file-name))))
+
+(defun org-mcp--file-link ()
+  "Return the native Org link to the file the current buffer visits.
+It is the `id:' link of the file's own property drawer when the file
+has one -- the ID org-roam gives a file node, which `org-id-open'
+resolves to the top of the file -- and `file:PATH' otherwise, with
+PATH written as `abbreviate-file-name' writes it, as every heading
+link in a response is written.  Either form names the whole file when
+a later call sends it back, see `org-mcp--target-heading-p'.
+
+The ID comes from Org's own parse of the file-level drawer rather
+than from `org-entry-get', which reads the first heading's drawer
+instead when the file opens on a heading.  No identifier is created."
+  (let ((id
+         (org-with-wide-buffer
+          (goto-char (point-min))
+          (org-element-property :ID (org-element-org-data-parser)))))
+    (if (org-string-nw-p id)
+        (concat "id:" id)
+      (concat "file:" (abbreviate-file-name (buffer-file-name))))))
+
+(defun org-mcp--node-child-positions (file-node)
+  "Return the buffer positions of the children of the node at point.
+FILE-NODE non-nil means the node is the file the buffer visits, and
+its children are the level-1 headings Org's parser finds.  A sibling
+walk started at the first heading would follow that heading's own
+level instead, and miss the level-1 headings of a file that opens at
+a deeper one.
+
+Otherwise the children are the headings one level below the heading
+at point, which `org-goto-first-child' and `org-get-next-sibling'
+walk.  Point does not move."
+  (save-excursion
+    (if file-node
+        (org-element-map
+         (org-element-parse-buffer 'headline) 'headline
+         (lambda (h)
+           (when (= (org-element-property :level h) 1)
+             (org-element-property :begin h)))
+         nil nil 'headline)
+      (let ((child-level (1+ (org-current-level)))
+            (positions '()))
+        (org-back-to-heading t)
+        (when (org-goto-first-child)
+          (cl-loop
+           do
+           (when (= (org-current-level) child-level)
+             (push (point) positions))
+           while (org-get-next-sibling)))
+        (nreverse positions)))))
+
+(defun org-mcp--node-content-bounds (file-node children)
+  "Return the body of the node at point as (BEGIN . END).
+FILE-NODE non-nil means the node is the file, whose body is its
+preamble: everything before CHILDREN, the positions
+`org-mcp--node-child-positions' returned, or the whole file when it
+holds no heading.  Otherwise the body is the region
+`org-mcp--body-bounds' delimits, the one org-node-set-content writes
+within, so what a client reads and what a write replaces are the same
+region."
+  (if file-node
+      (cons (point-min) (or (car children) (point-max)))
+    (org-mcp--body-bounds)))
+
+(defun org-mcp--node-properties ()
+  "Return the Org property drawer of the heading at point, or nil.
+`org-mcp--special-properties' are left out: Org computes them rather
+than storing them, and each is a node field in its own right."
+  (cl-remove-if
+   (lambda (pair)
+     (member (car pair) org-mcp--special-properties))
+   (org-entry-properties nil 'standard)))
+
+(defun org-mcp--node-at-point
+    (fields &optional child-fields file-node)
+  "Return the node at point as an alist carrying FIELDS.
+One node shape serves a file, a heading, a child and a query result,
+so a client learns one vocabulary to walk an outline.
+
+FIELDS is a list of node field names, in the order the node lists
+them; `org-mcp--node-read-fields' names every one.  A field the node
+has no value for -- no TODO state, no tag of its own, an empty body
+-- is left out rather than sent as null.
+
+CHILD-FIELDS is what the `children' field builds each child with, and
+defaults to `org-mcp--node-child-fields'.
+
+FILE-NODE non-nil builds the node of the file the buffer visits: a
+node at level 0, carrying the file's title, a link to the file and
+its preamble as its content.  The caller says which of the two it
+asked for, because point cannot: a file that opens on a heading has
+no position before that heading."
+  (let* ((meta
+          (unless file-node
+            (org-mcp--heading-metadata-at-point)))
+         (children
+          (when (or (memq 'children fields)
+                    (and file-node (memq 'content fields)))
+            (org-mcp--node-child-positions file-node)))
+         (link
+          (when (or (memq 'link fields) (memq 'id fields))
+            (if file-node
+                (org-mcp--file-link)
+              (org-mcp--link-at-point))))
+         (node '()))
+    (dolist (field fields (nreverse node))
+      (let ((value
+             (pcase field
+               ('title
+                (if file-node
+                    (org-mcp--file-title)
+                  (plist-get meta :title)))
+               ('todo (plist-get meta :todo))
+               ('priority (plist-get meta :priority))
+               ('tags
+                (when-let* ((tags (plist-get meta :tags)))
+                  (vconcat tags)))
+               ('local_tags
+                (when-let* ((tags (plist-get meta :local-tags)))
+                  (vconcat tags)))
+               ('scheduled (plist-get meta :scheduled))
+               ('deadline (plist-get meta :deadline))
+               ('closed (plist-get meta :closed))
+               ('file (buffer-file-name))
+               ;; The ID the link names, so `id' and `link' always
+               ;; agree; a blank :ID: gives neither.
+               ('id
+                (and link
+                     (string-prefix-p "id:" link)
+                     (substring link 3)))
+               ('level
+                (if file-node
+                    0
+                  (plist-get meta :level)))
+               ('link link)
+               ('content
+                (let* ((bounds
+                        (org-mcp--node-content-bounds
+                         file-node children))
+                       (text
+                        (buffer-substring-no-properties
+                         (car bounds) (cdr bounds))))
+                  (unless (string-blank-p text)
+                    (string-trim text))))
+               ('properties (org-mcp--node-properties))
+               ('children
+                (vconcat
+                 (mapcar
+                  (lambda (position)
+                    (save-excursion
+                      (goto-char position)
+                      (org-mcp--node-at-point
+                       (or child-fields org-mcp--node-child-fields))))
+                  children)))
+               (_ (error "Unknown node field: %s" field)))))
+        (when value
+          (push (cons field value) node))))))
+
+(defun org-mcp--generate-outline (file-path)
+  "Return the outline of FILE-PATH: its headings and theirs.
+The file node's `children' alone, each child carrying its own
+children, so the answer is the top-level headings and their direct
+ones.  The generation below those is left out, as are the fields a
+whole read carries."
   (org-mcp--with-org-file file-path
-    (let* ((headings
-            (org-element-map
-             (org-element-parse-buffer 'headline) 'headline
-             (lambda (h)
-               (when (= (org-element-property :level h) 1)
-                 (org-element-property :begin h)))
-             nil nil 'headline))
-           (content
-            (buffer-substring-no-properties
-             (point-min) (or (car headings) (point-max))))
-           (children
-            (mapcar
-             (lambda (begin)
-               (goto-char begin)
-               (org-mcp--extract-heading-child))
-             headings)))
-      `((file . ,file-path)
-        ,@
-        (when (and content (not (string-blank-p content)))
-          `((content . ,(string-trim content))))
-        (children . ,(vconcat children))))))
+    (org-mcp--node-at-point '(children)
+                            (append
+                             org-mcp--node-child-fields '(children))
+                            t)))
 
 ;; Links
 
@@ -1695,7 +1813,7 @@ element API."
                  'heading
                  (save-excursion
                    (org-back-to-heading t)
-                   (org-get-heading t t t t)))
+                   (org-mcp--title-at-point)))
                 (cons 'start (org-mcp--clock-element-start-str el))
                 (cons
                  'allowed (and (org-mcp--find-allowed-file file) t))
@@ -1715,7 +1833,7 @@ element API."
                            (heading
                             (save-excursion
                               (org-back-to-heading t)
-                              (org-get-heading t t t t))))
+                              (org-mcp--title-at-point))))
                       (throw 'found
                              (list
                               (cons 'file (expand-file-name file))
@@ -2771,16 +2889,20 @@ MCP Parameters:
 (defun org-mcp--read-structured (link &optional files)
   "Return structured JSON for what LINK, a native Org link, points to.
 The org-node-read tool and the org://{link} resource both read through
-here, so they resolve a link the same way.  FILES is the org-node-read
-tool's `files' parameter; see `org-mcp--link-target'.  The resource
-passes none."
+here, so they resolve a link the same way.  A file and a heading come
+back as the same node, `org-mcp--node-at-point' builds both, and the
+file is the one at level 0.  FILES is the org-node-read tool's `files'
+parameter; see `org-mcp--link-target'.  The resource passes none."
   (org-mcp--read-link link
                       (lambda ()
                         (json-encode
-                         (org-mcp--extract-structured-heading)))
-                      (lambda (file)
+                         (org-mcp--node-at-point
+                          org-mcp--node-read-fields)))
+                      (lambda (_file)
                         (json-encode
-                         (org-mcp--extract-structured-file file)))
+                         (org-mcp--node-at-point
+                          org-mcp--node-read-fields
+                          nil t)))
                       files))
 
 (defun org-mcp--handle-org-resource (params)
@@ -2837,8 +2959,8 @@ MCP Parameters:
 
       ;; Verify current title matches
       (beginning-of-line)
-      (let ((actual-title (org-get-heading t t t t)))
-        (unless (string= actual-title before)
+      (let ((actual-title (org-mcp--title-at-point)))
+        (unless (org-mcp--titles-equal-p actual-title before)
           (org-mcp--state-mismatch-error
            before actual-title "Title")))
 
@@ -2976,24 +3098,6 @@ MCP Parameters:
 
           (goto-char heading)
           (set-marker heading nil))))))
-
-(defconst org-mcp--special-properties
-  '("TODO"
-    "TAGS"
-    "ALLTAGS"
-    "PRIORITY"
-    "SCHEDULED"
-    "DEADLINE"
-    "CLOSED"
-    "CATEGORY"
-    "ITEM"
-    "FILE"
-    "BLOCKED"
-    "CLOCKSUM"
-    "CLOCKSUM_T"
-    "TIMESTAMP"
-    "TIMESTAMP_IA")
-  "Org special properties that cannot be set via `org-node-set-properties'.")
 
 (defun org-mcp--validate-properties (properties)
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
@@ -3335,65 +3439,19 @@ MCP Parameters:
 
 ;; org-ql integration
 
-(defun org-mcp--ql-extract-match ()
-  "Extract match data at point for `org-ql-select' :action.
-Returns an alist with headline metadata suitable for JSON encoding.
-Extra properties from `org-mcp-ql-extra-properties' are appended."
-  (let* ((meta (org-mcp--heading-metadata-at-point))
-         (title (plist-get meta :title))
-         (level (plist-get meta :level))
-         (file (buffer-file-name))
-         (todo (plist-get meta :todo))
-         (priority (plist-get meta :priority))
-         (tags (plist-get meta :tags))
-         (scheduled (plist-get meta :scheduled))
-         (deadline (plist-get meta :deadline))
-         (closed (plist-get meta :closed))
-         (link (org-mcp--link-at-point))
-         (props
-          (cl-remove-if
-           (lambda (pair)
-             (member
-              (car pair)
-              '("ALLTAGS"
-                "BLOCKED"
-                "CATEGORY"
-                "CLOCKSUM"
-                "CLOCKSUM_T"
-                "CLOSED"
-                "DEADLINE"
-                "FILE"
-                "ITEM"
-                "PRIORITY"
-                "SCHEDULED"
-                "TAGS"
-                "TIMESTAMP"
-                "TIMESTAMP_IA"
-                "TODO")))
-           (org-entry-properties nil 'standard)))
-         (result `((title . ,title) (level . ,level) (file . ,file))))
-    (when todo
-      (push `(todo . ,todo) result))
-    (when priority
-      (push `(priority . ,priority) result))
-    (when tags
-      (push `(tags . ,(vconcat tags)) result))
-    (when scheduled
-      (push `(scheduled . ,scheduled) result))
-    (when deadline
-      (push `(deadline . ,deadline) result))
-    (when closed
-      (push `(closed . ,closed) result))
-    (push `(link . ,link) result)
-    (when props
-      (let ((props-alist
-             (mapcar (lambda (p) (cons (car p) (cdr p))) props)))
-        (push `(properties . ,props-alist) result)))
-    (dolist (extra org-mcp-ql-extra-properties)
-      (let ((val (funcall (cdr extra))))
-        (when val
-          (push (cons (car extra) val) result))))
-    (nreverse result)))
+(defun org-mcp--ql-node-at-point ()
+  "Return the node at point for the `:action' of `org-ql-select'.
+It is the node a read returns, in the same shape, with the extra
+fields `org-mcp-ql-extra-properties' configures appended."
+  (append
+   (org-mcp--node-at-point org-mcp--node-query-fields)
+   (delq
+    nil
+    (mapcar
+     (lambda (extra)
+       (when-let* ((value (funcall (cdr extra))))
+         (cons (car extra) value)))
+     org-mcp-ql-extra-properties))))
 
 (defun org-mcp--tool-query (query &optional files)
   "Search Org files using an org-ql QUERY expression.
@@ -3421,7 +3479,7 @@ MCP Parameters:
                                       (type-of query-sexp)))
     (org-mcp--with-file-set files
       (let* ((target-files org-agenda-files)
-             (action #'org-mcp--ql-extract-match)
+             (action #'org-mcp--ql-node-at-point)
              (matches
               ;; Given no files, `org-ql-select' would search the
               ;; current buffer, which no call names.
@@ -3436,7 +3494,7 @@ MCP Parameters:
                     "Org-ql query error: %s"
                     (error-message-string err)))))))
         (json-encode
-         `((matches . ,(vconcat matches))
+         `((children . ,(vconcat matches))
            (total . ,(length matches))
            (files_searched . ,(length target-files))))))))
 
@@ -3458,7 +3516,7 @@ Returns JSON-encoded results in the same format as org-query."
           (when target-files
             (condition-case err
                 ;; Collect org-elements with the default action,
-                ;; then sort.  We map `org-mcp--ql-extract-match'
+                ;; then sort.  We map `org-mcp--ql-node-at-point'
                 ;; in a second pass because `org-ql-select' applies
                 ;; :action before :sort — custom actions that
                 ;; return non-element data would break sort
@@ -3476,14 +3534,14 @@ Returns JSON-encoded results in the same format as org-query."
                        ;; narrowing would be read at the wrong place.
                        (org-with-wide-buffer
                         (goto-char (org-element-property :begin el))
-                        (org-mcp--ql-extract-match))))
+                        (org-mcp--ql-node-at-point))))
                    elements))
               (error
                (org-mcp--tool-validation-error
                 "Org-ql query error: %s"
                 (error-message-string err)))))))
       (json-encode
-       `((matches . ,(vconcat matches))
+       `((children . ,(vconcat matches))
          (total . ,(length matches))
          (files_searched . ,(length target-files)))))))
 
@@ -3606,7 +3664,7 @@ MCP Parameters:
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (org-mcp--read-link
-   link #'org-mcp--extract-headline-content #'org-mcp--read-file
+   link #'org-mcp--node-text-at-point #'org-mcp--read-file
    files))
 
 ;; Clock tools
@@ -3656,7 +3714,7 @@ MCP Parameters:
                            (heading
                             (save-excursion
                               (org-back-to-heading t)
-                              (org-get-heading t t t t))))
+                              (org-mcp--title-at-point))))
                       (push `((file . ,clock-file)
                               (heading . ,heading)
                               (start . ,start-str)
@@ -3787,7 +3845,7 @@ MCP Parameters:
                                      ,(org-mcp--clock-format-timestamp
                                        clock-start))
                                     (heading
-                                     . ,(org-get-heading t t t t))
+                                     . ,(org-mcp--title-at-point))
                                     ,@
                                     (when (> resolved-count 0)
                                       `((resolved
@@ -4020,6 +4078,39 @@ Tool descriptions `concat' it after the parameter's first line.")
 "
   "How the `files' parameter of a tool scanning a set of files works.
 Tool descriptions `concat' it after the parameter's first lines.")
+
+(defconst org-mcp--node-description "
+A node is a file or a heading, and both come back in one shape.  A
+field the node has no value for is left out rather than sent as null.
+  title - The heading's title, or a file's #+TITLE: and its own name
+          when it sets none
+  todo - TODO state
+  priority - Priority letter
+  tags - The tags in effect on the heading, inherited ones included
+         as org-use-tag-inheritance and
+         org-tags-exclude-from-inheritance direct, both of which
+         org-config-tags reports
+  local_tags - The tags written on the heading itself, which is the
+         set org-node-set-tags replaces.  Identical to tags when
+         inheritance is off
+  scheduled - Scheduled timestamp
+  deadline - Deadline timestamp
+  closed - Closed timestamp
+  file - Absolute path of the file the node lives in
+  id - The ID the link names
+  level - Heading level, 0 for a file
+  link - Link naming this node again: id:{id} when it has an ID, else
+         file:{path}::#{custom-id} when it has a CUSTOM_ID, else
+         file:{path}::*{title}; a file without an ID is file:{path}
+  content - Body text, or a file's preamble before its first heading
+  properties - The Org property drawer
+  children - The direct children, each a node carrying title, todo,
+             level and link
+"
+  "How a node reads, for every tool description that returns one.
+One shape serves a file, a heading, a child and a query result, so
+the tools that return any of them share this text rather than each
+describing the same thing differently.")
 
 (defconst org-mcp--core-tool-specs
   (list
@@ -4543,9 +4634,7 @@ Returns JSON object:
     :id "org-node-read"
     :description
     (concat
-     "Read Org file or headline with structured JSON output.  Takes a
-native Org link and returns structured data including children,
-properties, and timestamps.
+     "Read an Org file or heading as a node.  Takes a native Org link.
 
 Parameters:
   link - Link to a heading or a file (string, required)
@@ -4570,34 +4659,10 @@ Parameters:
           Every tool that names a heading takes files in the same
           way.
 
-Returns: JSON object with structured data:
-  For files:
-    file - File path
-    content - Preamble text before first heading (if any)
-    children - Array of top-level headings (title, todo, level, link)
-  For headlines:
-    title - Headline text
-    todo - TODO state (if present)
-    priority - Priority letter (if present)
-    tags - The tags in effect on the heading (array, if present).
-           Which of a parent's or a file's tags reach it is Org's
-           decision, from org-use-tag-inheritance and
-           org-tags-exclude-from-inheritance, both of which
-           org-config-tags reports.
-    local_tags - The tags written on the heading itself (array, if
-           present), which is the set org-node-set-tags replaces.
-           Identical to tags when inheritance is off.
-    scheduled - Scheduled timestamp (if present)
-    deadline - Deadline timestamp (if present)
-    closed - Closed timestamp (if present)
-    id - The ID the link names (if the heading has an ID)
-    level - Heading level
-    link - Link to this heading: id:{id} when it has an ID, else
-           file:{path}::#{custom-id} when it has a CUSTOM_ID, else
-           file:{path}::*{title}
-    content - Body text (if present)
-    children - Array of direct children (title, todo, level, link)
-
+Returns: JSON object, the node the link names, with its children.
+It carries every field below but properties.
+"
+     org-mcp--node-description "
 File must be in the allowed files, or permitted by
 org-mcp-file-scope-override.")
     :read-only t)
@@ -4619,12 +4684,9 @@ Parameters:
          up, and so is an org:// resource URI.
 
 Returns: JSON object with hierarchical outline structure:
-  headings - Array of top-level headlines, each with title, level,
-             link and children (its level-2 headlines, whose children
-             arrays are empty)
-  link - Link to the headline: id:{id} when it has an ID, else
-         file:{path}::#{custom-id} when it has a CUSTOM_ID, else
-         file:{path}::*{title}"
+  children - Array of top-level headings, each a node carrying title,
+             todo, level, link and its own children, the level-2
+             headings; those carry no children of their own"
     :read-only t)
    (list
     #'org-mcp--tool-node-text
@@ -4668,23 +4730,13 @@ Parameters:
 "
      org-mcp--files-set-description "
 Returns JSON object:
-  matches - Array of matched entries, each with:
-    title - Headline text (string)
-    level - Headline level (number)
-    file - Absolute file path (string)
-    todo - TODO state (string, omitted if none)
-    priority - Priority letter (string, omitted if none)
-    tags - The tags in effect on the heading (array, omitted if
-           none), inherited ones included as
-           org-use-tag-inheritance and
-           org-tags-exclude-from-inheritance direct.  The same tags
-           org-node-read returns for that heading.
-    link - Link to the heading (string): id:{id} when it has an ID,
-           else file:{path}::#{custom-id} when it has a CUSTOM_ID,
-           else file:{path}::*{title}
-    properties - Standard properties (object, omitted if none)
+  children - Array of matching nodes, the shape org-node-read
+             returns.  Each carries every field below but content
+             and children.
   total - Number of matches (number)
-  files_searched - Number of files searched (number)")
+  files_searched - Number of files searched (number)
+"
+     org-mcp--node-description)
     :read-only t))
   "Specs for the tools org-mcp registers on every `org-mcp-enable\='.
 Each element is a `mcp-server-lib-register-server\=' `:tools\=' spec,
@@ -4784,8 +4836,8 @@ Returns JSON object:
     (only present in that case; file/heading/start/link are omitted)
   file - File path of active clock (string, only if active
     in allowed file)
-  heading - Heading title with active clock (string, only if active
-    in allowed file)
+  heading - Title of the heading with the active clock, the title a
+    read reports (string, only if active in allowed file)
   start - Start timestamp string (string, only if active
     in allowed file)
   link - Link to the heading with the active clock (string, only if
@@ -4841,7 +4893,7 @@ Returns JSON object:
           not on disk; tell the user it needs saving (boolean)
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
-  heading - The heading title (string)
+  heading - The heading's title, as a read reports it (string)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
@@ -4888,7 +4940,7 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   clocked_out - Always true (boolean)
-  heading - The heading title (string)
+  heading - The heading's title, as a read reports it (string)
   start - Start timestamp (string)
   end - End timestamp (string)
   duration - Duration as H:MM (string)
@@ -4982,7 +5034,7 @@ Parameters:
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
     file - File path (string)
-    heading - Heading title (string)
+    heading - The heading's title, as a read reports it (string)
     start - Start timestamp (string)
     link - Link to the heading (string): id:{id} when it has an ID,
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
@@ -5022,33 +5074,8 @@ Examples:
   org://file:/home/user/org/projects.org::%23alpha
   org://file:/home/user/org/projects.org::*Project%20Alpha
 
-Returns: JSON object with structured data:
-  For files:
-    file - File path
-    content - Preamble text before first heading (if any)
-    children - Array of top-level headings (title, todo, level, link)
-  For headlines:
-    title - Headline text
-    todo - TODO state (if present)
-    priority - Priority letter (if present)
-    tags - The tags in effect on the heading (array, if present).
-           Which of a parent's or a file's tags reach it is Org's
-           decision, from org-use-tag-inheritance and
-           org-tags-exclude-from-inheritance, both of which
-           org-config-tags reports.
-    local_tags - The tags written on the heading itself (array, if
-           present), which is the set org-node-set-tags replaces.
-           Identical to tags when inheritance is off.
-    scheduled - Scheduled timestamp (if present)
-    deadline - Deadline timestamp (if present)
-    closed - Closed timestamp (if present)
-    id - The ID the link names (if the heading has an ID)
-    level - Heading level
-    link - Link to this heading: id:{id} when it has an ID, else
-           file:{path}::#{custom-id} when it has a CUSTOM_ID, else
-           file:{path}::*{title}
-    content - Body text (if present)
-    children - Array of direct children (title, todo, level, link)
+Returns: the node the link names, exactly as the org-node-read tool
+returns it.
 
 A link resolves, and is refused, exactly as in the org-node-read tool.
 The file must be in the allowed files, or permitted by

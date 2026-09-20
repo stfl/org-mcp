@@ -174,7 +174,7 @@ Example:
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): Current headline title (without TODO state or tags) - must match actual title
+  - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
   - =after= (string, required): New headline title (without TODO state or tags)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
