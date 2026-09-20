@@ -163,22 +163,49 @@ package is byte-compiled, so it cannot drift from the package
 metadata the way a second copy of the string would.")
 
 ;; Error handling helpers
+;;
+;; A refusal a client acts on carries its class as a prefix on the
+;; message.  The transport has no error code of any kind:
+;; `mcp-server-lib-tool-throw' carries a string, and the org://{link}
+;; resource re-signals that same string as JSON-RPC `invalid-params', so
+;; a marker inside the message is the only thing both paths keep.  The
+;; prefixes live in the helpers below and nowhere else, so that no call
+;; site can raise a conflict that is not marked as one.  The vocabulary
+;; is published contract: docs/writing.org, "How a refusal is classed".
+
+(defconst org-mcp--refusal-conflict "conflict: "
+  "Marker on a refusal saying the client's belief is stale.
+The recovery is to read the file again and re-plan; sending the same
+call again refuses it again.  Only `org-mcp--tool-conflict-error'
+writes it.")
 
 (defun org-mcp--id-not-found-error (id)
-  "Throw error for ID not found."
+  "Throw error for ID not found.
+The refusal is unmarked, the validation class: an ID org-mcp cannot
+resolve is as likely a heading that has gone, a conflict, as one a
+client invented, and nothing here tells the two apart."
   (mcp-server-lib-tool-throw (format "Cannot find ID '%s'" id)))
 
 (defun org-mcp--tool-validation-error (message &rest args)
-  "Throw validation error MESSAGE with ARGS for tool operations."
+  "Throw validation error MESSAGE with ARGS for tool operations.
+Validation is the unmarked default class: the call itself was
+malformed, and the recovery is to correct it and send it again."
   (mcp-server-lib-tool-throw (apply #'format message args)))
 
+(defun org-mcp--tool-conflict-error (message &rest args)
+  "Throw conflict refusal MESSAGE with ARGS, marked `conflict:'.
+A conflict says the file is not as the client believed it to be, so
+the recovery is to read it again and re-plan rather than to retry."
+  (mcp-server-lib-tool-throw
+   (concat org-mcp--refusal-conflict (apply #'format message args))))
+
 (defun org-mcp--state-mismatch-error (expected found context)
-  "Throw state mismatch error.
+  "Throw a conflict refusal for a precondition that no longer holds.
 EXPECTED is the expected value, FOUND is the actual value,
 CONTEXT describes what is being compared."
-  (mcp-server-lib-tool-throw
-   (format "%s mismatch: expected '%s', found '%s'"
-           context expected found)))
+  (org-mcp--tool-conflict-error
+   "%s mismatch: expected '%s', found '%s'"
+   context expected found))
 
 (defun org-mcp--saved-then-failed-error (what err)
   "Throw an error for a save that wrote the file and then failed.
@@ -1678,12 +1705,16 @@ makes for that heading names it too, even when, as a title link, it
 resolves to an earlier heading of the same title.  A missing or wrong
 CLOCK-OUT is refused with the running clock's heading named by its
 title and link, and the clock's start, so the client can ask the user
-about it.  Nothing is changed."
+about it.  Nothing is changed.
+
+A CLOCK-OUT that disagrees with the running clock is a conflict: the
+client believed something about the world that no longer holds, and
+reading the clock again is what puts it right."
   (let ((clock-out (org-mcp--link-given clock-out)))
     (cond
      ((not active)
       (when clock-out
-        (org-mcp--tool-validation-error
+        (org-mcp--tool-conflict-error
          "clock_out names a clock to close, but no clock is running: %s"
          clock-out)))
      ((not (alist-get 'allowed active))
@@ -1704,7 +1735,7 @@ user to clock out of it before clocking in"))
                            link
                            (alist-get 'start active))))
              (unless clock-out
-               (org-mcp--tool-validation-error
+               (org-mcp--tool-conflict-error
                 "A clock is running on %s.  Ask the user whether to \
 clock out of it, then send its link as clock_out"
                 running))
@@ -1725,7 +1756,7 @@ clock out of it, then send its link as clock_out"
                          (ignore-error mcp-server-lib-tool-error
                            (org-mcp--goto-heading target)
                            (= (point) heading))))
-                 (org-mcp--tool-validation-error
+                 (org-mcp--tool-conflict-error
                   "clock_out does not name the running clock: %s.  \
 The clock runs on %s"
                   clock-out running)))))))))))
@@ -3686,7 +3717,7 @@ MCP Parameters:
           refused with any other link"
   (let ((active (org-mcp--clock-find-active)))
     (unless active
-      (org-mcp--tool-validation-error "No active clock to stop"))
+      (org-mcp--tool-conflict-error "No active clock to stop"))
     (unless (alist-get 'allowed active)
       (org-mcp--tool-validation-error
        "A clock is running in a file outside the allowed files.  Ask \
