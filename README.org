@@ -87,7 +87,10 @@ the next call sends — the same text =org-store-link= gives you in Emacs.
 - *It reaches the files you allow, and no others.* A file outside
   =org-mcp-allowed-files= is refused unless =org-mcp-file-scope-override= permits
   it, and then for one call only. Remote (TRAMP) paths are refused before a
-  connection is opened, and so are encrypted =.org.gpg= files.
+  connection is opened, and so are encrypted =.org.gpg= files. A clock running
+  in a file outside them is out of reach as well: neither clock tool closes it,
+  and org-mcp discloses nothing about it — not its file, not its heading, not
+  when it started — so you clock out of it in Emacs yourself.
 - *It blocks Emacs while it searches.* A query over a named directory walks the
   tree and reads every Org file in it in Emacs's single thread, and Emacs does not
   respond meanwhile. Point it at narrow directories.

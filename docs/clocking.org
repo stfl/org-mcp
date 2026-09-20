@@ -102,12 +102,29 @@ Example:
 #+end_src
 
 ** org-clock-out
-- *Description:* Clock out the currently active clock. Supports optional link validation and custom end time
+- *Description:* Clock out the currently active clock. Org writes the close, so the Emacs clock the CLOCK line belongs to stops with it and a following =org-clock-in= needs no =clock_out=. Supports optional link validation and custom end time
 - *Parameters:*
   - =link= (string, optional): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) to validate against the active clock, such as =file:/path/to/file.org=. If provided, its file must match the active clock's file; =null=, =false= or a blank string count as none
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
+
+Org writes the close, so Org's clock-out settings decide what the file ends up
+holding. With =org-clock-out-remove-zero-time-clocks=, a clock of no length
+leaves no CLOCK line behind at all, and the drawer it empties goes with it;
+=org-clock-out-switch-to-state= rewrites the heading's TODO keyword. The
+response reports neither — it reports the close that was asked for — so read
+the heading back when the outcome matters.
+
+A call is refused when:
+
+- a clock runs in a file outside the allowed files, as =org-clock-in= refuses one.  org-mcp writes no file outside the allowed files, and says nothing about that clock, neither its file nor its heading nor its start, so the user has to clock out of it in Emacs:
+  #+begin_example
+  A clock is running in a file outside the allowed files.  Ask the user to clock out of it in Emacs
+  #+end_example
+- no clock runs at all.
+- =end_time= is before the running clock's start, or cannot be parsed.
+- =link= names a file other than the running clock's, or is no link org-mcp takes or names a file outside the allowed files.
 
 Example:
 #+begin_src json
