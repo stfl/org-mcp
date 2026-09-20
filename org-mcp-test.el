@@ -937,7 +937,14 @@ setup outside requests may still create IDs."
        (advice-add 'org-id-new :before #'org-mcp-test--record-created-id))
      (org-mcp-enable)
      (unwind-protect
-         (prog1 (mcp-server-lib-ert-with-server :tools t :resources t ,@body)
+         ;; `org-mcp-enable' registers the server record itself, so the
+         ;; helper leaves it alone and `initialize' reports org-mcp's own
+         ;; serverInfo rather than the helper's test values.
+         (prog1 (mcp-server-lib-ert-with-server
+                  :tools t
+                  :resources t
+                  :version mcp-server-lib-default-server-version
+                  ,@body)
            (should-not org-mcp-test--created-ids))
        (org-mcp-disable)
        (unless watching
@@ -2990,6 +2997,25 @@ NEW-TITLE is the invalid new title that should be rejected."
      (let ((resources (mcp-server-lib-ert-get-resource-list)))
        ;; Check that the resource list is empty
        (should (= (length resources) 0))))))
+
+(ert-deftest org-mcp-test-tools-not-in-list-after-disable ()
+  "Test that tools are unregistered after `org-mcp-disable'."
+  (let ((org-mcp-allowed-files '("test.org")))
+    ;; Enable then disable
+    (org-mcp-enable)
+    (org-mcp-disable)
+    ;; Start server and check tools
+    (mcp-server-lib-ert-with-server
+     :tools nil
+     :resources nil
+     (let ((tools
+            (alist-get
+             'tools
+             (mcp-server-lib-ert-get-success-result
+              "tools/list"
+              (mcp-server-lib-create-tools-list-request)))))
+       ;; Check that the tool list is empty
+       (should (= (length tools) 0))))))
 
 (ert-deftest org-mcp-test-file-resource-read ()
   "Test that reading org:// resource returns structured JSON."

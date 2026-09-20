@@ -6,7 +6,7 @@
 ;;         Stefan Lendl <git@stfl.dev>
 ;; Keywords: convenience, files, matching, outlines
 ;; Version: 0.9.0
-;; Package-Requires: ((emacs "30.1") (mcp-server-lib "0.2.0") (org-ql "0.9"))
+;; Package-Requires: ((emacs "30.1") (mcp-server-lib "0.4.0") (org-ql "0.9"))
 ;; Homepage: https://github.com/laurynas-biveinis/org-mcp
 
 ;; This file is NOT part of GNU Emacs.
@@ -3864,11 +3864,16 @@ Tool descriptions `concat' it after the parameter's first lines.")
 
 (defun org-mcp-enable ()
   "Enable the org-mcp server."
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-todo-config
-   :id "org-get-todo-config"
-   :description
-   "Get the TODO keyword configuration from the current Emacs
+  (mcp-server-lib-register-server
+   :id org-mcp--server-id
+   :tools
+   (append
+    (list
+     (list
+      #'org-mcp--tool-get-todo-config
+      :id "org-get-todo-config"
+      :description
+      "Get the TODO keyword configuration from the current Emacs
 Org-mode settings.  Returns information about task state sequences
 and their semantics.
 
@@ -3890,14 +3895,12 @@ the last keyword is treated as the done state.
 
 Use this tool to understand the available task states in the Org
 configuration before creating or updating TODO items."
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-tag-config
-   :id "org-get-tag-config"
-   :description
-   "Get tag-related configuration from the current Emacs Org-mode
+      :read-only t)
+     (list
+      #'org-mcp--tool-get-tag-config
+      :id "org-get-tag-config"
+      :description
+      "Get tag-related configuration from the current Emacs Org-mode
 settings.  Returns literal Elisp variable values as strings for tag
 configuration introspection.
 
@@ -3924,15 +3927,13 @@ Use this tool to understand:
 
 This helps validate tag usage and understand tag semantics before
 adding or modifying tags on TODO items."
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-tag-candidates
-   :id "org-get-tag-candidates"
-   :description
-   (concat
-    "Return all candidate tags the user might want to use across the
+      :read-only t)
+     (list
+      #'org-mcp--tool-get-tag-candidates
+      :id "org-get-tag-candidates"
+      :description
+      (concat
+       "Return all candidate tags the user might want to use across the
 allowed files, or across the files named in `files'.
 
 Mirrors Org's interactive tag completion (C-c C-q): the result is
@@ -3947,20 +3948,18 @@ Parameters:
           Replaces the allowed files for this call; when omitted, all
           allowed files are used.
 "
-    org-mcp--files-set-description "
+       org-mcp--files-set-description "
 Returns JSON object with:
   tags - Sorted, deduplicated array of tag-name strings.
 
 Use this when suggesting or completing tags rather than
 `org-get-tag-config', which only exposes the static configuration.")
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-priority-config
-   :id "org-get-priority-config"
-   :description
-   "Get priority configuration from the current Emacs Org-mode
+      :read-only t)
+     (list
+      #'org-mcp--tool-get-priority-config
+      :id "org-get-priority-config"
+      :description
+      "Get priority configuration from the current Emacs Org-mode
 settings.  Returns the priority range and default as single-character
 strings.
 
@@ -3973,14 +3972,12 @@ Returns JSON object with:
 
 Use this tool to understand the valid priority range before setting
 or interpreting priorities on TODO items."
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-allowed-files
-   :id "org-get-allowed-files"
-   :description
-   "Get the list of Org files accessible through the org-mcp
+      :read-only t)
+     (list
+      #'org-mcp--tool-get-allowed-files
+      :id "org-get-allowed-files"
+      :description
+      "Get the list of Org files accessible through the org-mcp
 server, and whether a call may name Org files outside them.  Returns
 the allowed files as configured in org-mcp-allowed-files (the agenda
 files when unset), and the policy of org-mcp-file-scope-override.
@@ -4021,22 +4018,20 @@ Use cases:
   - Access Troubleshooting: Why is my file access failing?
   - Configuration Verification: Did my org-mcp-allowed-files setting
     work correctly?"
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-update-todo-state
-   :id "org-update-todo-state"
-   :description
-   (concat
-    "Update the TODO state of an Org headline.  Changes the task state
+      :read-only t)
+     (list
+      #'org-mcp--tool-update-todo-state
+      :id "org-update-todo-state"
+      :description
+      (concat
+       "Update the TODO state of an Org headline.  Changes the task state
 while preserving the headline title, tags, and other properties.
 
 Parameters:
   link - Link to the headline to update (string, required)
 "
-    org-mcp--heading-link-formats
-    "  current_state - Expected current TODO state (string, optional)
+       org-mcp--heading-link-formats
+       "  current_state - Expected current TODO state (string, optional)
                   When provided, must match actual state or tool will error
                   Omit to skip the state check
   new_state - New TODO state to set (string, required)
@@ -4056,14 +4051,12 @@ Returns JSON object:
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-add-todo
-   :id "org-add-todo"
-   :description
-   "Add a new TODO item to an Org file at a specified location.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-add-todo
+      :id "org-add-todo"
+      :description
+      "Add a new TODO item to an Org file at a specified location.
 Creates the headline with TODO state, optional tags, optional body
 content, and optional properties.  No ID or CUSTOM_ID is created:
 set one in properties to give the headline a stable link.
@@ -4138,22 +4131,20 @@ file's preamble (a file-level property drawer, keyword lines such as
 heading
   - Top-level + after_link: Inserts immediately after that top-level
 heading and its subtree"
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-rename-headline
-   :id "org-rename-headline"
-   :description
-   (concat
-    "Rename an Org headline's title while preserving its TODO state,
+      :read-only nil)
+     (list
+      #'org-mcp--tool-rename-headline
+      :id "org-rename-headline"
+      :description
+      (concat
+       "Rename an Org headline's title while preserving its TODO state,
 tags, properties, and body content.
 
 Parameters:
   link - Link to the headline to rename (string, required)
 "
-    org-mcp--heading-link-formats
-    "  current_title - Expected current title without TODO/tags (string,
+       org-mcp--heading-link-formats
+       "  current_title - Expected current title without TODO/tags (string,
 required)
                   Must match actual title or tool will error
                   Used to prevent race conditions
@@ -4172,15 +4163,13 @@ Returns JSON object:
   link - Link to the renamed headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-edit-body
-   :id "org-edit-body"
-   :description
-   (concat
-    "Edit or append to the body content of an Org headline.  In replace
+      :read-only nil)
+     (list
+      #'org-mcp--tool-edit-body
+      :id "org-edit-body"
+      :description
+      (concat
+       "Edit or append to the body content of an Org headline.  In replace
 mode (default), finds and replaces a unique substring within the
 headline's body text.  In append mode, inserts new content after
 existing body content but before any child headlines.
@@ -4188,8 +4177,8 @@ existing body content but before any child headlines.
 Parameters:
   link - Link to the headline to edit (string, required)
 "
-    org-mcp--heading-link-formats
-    "  old_body - Substring to find and replace (string, required in
+       org-mcp--heading-link-formats
+       "  old_body - Substring to find and replace (string, required in
              replace mode, ignored when append is true)
              Must appear exactly once in the body
              Use empty string \"\" only for adding to empty nodes
@@ -4216,24 +4205,23 @@ Special behavior - Empty old_body (replace mode):
   - Only works if node body is empty or whitespace-only
   - Error if node already has content
   - Useful for adding initial content to newly created headlines")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  ;; Entry update tools
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-set-properties
-   :id "org-set-properties"
-   :description
-   (concat
-    "Set or delete properties on an Org headline.  Updates the
+      :read-only nil))
+    ;; Entry update tools
+    (list
+     (list
+      #'org-mcp--tool-set-properties
+      :id "org-set-properties"
+      :description
+      (concat
+       "Set or delete properties on an Org headline.  Updates the
 PROPERTIES drawer.  Setting ID or CUSTOM_ID gives the headline a
 stable link; org-mcp creates neither itself.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  properties - JSON object of property name-value pairs (required)
+       org-mcp--heading-link-formats
+       "  properties - JSON object of property name-value pairs (required)
                String value (numbers and booleans are accepted):
                set the property; it must be a single line
                true or false writes the text t or nil (false keeps
@@ -4256,21 +4244,19 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-update-scheduled
-   :id "org-update-scheduled"
-   :description
-   (concat
-    "Update the SCHEDULED timestamp on an Org headline.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-update-scheduled
+      :id "org-update-scheduled"
+      :description
+      (concat
+       "Update the SCHEDULED timestamp on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  scheduled - ISO date string (string, optional)
+       org-mcp--heading-link-formats
+       "  scheduled - ISO date string (string, optional)
               Examples: \"2026-03-27\", \"2026-03-27 09:00\"
               Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
@@ -4285,21 +4271,19 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-update-deadline
-   :id "org-update-deadline"
-   :description
-   (concat
-    "Update the DEADLINE timestamp on an Org headline.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-update-deadline
+      :id "org-update-deadline"
+      :description
+      (concat
+       "Update the DEADLINE timestamp on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  deadline - ISO date string (string, optional)
+       org-mcp--heading-link-formats
+       "  deadline - ISO date string (string, optional)
              Examples: \"2026-03-27\", \"2026-03-27 09:00\"
              Omit or empty string to remove the timestamp
   files - Files and directories to look up an id: link in (array of
@@ -4314,21 +4298,19 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-set-tags
-   :id "org-set-tags"
-   :description
-   (concat
-    "Set tags on an Org headline, replacing any existing tags.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-set-tags
+      :id "org-set-tags"
+      :description
+      (concat
+       "Set tags on an Org headline, replacing any existing tags.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  tags - Tags to set (string or array, optional)
+       org-mcp--heading-link-formats
+       "  tags - Tags to set (string or array, optional)
          Single tag: \"work\"
          Multiple tags: [\"work\", \"urgent\"]
          Omit or empty to clear all tags
@@ -4347,21 +4329,19 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-set-priority
-   :id "org-set-priority"
-   :description
-   (concat
-    "Set or remove priority on an Org headline.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-set-priority
+      :id "org-set-priority"
+      :description
+      (concat
+       "Set or remove priority on an Org headline.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  priority - Priority character (string, optional)
+       org-mcp--heading-link-formats
+       "  priority - Priority character (string, optional)
              Must be in the configured range (default \"A\" to \"C\")
              Use org-get-priority-config to check the valid range
              Omit or empty string to remove priority
@@ -4377,22 +4357,20 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-add-logbook-note
-   :id "org-add-logbook-note"
-   :description
-   (concat
-    "Add a timestamped note to the LOGBOOK drawer of an Org headline.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-add-logbook-note
+      :id "org-add-logbook-note"
+      :description
+      (concat
+       "Add a timestamped note to the LOGBOOK drawer of an Org headline.
 Creates the LOGBOOK drawer if it doesn't exist.
 
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  note - Note text to add (string, required)
+       org-mcp--heading-link-formats
+       "  note - Note text to add (string, required)
          Cannot be empty or whitespace-only
          Multi-line notes are properly indented in the LOGBOOK
          Note is inserted at the top of the LOGBOOK drawer
@@ -4406,23 +4384,21 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-read
-   :id "org-read"
-   :description
-   (concat
-    "Read Org file or headline with structured JSON output.  Takes a
+      :read-only nil)
+     (list
+      #'org-mcp--tool-read
+      :id "org-read"
+      :description
+      (concat
+       "Read Org file or headline with structured JSON output.  Takes a
 native Org link and returns structured data including children,
 properties, and timestamps.
 
 Parameters:
   link - Link to a heading or a file (string, required)
 "
-    org-mcp--read-link-formats
-    "         Any other string, such as a bare ID, a bare path or an
+       org-mcp--read-link-formats
+       "         Any other string, such as a bare ID, a bare path or an
          org:// resource URI, is refused.
   files - Files and directories to look up an id: link in (array of
           strings, optional)
@@ -4464,14 +4440,12 @@ Returns: JSON object with structured data:
 
 File must be in the allowed files, or permitted by
 org-mcp-file-scope-override.")
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-read-outline
-   :id "org-read-outline"
-   :description
-   "Get hierarchical structure of Org file as JSON outline. Returns
+      :read-only t)
+     (list
+      #'org-mcp--tool-read-outline
+      :id "org-read-outline"
+      :description
+      "Get hierarchical structure of Org file as JSON outline. Returns
    the titles of the top-level headlines and of their direct
    children; deeper headlines are left out. File must be in the
    allowed files, or permitted by org-mcp-file-scope-override.
@@ -4491,36 +4465,32 @@ Returns: JSON object with hierarchical outline structure:
   link - Link to the headline: id:{id} when it has an ID, else
          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
          file:{path}::*{title}"
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-read-headline
-   :id "org-read-headline"
-   :description
-   (concat
-    "Read Org headline or file as plain text.  Takes a native Org link.
+      :read-only t)
+     (list
+      #'org-mcp--tool-read-headline
+      :id "org-read-headline"
+      :description
+      (concat
+       "Read Org headline or file as plain text.  Takes a native Org link.
 Returns headline with TODO state, tags, properties, body text, and all
 nested subheadings.
 
 Parameters:
   link - Link to a heading or a file (string, required)
 "
-    org-mcp--read-link-formats
-    "         Any other string is refused, as in org-read.
+       org-mcp--read-link-formats
+       "         Any other string is refused, as in org-read.
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-read
 
 Returns: Plain text content of the headline and its subtree (or file)")
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-ql-query
-   :id "org-ql-query"
-   :description
-   (concat
-    "Search Org files using org-ql query expressions.  Supports
+      :read-only t)
+     (list
+      #'org-mcp--tool-ql-query
+      :id "org-ql-query"
+      :description
+      (concat
+       "Search Org files using org-ql query expressions.  Supports
 querying by TODO state, tags, priority, deadlines, properties, and
 more.  Returns matched entries as JSON with Org links for follow-up
 access.
@@ -4536,7 +4506,7 @@ Parameters:
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.
 "
-    org-mcp--files-set-description "
+       org-mcp--files-set-description "
 Returns JSON object:
   matches - Array of matched entries, each with:
     title - Headline text (string)
@@ -4551,16 +4521,15 @@ Returns JSON object:
     properties - Standard properties (object, omitted if none)
   total - Number of matches (number)
   files_searched - Number of files searched (number)")
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  ;; GTD query tools (registered only when configured)
-  (when org-mcp-query-inbox-fn
-    (mcp-server-lib-register-tool
-     #'org-mcp--tool-query-inbox
-     :id "query-inbox"
-     :description
-     "Query inbox items using the configured GTD workflow.
+      :read-only t))
+    ;; GTD query tools (registered only when configured)
+    (when org-mcp-query-inbox-fn
+      (list
+       (list
+        #'org-mcp--tool-query-inbox
+        :id "query-inbox"
+        :description
+        "Query inbox items using the configured GTD workflow.
 Returns items matching the inbox query, sorted by rank when
 a sort function is configured.  Always runs over the allowed files;
 naming files is an error.  Use org-ql-query to search other files.
@@ -4568,15 +4537,14 @@ naming files is an error.  Use org-ql-query to search other files.
 Parameters: None
 
 Returns: Same format as org-ql-query tool"
-     :read-only t
-     :server-id org-mcp--server-id))
-
-  (when org-mcp-query-next-fn
-    (mcp-server-lib-register-tool
-     #'org-mcp--tool-query-next
-     :id "query-next"
-     :description
-     "Query next action items using the configured GTD workflow.
+        :read-only t)))
+    (when org-mcp-query-next-fn
+      (list
+       (list
+        #'org-mcp--tool-query-next
+        :id "query-next"
+        :description
+        "Query next action items using the configured GTD workflow.
 Returns actionable items sorted by rank when a sort function
 is configured.  Always runs over the allowed files; naming files is
 an error.  Use org-ql-query to search other files.
@@ -4585,15 +4553,14 @@ Parameters:
   tag - Tag string to filter results (string, optional)
 
 Returns: Same format as org-ql-query tool"
-     :read-only t
-     :server-id org-mcp--server-id))
-
-  (when org-mcp-query-backlog-fn
-    (mcp-server-lib-register-tool
-     #'org-mcp--tool-query-backlog
-     :id "query-backlog"
-     :description
-     "Query backlog items (projects and standalone actions) using
+        :read-only t)))
+    (when org-mcp-query-backlog-fn
+      (list
+       (list
+        #'org-mcp--tool-query-backlog
+        :id "query-backlog"
+        :description
+        "Query backlog items (projects and standalone actions) using
 the configured GTD workflow.  Returns items sorted by rank when
 a sort function is configured.  Always runs over the allowed files;
 naming files is an error.  Use org-ql-query to search other files.
@@ -4602,15 +4569,14 @@ Parameters:
   tag - Tag string to filter results (string, optional)
 
 Returns: Same format as org-ql-query tool"
-     :read-only t
-     :server-id org-mcp--server-id))
-
-  ;; Clock tools
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-get-clock-config
-   :id "org-get-clock-config"
-   :description
-   "Get the clock configuration from the current Emacs Org-mode
+        :read-only t)))
+    ;; Clock tools
+    (list
+     (list
+      #'org-mcp--tool-get-clock-config
+      :id "org-get-clock-config"
+      :description
+      "Get the clock configuration from the current Emacs Org-mode
 settings.  Returns clock-related settings.
 
 Parameters: None
@@ -4624,14 +4590,12 @@ Returns JSON object with:
 
 Use this tool to understand clock settings before clocking
 in or out."
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-get-active
-   :id "org-clock-get-active"
-   :description
-   "Get the currently active clock, if any.  Searches all allowed
+      :read-only t)
+     (list
+      #'org-mcp--tool-clock-get-active
+      :id "org-clock-get-active"
+      :description
+      "Get the currently active clock, if any.  Searches all allowed
 files for an unclosed CLOCK entry.  Also detects native Emacs clocks
 running in non-allowed files via `org-clock-is-active'.
 
@@ -4651,15 +4615,13 @@ Returns JSON object:
     active in allowed file): id:{id} when it has an ID, else
     file:{path}::#{custom-id} when it has a CUSTOM_ID, else
     file:{path}::*{title}"
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-in
-   :id "org-clock-in"
-   :description
-   (concat
-    "Clock in to the specified heading.
+      :read-only t)
+     (list
+      #'org-mcp--tool-clock-in
+      :id "org-clock-in"
+      :description
+      (concat
+       "Clock in to the specified heading.
 
 Only one clock runs at a time.  While one runs, the call must name it
 in clock_out, and that clock is closed first, at the new clock's
@@ -4678,8 +4640,8 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   link - Link to the headline to clock in (string, required)
 "
-    org-mcp--heading-link-formats
-    "  start_time - ISO 8601 start time (string, optional)
+       org-mcp--heading-link-formats
+       "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
                If omitted, uses current time (or continuous time)
                Must not be before the running clock's start
@@ -4708,14 +4670,12 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}
   resolved - Number of dangling clocks deleted (integer, only if
              resolve was requested and dangling clocks were found)")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-out
-   :id "org-clock-out"
-   :description
-   "Clock out the currently active clock.
+      :read-only nil)
+     (list
+      #'org-mcp--tool-clock-out
+      :id "org-clock-out"
+      :description
+      "Clock out the currently active clock.
 
 Closing the clock stops the Emacs clock it belongs to, so a clock-in
 after it needs no clock_out.  Org's clock-out settings decide what the
@@ -4758,15 +4718,13 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}"
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-add
-   :id "org-clock-add"
-   :description
-   (concat
-    "Add a completed clock entry to a heading.  Creates a LOGBOOK
+      :read-only nil)
+     (list
+      #'org-mcp--tool-clock-add
+      :id "org-clock-add"
+      :description
+      (concat
+       "Add a completed clock entry to a heading.  Creates a LOGBOOK
 drawer if one doesn't exist.  New entries are inserted at the top
 of the LOGBOOK.
 
@@ -4775,8 +4733,8 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  start - ISO 8601 start time (string, required)
+       org-mcp--heading-link-formats
+       "  start - ISO 8601 start time (string, required)
           Example: 2026-03-23T14:30:00
   end - ISO 8601 end time (string, required)
         Example: 2026-03-23T16:45:00
@@ -4795,15 +4753,13 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-delete
-   :id "org-clock-delete"
-   :description
-   (concat
-    "Delete a clock entry from a heading.  Removes the LOGBOOK
+      :read-only nil)
+     (list
+      #'org-mcp--tool-clock-delete
+      :id "org-clock-delete"
+      :description
+      (concat
+       "Delete a clock entry from a heading.  Removes the LOGBOOK
 drawer if it becomes empty after deletion.
 
 Rounding is applied per org-clock-rounding-minutes.
@@ -4811,8 +4767,8 @@ Rounding is applied per org-clock-rounding-minutes.
 Parameters:
   link - Link to the headline (string, required)
 "
-    org-mcp--heading-link-formats
-    "  start - ISO 8601 start time of the clock entry to delete
+       org-mcp--heading-link-formats
+       "  start - ISO 8601 start time of the clock entry to delete
           (string, required)
           Example: 2026-03-23T14:30:00
   files - Files and directories to look up an id: link in (array of
@@ -4829,15 +4785,13 @@ Returns JSON object:
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
-   :read-only nil
-   :server-id org-mcp--server-id)
-
-  (mcp-server-lib-register-tool
-   #'org-mcp--tool-clock-find-dangling
-   :id "org-clock-find-dangling"
-   :description
-   (concat
-    "Find all open (unclosed) clocks in allowed Org files, or in the
+      :read-only nil)
+     (list
+      #'org-mcp--tool-clock-find-dangling
+      :id "org-clock-find-dangling"
+      :description
+      (concat
+       "Find all open (unclosed) clocks in allowed Org files, or in the
 files named in `files'.  Searches for dangling CLOCK entries that
 were never closed.  Uses Emacs native `org-find-open-clocks' on
 each of those files.
@@ -4847,7 +4801,7 @@ Parameters:
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.
 "
-    org-mcp--files-set-description "
+       org-mcp--files-set-description "
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
     file - File path (string)
@@ -4857,15 +4811,14 @@ Returns JSON object:
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
            else file:{path}::*{title}
   total - Number of open clocks found (number)")
-   :read-only t
-   :server-id org-mcp--server-id)
-
-  ;; Register the template resource for org files
-  (mcp-server-lib-register-resource
-   "org://{link}" #'org-mcp--handle-org-resource
-   :name "Org resource (structured JSON)"
-   :description
-   "Read an Org file or heading as structured JSON.  The URI is
+      :read-only t)))
+   :resources
+   (list
+    (list
+     "org://{link}" #'org-mcp--handle-org-resource
+     :name "Org resource (structured JSON)"
+     :description
+     "Read an Org file or heading as structured JSON.  The URI is
 org:// followed by a native Org link, the same link the org-read
 tool takes, percent-encoded as in any URI.
 
@@ -4913,69 +4866,13 @@ Returns: JSON object with structured data:
 A link resolves, and is refused, exactly as in the org-read tool.
 The file must be in the allowed files, or permitted by
 org-mcp-file-scope-override."
-   :mime-type "application/json"
-   :server-id org-mcp--server-id))
+     :mime-type "application/json"))))
+
 
 (defun org-mcp-disable ()
   "Disable the org-mcp server."
-  (mcp-server-lib-unregister-tool
-   "org-get-todo-config" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-get-tag-config" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-get-tag-candidates" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-get-priority-config" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-get-allowed-files" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-update-todo-state" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-add-todo" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-rename-headline" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-edit-body" org-mcp--server-id)
-  ;; Entry update tools
-  (mcp-server-lib-unregister-tool
-   "org-set-properties" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-update-scheduled" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-update-deadline" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-set-tags" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-set-priority" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-add-logbook-note" org-mcp--server-id)
-  ;; Unregister workaround tools
-  (mcp-server-lib-unregister-tool "org-read" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-read-outline" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-read-headline" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-ql-query" org-mcp--server-id)
-  ;; GTD query tools (ignore errors if they weren't registered)
-  (ignore-errors
-    (mcp-server-lib-unregister-tool "query-inbox" org-mcp--server-id))
-  (ignore-errors
-    (mcp-server-lib-unregister-tool "query-next" org-mcp--server-id))
-  (ignore-errors
-    (mcp-server-lib-unregister-tool
-     "query-backlog" org-mcp--server-id))
-  ;; Clock tools
-  (mcp-server-lib-unregister-tool
-   "org-get-clock-config" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-get-active" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-clock-in" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-clock-out" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool "org-clock-add" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-delete" org-mcp--server-id)
-  (mcp-server-lib-unregister-tool
-   "org-clock-find-dangling" org-mcp--server-id)
-  ;; Unregister the template resource
-  (mcp-server-lib-unregister-resource
-   "org://{link}" org-mcp--server-id))
+  (mcp-server-lib-unregister-server org-mcp--server-id))
+
 
 ;;; Script Installation
 
