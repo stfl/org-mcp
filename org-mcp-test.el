@@ -2149,27 +2149,12 @@ local name itself, which Emacs routes to it only because
             file-name-handler-alist)))
      ,@body))
 
-(defun org-mcp-test--call-tool-refused
-    (tool-name params expected-message &optional file)
-  "Call TOOL-NAME with PARAMS and assert it is refused.
+(defun org-mcp-test--refusal-message (tool-name params)
+  "Call TOOL-NAME with PARAMS, assert it is refused, return the message.
 The refusal arrives as a tool error or, from the resource-style
-validation, as a JSON-RPC error; either way its message must match
-the regexp EXPECTED-MESSAGE.  When FILE is non-nil, it must be
-byte-for-byte unchanged afterwards.
-
-A buffer holding the user's unsaved edits must be unchanged too, and
-the file alone cannot say so: a refusal that damaged such a buffer
-leaves the file exactly as it found it, and the damage reaches disk
-at the user's next save.  So while a modified buffer visits FILE,
-what the server serves for it is pinned across the call as well.  An
-unmodified buffer holds what FILE holds, which the bytes already say."
-  (let* ((before (and file (org-mcp-test--read-file-raw file)))
-         (served-before
-          (and file
-               (let ((visiting (find-buffer-visiting file)))
-                 (and visiting (buffer-modified-p visiting)))
-               (org-mcp-test--served-text file)))
-         (response
+validation, as a JSON-RPC error; the message reads the same either
+way, which is what a client acts on."
+  (let* ((response
           (mcp-server-lib-process-jsonrpc-parsed
            (mcp-server-lib-create-tools-call-request tool-name 1 params)
            mcp-server-lib-ert-server-id))
@@ -2179,7 +2164,30 @@ unmodified buffer holds what FILE holds, which the bytes already say."
               (alist-get 'text (aref (alist-get 'content result) 0))
             (alist-get 'message (alist-get 'error response)))))
     (should (stringp message))
-    (should (string-match-p expected-message message))
+    message))
+
+(defun org-mcp-test--call-tool-refused
+    (tool-name params expected-message &optional file)
+  "Call TOOL-NAME with PARAMS and assert it is refused.
+The refusal\='s message must match the regexp EXPECTED-MESSAGE.  When
+FILE is non-nil, it must be byte-for-byte unchanged afterwards.
+
+A buffer holding the user\='s unsaved edits must be unchanged too, and
+the file alone cannot say so: a refusal that damaged such a buffer
+leaves the file exactly as it found it, and the damage reaches disk
+at the user\='s next save.  So while a modified buffer visits FILE,
+what the server serves for it is pinned across the call as well.  An
+unmodified buffer holds what FILE holds, which the bytes already say."
+  (let* ((before (and file (org-mcp-test--read-file-raw file)))
+         (served-before
+          (and file
+               (let ((visiting (find-buffer-visiting file)))
+                 (and visiting (buffer-modified-p visiting)))
+               (org-mcp-test--served-text file))))
+    (should
+     (string-match-p
+      expected-message
+      (org-mcp-test--refusal-message tool-name params)))
     (when file
       (should (string= (org-mcp-test--read-file-raw file) before)))
     (when served-before
@@ -13373,6 +13381,26 @@ surface."
       (should (equal (org-mcp-test--read-fields link []) default))
       (should (equal (org-mcp-test--read-fields link "") default)))))
 
+(ert-deftest org-mcp-test-fields-default-says-the-digests-are-out ()
+  "A tool's description says the digests are not in its default.
+It is the text a model reads before deciding whether it must ask for
+a digest, so a description promising every field is the one that
+sends a client into a write with no token to assert with.  The node a
+default read returns is checked against the same claim, so the
+sentence and the list cannot drift apart."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (dolist (tool '("org-node-read" "org-query"))
+      (should
+       (string-match-p
+        "Defaults to every field below[^.]*digests"
+        (org-mcp-test--registered-tool-description tool))))
+    (let ((node
+           (org-mcp-test--read-fields
+            (concat "id:" org-mcp-test--node-shape-parent-id) nil)))
+      (should-not (assq 'digest node))
+      (should-not (assq 'content_digest node)))))
+
 (ert-deftest org-mcp-test-fields-unknown-name-refused ()
   "A field that does not exist is refused, naming the ones that do.
 Silently leaving it out would hand a client a node missing the field
@@ -14649,6 +14677,37 @@ moved on from what it asserted."
        "\\`conflict: Subtree mismatch: .*nothing was deleted\\'"
        test-file))))
 
+(ert-deftest org-mcp-test-node-verbs-withhold-the-digest-they-found ()
+  "The conflict names the token the call sent, never the current one.
+The current digest is the one value that would make the same call
+succeed, so a refusal carrying it would make resending the call the
+cheapest recovery there is — and a caller asserting a digest it never
+read asserts nothing.  The refusal says the subtree moved and sends
+the caller back to a read instead."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-title"
+       `((link . ,link) (before . "Target") (after . "Target renamed")))
+      (let ((fresh (org-mcp-test--verbs-digest link)))
+        (should-not (string= stale fresh))
+        (dolist (call
+                 `(("org-node-delete" . ((link . ,link) (before . ,stale)))
+                   ("org-node-archive" . ((link . ,link) (before . ,stale)))
+                   ("org-node-refile"
+                    .
+                    ((link . ,link)
+                     (before . ,stale)
+                     (parent
+                      .
+                      ,(org-mcp-test--file-link test-file "*Home"))))))
+          (let ((message
+                 (org-mcp-test--refusal-message (car call) (cdr call))))
+            (should (string-match-p (regexp-quote stale) message))
+            (should-not (string-match-p (regexp-quote fresh) message))
+            (should (string-match-p "read the node again" message))))))))
+
 (ert-deftest org-mcp-test-node-delete-refuses-after-a-descendant-moves ()
   "A change to a grandchild the client never read makes its token stale.
 The read asked for the token alone, no children and no depth, and
@@ -14729,6 +14788,48 @@ model reads: in the tool's own description."
      (string-match-p
       "org-node-archive"
       (org-mcp-test--registered-tool-description "org-node-delete")))))
+
+(ert-deftest org-mcp-test-node-delete-refuses-the-node-the-clock-runs-in ()
+  "A node the Emacs session's clock runs in is not deleted.
+The CLOCK line would leave the file with the text while Emacs went on
+believing a clock runs, and the user's next clock-out would fail with
+no line left to close.  The refusal is the unmarked validation class,
+not a conflict: the open CLOCK line was in the region the client
+read, so its token is fresh and reading again resolves nothing.  The
+clock is left running, because a tool that stops the user's clock on
+their behalf is worse than one that declines."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((link (org-mcp-test--verbs-link)))
+      (org-mcp-test--call-clock-in link "2026-03-20T09:30:00")
+      (org-mcp-test--with-session-clock test-file
+        (org-mcp-test--call-tool-refused
+         "org-node-delete"
+         `((link . ,link)
+           (before . ,(org-mcp-test--verbs-digest link)))
+         "\\`The clock is running in this node.*org-clock-out"
+         test-file)
+        (should (org-clock-is-active))))))
+
+(ert-deftest org-mcp-test-node-delete-takes-a-node-the-clock-is-not-in ()
+  "A clock running in another node is no reason to refuse the delete.
+The guard asks where the clock is, not whether one runs: Keep holds
+the open CLOCK line here, so taking Target away strands nothing."
+  (org-mcp-test--with-verbs-file test-file
+    (org-mcp-test--call-clock-in
+     (org-mcp-test--file-link test-file "*Keep") "2026-03-20T09:30:00")
+    (org-mcp-test--with-session-clock test-file
+      (let ((link (org-mcp-test--verbs-link)))
+        (should
+         (eq
+          (alist-get
+           'success
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-delete"
+             `((link . ,link)
+               (before . ,(org-mcp-test--verbs-digest link))))))
+          t))
+        (should (org-clock-is-active))))))
 
 (ert-deftest org-mcp-test-node-refile-carries-the-subtree-and-a-position ()
   "org-node-refile puts the node under a new parent, after a named sibling.
@@ -15709,6 +15810,140 @@ is resolved, and the buffer the user is editing keeps its own text."
          "\\`conflict: A clock is running on " test-file)
         (org-mcp-test--assert-content-unmoved
          buffer test-file on-disk)))))
+;;; A destination folded in the buffer
+
+;; Emacs folds a file with `#+STARTUP: overview' as it visits it, so
+;; every heading below the top level is invisible, which is the state
+;; a user's own buffer is usually in.  A placement that asks Org for
+;; the next *visible* heading then leaves the node wherever the fold
+;; happens to end, and the call reports success with a link that
+;; resolves to it.  These tests pin the placement against the text of
+;; the file, which is what the client is promised.
+
+(defconst org-mcp-test--folded-target-id
+  "fedcba98-7654-3210-fedc-ba9876543210"
+  "ID of Target in `org-mcp-test--folded-source'.")
+
+(defconst org-mcp-test--folded-destination
+  (concat
+   "#+STARTUP: overview\n"
+   "* Outer\n"
+   "** Parent\n"
+   "Parent body.\n"
+   "\n"
+   "** Follower\n"
+   "Follower body.\n"
+   "* Elsewhere\n")
+  "A file whose Parent is folded by the time a call reaches it.
+Parent and Follower are both under a level-1 heading, so `overview'
+hides them and leaves Elsewhere visible.  The blank line Org leaves
+before a new entry ends Parent's subtree, so a placement stops on it
+rather than on a heading, and the next heading Org can see from there
+is Elsewhere: a placement that follows the fold puts the node at the
+end of Follower instead of at the end of Parent.")
+
+(defconst org-mcp-test--folded-target
+  (concat
+   "* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--folded-target-id "\n"
+   ":END:\n"
+   "Target body.\n")
+  "The node a refile moves under the folded Parent.")
+
+(defconst org-mcp-test--folded-source
+  (concat org-mcp-test--folded-destination org-mcp-test--folded-target)
+  "The folded destination with the node to move already in it.")
+
+(defconst org-mcp-test--folded-target-under-parent
+  (concat
+   "\\`#\\+STARTUP: overview\n"
+   "\\* Outer\n"
+   "\\*\\* Parent\n"
+   "Parent body\\.\n"
+   "\n"
+   "\\*\\*\\* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--folded-target-id "\n"
+   ":END:\n"
+   "Target body\\.\n"
+   "\\*\\* Follower\n"
+   "Follower body\\.\n"
+   "\\* Elsewhere\n"
+   "\\'")
+  "The complete destination file once Target is Parent's last child.
+Target stands between Parent's body and Follower, one level deeper
+than Parent, so a node that went to the end of Follower's subtree or
+that came back a level fails here.")
+
+(ert-deftest org-mcp-test-node-refile-under-a-folded-parent ()
+  "A refile puts the node under the parent it names, folded or not.
+The parent's subtree ends on a blank line, and the heading after it
+is folded, so the placement has to read the file's text rather than
+what is visible in it."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--folded-source
+      (list org-mcp-test--folded-target-id)
+    (let ((link (concat "id:" org-mcp-test--folded-target-id)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-refile"
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest link))
+         (parent . ,(org-mcp-test--file-link test-file "*Parent"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--folded-target-under-parent))))
+
+(ert-deftest org-mcp-test-node-refile-into-a-folded-file ()
+  "A refile into another file reads that file's text, not its folds.
+The destination file is folded as Emacs visits it for the move, which
+is the first time anything has opened it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--folded-target)
+       (other-file org-mcp-test--folded-destination))
+    (org-mcp-test--with-id-tracking
+     (list test-file other-file)
+     (list (cons org-mcp-test--folded-target-id test-file))
+     (let ((link (concat "id:" org-mcp-test--folded-target-id)))
+       (mcp-server-lib-ert-call-tool
+        "org-node-refile"
+        `((link . ,link)
+          (before . ,(org-mcp-test--verbs-digest link))
+          (parent . ,(org-mcp-test--file-link other-file "*Parent"))))
+       (org-mcp-test--verify-file-matches
+        other-file org-mcp-test--folded-target-under-parent)
+       (should (string= (org-mcp-test--read-file test-file) ""))))))
+
+(defconst org-mcp-test--folded-made-under-parent
+  (concat
+   "\\`#\\+STARTUP: overview\n"
+   "\\* Outer\n"
+   "\\*\\* Parent\n"
+   "Parent body\\.\n"
+   "\\*\\*\\* TODO Made\n"
+   "\\*\\* Follower\n"
+   "Follower body\\.\n"
+   "\\* Elsewhere\n"
+   "\\'")
+  "The complete file once org-node-create has added Made under Parent.
+Made stands between Parent's body and Follower, where the same call
+against the same file unfolded puts it: `org-insert-heading' spends
+the blank line that ended Parent's subtree on the new entry either
+way.")
+
+(ert-deftest org-mcp-test-node-create-under-a-folded-parent ()
+  "org-node-create adds the node under the parent it names, folded or not.
+This one predates the epic: the heading goes in through
+`org-insert-heading', which relocates to a visible heading unless it
+is told that an invisible one is where the caller means."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--folded-destination))
+    (org-mcp-test--add-todo-and-check
+     "Made" "TODO" nil nil
+     (org-mcp-test--file-link test-file "*Parent")
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--folded-made-under-parent)))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

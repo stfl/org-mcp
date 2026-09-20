@@ -1345,7 +1345,8 @@ the call that reads it in full.")
 The same node a read returns, without the body and the children a
 match list would read every matched subtree to fill.  A query also
 carries the whole Org drawer and every computed field unasked, which
-is not a field list and lives in `org-mcp--tool-query'.")
+is not a field list: it is the default each of `org-mcp--tool-query'
+and `org-mcp--tool-view' passes for those two parameters.")
 
 (defun org-mcp--node-field (name)
   "Return the node field NAME names, or refuse NAME as not one.
@@ -1668,12 +1669,48 @@ them did not happen.
 The token covers the whole subtree, so an edit to a descendant the
 client never read refuses the call.  That is the point of it: what
 these verbs take away is the subtree entire, and a guard asserts
-what it is about to destroy."
-  (let ((found (org-mcp--digest (org-mcp--subtree-bounds))))
-    (unless (string= digest found)
-      (org-mcp--tool-conflict-error
-       "Subtree mismatch: expected '%s', found '%s'; %s"
-       digest found undone))))
+what it is about to destroy.
+
+The refusal names the digest the call sent and not the one the
+subtree carries now.  The current one is the only value that would
+make the same call succeed, so handing it back would make resending
+it the cheapest recovery there is — and a call that asserts a digest
+the caller never read asserts nothing.  What the caller is owed is
+that the node has moved on from the read they planned from, which is
+what the message says; the recovery is to read it again."
+  (unless (string= digest (org-mcp--digest (org-mcp--subtree-bounds)))
+    (org-mcp--tool-conflict-error
+     "Subtree mismatch: expected '%s'; the subtree has changed since that read, so read the node again for a current digest; %s"
+     digest undone)))
+
+(defun org-mcp--assert-clock-outside-subtree ()
+  "Refuse unless Emacs's running clock is outside the subtree at point.
+The clock is inside it when `org-clock-marker' points into the region
+`org-mcp--subtree-bounds' gives the heading, in this buffer, which is
+how Org itself asks the question.
+
+org-node-delete is the one verb that asks: it takes the open CLOCK
+line away with the text and never puts it down again, so the marker
+`org-cut-subtree' saved for a paste collapses.  Emacs goes on
+reporting a running clock with no line left to close, and the user's
+next `org-clock-out' fails with `Clock start time is gone'.
+org-node-refile puts the line down with the subtree and the marker
+follows it, and org-archive-subtree reinstates the marker in the
+archive copy itself, so neither strands the clock.
+
+The refusal is the unmarked validation class and not a conflict: the
+open CLOCK line was inside the region the client read, so the
+subtree's digest is fresh, and there is nothing to read again that
+would resolve this.  What resolves it is a clock-out, which the
+message names.  org-mcp does not run one on the user's behalf: a tool
+that stops the user's clock without being asked is worse than one
+that declines."
+  (when (and (eq (org-clocking-buffer) (current-buffer))
+             (let ((bounds (org-mcp--subtree-bounds))
+                   (clock (marker-position org-clock-marker)))
+               (and (<= (car bounds) clock) (< clock (cdr bounds)))))
+    (org-mcp--tool-validation-error
+     "The clock is running in this node: close it with org-clock-out first; nothing was deleted")))
 
 (defun org-mcp--node-properties (names)
   "Return the Org property drawer of the node at point, or nil.
@@ -3060,9 +3097,16 @@ After insertion, point is left on the heading line at end-of-line."
       ;; This is what avoids the "creates a sibling of the parent
       ;; instead of a child" pitfall of bare `org-insert-heading' when
       ;; the parent has no children.
+      ;;
+      ;; INVISIBLE-OK says that point is where the caller means even
+      ;; when it is inside a folded region.  Without it
+      ;; `org-insert-heading' walks back to the nearest *visible*
+      ;; heading and inserts at the end of that one's subtree, so a
+      ;; parent the user has folded hands its new child to whichever
+      ;; heading the fold ends on.
       (progn
         (org-mcp--ensure-newline)
-        (org-insert-heading nil nil (1+ parent-level))
+        (org-insert-heading nil t (1+ parent-level))
         (insert title))
     ;; Top-level heading
     ;; Check if there are no headlines yet (empty buffer or only
@@ -3079,7 +3123,7 @@ After insertion, point is left on the heading line at end-of-line."
         ;; Has headlines - use `org-insert-heading'
         ;; Ensure proper spacing before inserting
         (org-mcp--ensure-newline)
-        (org-insert-heading nil nil t))
+        (org-insert-heading nil t t))
       (insert title))))
 
 (defun org-mcp--replace-body-content
@@ -3143,6 +3187,14 @@ in the same state."
     (when (featurep 'org-inlinetask)
       (org-inlinetask-remove-END-maybe))))
 
+(defun org-mcp--goto-next-heading-start ()
+  "Move point to the start of the next heading, or to the end of the buffer.
+Point stays where it is when it already starts one.  The search reads
+the buffer's text and not its visibility, so a heading the user has
+folded is a heading here."
+  (unless (and (bolp) (org-at-heading-p))
+    (outline-next-heading)))
+
 (defun org-mcp--paste-subtree-under
     (text parent-target sibling-target)
   "Paste TEXT, a subtree cut from this buffer, under PARENT-TARGET.
@@ -3164,10 +3216,10 @@ is."
     (org-mcp--position-for-new-child sibling-target parent-level)
     ;; `org-paste-subtree' pastes before the heading point starts, and
     ;; walks to the next *visible* heading when point starts none.
-    ;; Point goes to the start of that heading here, so that a heading
-    ;; folded in the user's buffer cannot carry the subtree past it.
-    (unless (bolp)
-      (forward-line 1))
+    ;; Point goes to the start of that heading here, so the paste never
+    ;; begins that walk: a heading the user has folded would carry the
+    ;; subtree past it and make the node a child of the wrong parent.
+    (org-mcp--goto-next-heading-start)
     (org-paste-subtree
      (if parent-level
          (1+ parent-level)
@@ -4223,6 +4275,11 @@ The text is gone from the file and org-mcp keeps no copy of it.  The
 response carries the link the node had, read while it was still
 there, so a client can say which node it lost.
 
+A node the running clock is in is refused rather than deleted, see
+`org-mcp--assert-clock-outside-subtree': the open CLOCK line would go
+with the text and leave Emacs clocking a node that is not there.
+Call org-clock-out first, then delete it.
+
 MCP Parameters:
   link - Link to the node to delete
          Formats:
@@ -4242,6 +4299,7 @@ MCP Parameters:
                               `((link . ,deleted))
       (org-mcp--goto-heading target)
       (org-mcp--assert-subtree digest "nothing was deleted")
+      (org-mcp--assert-clock-outside-subtree)
       (setq deleted (org-mcp--link-at-point))
       (org-mcp--cut-subtree-at-point))))
 
@@ -4305,9 +4363,11 @@ node is to follow, looked up in the parent's file; see
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.  It applies to LINK only, as on every
 other write tool: it says where to find the node the call acts on.
-PARENT and PREVIOUS_SIBLING are resolved without it — a `file:' link
-names its own file, and an `id:' one is looked up in Emacs's ID index
-and refused by name when the index does not hold it.
+PARENT and PREVIOUS_SIBLING are resolved without it.  A `file:' link
+names its own file; an `id:' PARENT is looked up in Emacs's ID index
+and refused by name when the index does not hold it, and an `id:'
+PREVIOUS_SIBLING is looked for in the parent's file alone, since a
+sibling that is not a child of that parent is no sibling.
 
 The subtree arrives whole, its LOGBOOK with it, and nothing in it
 records where it was: a refile is undone by refiling it back, by a
@@ -4362,6 +4422,55 @@ MCP Parameters:
 
 ;; org-ql integration
 
+(defun org-mcp--projected-node-at (element fields properties computed)
+  "Return the node ELEMENT stands for, carrying FIELDS.
+ELEMENT is one match `org-ql-select' returned.  Its buffer is read
+widened: a heading outside the user's own narrowing would otherwise
+be read at the wrong place."
+  (with-current-buffer (org-element-property :buffer element)
+    (org-with-wide-buffer
+     (goto-char (org-element-property :begin element))
+     (org-mcp--projected-node-at-point fields properties computed))))
+
+(defun org-mcp--run-query (query-sexp fields properties computed sort)
+  "Return the JSON answer to QUERY-SEXP, each match carrying FIELDS.
+This is the one runner behind org-query and org-view, so the two
+answer in the same envelope by construction: `children', `total' and
+the `files_searched' count.
+
+The files searched are the ones the caller put in force with
+`org-mcp--with-file-set', which is where the two differ: org-query
+may be sent a `files' parameter and a view always runs over the
+allowed files.  SORT is the other difference, passed to
+`org-ql-select' as `:sort': a view sorts by `org-mcp-query-sort-fn'
+and org-query is unsorted.  FIELDS, PROPERTIES and COMPUTED are
+resolved before this runs, so every match is built from names that
+are known to exist.
+
+Matches come back as Org elements and the nodes are built from them
+in a second pass, because `org-ql-select' applies `:action' before
+`:sort': an action returning anything but an element would hand a
+comparator something it cannot compare."
+  (let* ((target-files org-agenda-files)
+         (matches
+          ;; Given no files, `org-ql-select' would search the current
+          ;; buffer, which no call names.
+          (when target-files
+            (condition-case err
+                (mapcar
+                 (lambda (element)
+                   (org-mcp--projected-node-at
+                    element fields properties computed))
+                 (org-ql-select target-files query-sexp :sort sort))
+              (error
+               (org-mcp--tool-validation-error
+                "Org-ql query error: %s"
+                (error-message-string err)))))))
+    (json-encode
+     `((children . ,(vconcat matches))
+       (total . ,(length matches))
+       (files_searched . ,(length target-files))))))
+
 (defun org-mcp--tool-query
     (query &optional fields properties computed files)
   "Search Org files using an org-ql QUERY expression.
@@ -4403,87 +4512,16 @@ MCP Parameters:
       (org-mcp--tool-validation-error "Query must be a list, got: %s"
                                       (type-of query-sexp)))
     (org-mcp--with-file-set files
-      (let* ( ;; Resolved before the query runs, so a misspelled
-             ;; name is refused rather than repeated per match.
-             (node-fields
-              (org-mcp--node-fields-given
-               fields org-mcp--node-query-fields))
-             (node-properties
-              (org-mcp--node-properties-given properties 'all))
-             (node-computed
-              (org-mcp--node-computed-given computed 'all))
-             (target-files org-agenda-files)
-             (action
-              (lambda ()
-                (org-mcp--projected-node-at-point
-                 node-fields node-properties node-computed)))
-             (matches
-              ;; Given no files, `org-ql-select' would search the
-              ;; current buffer, which no call names.
-              (when target-files
-                (condition-case err
-                    (org-ql-select
-                     target-files
-                     query-sexp
-                     :action action)
-                  (error
-                   (org-mcp--tool-validation-error
-                    "Org-ql query error: %s"
-                    (error-message-string err)))))))
-        (json-encode
-         `((children . ,(vconcat matches))
-           (total . ,(length matches))
-           (files_searched . ,(length target-files))))))))
+      ;; The three namespaces are resolved before the query runs, so
+      ;; a misspelled name is refused rather than repeated per match.
+      (org-mcp--run-query
+       query-sexp
+       (org-mcp--node-fields-given fields org-mcp--node-query-fields)
+       (org-mcp--node-properties-given properties 'all)
+       (org-mcp--node-computed-given computed 'all)
+       nil))))
 
 ;; Views
-
-(defun org-mcp--run-view (query-sexp fields properties computed)
-  "Run QUERY-SEXP via `org-ql-select', each match carrying FIELDS.
-A view always runs over the allowed files: org-view takes no
-`files' parameter, and mcp-server-lib refuses a call passing one
-with an \"Unexpected parameter\" error before any handler runs.
-FIELDS, PROPERTIES and COMPUTED are resolved before this runs, so
-every match is built from names that are known to exist.
-Uses `org-mcp-query-sort-fn' for sorting when set.
-Returns JSON-encoded results in the same format as org-query."
-  (org-mcp--with-file-set nil
-    (let*
-        ((target-files org-agenda-files)
-         (matches
-          ;; Given no files, `org-ql-select' would search the
-          ;; current buffer, which is not among the allowed files.
-          (when target-files
-            (condition-case err
-                ;; Collect org-elements with the default action,
-                ;; then sort.  We map the node builder
-                ;; in a second pass because `org-ql-select' applies
-                ;; :action before :sort — custom actions that
-                ;; return non-element data would break sort
-                ;; functions expecting org-elements.
-                (let ((elements
-                       (org-ql-select
-                        target-files
-                        query-sexp
-                        :sort org-mcp-query-sort-fn)))
-                  (mapcar
-                   (lambda (el)
-                     (with-current-buffer (org-element-property
-                                           :buffer el)
-                       ;; Widen: a heading outside the user's
-                       ;; narrowing would be read at the wrong place.
-                       (org-with-wide-buffer
-                        (goto-char (org-element-property :begin el))
-                        (org-mcp--projected-node-at-point
-                         fields properties computed))))
-                   elements))
-              (error
-               (org-mcp--tool-validation-error
-                "Org-ql query error: %s"
-                (error-message-string err)))))))
-      (json-encode
-       `((children . ,(vconcat matches))
-         (total . ,(length matches))
-         (files_searched . ,(length target-files)))))))
 
 (defconst org-mcp--view-parameters '(:filter :range)
   "The parameters a view declares, in the order its query takes them.
@@ -4659,19 +4697,24 @@ MCP Parameters:
   (let* ((declaration (org-mcp--view view))
          (arguments
           (org-mcp--view-arguments view declaration filter range))
-         ;; Resolved before the query runs, so a misspelled field is
-         ;; refused rather than repeated per match.
-         ;; Resolved before the query runs, so a misspelled name is
-         ;; refused rather than repeated per match.
+         ;; The three namespaces are resolved before the query runs,
+         ;; so a misspelled name is refused rather than repeated per
+         ;; match.
          (node-fields
           (org-mcp--node-fields-given
            fields org-mcp--node-query-fields))
          (properties (org-mcp--node-properties-given properties 'all))
          (computed (org-mcp--node-computed-given computed 'all)))
-    (org-mcp--run-view
-     (org-mcp--view-query
-      view declaration arguments)
-     node-fields properties computed)))
+    ;; A view always runs over the allowed files: org-view takes no
+    ;; `files' parameter, and mcp-server-lib refuses a call passing
+    ;; one with an "Unexpected parameter" error before this runs.
+    (org-mcp--with-file-set nil
+      (org-mcp--run-query
+       (org-mcp--view-query view declaration arguments)
+       node-fields
+       properties
+       computed
+       org-mcp-query-sort-fn))))
 
 ;; Read tools
 
@@ -5922,7 +5965,9 @@ Parameters:
          org:// resource URI, is refused.
   fields - How much of the node to return (array of strings, or a
           string, optional)
-          Defaults to every field below.
+          Defaults to every field below but the two digests: a
+          digest is for a call about to change something, so no
+          node is hashed unasked; naming one asks for exactly that.
 "
      org-mcp--fields-description
      "  depth - How many generations of children to expand in place
@@ -6015,9 +6060,9 @@ Parameters:
             (deadline :to today)
   fields - How much of each matching node to return (array of
           strings, or a string, optional)
-          Defaults to every field below but content and children,
-          which a match list would read every matched subtree to
-          fill; naming either asks for exactly that.
+          Defaults to every field below but content, children and
+          the two digests, which a match list would read every
+          matched subtree to fill; naming one asks for exactly that.
 "
      org-mcp--fields-description
      "  properties - Which Org drawer properties to return (array of
