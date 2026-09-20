@@ -73,10 +73,10 @@ machine cannot follow one.
 Work ends committed, never stashed: the stash is shared with every worktree of
 this repository and other sessions pop it.
 
-`.git/hooks/pre-push` refuses every ref but `main` while the native-links work
-is unpublished, so a feature branch ends at its commits, and the session says
-plainly that nothing was pushed. When the guard is gone, `git pull --rebase &&
-git push` and confirm with `git status` that the branch tracks its remote.
+A session ends with the branch pushed: `git pull --rebase && git push`, then
+`git status` to confirm the branch tracks its remote. `feat/native-links-and-file-scope`
+is published and tracks `origin`; `main` is where it is headed, and merging it
+there is Stefan's decision, not a session's.
 
 Several agents work this repository at once, each in its own worktree under
 `.claude/worktrees/`. Before editing after a resume, check `git status
