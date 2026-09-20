@@ -1675,6 +1675,35 @@ what it is about to destroy."
        "Subtree mismatch: expected '%s', found '%s'; %s"
        digest found undone))))
 
+(defun org-mcp--assert-clock-outside-subtree ()
+  "Refuse unless Emacs's running clock is outside the subtree at point.
+The clock is inside it when `org-clock-marker' points into the region
+`org-mcp--subtree-bounds' gives the heading, in this buffer, which is
+how Org itself asks the question.
+
+org-node-delete is the one verb that asks: it takes the open CLOCK
+line away with the text and never puts it down again, so the marker
+`org-cut-subtree' saved for a paste collapses.  Emacs goes on
+reporting a running clock with no line left to close, and the user's
+next `org-clock-out' fails with `Clock start time is gone'.
+org-node-refile puts the line down with the subtree and the marker
+follows it, and org-archive-subtree reinstates the marker in the
+archive copy itself, so neither strands the clock.
+
+The refusal is the unmarked validation class and not a conflict: the
+open CLOCK line was inside the region the client read, so the
+subtree's digest is fresh, and there is nothing to read again that
+would resolve this.  What resolves it is a clock-out, which the
+message names.  org-mcp does not run one on the user's behalf: a tool
+that stops the user's clock without being asked is worse than one
+that declines."
+  (when (and (eq (org-clocking-buffer) (current-buffer))
+             (let ((bounds (org-mcp--subtree-bounds))
+                   (clock (marker-position org-clock-marker)))
+               (and (<= (car bounds) clock) (< clock (cdr bounds)))))
+    (org-mcp--tool-validation-error
+     "The clock is running in this node: close it with org-clock-out first; nothing was deleted")))
+
 (defun org-mcp--node-properties (names)
   "Return the Org property drawer of the node at point, or nil.
 NAMES is `all' for the whole drawer or the upcased names to take
@@ -4238,6 +4267,11 @@ The text is gone from the file and org-mcp keeps no copy of it.  The
 response carries the link the node had, read while it was still
 there, so a client can say which node it lost.
 
+A node the running clock is in is refused instead, see
+`org-mcp--assert-clock-outside-subtree': the open CLOCK line would go
+with the text and leave Emacs clocking a node that is not there.
+Call org-clock-out first, then delete it.
+
 MCP Parameters:
   link - Link to the node to delete
          Formats:
@@ -4257,6 +4291,7 @@ MCP Parameters:
                               `((link . ,deleted))
       (org-mcp--goto-heading target)
       (org-mcp--assert-subtree digest "nothing was deleted")
+      (org-mcp--assert-clock-outside-subtree)
       (setq deleted (org-mcp--link-at-point))
       (org-mcp--cut-subtree-at-point))))
 

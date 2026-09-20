@@ -525,8 +525,19 @@ them:
   - =before= (string, required): the node's =digest=, sent back exactly as the read you planned this call from handed it to you, =sha256:= and all. A value in no such form is refused as a malformed call rather than as a conflict, since reading the file again would not help
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and =link= — the link the node had, read while it was still there. It resolves to nothing now
-- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is deleted; unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is deleted; unmarked validation otherwise, a node the Emacs session's clock is running in among them (see [[*How a refusal is classed]])
 - *Recovery:* none. The text leaves the file, org-mcp keeps no copy of it, and nothing in the file records that the node was ever there. For a node that is finished rather than mistaken, use [[*org-node-archive][org-node-archive]], which writes the node's origin into it as it moves it
+
+A node the Emacs session's clock is running in is refused rather than deleted.
+The open CLOCK line would leave the file with the text while Emacs went on
+clocking a node that is no longer there, and the next clock-out would fail
+with no line left to close. Reading the node again would not resolve that, so
+the refusal is not a conflict: close the clock with
+[[file:clocking.org::*org-clock-out][org-clock-out]] and delete the node after
+that. org-mcp does not close it for you — a call that stops your clock without
+being asked for that is worse than one that declines. =org-node-refile= and
+=org-node-archive= put the CLOCK line down again where the node lands, so
+neither of them is refused for it.
 
 Example:
 #+begin_src json
@@ -546,6 +557,11 @@ Example:
 # The subtree moved since that read:
 {
   "error": "conflict: Subtree mismatch: expected 'sha256:3f9c2a1b8e4d7c05', found 'sha256:e3b0c44298fc1c14'; nothing was deleted"
+}
+
+# The clock is running in the node:
+{
+  "error": "The clock is running in this node: close it with org-clock-out first; nothing was deleted"
 }
 #+end_src
 

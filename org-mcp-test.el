@@ -14744,6 +14744,48 @@ model reads: in the tool's own description."
       "org-node-archive"
       (org-mcp-test--registered-tool-description "org-node-delete")))))
 
+(ert-deftest org-mcp-test-node-delete-refuses-the-node-the-clock-runs-in ()
+  "A node the Emacs session's clock runs in is not deleted.
+The CLOCK line would leave the file with the text while Emacs went on
+believing a clock runs, and the user's next clock-out would fail with
+no line left to close.  The refusal is the unmarked validation class,
+not a conflict: the open CLOCK line was in the region the client
+read, so its token is fresh and reading again resolves nothing.  The
+clock is left running, because a tool that stops the user's clock on
+their behalf is worse than one that declines."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((link (org-mcp-test--verbs-link)))
+      (org-mcp-test--call-clock-in link "2026-03-20T09:30:00")
+      (org-mcp-test--with-session-clock test-file
+        (org-mcp-test--call-tool-refused
+         "org-node-delete"
+         `((link . ,link)
+           (before . ,(org-mcp-test--verbs-digest link)))
+         "\\`The clock is running in this node.*org-clock-out"
+         test-file)
+        (should (org-clock-is-active))))))
+
+(ert-deftest org-mcp-test-node-delete-takes-a-node-the-clock-is-not-in ()
+  "A clock running in another node is no reason to refuse the delete.
+The guard asks where the clock is, not whether one runs: Keep holds
+the open CLOCK line here, so taking Target away strands nothing."
+  (org-mcp-test--with-verbs-file test-file
+    (org-mcp-test--call-clock-in
+     (org-mcp-test--file-link test-file "*Keep") "2026-03-20T09:30:00")
+    (org-mcp-test--with-session-clock test-file
+      (let ((link (org-mcp-test--verbs-link)))
+        (should
+         (eq
+          (alist-get
+           'success
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-delete"
+             `((link . ,link)
+               (before . ,(org-mcp-test--verbs-digest link))))))
+          t))
+        (should (org-clock-is-active))))))
+
 (ert-deftest org-mcp-test-node-refile-carries-the-subtree-and-a-position ()
   "org-node-refile puts the node under a new parent, after a named sibling.
 The LOGBOOK travels with the node, and Org shifts every generation
