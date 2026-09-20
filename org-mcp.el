@@ -4970,4 +4970,8 @@ no extra configuration."
       (message "Script removed from: %s" target))))
 
 (provide 'org-mcp)
+;; scripts/format-elisp.el lays this file out for 70 columns.
+;; Local Variables:
+;; fill-column: 70
+;; End:
 ;;; org-mcp.el ends here

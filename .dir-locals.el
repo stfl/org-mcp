@@ -1,10 +1,10 @@
 ;;; Directory Local Variables
 ;;; For more information see (info "(emacs) Directory Variables")
 
-;;; `fill-column' is the width scripts/format-elisp.el lays the code out
-;;; for, so elisp-autofmt-mode in a session gives the same result.
+;;; org-mcp.el carries a narrower `fill-column' of its own, the width
+;;; scripts/format-elisp.el lays it out for.
 
-((emacs-lisp-mode . ((fill-column . 70)
+((emacs-lisp-mode . ((fill-column . 100)
                      (indent-tabs-mode . nil)
                      (elisp-lint-indent-specs . ((org-mcp--modify-and-save . 3)
                                                  (org-mcp--with-uri-prefix-dispatch . 1)
