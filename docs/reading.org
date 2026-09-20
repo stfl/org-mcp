@@ -32,6 +32,8 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =level=      | the heading level, =0= for a file                                                   |
 | =link=       | the link that names this node again                                                 |
 | =content=    | the body text, or a file's preamble before its first heading                        |
+| =content_digest= | an opaque token over the region =content= is read from                          |
+| =digest=     | an opaque token over the node's whole subtree                                        |
 | =properties= | the Org property drawer                                                             |
 | =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
 
@@ -116,17 +118,19 @@ A call that sends no =fields= — or sends =null=, =false=, an empty string or a
 empty array, which mean the same as sending none — gets what that node carries
 unasked:
 
-| A node from                 | Carries unasked                          |
-|-----------------------------+------------------------------------------|
-| =org-node-read=             | every field but =properties=             |
-| the =org://{link}= resource | every field but =properties=             |
-| =org-query=                 | every field but =content= and =children= |
-| a child inside a node       | =title=, =todo=, =level= and =link=      |
+| A node from                 | Carries unasked                                       |
+|-----------------------------+-------------------------------------------------------|
+| =org-node-read=             | every field but =properties= and the two digests      |
+| the =org://{link}= resource | every field but =properties= and the two digests      |
+| =org-query=                 | every field but =content=, =children= and the digests |
+| a child inside a node       | =title=, =todo=, =level= and =link=                   |
 
 A query leaves =content= and =children= out because filling them means reading
 every matched subtree; naming either in =fields= asks for exactly that, at that
-cost. A child always carries the four fields above, whatever the call asked of
-its parent: to see more of a child, read it by its =link=.
+cost. Neither endpoint hashes a node it was not asked to: a digest is for a
+client about to change something, and a query asked for one hashes every match.
+A child always carries the four fields above, whatever the call asked of its
+parent: to see more of a child, read it by its =link=.
 
 *** Naming a list of fields
 
@@ -172,6 +176,42 @@ are. =org-node-set-tags= replaces the tags written on the heading and leaves
 inherited ones where they are, so =local_tags= is the field to work from when
 changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
 
+** The two digests
+
+=digest= and =content_digest= are tokens over regions of the file, asked for by
+a client that means to change something (see [[file:writing.org::*Knowing what you are about to change][Knowing what you are about to
+change]]). =digest= covers the node's whole subtree: its heading, its body, its
+drawers and every descendant under it, up to where the next heading of the same
+level or a shallower one begins — the whole file, for a file node.
+=content_digest= covers the body alone, exactly the region =content= is read
+from and =org-node-set-content= writes within, which for a file is its preamble.
+
+A token is opaque. It says which version of a region you read, and the way to
+use one is to send back the token you were given. How org-mcp builds one is
+written down anyway — =sha256:= followed by the first 16 hexadecimal characters
+of the SHA-256 of the region's text as UTF-8 bytes — so that the server's
+answer can be checked rather than taken on trust. That is not an invitation to
+compute one in a client: the token covers a region of the file, and a client
+holds at most part of it. The prefix names the algorithm, so a token made by a
+later one is told apart from this one without a second field to say so.
+
+=content= is trimmed for reading and the region is not. Two headings whose
+bodies differ only in a trailing newline therefore carry the same =content= and
+different =content_digest=s, which is the file telling the truth about itself.
+Deriving one from the other is the one thing a token does not support.
+
+A node asked for a digest carries one, an empty body included: a region with
+nothing in it is still a region, and a client asserting that a body is empty has
+a token to assert with. =digest= covers every descendant whatever the call asked
+to see of them, so a node read without its children still carries a token over
+the subtree below it.
+
+Read a token on the read immediately before you act on it, rather than from a
+list you kept. Both regions take in =:LOGBOOK:= drawers and =CLOCK:= lines,
+which move as notes and clocks are written — including by org-mcp's own clock
+tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier call can name a
+version that the client's own clocking has left behind.
+
 * Available MCP Resources
 
 ** org://{link}
@@ -187,7 +227,7 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
   resource is picked from a client's UI, which has nowhere to say how much of
   the node it wants, so the resource always serves the default.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
-- *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
+- *Returns:* the node the link names, with every field but =properties= and the two digests (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -235,7 +275,7 @@ the same data as the resource for the same link; =org-read-outline= and
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but =properties= when it asked for none (see [[*The node][The node]])
+- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but =properties= and the two digests when it asked for none (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 ** org-read-outline
@@ -275,6 +315,11 @@ Example response:
 - *Returns:* Plain text content of the file or headline subtree
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 - *Note:* Use this when you need plain text instead of structured JSON
+
+What comes back is the subtree region =digest= is taken over, with the line
+break that separates it from the next heading dropped. The drop belongs to this
+read and to nothing else: a digest covers the region of the file, never the text
+a tool returns from it (see [[*The two digests][The two digests]]).
 
 * Configuration and discovery tools
 

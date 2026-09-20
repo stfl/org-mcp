@@ -907,14 +907,22 @@ decodes to its byte, `%0A' and `%0D' included."
    (url-unhex-string (encode-coding-string string 'utf-8) t) 'utf-8))
 
 (defun org-mcp--node-text-at-point ()
-  "Extract content of current headline including the headline itself.
-Point should be at the headline."
-  (let ((start (line-beginning-position)))
-    (org-end-of-subtree t t)
-    ;; Remove trailing newline if present
-    (when (and (> (point) start) (= (char-before) ?\n))
-      (backward-char))
-    (buffer-substring-no-properties start (point))))
+  "Return the text of the subtree at point, its heading included.
+The text is the region `org-mcp--subtree-bounds' delimits, with one
+trailing newline dropped: the region runs up to the next heading, and
+a caller reading one subtree has no use for the line break that
+separates it from that heading.
+
+The trim belongs to this read and to nothing else.  A caller that
+needs the region itself takes it from `org-mcp--subtree-bounds', not
+from what this returns, so a presentation decision made here stays
+here.  Point does not move."
+  (let* ((bounds (org-mcp--subtree-bounds))
+         (text
+          (buffer-substring-no-properties (car bounds) (cdr bounds))))
+    (if (string-suffix-p "\n" text)
+        (substring text 0 -1)
+      text)))
 
 (defun org-mcp--link-at-point ()
   "Return the native Org link to the heading at point.
@@ -1114,6 +1122,24 @@ locale-dependent reformatting)."
      :deadline (and deadl (org-element-property :raw-value deadl))
      :closed (and clsd (org-element-property :raw-value clsd)))))
 
+(defun org-mcp--subtree-bounds ()
+  "Return the subtree of the heading at point as (BEGIN . END).
+BEGIN is the heading's first star and END is where the next heading
+of the same level or a shallower one begins, or the end of the
+buffer.  That is the region Org's own parser gives the headline, so
+every descendant lies inside it whatever depth a caller asked to see.
+
+This is the one definition of a subtree's extent: a caller reading
+the text verbatim and a caller measuring the region resolve to the
+same bytes rather than to two walks that agree by coincidence.  Point
+does not move."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((el (org-element-at-point)))
+      (cons
+       (org-element-property :begin el)
+       (org-element-property :end el)))))
+
 (defun org-mcp--body-bounds ()
   "Return the body of the heading at point as (BEGIN . END).
 The body begins where `org-end-of-meta-data' with FULL leaves point,
@@ -1184,6 +1210,8 @@ it unless TEXT ends in one or a line break follows point."
     level
     link
     content
+    content_digest
+    digest
     properties
     children)
   "Every field a node can carry.
@@ -1381,6 +1409,43 @@ region."
       (cons (point-min) (or (car children) (point-max)))
     (org-mcp--body-bounds)))
 
+(defun org-mcp--node-subtree-bounds (file-node)
+  "Return the subtree of the node at point as (BEGIN . END).
+FILE-NODE non-nil means the node is the file the buffer visits, and
+its subtree is the whole of it.  Otherwise it is the region
+`org-mcp--subtree-bounds' delimits: the heading, its body and every
+descendant under it, whatever depth the call asked to see."
+  (if file-node
+      (cons (point-min) (point-max))
+    (org-mcp--subtree-bounds)))
+
+(defun org-mcp--digest (bounds)
+  "Return the digest of the buffer region BOUNDS covers.
+BOUNDS is (BEGIN . END) in the current buffer.  The token is
+`sha256:' followed by the first 16 hexadecimal characters of the
+SHA-256 of the region's text as UTF-8 bytes.
+
+The token is opaque to the client that receives it: it says which
+version of a region the client read, and a client asserts by sending
+back the one it was given rather than by computing one.  The prefix
+names the algorithm, so a token made by a later one is told apart
+from this one without a second field to carry the answer.
+
+The region is what is digested, never a tool's rendering of it: a
+read that trims or formats what it returns is making a decision for
+its reader, and a decision made for a reader is not a safety
+boundary.  Every region has a digest, an empty one included, so a
+node asked for a digest always carries one."
+  (concat
+   "sha256:"
+   (substring (secure-hash
+               'sha256
+               (encode-coding-string (buffer-substring-no-properties
+                                      (car bounds) (cdr bounds))
+                                     'utf-8
+                                     t))
+              0 16)))
+
 (defun org-mcp--node-properties ()
   "Return the Org property drawer of the heading at point, or nil.
 `org-mcp--special-properties' are left out: Org computes them rather
@@ -1389,6 +1454,17 @@ than storing them, and each is a node field in its own right."
    (lambda (pair)
      (member (car pair) org-mcp--special-properties))
    (org-entry-properties nil 'standard)))
+
+(defun org-mcp--node-needs-children-p (fields file-node)
+  "Return non-nil when a node carrying FIELDS must find its children.
+A node asked for `children' needs their positions to build them.  A
+file node, FILE-NODE non-nil, needs them for its body as well: a
+file's body is the preamble before its first heading, so both
+`content' and `content_digest' are bounded by the first child."
+  (or (memq 'children fields)
+      (and file-node
+           (or (memq 'content fields)
+               (memq 'content_digest fields)))))
 
 (defun org-mcp--node-at-point
     (fields &optional child-fields file-node)
@@ -1413,8 +1489,7 @@ no position before that heading."
           (unless file-node
             (org-mcp--heading-metadata-at-point)))
          (children
-          (when (or (memq 'children fields)
-                    (and file-node (memq 'content fields)))
+          (when (org-mcp--node-needs-children-p fields file-node)
             (org-mcp--node-child-positions file-node)))
          (link
           (when (or (memq 'link fields) (memq 'id fields))
@@ -1461,6 +1536,12 @@ no position before that heading."
                          (car bounds) (cdr bounds))))
                   (unless (string-blank-p text)
                     (string-trim text))))
+               ('content_digest
+                (org-mcp--digest
+                 (org-mcp--node-content-bounds file-node children)))
+               ('digest
+                (org-mcp--digest
+                 (org-mcp--node-subtree-bounds file-node)))
                ('properties (org-mcp--node-properties))
                ('children
                 (vconcat
@@ -3597,7 +3678,8 @@ MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
   fields - How much of each matching node to return (array of
           strings, or a string naming a configured list, optional);
-          defaults to every field but content and children
+          defaults to every field but content, children and the two
+          digests
   files - Files and directories to search, replacing the allowed
           files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
@@ -3750,7 +3832,7 @@ MCP Parameters:
          - any of these bracketed, as [[link]] or [[link][description]]
   fields - How much of the node to return (array of strings, or a
           string naming a configured list, optional); defaults to
-          every field but properties
+          every field but properties and the two digests
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -4256,8 +4338,9 @@ itself says which.  Nothing is ever sent as null.
          as org-use-tag-inheritance and
          org-tags-exclude-from-inheritance direct, both of which
          org-config-tags reports
-  local_tags - The tags written on the heading itself, which is the
-         set org-node-set-tags replaces.  Identical to tags when
+  local_tags - The tags written on the heading itself: local to the
+         heading, not to this machine.  They are the set
+         org-node-set-tags replaces, and are identical to tags when
          inheritance is off
   scheduled - Scheduled timestamp
   deadline - Deadline timestamp
@@ -4269,6 +4352,15 @@ itself says which.  Nothing is ever sent as null.
          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
          file:{path}::*{title}; a file without an ID is file:{path}
   content - Body text, or a file's preamble before its first heading
+  content_digest - Opaque token over the region content is read from
+         and org-node-set-content writes within.  Send back the token
+         you were given to say what you believed was there; never
+         compute one.  content is trimmed for reading and the token
+         is not, so two nodes carrying the same content can carry
+         different tokens.  A node with an empty body still has one
+  digest - Opaque token over the node's whole subtree, every
+         descendant included whatever depth was asked for.  A change
+         anywhere under the node changes it
   properties - The Org property drawer
   children - The direct children, each a node carrying title, todo,
              level and link

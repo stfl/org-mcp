@@ -42,9 +42,10 @@ Example:
 A result is the node =org-node-read= returns for the same heading. Asked
 nothing, a query leaves out =content= and =children= — a match list would read
 every matched subtree to fill those — and carries the heading's Org property
-drawer as =properties=. =fields= is how a call chooses otherwise, in either
-direction: naming =content= returns the bodies, at that cost, and naming
-neither it nor =properties= returns neither.
+drawer as =properties=. It leaves out the two digests as well, and a query that
+names one hashes the region of every match (see [[file:reading.org::*The two digests][The two digests]]). =fields= is
+how a call chooses otherwise, in either direction: naming =content= returns the
+bodies, at that cost, and naming neither it nor =properties= returns neither.
 
 Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags works from =local_tags= without reading the heading again (see
