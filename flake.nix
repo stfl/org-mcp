@@ -2,9 +2,12 @@
   description = "org-mcp development environment";
 
   inputs = {
-    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1";
-    flake-parts.url = "https://flakehub.com/f/hercules-ci/flake-parts/0.1";
-    git-hooks-nix.url = "github:cachix/git-hooks.nix";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs @ {flake-parts, ...}:
