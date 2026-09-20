@@ -3021,6 +3021,98 @@ NEW-TITLE is the invalid new title that should be rejected."
        ;; Check that the tool list is empty
        (should (= (length tools) 0))))))
 
+(defconst org-mcp-test--non-gtd-tool-ids
+  '("org-add-logbook-note"
+    "org-add-todo"
+    "org-clock-add"
+    "org-clock-delete"
+    "org-clock-find-dangling"
+    "org-clock-get-active"
+    "org-clock-in"
+    "org-clock-out"
+    "org-edit-body"
+    "org-get-allowed-files"
+    "org-get-clock-config"
+    "org-get-priority-config"
+    "org-get-tag-candidates"
+    "org-get-tag-config"
+    "org-get-todo-config"
+    "org-ql-query"
+    "org-read"
+    "org-read-headline"
+    "org-read-outline"
+    "org-rename-headline"
+    "org-set-priority"
+    "org-set-properties"
+    "org-set-tags"
+    "org-update-deadline"
+    "org-update-scheduled"
+    "org-update-todo-state")
+  "Every tool id org-mcp registers regardless of configuration, sorted.")
+
+(defconst org-mcp-test--gtd-tool-ids
+  '("query-backlog" "query-inbox" "query-next")
+  "Tool ids org-mcp registers for configured GTD query functions, sorted.")
+
+(defun org-mcp-test--registered-tool-ids ()
+  "Return the ids in the tools/list response, sorted.
+Sorted because `mcp-server-lib' leaves the response order
+unspecified, so pinning it here would pin something org-mcp does not
+control."
+  (sort
+   (mapcar
+    (lambda (tool) (alist-get 'name tool))
+    (append
+     (alist-get
+      'tools
+      (mcp-server-lib-ert-get-success-result
+       "tools/list" (mcp-server-lib-create-tools-list-request)))
+     nil))
+   #'string<))
+
+(ert-deftest org-mcp-test-registered-tool-ids-without-gtd ()
+  "The registered tools are exactly the unconditional ones."
+  (let ((org-mcp-query-inbox-fn nil)
+        (org-mcp-query-next-fn nil)
+        (org-mcp-query-backlog-fn nil))
+    (org-mcp-test--with-enabled
+      (should
+       (equal
+        (org-mcp-test--registered-tool-ids)
+        org-mcp-test--non-gtd-tool-ids)))))
+
+(ert-deftest org-mcp-test-registered-tool-ids-with-gtd ()
+  "Configuring every GTD query function adds exactly its three tools."
+  (let ((org-mcp-query-inbox-fn (lambda () '(todo)))
+        (org-mcp-query-next-fn (lambda () '(todo)))
+        (org-mcp-query-backlog-fn (lambda () '(todo))))
+    (org-mcp-test--with-enabled
+      (should
+       (equal
+        (org-mcp-test--registered-tool-ids)
+        (sort
+         (append
+          org-mcp-test--non-gtd-tool-ids org-mcp-test--gtd-tool-ids)
+         #'string<))))))
+
+(ert-deftest org-mcp-test-each-gtd-tool-follows-its-own-function ()
+  "Each GTD tool is registered from its own function, not a shared one."
+  (dolist (pair '((org-mcp-query-inbox-fn . "query-inbox")
+                  (org-mcp-query-next-fn . "query-next")
+                  (org-mcp-query-backlog-fn . "query-backlog")))
+    (let ((org-mcp-query-inbox-fn nil)
+          (org-mcp-query-next-fn nil)
+          (org-mcp-query-backlog-fn nil))
+      ;; `set' writes the binding the `let' above established, so the
+      ;; value is undone with it.
+      (set (car pair) (lambda () '(todo)))
+      (org-mcp-test--with-enabled
+        (let ((ids (org-mcp-test--registered-tool-ids)))
+          (should (member (cdr pair) ids))
+          (dolist (other org-mcp-test--gtd-tool-ids)
+            (unless (string= other (cdr pair))
+              (should-not (member other ids)))))))))
+
 (ert-deftest org-mcp-test-file-resource-read ()
   "Test that reading org:// resource returns structured JSON."
   (let ((test-content "* Test Heading\nThis is test content."))
