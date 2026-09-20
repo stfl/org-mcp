@@ -14607,6 +14607,33 @@ travels with the node.")
    "\\'")
   "The complete file after Target moves under Home naming no sibling.")
 
+(defconst org-mcp-test--verbs-child-archived-in-place
+  (concat
+   "\\`\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* Second child\n"
+   "\n"
+   "\\* Archived\n"
+   "\n"
+   "\\*\\* Child\n"
+   ":PROPERTIES:\n"
+   ":ARCHIVE_TIME: .+\n"
+   ":ARCHIVE_FILE: .+\n"
+   ":ARCHIVE_OLPATH: Target\n"
+   ":ARCHIVE_CATEGORY: .+\n"
+   ":END:\n"
+   "\\*\\*\\* Grandchild\n"
+   "\\'")
+  "The complete file after Child is archived to a heading in it.
+The time, the origin file and the category are whatever this run
+makes of them; the outline path is the one fact the test pins,
+because it is what says where the node was.")
+
 (defconst org-mcp-test--verbs-target-at-top
   (concat
    "\\`\\* TODO Target\n"
@@ -14712,6 +14739,25 @@ back for a token."
        (before . "e3b0c44298fc1c14")
        (parent . ,(org-mcp-test--file-link test-file "*Home")))
      "\\`before must be the digest"
+     test-file)))
+
+(ert-deftest org-mcp-test-node-verbs-have-no-unguarded-spelling ()
+  "None of the three can be called without saying what it acts on.
+`before' is a required parameter of each, so a call that omits it
+never reaches the file: there is no spelling of these verbs that
+destroys something the caller did not name."
+  (org-mcp-test--with-verbs-file test-file
+    (dolist (tool '("org-node-delete" "org-node-archive"))
+      (org-mcp-test--call-tool-refused
+       tool
+       `((link . ,(org-mcp-test--verbs-link)))
+       "before"
+       test-file))
+    (org-mcp-test--call-tool-refused
+     "org-node-move"
+     `((link . ,(org-mcp-test--verbs-link))
+       (parent . ,(org-mcp-test--file-link test-file "*Home")))
+     "before"
      test-file)))
 
 (ert-deftest org-mcp-test-node-verbs-refuse-a-link-naming-a-file ()
@@ -14890,6 +14936,30 @@ response names the file it went to."
               (should (string-match-p "Decided this one\\." archived))))
         (when (file-exists-p archive)
           (delete-file archive))))))
+
+(ert-deftest org-mcp-test-node-archive-to-a-heading-in-the-same-file ()
+  "An archive location naming a heading keeps the node in its own file.
+`org-archive-location' decides where an archive goes, and a location
+with no file part names a heading in the file the node is in.  The
+node archived here has a parent, so the outline path Org writes into
+it leads back to where it was — the property a reader follows to put
+it back."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((org-archive-location "::* Archived")
+           (link (org-mcp-test--file-link test-file "*Child"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-archive"
+              `((link . ,link)
+                (before . ,(org-mcp-test--verbs-digest link)))))))
+      (should (eq (alist-get 'saved result) t))
+      (should
+       (equal
+        (alist-get 'archive_file result)
+        (abbreviate-file-name test-file)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-child-archived-in-place))))
 
 (ert-deftest org-mcp-test-node-archive-leaves-a-dirty-archive-unsaved ()
   "An archive file the user is editing is written but not saved.
