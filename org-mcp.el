@@ -115,6 +115,24 @@ the setting is that org-mcp does not decide which names exist."
   :type '(alist :key-type symbol :value-type (repeat symbol))
   :group 'org-mcp)
 
+(defcustom org-mcp-read-max-nodes 500
+  "The most nodes one read of a node returns.
+A call expands as many generations of children as its `depth' asks
+for, and a few generations of a large outline run to far more of the
+file than the caller meant to ask for.  A read whose walk passes
+this many nodes is refused, naming the node it stopped at so that
+the caller can read that node on its own instead.
+
+It is never trimmed to fit: a caller handed a subtree that was
+silently shortened believes it has seen the whole thing and has no
+way to find out otherwise.
+
+The count is every node the response carries -- the node that was
+read, the generations expanded under it, and the references that
+end the walk -- so raising it raises what one call may return."
+  :type 'natnum
+  :group 'org-mcp)
+
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
@@ -1433,6 +1451,24 @@ not."
       fields
     org-mcp--node-child-fields))
 
+(defun org-mcp--spend-node (budget file-node)
+  "Spend one node of BUDGET, or refuse the walk at the node at point.
+BUDGET is the cell `org-mcp--node-at-point' hands its walk, holding
+the nodes the walk may still return.  When it is empty the walk is
+refused rather than cut short: a caller handed a subtree that was
+silently shortened believes it has seen the whole thing.
+
+The refusal names the node the walk stopped at, which is a link the
+caller can read on its own, and `org-mcp-read-max-nodes', which is
+where the user raises the ceiling.  FILE-NODE says which kind of
+node point is on; see `org-mcp--node-link-at-point'."
+  (when (< (cl-decf (car budget)) 0)
+    (org-mcp--tool-validation-error
+     "Too many nodes: more than %d.  The walk stops at %s: ask for \
+a shallower depth, or read that node on its own.  \
+org-mcp-read-max-nodes sets the ceiling"
+     org-mcp-read-max-nodes (org-mcp--node-link-at-point file-node))))
+
 (defun org-mcp--node-at-point (fields &optional depth file-node)
   "Return the node at point as an alist carrying FIELDS.
 One node shape serves a file, a heading, a child and a query result,
@@ -1451,9 +1487,22 @@ FILE-NODE non-nil builds the node of the file the buffer visits: a
 node at level 0, carrying the file's title, a link to the file and
 its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
-no position before that heading."
-  (let* ((depth (or depth 0))
-         (meta
+no position before that heading.
+
+The walk is given `org-mcp-read-max-nodes' nodes to spend and is
+refused when it wants more; every caller gets its own budget, so a
+list of matches is bounded one match at a time."
+  (org-mcp--node-at-point-within
+   fields (or depth 0) file-node (list org-mcp-read-max-nodes)))
+
+(defun org-mcp--node-at-point-within (fields depth file-node budget)
+  "Return the node at point carrying FIELDS, within BUDGET.
+FIELDS, DEPTH and FILE-NODE are `org-mcp--node-at-point's, which
+holds what a node is; BUDGET is the walk's, which
+`org-mcp--spend-node' spends one node of per node built, this one
+included."
+  (org-mcp--spend-node budget file-node)
+  (let* ((meta
           (unless file-node
             (org-mcp--heading-metadata-at-point)))
          (children
@@ -1510,9 +1559,11 @@ no position before that heading."
                   (lambda (position)
                     (save-excursion
                       (goto-char position)
-                      (org-mcp--node-at-point
+                      (org-mcp--node-at-point-within
                        (org-mcp--child-node-fields fields depth)
-                       (1- depth))))
+                       (1- depth)
+                       nil
+                       budget)))
                   children)))
                ;; A call's fields are resolved against
                ;; `org-mcp--node-fields' before they reach here, so
@@ -4884,6 +4935,9 @@ Parameters:
           past depth comes back as references again.  With no
           children among the fields there is nothing to expand and
           depth changes nothing.
+          A read of more nodes than org-mcp-read-max-nodes is
+          refused, naming the node the walk stopped at so that it
+          can be read on its own; it is never trimmed to fit.
           null, false, \"\" and [] ask for none.
   files - Files and directories to look up an id: link in (array of
           strings, optional)

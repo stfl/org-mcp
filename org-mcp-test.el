@@ -3178,6 +3178,22 @@ Very deep content."
         ;; Deep subsection is left out (level 3 under level 1)
         (should (= (length (alist-get 'children second)) 0))))))
 
+(ert-deftest org-mcp-test-tool-read-outline-ceiling ()
+  "An outline past the node ceiling is refused, as a read of it is.
+The outline is the file read one generation deep, so the same
+setting bounds it and the refusal names the heading it stopped at."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-outline-depth))
+    (let ((org-mcp-read-max-nodes 5))
+      (should (org-mcp-test--call-read-outline test-file)))
+    (let ((org-mcp-read-max-nodes 4))
+      (org-mcp-test--call-tool-refused
+       "org-read-outline" `((file . ,test-file))
+       (concat
+        "\\`Too many nodes: more than 4\\.  The walk stops at "
+        (regexp-quote
+         (org-mcp-test--file-link test-file "*Second Section")))))))
+
 (ert-deftest org-mcp-test-file-not-in-allowed-list-returns-error ()
   "Test that reading a file not in allowed list returns an error."
   (org-mcp-test--with-temp-org-files
@@ -13515,6 +13531,56 @@ leaving a client to conclude that the file is flat."
       (org-mcp-test--call-tool-refused
        "org-node-read" `((link . ,link) (depth . 1.5))
        "depth must be a whole number of generations, not: 1.5"))))
+
+(ert-deftest org-mcp-test-depth-ceiling-refuses-and-never-trims ()
+  "A walk past the ceiling is refused, not cut short.
+The refusal names the node the walk stopped at, which is a link the
+caller can read on its own, and the setting that raises the
+ceiling.  It is a validation refusal and carries no marker, because
+the call itself asked for too much and the recovery is to ask for
+less.  A walk that fits returns the whole subtree, so the ceiling
+never quietly takes anything out of one."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (whole (org-mcp-test--read-depth link 2)))
+      (let ((org-mcp-read-max-nodes 5))
+        (should (equal (org-mcp-test--read-depth link 2) whole)))
+      (let ((org-mcp-read-max-nodes 4))
+        (org-mcp-test--call-tool-refused
+         "org-node-read" `((link . ,link) (depth . 2))
+         (concat
+          "\\`Too many nodes: more than 4\\.  The walk stops at "
+          (regexp-quote
+           (org-mcp-test--file-link test-file "*Task Two"))
+          ": ask for a shallower depth, or read that node on its "
+          "own\\.  org-mcp-read-max-nodes sets the ceiling"))))))
+
+(ert-deftest org-mcp-test-depth-ceiling-counts-every-node-returned ()
+  "The ceiling counts the references that end a walk as well.
+They are nodes the response carries and a client pays for, so a read
+that asks for no depth at all is bounded by the same number: the
+count is what comes back, not what was expanded."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let ((link (concat "id:" org-mcp-test--depth-project-id)))
+      (let ((org-mcp-read-max-nodes 3))
+        (should (org-mcp-test--read-depth link 0)))
+      (let ((org-mcp-read-max-nodes 2))
+        (org-mcp-test--call-tool-refused
+         "org-node-read" `((link . ,link) (depth . 0))
+         "\\`Too many nodes: more than 2\\.")))))
+
+(ert-deftest org-mcp-test-depth-ceiling-bounds-one-node-not-a-match-list ()
+  "The ceiling is what one node read returns, not what a call returns.
+Every node a query matches is read on its own and gets the whole
+ceiling to itself, so bounding how deep a match may be read does not
+bound how many matches there are."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let ((org-mcp-read-max-nodes 1)
+          (result (org-mcp-test--call-ql-query "(todo \"TODO\")")))
+      (should (= (alist-get 'total result) 2)))))
 
 (ert-deftest org-mcp-test-depth-resource-carries-references ()
   "The org:// resource serves the node alone, its children references.
