@@ -4342,8 +4342,9 @@ itself says which.  Nothing is ever sent as null.
          as org-use-tag-inheritance and
          org-tags-exclude-from-inheritance direct, both of which
          org-config-tags reports
-  local_tags - The tags written on the heading itself, which is the
-         set org-node-set-tags replaces.  Identical to tags when
+  local_tags - The tags written on the heading itself: local to the
+         heading, not to this machine.  They are the set
+         org-node-set-tags replaces, and are identical to tags when
          inheritance is off
   scheduled - Scheduled timestamp
   deadline - Deadline timestamp
