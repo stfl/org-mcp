@@ -34,7 +34,7 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =content=    | the body text, or a file's preamble before its first heading                        |
 | =content_digest= | an opaque token over the region =content= is read from                          |
 | =digest=     | an opaque token over the node's whole subtree                                        |
-| =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
+| =children=   | the direct children: references, or whole nodes as far as =depth= expands them      |
 
 Two things a node carries are not fields, because their names are yours rather
 than org-mcp's: a drawer holds =TITLE= as readily as =Effort=. Each is asked
@@ -138,14 +138,16 @@ unasked:
 | =org-node-read=             | every field but the two digests                       |
 | the =org://{link}= resource | every field but the two digests                       |
 | =org-query=                 | every field but =content=, =children= and the digests |
-| a child inside a node       | =title=, =todo=, =level= and =link=                   |
+| a child the call expanded   | the same fields as its parent                         |
+| a child it did not          | =title=, =todo=, =level= and =link=                   |
 
 A query leaves =content= and =children= out because filling them means reading
 every matched subtree; naming either in =fields= asks for exactly that, at that
 cost. Neither endpoint hashes a node it was not asked to: a digest is for a
 client about to change something, and a query asked for one hashes every match.
-A child always carries the four fields above, whatever the call asked of its
-parent: to see more of a child, read it by its =link=.
+A child the call did not expand carries the four fields above, whatever it
+asked of the parent: to see more of that child, expand it with =depth= (see
+[[*Reading a subtree][Reading a subtree]]) or read it by its =link=.
 
 *** Naming a list of fields
 
@@ -220,7 +222,8 @@ what the call is for:
 | =org-node-read=             | no properties   |
 | the =org://{link}= resource | no properties   |
 | =org-query=                 | every property  |
-| a child inside a node       | no properties   |
+| a child the call expanded   | its parent's    |
+| a child it did not          | no properties   |
 
 A query is the call that asks /about/ properties, so it hands the drawer back
 with each match; ="none"= turns that off when a match list does not need it. A
@@ -281,11 +284,83 @@ ones that are.
 | =org-node-read=             | no computed fields    |
 | the =org://{link}= resource | no computed fields    |
 | =org-query=                 | every computed field  |
-| a child inside a node       | no computed fields    |
+| a child the call expanded   | its parent's          |
+| a child it did not          | no computed fields    |
 
 A query carries them all because a workflow configures them for the matches it
 ranks; a read carries none, because a client asks for what it knows what to do
 with.
+** Reading a subtree
+
+=depth= expands that many generations of children in place, so a project and
+its tasks arrive in one call instead of one call per heading. =org-node-read=
+takes it, and a call that sends none asks for none.
+
+| =depth= | The children come back as                      |
+|---------+------------------------------------------------|
+|       0 | references                                     |
+|       1 | whole nodes, whose own children are references |
+|       2 | whole nodes one generation further down        |
+
+Every generation a call expands carries everything the call asked for — its
+=fields=, and the =properties= and =computed= values too — so an expanded child
+is the very node =org-node-read= returns for that child's =link=: there is one
+node shape and no separate kind for a child that came back inside its parent.
+The generation past =depth= comes back as references, carrying the four fields
+of an address and neither of the other two namespaces, so a walk always ends in
+something you can follow.
+
+A heading at =depth: 1=, its tasks whole and their own steps references:
+
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "content": "Ships before the review.",
+  "children": [
+    {"title": "Write the spec", "todo": "TODO", "level": 2,
+     "link": "file:~/org/projects.org::*Write the spec",
+     "content": "Due Friday.",
+     "children": [
+       {"title": "Collect the numbers", "level": 3,
+        "link": "file:~/org/projects.org::*Collect the numbers"}
+     ]}
+  ]
+}
+#+end_src
+
+=depth= says how many nodes come back and =fields= how much of each, and the two
+do not interact. A call that did not ask for =children= has nothing to expand,
+so =depth= changes nothing for it.
+
+*** The ceiling on one read
+
+A read returns at most =org-mcp-read-max-nodes= nodes, 500 by default. A walk
+that wants more is refused, and the refusal names the node it stopped at:
+
+#+begin_example
+Too many nodes: more than 500.  The walk stops at
+file:/home/user/org/projects.org::*Collect the numbers: ask for a shallower
+depth, or read that node on its own.  org-mcp-read-max-nodes sets the ceiling
+#+end_example
+
+The named node is a link, so the two remedies are both a call you can make: ask
+again with a smaller =depth=, or read that node and carry on from there.
+
+The count is every node the response carries — the node you read, the
+generations expanded under it, and the references that end the walk — so a file
+whose top-level headings alone pass the ceiling is refused without any =depth=
+at all. Raise the setting if that is the size of file you work with:
+
+#+begin_src emacs-lisp
+(setq org-mcp-read-max-nodes 2000)
+#+end_src
+
+Nothing is ever trimmed to fit. A shortened subtree that did not say it was
+shortened reads exactly like a complete one, and a client acting on it has no
+way to find out otherwise.
 
 ** The two tag fields
 
@@ -351,11 +426,11 @@ version that the client's own clocking has left behind.
   =org-node-read=, and a refusal carries the same message. A resource URI carries
   no =files= parameter, so an =id:= link resolves only within the allowed
   files; to reach an ID in another file, call =org-node-read= with =files= (see
-  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= parameter either: a
-  resource is picked from a client's UI, which has nowhere to say how much of
-  the node it wants, so the resource always serves the default. It carries no
-  =properties= or =computed= parameter for the same reason, and serves
-  neither.
+  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= or =depth= parameter
+  either: a resource is picked from a client's UI, which has nowhere to say how
+  much of the node it wants, so the resource always serves the default node,
+  its children as references. It carries no =properties= or =computed=
+  parameter for the same reason, and serves neither.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* the node the link names, with every field but the two digests, and no properties and no computed fields (see [[*The node][The node]])
 
@@ -404,6 +479,7 @@ the same data as the resource for the same link; =org-read-outline= and
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
+  - =depth= (number, optional): how many generations of children to expand in place; none by default. See [[*Reading a subtree][Reading a subtree]]
   - =properties= (array of strings, or a string, optional): which Org drawer properties to return; an array of property names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for properties][Asking for properties]]
   - =computed= (array of strings, or a string, optional): which computed fields to return; an array of names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
@@ -420,7 +496,10 @@ the same data as the resource for the same link; =org-read-outline= and
     up, and so is a string starting with =org://=
 - *Returns:* JSON object with a =children= array: the top-level headings, each
   a node (see [[*The node][The node]]) carrying its own =children=, the level-2 headings.
-  Deeper headings are left out, and so are the fields a whole read carries
+  Deeper headings are left out, and so are the fields a whole read carries.
+  A file with more headings in those two levels than
+  =org-mcp-read-max-nodes= is refused, as a read of it that deep is (see
+  [[*The ceiling on one read][The ceiling on one read]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 Example response:

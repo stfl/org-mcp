@@ -95,6 +95,12 @@ the next call sends — the same text =org-store-link= gives you in Emacs.
   in a file outside them is out of reach as well: neither clock tool closes it,
   and org-mcp discloses nothing about it — not its file, not its heading, not
   when it started — so you clock out of it in Emacs yourself.
+- *It refuses a read that would return too much.* A read expands as many
+  generations of a heading's children as you ask for, and stops at
+  =org-mcp-read-max-nodes= nodes, 500 by default. Past that the call is refused,
+  naming the heading it stopped at so you can read that one instead. It is never
+  trimmed to fit, because a shortened answer that does not say so reads like a
+  complete one.
 - *It blocks Emacs while it searches.* A query over a named directory walks the
   tree and reads every Org file in it in Emacs's single thread, and Emacs does not
   respond meanwhile. Point it at narrow directories.

@@ -135,6 +135,24 @@ package populates this as it populates `org-mcp-node-field-lists'."
   :type '(alist :key-type symbol :value-type function)
   :group 'org-mcp)
 
+(defcustom org-mcp-read-max-nodes 500
+  "The most nodes one read of a node returns.
+A call expands as many generations of children as its `depth' asks
+for, and a few generations of a large outline run to far more of the
+file than the caller meant to ask for.  A read whose walk passes
+this many nodes is refused, naming the node it stopped at so that
+the caller can read that node on its own instead.
+
+It is never trimmed to fit: a caller handed a subtree that was
+silently shortened believes it has seen the whole thing and has no
+way to find out otherwise.
+
+The count is every node the response carries -- the node that was
+read, the generations expanded under it, and the references that
+end the walk -- so raising it raises what one call may return."
+  :type 'natnum
+  :group 'org-mcp)
+
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
@@ -758,6 +776,28 @@ false to.  Any other VALUE is refused with an error naming NAME."
     (org-mcp--tool-validation-error "%s must be true or false: %S"
                                     name
                                     value))))
+
+(defun org-mcp--depth-given (depth)
+  "Return DEPTH, a call's `depth' parameter, as a generation count.
+A blank DEPTH, see `org-mcp--blank-param-p', is none: the call asks
+for no expansion and the node's children come back as references.
+A whole number is that many generations, and so is a string holding
+one, which is how a client following the tool schema sends every
+parameter.  Anything else is refused, since there is no such thing
+as a fraction of a generation or a walk of minus one."
+  (let ((count
+         (cond
+          ((org-mcp--blank-param-p depth)
+           0)
+          ((integerp depth)
+           depth)
+          ((and (stringp depth) (string-match-p "\\`[0-9]+\\'" depth))
+           (string-to-number depth)))))
+    (unless (and count (>= count 0))
+      (org-mcp--tool-validation-error
+       "depth must be a whole number of generations, not: %S"
+       depth))
+    count))
 
 (defun org-mcp--files-given (files)
   "Return FILES, a call's `files' parameter, or nil when it is blank.
@@ -1610,8 +1650,54 @@ file's body is the preamble before its first heading, so both
            (or (memq 'content fields)
                (memq 'content_digest fields)))))
 
-(defun org-mcp--node-at-point
-    (fields &optional child-fields file-node)
+(defun org-mcp--node-link-at-point (file-node)
+  "Return the link naming the node at point.
+FILE-NODE non-nil means the node is the file the buffer visits,
+which `org-mcp--file-link' names; otherwise it is the heading at
+point, which `org-mcp--link-at-point' names."
+  (if file-node
+      (org-mcp--file-link)
+    (org-mcp--link-at-point)))
+
+(defun org-mcp--child-projection (fields properties computed depth)
+  "Return what the children of a node asked for DEPTH carry.
+The value is (FIELDS PROPERTIES COMPUTED) for the next generation.
+
+While DEPTH remains, a child carries everything its parent was asked
+for -- its fields, its drawer and its computed values alike -- so a
+child inside a node is the node a call reading that child by its
+link gets.  All three travel together because all three are what a
+read of that child would answer: expanding the fields alone would
+make an expanded child a shape of its own, which is what having one
+node shape exists to prevent.
+
+The generation past DEPTH comes back as a reference: the fields
+`org-mcp--node-child-fields' names and neither namespace, so a walk
+ends in an address the caller can follow rather than in a node that
+looks whole and is not."
+  (if (> depth 0)
+      (list fields properties computed)
+    (list org-mcp--node-child-fields nil nil)))
+
+(defun org-mcp--spend-node (budget file-node)
+  "Spend one node of BUDGET, or refuse the walk at the node at point.
+BUDGET is the cell `org-mcp--node-at-point' hands its walk, holding
+the nodes the walk may still return.  When it is empty the walk is
+refused rather than cut short: a caller handed a subtree that was
+silently shortened believes it has seen the whole thing.
+
+The refusal names the node the walk stopped at, which is a link the
+caller can read on its own, and `org-mcp-read-max-nodes', which is
+where the user raises the ceiling.  FILE-NODE says which kind of
+node point is on; see `org-mcp--node-link-at-point'."
+  (when (< (cl-decf (car budget)) 0)
+    (org-mcp--tool-validation-error
+     "Too many nodes: more than %d.  The walk stops at %s: ask for \
+a shallower depth, or read that node on its own.  \
+org-mcp-read-max-nodes sets the ceiling"
+     org-mcp-read-max-nodes (org-mcp--node-link-at-point file-node))))
+
+(defun org-mcp--node-at-point (fields &optional depth file-node)
   "Return the node at point as an alist carrying FIELDS.
 One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
@@ -1621,14 +1707,36 @@ them; `org-mcp--node-fields' names every one there is.  A field the
 node has no value for -- no TODO state, no tag of its own, an empty
 body -- is left out rather than sent as null.
 
-CHILD-FIELDS is what the `children' field builds each child with, and
-defaults to `org-mcp--node-child-fields'.
+DEPTH is how many generations of children the `children' field
+expands in place, and defaults to none.  See
+`org-mcp--child-node-fields' for what each generation carries.
 
 FILE-NODE non-nil builds the node of the file the buffer visits: a
 node at level 0, carrying the file's title, a link to the file and
 its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
-no position before that heading."
+no position before that heading.
+
+The walk is given `org-mcp-read-max-nodes' nodes to spend and is
+refused when it wants more; every caller gets its own budget, so a
+list of matches is bounded one match at a time."
+  (org-mcp--node-at-point-within
+   fields
+   nil
+   nil
+   (or depth 0)
+   file-node
+   (list org-mcp-read-max-nodes)))
+
+(defun org-mcp--node-at-point-within
+    (fields properties computed depth file-node budget)
+  "Return the node at point carrying FIELDS, within BUDGET.
+FIELDS, DEPTH and FILE-NODE are `org-mcp--node-at-point\='s, which
+holds what a node is.  PROPERTIES and COMPUTED are the node\='s two
+other namespaces, see `org-mcp--projected-node-at-point\='.  BUDGET
+is the walk\='s, which `org-mcp--spend-node\=' spends one node of per
+node built, this one included."
+  (org-mcp--spend-node budget file-node)
   (let* ((meta
           (unless file-node
             (org-mcp--heading-metadata-at-point)))
@@ -1637,11 +1745,9 @@ no position before that heading."
             (org-mcp--node-child-positions file-node)))
          (link
           (when (or (memq 'link fields) (memq 'id fields))
-            (if file-node
-                (org-mcp--file-link)
-              (org-mcp--link-at-point))))
+            (org-mcp--node-link-at-point file-node)))
          (node '()))
-    (dolist (field fields (nreverse node))
+    (dolist (field fields)
       (let ((value
              (pcase field
                ('title
@@ -1687,61 +1793,84 @@ no position before that heading."
                 (org-mcp--digest
                  (org-mcp--node-subtree-bounds file-node)))
                ('children
-                (vconcat
-                 (mapcar
-                  (lambda (position)
-                    (save-excursion
-                      (goto-char position)
-                      (org-mcp--node-at-point
-                       (or child-fields org-mcp--node-child-fields))))
-                  children)))
+                (pcase-let ((`(,child-fields
+                               ,child-properties ,child-computed)
+                             (org-mcp--child-projection
+                              fields properties computed depth)))
+                  (vconcat
+                   (mapcar
+                    (lambda (position)
+                      (save-excursion
+                        (goto-char position)
+                        (org-mcp--node-at-point-within
+                         child-fields
+                         child-properties
+                         child-computed
+                         (1- depth)
+                         nil
+                         budget)))
+                    children))))
                ;; A call's fields are resolved against
                ;; `org-mcp--node-fields' before they reach here, so
                ;; this catches a field list written in this file
                ;; that the builder does not build.
                (_ (error "Unknown node field: %s" field)))))
         (when value
-          (push (cons field value) node))))))
+          (push (cons field value) node))))
+    (append
+     (nreverse node)
+     (when-let* ((drawer (org-mcp--node-properties properties)))
+       (list (cons 'properties drawer)))
+     (when-let* ((values (org-mcp--node-computed computed)))
+       (list (cons 'computed values))))))
 
 (defun org-mcp--projected-node-at-point
-    (fields properties computed &optional file-node)
+    (fields properties computed &optional depth file-node)
   "Return the node at point as a call asking for it receives it.
-FIELDS is the node's own fields, see `org-mcp--node-at-point', and
-FILE-NODE says the node is the file's, as it does there.  PROPERTIES
-is the node's Org drawer, see `org-mcp--node-properties'.  COMPUTED
-is what the configured functions answer for it, see
-`org-mcp--node-computed'.
+FIELDS is the node\='s own fields and DEPTH how many generations of
+children it expands, see `org-mcp--node-at-point\='; FILE-NODE says
+the node is the file\='s, as it does there.  PROPERTIES is the node\='s
+Org drawer, see `org-mcp--node-properties\='.  COMPUTED is what the
+configured functions answer for it, see `org-mcp--node-computed\='.
 
 The three are three namespaces and arrive as three.  A field is a
-key of the node; the drawer is one key, `properties', holding the
+key of the node; the drawer is one key, `properties\=', holding the
 names the user wrote in the file; the answers are one key,
-`computed'.  A property called TITLE therefore cannot collide with
-the field `title'.
+`computed\='.  A property called TITLE therefore cannot collide with
+the field `title\='.
 
 Keeping the last two apart is what tells a client which values a
-write can put back: `properties' is in the file and survives the
-round trip, `computed' is this server's answer at this moment and
+write can put back: `properties\=' is in the file and survives the
+round trip, `computed\=' is this server\='s answer at this moment and
 belongs to no drawer.  Merged into one object they would be
 indistinguishable without reading the configuration, and a client
-would write this server's opinion into the user's file."
-  (append
-   (org-mcp--node-at-point fields nil file-node)
-   (when-let* ((drawer (org-mcp--node-properties properties)))
-     (list (cons 'properties drawer)))
-   (when-let* ((values (org-mcp--node-computed computed)))
-     (list (cons 'computed values)))))
+would write this server\='s opinion into the user\='s file.
+
+All three reach every generation DEPTH expands, so an expanded child
+is the node a read of its link returns; see
+`org-mcp--child-projection\='."
+  (org-mcp--node-at-point-within
+   fields
+   properties
+   computed
+   (or depth 0)
+   file-node
+   (list org-mcp-read-max-nodes)))
 
 (defun org-mcp--generate-outline (file-path)
   "Return the outline of FILE-PATH: its headings and theirs.
 The file node's `children' alone, each child carrying its own
 children, so the answer is the top-level headings and their direct
 ones.  The generation below those is left out, as are the fields a
-whole read carries."
+whole read carries: the file node is read one generation deep, and
+the tool answers with that one key of it."
   (org-mcp--with-org-file file-path
-    (org-mcp--node-at-point '(children)
-                            (append
-                             org-mcp--node-child-fields '(children))
-                            t)))
+    (list
+     (assq
+      'children
+      (org-mcp--node-at-point (append
+                               org-mcp--node-child-fields '(children))
+                              1 t)))))
 
 ;; Links
 
@@ -3263,7 +3392,7 @@ MCP Parameters:
 ;; Resource handlers
 
 (defun org-mcp--read-structured
-    (link &optional fields properties computed files)
+    (link &optional fields depth properties computed files)
   "Return structured JSON for what LINK, a native Org link, points to.
 The org-node-read tool and the org://{link} resource both read through
 here, so they resolve a link the same way.  A file and a heading come
@@ -3280,23 +3409,31 @@ opening a file.  The resource passes none of them and takes every
 default: a resource is picked from a client's UI, which has nowhere
 to say how much of the node it wants.
 
+DEPTH is the org-node-read tool's `depth' parameter, see
+`org-mcp--depth-given', and is resolved before the link is for the
+same reason.  The resource passes none and takes the node alone: a
+join is a client's decision about how much to fetch, and a resource
+is picked from a UI where an unbounded expansion is a surprise.
+
 FILES is the org-node-read tool's `files' parameter; see
 `org-mcp--link-target'.  The resource passes none."
   (let ((fields
          (org-mcp--node-fields-given
           fields org-mcp--node-read-fields))
+        (depth (org-mcp--depth-given depth))
         (properties (org-mcp--node-properties-given properties nil))
         (computed (org-mcp--node-computed-given computed nil)))
     (org-mcp--read-link link
                         (lambda ()
                           (json-encode
                            (org-mcp--projected-node-at-point
-                            fields properties computed)))
+                            fields properties computed
+                            depth)))
                         (lambda (_file)
                           (json-encode
                            (org-mcp--projected-node-at-point
                             fields properties computed
-                            t)))
+                            depth t)))
                         files)))
 
 (defun org-mcp--handle-org-resource (params)
@@ -3994,11 +4131,13 @@ Returns: Same format as org-query tool, sorted by
 ;; Read tools
 
 (defun org-mcp--tool-node-read
-    (link &optional fields properties computed files)
+    (link &optional fields depth properties computed files)
   "Tool handler for org-node-read.
 LINK is a native Org link to a heading or a whole file.
 FIELDS, when non-nil, says how much of the node to return; see
 `org-mcp--node-fields-given'.
+DEPTH, when non-nil, says how many generations of children to
+expand in place; see `org-mcp--depth-given'.
 PROPERTIES, when non-nil, says which of the node's Org drawer to
 return; see `org-mcp--node-properties-given'.
 COMPUTED, when non-nil, says which computed fields the node
@@ -4020,6 +4159,8 @@ MCP Parameters:
   fields - How much of the node to return (array of strings, or a
           string naming a configured list, optional); defaults to
           every field but the two digests
+  depth - How many generations of children to expand in place
+          (number, optional); defaults to none
   properties - Which Org drawer properties to return (array of
           property names, or \"all\" or \"none\", optional);
           defaults to none
@@ -4028,7 +4169,12 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (org-mcp--read-structured link fields properties computed files))
+  (org-mcp--read-structured link
+                            fields
+                            depth
+                            properties
+                            computed
+                            files))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
@@ -4579,8 +4725,10 @@ itself says which.  Nothing is ever sent as null.
   digest - Opaque token over the node's whole subtree, every
          descendant included whatever depth was asked for.  A change
          anywhere under the node changes it
-  children - The direct children, each a node carrying title, todo,
-             level and link
+  children - The direct children: references carrying title, todo,
+             level and link, or, as far as depth expands them, nodes
+             carrying the same fields, properties and computed values
+             as this one
 
 Two things a node carries are not fields, because their names are
 the user's rather than this server's: a drawer holds TITLE as
@@ -5137,7 +5285,21 @@ Parameters:
           Defaults to every field below.
 "
      org-mcp--fields-description
-     "  properties - Which Org drawer properties to return (array of
+     "  depth - How many generations of children to expand in place
+          (number, optional)
+          Defaults to none, which returns the children as
+          references.  Every generation a call expands carries the
+          same fields as the node itself, and the properties and
+          computed values it asked for, so an expanded child is the
+          node a read of its link returns, and the generation past
+          depth comes back as references again.  With no children
+          among the fields there is nothing to expand and depth
+          changes nothing.
+          A read of more nodes than org-mcp-read-max-nodes is
+          refused, naming the node the walk stopped at so that it
+          can be read on its own; it is never trimmed to fit.
+          null, false, \"\" and [] ask for none.
+  properties - Which Org drawer properties to return (array of
           strings, or a string, optional)
           Defaults to none: a drawer holds what the user put in it,
           so a call asks for the properties it knows what to do
