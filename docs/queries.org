@@ -11,6 +11,7 @@ itself.
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
   - =fields= (array of strings, or a string, optional): how much of each matching node to return; an array of field names, or the name of a configured list. It means here exactly what it means on =org-node-read=. See [[file:reading.org::*Asking for fields][Asking for fields]]
+  - =properties= (array of strings, or a string, optional): which Org drawer properties each matching node returns; an array of property names, or ="all"= or ="none"=. Defaults to all. See [[file:reading.org::*Asking for properties][Asking for properties]]
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[file:file-access.org::*Querying other files][Querying other files]]
 - *Returns:* JSON object with a =children= array of the matching nodes (see [[file:reading.org::*The node][The node]]), the =total= count, and the =files_searched= count
 
@@ -31,6 +32,7 @@ Example:
       "file": "/home/user/org/tasks.org",
       "level": 1,
       "link": "file:~/org/tasks.org::*Urgent task",
+      "properties": {"EFFORT": "2:00"},
       "parent-priority": "A"
     }
   ],
@@ -41,10 +43,12 @@ Example:
 
 A result is the node =org-node-read= returns for the same heading. Asked
 nothing, a query leaves out =content= and =children= — a match list would read
-every matched subtree to fill those — and carries the heading's Org property
-drawer as =properties=. =fields= is how a call chooses otherwise, in either
-direction: naming =content= returns the bodies, at that cost, and naming
-neither it nor =properties= returns neither.
+every matched subtree to fill those — and carries the heading's whole Org
+property drawer, because a query is the call that asks about properties.
+=fields= and =properties= are how a call chooses otherwise, each in either
+direction: naming =content= in =fields= returns the bodies, at that cost, and
+=properties: "none"= leaves the drawer out of a match list that does not need
+it.
 
 Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags works from =local_tags= without reading the heading again (see
@@ -53,7 +57,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 ** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
 - *Parameters:* None
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -61,7 +65,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 - *Description:* Query next action items using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -69,7 +73,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 - *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 

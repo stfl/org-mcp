@@ -32,8 +32,13 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =level=      | the heading level, =0= for a file                                                   |
 | =link=       | the link that names this node again                                                 |
 | =content=    | the body text, or a file's preamble before its first heading                        |
-| =properties= | the Org property drawer                                                             |
 | =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
+
+A node's Org property drawer is not among its fields. A drawer holds names you
+chose — =TITLE= as readily as =Effort= — and a field is named by org-mcp, so
+the two are kept in two namespaces and a property can never shadow a field. A
+call names the properties it wants in its own =properties= parameter (see
+[[*Asking for properties][Asking for properties]]) and they arrive together under the key =properties=.
 
 Which form a node's =link= takes is [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]. A file's is the
 =id:= link of its own property drawer when the file has one, and
@@ -118,8 +123,8 @@ unasked:
 
 | A node from                 | Carries unasked                          |
 |-----------------------------+------------------------------------------|
-| =org-node-read=             | every field but =properties=             |
-| the =org://{link}= resource | every field but =properties=             |
+| =org-node-read=             | every field                              |
+| the =org://{link}= resource | every field                              |
 | =org-query=                 | every field but =content= and =children= |
 | a child inside a node       | =title=, =todo=, =level= and =link=      |
 
@@ -155,6 +160,63 @@ both refused, and the refusal names the valid ones. Leaving an unknown name out
 silently would hand back a node missing the field the call asked for with
 nothing to say why.
 
+** Asking for properties
+
+A node's Org property drawer is asked for in the =properties= parameter, which
+=org-node-read= and =org-query= both take. Name the properties you want:
+
+#+begin_src json
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "properties": ["Effort", "Owner"]
+}
+#+end_src
+
+and they arrive together, under one key of the node:
+
+#+begin_src json
+{
+  "title": "Ship v2",
+  "properties": {"EFFORT": "1:00", "OWNER": "stefan"}
+}
+#+end_src
+
+Property names are matched the way Org matches them, ignoring case, and come
+back under the name Org keeps, which is upper case. A property the node does
+not carry is left out, exactly as a field with no value is, so an answer says
+what the node has rather than what you asked about.
+
+Two group names, sent as a string rather than an array, stand for the whole
+drawer and for none of it:
+
+| =properties=          | Returns                           |
+|-----------------------+-----------------------------------|
+| =["Effort", "Owner"]= | those two, if the node has them   |
+| ="all"=               | every property the drawer holds   |
+| ="none"=              | no =properties= key at all        |
+
+What each endpoint carries when the call sends no =properties= follows from
+what the call is for:
+
+| A node from                 | Carries unasked |
+|-----------------------------+-----------------|
+| =org-node-read=             | no properties   |
+| the =org://{link}= resource | no properties   |
+| =org-query=                 | every property  |
+| a child inside a node       | no properties   |
+
+A query is the call that asks /about/ properties, so it hands the drawer back
+with each match; ="none"= turns that off when a match list does not need it. A
+read hands back none unasked, because a drawer holds what you put there and a
+client asks for the properties it knows what to do with.
+
+The special properties — =TODO=, =TAGS=, =PRIORITY=, =SCHEDULED=, =DEADLINE=,
+=CLOSED=, =CATEGORY=, =ITEM=, =FILE=, =ALLTAGS=, =BLOCKED=, =CLOCKSUM=,
+=CLOCKSUM_T=, =TIMESTAMP= and =TIMESTAMP_IA= — are never in a =properties=
+answer: Org computes them rather than storing them, so no drawer holds one, and
+what they say a node says in its own fields. Naming one is refused rather than
+answered empty.
+
 ** The two tag fields
 
 =tags= is the set of tags in effect on the heading; =local_tags= is the part of
@@ -185,9 +247,10 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
   files; to reach an ID in another file, call =org-node-read= with =files= (see
   [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= parameter either: a
   resource is picked from a client's UI, which has nowhere to say how much of
-  the node it wants, so the resource always serves the default.
+  the node it wants, so the resource always serves the default. It carries no
+  =properties= parameter for the same reason, and serves no drawer.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
-- *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
+- *Returns:* the node the link names, with every field and no properties (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -234,8 +297,9 @@ the same data as the resource for the same link; =org-read-outline= and
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
+  - =properties= (array of strings, or a string, optional): which Org drawer properties to return; an array of property names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for properties][Asking for properties]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but =properties= when it asked for none (see [[*The node][The node]])
+- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field when it asked for none, and the properties =properties= named (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 ** org-read-outline

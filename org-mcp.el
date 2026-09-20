@@ -1184,7 +1184,6 @@ it unless TEXT ends in one or a line break follows point."
     level
     link
     content
-    properties
     children)
   "Every field a node can carry.
 `org-mcp--node-at-point' builds each of these and nothing else, and
@@ -1192,7 +1191,12 @@ a field a call asks for is checked against this list before any
 file is opened.  The tool descriptions and docs/reading.org
 describe the same names to a client, so a field added here is added
 to the builder, to that page and to the node description in the
-same change.")
+same change.
+
+A node's Org drawer is not among them.  A drawer holds names the
+user chose, `TITLE' as readily as `Effort', so putting them in this
+namespace would let one collide with a field; the `properties'
+parameter names them instead, and they arrive under their own key.")
 
 (defconst org-mcp--node-child-fields '(title todo level link)
   "The fields a child node carries.
@@ -1229,12 +1233,12 @@ the call that reads it in full.")
     file
     id
     level
-    link
-    properties)
+    link)
   "The fields a query result carries.
 The same node a read returns, without the body and the children a
-match list would read every matched subtree to fill, and with the Org
-property drawer a query is asked about.")
+match list would read every matched subtree to fill.  A query also
+carries the whole Org drawer and every computed field unasked, which
+is not a field list and lives in `org-mcp--tool-query'.")
 
 (defun org-mcp--node-field (name)
   "Return the node field NAME names, or refuse NAME as not one.
@@ -1312,6 +1316,74 @@ would otherwise be a key sent twice."
      (mapcar
       #'org-mcp--node-field (org-mcp--node-field-names fields)))))
 
+(defun org-mcp--group-given (value default what)
+  "Return what a call's WHAT parameter, VALUE, asks for.
+VALUE is an array of names, or a string naming a group: \"all\" is
+every member there is and \"none\" is no member at all.  A blank
+VALUE, see `org-mcp--blank-param-p', means the call does not send
+the parameter and takes DEFAULT, what that endpoint carries unasked.
+
+The answer is the symbol `all', nil for none, or the list of names
+the call wrote.  Which names are valid is the parameter's business
+rather than this grammar's, so the caller checks them; WHAT names the
+parameter in the refusal raised here."
+  (cond
+   ((org-mcp--blank-param-p value)
+    default)
+   ((equal value "all")
+    'all)
+   ((equal value "none")
+    nil)
+   ((or (vectorp value) (consp value))
+    (append value nil))
+   (t
+    (org-mcp--tool-validation-error
+     "%s takes an array of names, or \"all\" or \"none\" as a \
+string, not: %S"
+     what value))))
+
+(defun org-mcp--drawer-property (name)
+  "Return NAME as a drawer property name, or refuse it as not one.
+Org holds a property name upcased and matches it that way, so a call
+naming `effort' asks for the property a drawer writes as `Effort'
+and reads it back under the name Org keeps.
+
+A special property is refused rather than answered empty: Org
+computes those rather than storing them, so no drawer holds one, and
+what each says a node says as a field of its own."
+  (unless (stringp name)
+    (org-mcp--tool-validation-error
+     "A property name is a string, not: %S"
+     name))
+  (unless (with-syntax-table org-mode-syntax-table
+            (org--valid-property-p name))
+    (org-mcp--tool-validation-error "Invalid property name: '%s'"
+                                    name))
+  (let ((upper (upcase name)))
+    (when (member upper org-mcp--special-properties)
+      (org-mcp--tool-validation-error
+       "Not a drawer property: %s.  Org computes it rather than \
+storing it; the node's own fields carry what it says.  Special \
+properties: %s"
+       name (mapconcat #'identity org-mcp--special-properties ", ")))
+    upper))
+
+(defun org-mcp--node-properties-given (properties default)
+  "Return the drawer properties a call asking for PROPERTIES wants.
+PROPERTIES is the `properties' parameter of a call: an array of
+property names, or one of the group names `org-mcp--group-given'
+takes, or blank for DEFAULT, the drawer that endpoint carries
+unasked.
+
+Every name is resolved here, at the parameter, as a field name is,
+so a call that names something no drawer can hold is refused before
+a file is opened."
+  (let ((asked
+         (org-mcp--group-given properties default "properties")))
+    (if (eq asked 'all)
+        'all
+      (mapcar #'org-mcp--drawer-property asked))))
+
 (defun org-mcp--file-title ()
   "Return the title of the file the current buffer visits.
 It is the `#+TITLE:' keyword, which `org-get-title' reads, and the
@@ -1381,14 +1453,22 @@ region."
       (cons (point-min) (or (car children) (point-max)))
     (org-mcp--body-bounds)))
 
-(defun org-mcp--node-properties ()
-  "Return the Org property drawer of the heading at point, or nil.
-`org-mcp--special-properties' are left out: Org computes them rather
-than storing them, and each is a node field in its own right."
-  (cl-remove-if
-   (lambda (pair)
-     (member (car pair) org-mcp--special-properties))
-   (org-entry-properties nil 'standard)))
+(defun org-mcp--node-properties (names)
+  "Return the Org property drawer of the node at point, or nil.
+NAMES is `all' for the whole drawer or the upcased names to take
+from it, as `org-mcp--node-properties-given' resolved them; nil
+takes nothing, and a name the drawer does not hold contributes
+nothing, the way a field with no value does.
+
+`org-mcp--special-properties' are left out whichever it is: Org
+computes them rather than storing them, and each is a node field in
+its own right."
+  (when names
+    (cl-remove-if-not
+     (lambda (pair)
+       (and (not (member (car pair) org-mcp--special-properties))
+            (or (eq names 'all) (member (car pair) names))))
+     (org-entry-properties nil 'standard))))
 
 (defun org-mcp--node-at-point
     (fields &optional child-fields file-node)
@@ -1461,7 +1541,6 @@ no position before that heading."
                          (car bounds) (cdr bounds))))
                   (unless (string-blank-p text)
                     (string-trim text))))
-               ('properties (org-mcp--node-properties))
                ('children
                 (vconcat
                  (mapcar
@@ -1478,6 +1557,23 @@ no position before that heading."
                (_ (error "Unknown node field: %s" field)))))
         (when value
           (push (cons field value) node))))))
+
+(defun org-mcp--projected-node-at-point
+    (fields properties &optional file-node)
+  "Return the node at point as a call asking for it receives it.
+FIELDS is the node's own fields, see `org-mcp--node-at-point', and
+FILE-NODE says the node is the file's, as it does there.  PROPERTIES
+is the node's Org drawer, see `org-mcp--node-properties'.
+
+The two are two namespaces and arrive as two.  A field is a key of
+the node; the drawer is one key, `properties', holding the names the
+user wrote in the file.  A property called TITLE therefore cannot
+collide with the field `title', and neither can a drawer a call
+knows nothing about shadow a field it relies on."
+  (append
+   (org-mcp--node-at-point fields nil file-node)
+   (when-let* ((drawer (org-mcp--node-properties properties)))
+     (list (cons 'properties drawer)))))
 
 (defun org-mcp--generate-outline (file-path)
   "Return the outline of FILE-PATH: its headings and theirs.
@@ -3010,7 +3106,8 @@ MCP Parameters:
 
 ;; Resource handlers
 
-(defun org-mcp--read-structured (link &optional fields files)
+(defun org-mcp--read-structured
+    (link &optional fields properties files)
   "Return structured JSON for what LINK, a native Org link, points to.
 The org-node-read tool and the org://{link} resource both read through
 here, so they resolve a link the same way.  A file and a heading come
@@ -3018,24 +3115,31 @@ back as the same node, `org-mcp--node-at-point' builds both, and the
 file is the one at level 0.
 
 FIELDS is the org-node-read tool's `fields' parameter, defaulting
-to `org-mcp--node-read-fields' and resolved before the link is, so
-a misspelled field is refused without opening a file.  The
-resource passes none and takes that default: a resource is picked
-from a client's UI, which has nowhere to say how much of the node it
+to `org-mcp--node-read-fields', and PROPERTIES its `properties'
+parameter, defaulting to no drawer at all: a read carries the whole
+node, and a drawer is the part of it whose names a client has to
+know to use.  Both are resolved before the link is, so a misspelled
+name is refused without opening a file.  The resource passes
+neither and takes both defaults: a resource is picked from a
+client's UI, which has nowhere to say how much of the node it
 wants.
 
 FILES is the org-node-read tool's `files' parameter; see
 `org-mcp--link-target'.  The resource passes none."
   (let ((fields
          (org-mcp--node-fields-given
-          fields org-mcp--node-read-fields)))
+          fields org-mcp--node-read-fields))
+        (properties (org-mcp--node-properties-given properties nil)))
     (org-mcp--read-link link
                         (lambda ()
                           (json-encode
-                           (org-mcp--node-at-point fields)))
+                           (org-mcp--projected-node-at-point
+                            fields properties)))
                         (lambda (_file)
                           (json-encode
-                           (org-mcp--node-at-point fields nil t)))
+                           (org-mcp--projected-node-at-point
+                            fields properties
+                            t)))
                         files)))
 
 (defun org-mcp--handle-org-resource (params)
@@ -3572,14 +3676,15 @@ MCP Parameters:
 
 ;; org-ql integration
 
-(defun org-mcp--ql-node-at-point (fields)
+(defun org-mcp--ql-node-at-point (fields properties)
   "Return the node at point for the `:action' of `org-ql-select'.
-It is the node a read returns, in the same shape, carrying FIELDS,
-with the extra fields `org-mcp-ql-extra-properties' configures
-appended.  Those are named by their own setting rather than by a
-call, so they come with every match whatever FIELDS says."
+It is the node a read returns, in the same shape, carrying FIELDS
+and PROPERTIES, with the extra fields `org-mcp-ql-extra-properties'
+configures appended.  Those are named by their own setting rather
+than by a call, so they come with every match whatever the call
+asked for."
   (append
-   (org-mcp--node-at-point fields)
+   (org-mcp--projected-node-at-point fields properties)
    (delq
     nil
     (mapcar
@@ -3588,11 +3693,13 @@ call, so they come with every match whatever FIELDS says."
          (cons (car extra) value)))
      org-mcp-ql-extra-properties))))
 
-(defun org-mcp--tool-query (query &optional fields files)
+(defun org-mcp--tool-query (query &optional fields properties files)
   "Search Org files using an org-ql QUERY expression.
 QUERY is a string containing an org-ql query sexp.
 FIELDS says how much of each matching node to return; see
 `org-mcp--node-fields-given'.
+PROPERTIES says which of each matching node's drawer to return; see
+`org-mcp--node-properties-given'.
 FILES names the files and directories to search, replacing the
 allowed files, see `org-mcp--with-file-set'; defaults to all
 allowed files.
@@ -3602,6 +3709,9 @@ MCP Parameters:
   fields - How much of each matching node to return (array of
           strings, or a string naming a configured list, optional);
           defaults to every field but content and children
+  properties - Which Org drawer properties to return (array of
+          property names, or \"all\" or \"none\", optional);
+          defaults to all
   files - Files and directories to search, replacing the allowed
           files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
@@ -3619,13 +3729,17 @@ MCP Parameters:
                                       (type-of query-sexp)))
     (org-mcp--with-file-set files
       (let* ( ;; Resolved before the query runs, so a misspelled
-             ;; field is refused rather than repeated per match.
+             ;; name is refused rather than repeated per match.
              (node-fields
               (org-mcp--node-fields-given
                fields org-mcp--node-query-fields))
+             (node-properties
+              (org-mcp--node-properties-given properties 'all))
              (target-files org-agenda-files)
              (action
-              (lambda () (org-mcp--ql-node-at-point node-fields)))
+              (lambda ()
+                (org-mcp--ql-node-at-point
+                 node-fields node-properties)))
              (matches
               ;; Given no files, `org-ql-select' would search the
               ;; current buffer, which no call names.
@@ -3651,8 +3765,9 @@ MCP Parameters:
 A GTD query always runs over the allowed files: its tools take no
 `files' parameter, and mcp-server-lib refuses a call passing one
 with an \"Unexpected parameter\" error before any handler runs.
-They take no `fields' parameter either, so every match carries
-`org-mcp--node-query-fields', the fields org-query carries unasked.
+They take no `fields' or `properties' parameter either, so every
+match carries `org-mcp--node-query-fields' and its whole Org drawer,
+which is what org-query carries unasked.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-query."
   (org-mcp--with-file-set nil
@@ -3683,7 +3798,7 @@ Returns JSON-encoded results in the same format as org-query."
                        (org-with-wide-buffer
                         (goto-char (org-element-property :begin el))
                         (org-mcp--ql-node-at-point
-                         org-mcp--node-query-fields))))
+                         org-mcp--node-query-fields 'all))))
                    elements))
               (error
                (org-mcp--tool-validation-error
@@ -3733,11 +3848,14 @@ Returns: Same format as org-query tool, sorted by
 
 ;; Read tools
 
-(defun org-mcp--tool-node-read (link &optional fields files)
+(defun org-mcp--tool-node-read
+    (link &optional fields properties files)
   "Tool handler for org-node-read.
 LINK is a native Org link to a heading or a whole file.
 FIELDS, when non-nil, says how much of the node to return; see
 `org-mcp--node-fields-given'.
+PROPERTIES, when non-nil, says which of the node's Org drawer to
+return; see `org-mcp--node-properties-given'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 Returns structured JSON.
@@ -3754,11 +3872,14 @@ MCP Parameters:
          - any of these bracketed, as [[link]] or [[link][description]]
   fields - How much of the node to return (array of strings, or a
           string naming a configured list, optional); defaults to
-          every field but properties
+          every field there is
+  properties - Which Org drawer properties to return (array of
+          property names, or \"all\" or \"none\", optional);
+          defaults to none
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (org-mcp--read-structured link fields files))
+  (org-mcp--read-structured link fields properties files))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
@@ -4246,6 +4367,20 @@ Each such tool names its own default before this text, because the
 default is what that endpoint carries and not a property of the
 parameter.")
 
+(defconst org-mcp--properties-description
+  "          Either an array of property names, such as
+          [\"Effort\"], or \"all\" for the whole drawer or \"none\"
+          for none of it, sent as a string.  Property names are
+          matched as Org matches them, ignoring case.  A property
+          the node does not carry is left out, as an empty field is;
+          a special property, which Org computes rather than stores,
+          is refused and named as a node field instead.
+          null, false, \"\" and [] ask for the default.
+"
+  "How the `properties' parameter works, for every tool taking one.
+Each such tool names its own default before this text, as it does
+for `fields'.")
+
 (defconst org-mcp--node-description "
 A node is a file or a heading, and both come back in one shape.  A
 node carries the fields the call asked for, minus any it has no
@@ -4273,9 +4408,15 @@ itself says which.  Nothing is ever sent as null.
          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
          file:{path}::*{title}; a file without an ID is file:{path}
   content - Body text, or a file's preamble before its first heading
-  properties - The Org property drawer
   children - The direct children, each a node carrying title, todo,
              level and link
+
+A node's Org property drawer is not among its fields: a drawer holds
+names the user chose, TITLE as readily as Effort, and a field is
+named by this server.  A call names the drawer properties it wants
+in its own properties parameter, and they arrive together under the
+key properties, where no name of the user's can shadow a field.
+  properties - The Org drawer properties the call asked for
 "
   "How a node reads, for every tool description that returns one.
 One shape serves a file, a heading, a child and a query result, so
@@ -4814,9 +4955,16 @@ Parameters:
          org:// resource URI, is refused.
   fields - How much of the node to return (array of strings, or a
           string, optional)
-          Defaults to every field below but properties.
+          Defaults to every field below.
 "
      org-mcp--fields-description
+     "  properties - Which Org drawer properties to return (array of
+          strings, or a string, optional)
+          Defaults to none: a drawer holds what the user put in it,
+          so a call asks for the properties it knows what to do
+          with.
+"
+     org-mcp--properties-description
      "  files - Files and directories to look up an id: link in (array of
           strings, optional)
           An id: link names no file, so without files it resolves
@@ -4906,6 +5054,13 @@ Parameters:
           fill; naming either asks for exactly that.
 "
      org-mcp--fields-description
+     "  properties - Which Org drawer properties to return (array of
+          strings, or a string, optional)
+          Defaults to all: a query is the call that asks about
+          properties, so it carries the drawer unasked.  \"none\"
+          turns it off.
+"
+     org-mcp--properties-description
      "  files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.

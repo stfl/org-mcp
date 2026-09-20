@@ -13098,12 +13098,17 @@ FIELDS is sent as the `fields' parameter, as a client sends it."
     "org-node-read" `((link . ,link) (fields . ,fields)))))
 
 (defun org-mcp-test--query-fields (query fields)
-  "Return the nodes `org-query' matches QUERY with, asking for FIELDS."
+  "Return the nodes `org-query' matches QUERY with, asking for FIELDS.
+The drawer a query carries unasked is turned off, so what comes back
+is the fields and nothing else."
   (alist-get
    'children
    (json-read-from-string
     (mcp-server-lib-ert-call-tool
-     "org-query" `((query . ,query) (fields . ,fields))))))
+     "org-query"
+     `((query . ,query)
+       (fields . ,fields)
+       (properties . "none"))))))
 
 (ert-deftest org-mcp-test-fields-named-explicitly ()
   "A call naming the fields it wants receives those and no others.
@@ -13142,9 +13147,9 @@ field named there that the builder does not build fails here rather
 than reaching a client as a refusal.
 
 A heading carries every field but `closed' here, which stands for
-the fields left out when empty.  A file carries the six a file has;
-its own property drawer is not among them, so `properties' on a file
-is one of the empty ones."
+the fields left out when empty.  A file carries the six a file has.
+No field of either is the Org drawer: that is a namespace of the
+user's, asked for in its own parameter."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
       (list org-mcp-test--node-shape-parent-id)
     (let ((every (vconcat (mapcar #'symbol-name org-mcp--node-fields))))
@@ -13283,13 +13288,211 @@ that learns the parameter on either endpoint has learned it on
 both."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
       (list org-mcp-test--node-shape-parent-id)
-    (let ((fields ["title" "todo" "local_tags" "properties" "link"]))
+    (let ((fields ["title" "todo" "local_tags" "link"]))
       (should
        (equal
         (aref (org-mcp-test--query-fields "(todo \"TODO\")" fields) 0)
         (org-mcp-test--read-fields
          (concat "id:" org-mcp-test--node-shape-parent-id)
          fields))))))
+
+;;; Asking for the properties you want
+
+;; A node's Org drawer is a namespace of the user's, asked for in a
+;; parameter of its own and answered under one key.  These tests ask at
+;; the seam a client asks at.
+
+(defconst org-mcp-test--content-property-namespace
+  (concat
+   "* Parent\n"
+   ":PROPERTIES:\n"
+   ":TITLE:    a property, not the heading\n"
+   ":Effort:   1:00\n"
+   ":END:\n")
+  "A heading whose drawer holds a property named like a node field.")
+
+(defun org-mcp-test--read-properties (link properties)
+  "Return the node `org-node-read' serves for LINK asking for PROPERTIES.
+PROPERTIES is sent as the `properties' parameter, as a client sends
+it, and the node is cut down to the one field the drawer could
+collide with, so what the test reads is the two namespaces side by
+side."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read"
+    `((link . ,link)
+      (fields . ["title"])
+      (properties . ,properties)))))
+
+(defun org-mcp-test--query-properties (query properties)
+  "Return the nodes `org-query' matches QUERY with, asking for PROPERTIES."
+  (alist-get
+   'children
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool
+     "org-query"
+     `((query . ,query)
+       (fields . ["title"])
+       (properties . ,properties))))))
+
+(ert-deftest org-mcp-test-properties-named-explicitly ()
+  "A call naming the properties it wants receives those and no others.
+A name the drawer does not hold contributes nothing, as a field with
+no value does, so the answer says what the node has rather than what
+the call asked about."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-properties link ["Effort"])
+        '((title . "Parent") (properties . ((EFFORT . "1:00"))))))
+      (should
+       (equal
+        (org-mcp-test--read-properties link ["Owner"])
+        '((title . "Parent")))))))
+
+(ert-deftest org-mcp-test-properties-match-as-org-matches-them ()
+  "A property name is matched the way Org matches one, ignoring case.
+The drawer of the file under test writes `Effort'; a call naming it
+in any case asks for the same property, and reads it back under the
+name Org keeps."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+          (answer
+           '((title . "Parent") (properties . ((EFFORT . "1:00"))))))
+      (should (equal (org-mcp-test--read-properties link ["effort"])
+                     answer))
+      (should (equal (org-mcp-test--read-properties link ["EFFORT"])
+                     answer)))))
+
+(ert-deftest org-mcp-test-properties-whole-drawer-or-none ()
+  "A call takes the whole drawer, or none of it, by naming a group.
+Naming each property is the way to ask for some of them; \"all\" is
+how a call that does not know the names reaches them, and \"none\"
+is how one that has the fields it came for leaves them behind."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "all")
+        `((title . "Parent")
+          (properties
+           . ((EFFORT . "1:00")
+              (ID . ,org-mcp-test--node-shape-parent-id))))))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "none")
+        '((title . "Parent")))))))
+
+(ert-deftest org-mcp-test-properties-kept-apart-from-fields ()
+  "A property cannot shadow the node field of the same name.
+A drawer holds names the user chose, so one of them is called TITLE
+here.  It arrives under `properties', beside the field `title', and
+neither has anything to say about the other."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-property-namespace))
+    (let ((link (org-mcp-test--file-link test-file "*Parent")))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "all")
+        '((title . "Parent")
+          (properties
+           . ((EFFORT . "1:00")
+              (TITLE . "a property, not the heading"))))))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . ["TITLE"]))
+       "Unknown node field: TITLE\\.  Valid fields: title, todo, "))))
+
+(ert-deftest org-mcp-test-properties-default-is-the-endpoint-s ()
+  "What a call carries unasked is what that endpoint is for.
+A read carries the whole node and no drawer: a drawer holds what the
+user put there, and a client asks for the properties it knows what
+to do with.  A query is the call that asks about properties, so it
+hands the drawer back with every match."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+          (drawer
+           `((EFFORT . "1:00")
+             (ID . ,org-mcp-test--node-shape-parent-id))))
+      (should-not
+       (alist-get 'properties (org-mcp-test--node-shape-read link)))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (aref
+          (alist-get
+           'children
+           (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+          0))
+        drawer))
+      (should
+       (equal
+        (org-mcp-test--read-properties link [])
+        '((title . "Parent"))))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (aref (org-mcp-test--query-properties "(todo \"TODO\")" []) 0))
+        drawer)))))
+
+(ert-deftest org-mcp-test-properties-mean-the-same-on-both-endpoints ()
+  "The same `properties' asks the same thing of a read and of a query.
+One heading reached two ways comes back as one node, drawer
+included, so a client that learns the parameter on either endpoint
+has learned it on both."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (dolist (asked (list ["Effort"] "all" "none"))
+      (should
+       (equal
+        (aref (org-mcp-test--query-properties "(todo \"TODO\")" asked) 0)
+        (org-mcp-test--read-properties
+         (concat "id:" org-mcp-test--node-shape-parent-id) asked))))))
+
+(ert-deftest org-mcp-test-properties-special-property-refused ()
+  "A special property is refused rather than answered empty.
+Org computes those rather than storing them, so no drawer holds one,
+and a call that asked for one and got nothing back would read that
+as a node without it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["TODO"]))
+       "Not a drawer property: TODO\\.  Org computes it rather than \
+storing it; the node's own fields carry what it says\\.  Special \
+properties: TODO, TAGS, ")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["deadline"]))
+       "Not a drawer property: deadline\\.")
+      (org-mcp-test--call-tool-refused
+       "org-query"
+       `((query . "(todo \"TODO\")") (properties . ["ALLTAGS"]))
+       "Not a drawer property: ALLTAGS\\."))))
+
+(ert-deftest org-mcp-test-properties-malformed-refused ()
+  "A `properties' that is neither names nor a group is refused.
+The refusal names both ways of writing one, since a call that sent
+something else cannot tell which it got wrong."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . "everything"))
+       "properties takes an array of names, or \"all\" or \"none\" \
+as a string, not: \"everything\"")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . [42]))
+       "A property name is a string, not: 42")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["not a name"]))
+       "Invalid property name: 'not a name'"))))
 
 ;;; One definition of a title
 
