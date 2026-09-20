@@ -13291,6 +13291,256 @@ both."
          (concat "id:" org-mcp-test--node-shape-parent-id)
          fields))))))
 
+;;; Reading a subtree in one call
+
+;; `depth' expands that many generations of children in place, and the
+;; generation past it comes back as references.  These tests read at
+;; the seam a client reads at, so what they pin is that an expanded
+;; child and a read of that child by its own link are one node.
+
+(defconst org-mcp-test--depth-project-id
+  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  "ID of Project in `org-mcp-test--content-depth'.")
+
+(defconst org-mcp-test--content-depth
+  (concat
+   "#+TITLE: Depth\n"
+   "Preamble.\n"
+   "* TODO Project :work:\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--depth-project-id "\n"
+   ":END:\n"
+   "Project body.\n"
+   "** TODO Task One\n"
+   "Task One body.\n"
+   "*** Step A\n"
+   "*** Step B\n"
+   "** Task Two\n"
+   "* Other\n")
+  "A file four generations deep, counting the file itself as the first.
+Project has two children, Task One two of its own and Task Two none,
+so one walk covers an expanded node with children, an expanded node
+without, and the references that end the walk.")
+
+(defun org-mcp-test--read-depth (link depth &optional fields)
+  "Return the node `org-node-read' serves for LINK, DEPTH deep.
+DEPTH is sent as the `depth' parameter and FIELDS, when non-nil, as
+the `fields' parameter, the way a client sends them."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read"
+    `((link . ,link)
+      (depth . ,depth)
+      ,@(when fields `((fields . ,fields)))))))
+
+(ert-deftest org-mcp-test-depth-none-returns-references ()
+  "A read asking for no depth carries its children as references.
+Sending no `depth', sending zero, sending the string a client
+following the tool schema sends and sending the blank an optional
+parameter is filled with are one call: a walk that expands nothing
+ends where it starts, and each child is the address of the read that
+opens it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (node
+            (json-read-from-string (org-mcp-test--call-read link))))
+      (should (equal (org-mcp-test--read-depth link 0) node))
+      (should (equal (org-mcp-test--read-depth link "0") node))
+      (should (equal (org-mcp-test--read-depth link "") node))
+      (should (equal (org-mcp-test--read-depth link []) node))
+      (should
+       (equal
+        (append (alist-get 'children node) nil)
+        `(((title . "Task One")
+           (todo . "TODO")
+           (level . 2)
+           (link . ,(org-mcp-test--file-link test-file "*Task One")))
+          ((title . "Task Two")
+           (level . 2)
+           (link
+            . ,(org-mcp-test--file-link test-file "*Task Two")))))))))
+
+(ert-deftest org-mcp-test-depth-expands-one-generation ()
+  "Depth one returns children as nodes whose own children are references.
+An expanded child carries the fields the call asked of the node
+itself, body text included; the generation past the depth carries a
+reference's four, so the walk ends in an address rather than in a
+node that looks whole and is not."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (children
+            (alist-get 'children (org-mcp-test--read-depth link 1)))
+           (task-one (aref children 0))
+           (task-two (aref children 1)))
+      (should (equal (alist-get 'title task-one) "Task One"))
+      (should (equal (alist-get 'todo task-one) "TODO"))
+      (should (equal (alist-get 'content task-one) "Task One body."))
+      (should (equal (alist-get 'file task-one) test-file))
+      (should (equal (alist-get 'tags task-one) ["work"]))
+      (should
+       (equal
+        (append (alist-get 'children task-one) nil)
+        `(((title . "Step A")
+           (level . 3)
+           (link . ,(org-mcp-test--file-link test-file "*Step A")))
+          ((title . "Step B")
+           (level . 3)
+           (link . ,(org-mcp-test--file-link test-file "*Step B"))))))
+      ;; Task Two has no children, and reports that the way a read of
+      ;; Task Two on its own reports it.
+      (should
+       (equal (append (alist-get 'children task-two) nil) nil)))))
+
+(ert-deftest org-mcp-test-depth-expands-two-generations ()
+  "Depth two goes one generation further than depth one.
+Step A arrives as a whole node where depth one left a reference: it
+gains the fields a reference does not carry and the empty `children'
+of a node with none."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (step-of
+            (lambda (depth)
+              (aref
+               (alist-get
+                'children
+                (aref
+                 (alist-get
+                  'children (org-mcp-test--read-depth link depth))
+                 0))
+               0))))
+      (should-not (alist-get 'file (funcall step-of 1)))
+      (should (equal (alist-get 'title (funcall step-of 2)) "Step A"))
+      (should (equal (alist-get 'file (funcall step-of 2)) test-file))
+      (should
+       (equal
+        (append (alist-get 'children (funcall step-of 2)) nil) nil)))))
+
+(ert-deftest org-mcp-test-depth-expanded-child-is-a-read-of-that-child ()
+  "An expanded child is the node a read of its own link returns.
+This is what makes depth a join rather than a second shape: one
+builder, one node, so a client that expands a subtree and a client
+that walks it link by link cannot tell their answers apart.  It
+holds a generation down, where the child of an expanded child equals
+that child read one generation shallower, and it holds for a field
+list the call names as it does for the default."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let ((project (concat "id:" org-mcp-test--depth-project-id))
+          (task-one (org-mcp-test--file-link test-file "*Task One"))
+          (fields ["title" "level" "link" "children"]))
+      (should
+       (equal
+        (aref
+         (alist-get 'children (org-mcp-test--read-depth project 1)) 0)
+        (json-read-from-string
+         (org-mcp-test--call-read task-one))))
+      (should
+       (equal
+        (aref
+         (alist-get 'children (org-mcp-test--read-depth project 2)) 0)
+        (org-mcp-test--read-depth task-one 1)))
+      (should
+       (equal
+        (aref
+         (alist-get
+          'children (org-mcp-test--read-depth project 1 fields))
+         0)
+        (org-mcp-test--read-depth task-one 0 fields))))))
+
+(ert-deftest org-mcp-test-depth-the-walk-ends-in-an-address ()
+  "The generation past the depth is a reference that resolves.
+A walk that stopped is continued by reading the link it stopped at,
+so no depth leaves a client holding a node it cannot reach."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (task-one
+            (aref
+             (alist-get 'children (org-mcp-test--read-depth link 1))
+             0))
+           (step-a (aref (alist-get 'children task-one) 0)))
+      (org-mcp-test--should-resolve-to
+       (alist-get 'link step-a) "Step A"))))
+
+(ert-deftest org-mcp-test-depth-one-field-list-renders-every-level ()
+  "The fields a call asks for render every generation it expands.
+`depth' says how many nodes come back and `fields' how much of each,
+and the two do not interact.  The last generation is the one place
+they meet: a reference carries the four fields a child carries,
+whatever the call asked of its parent, and a field it has no value
+for is left out there as everywhere."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((node
+            (org-mcp-test--read-depth
+             (concat "file:" test-file) 2 ["title" "link" "children"]))
+           (project (aref (alist-get 'children node) 0))
+           (task-one (aref (alist-get 'children project) 0))
+           (step-a (aref (alist-get 'children task-one) 0)))
+      (should (equal (mapcar #'car node) '(title link children)))
+      (should (equal (mapcar #'car project) '(title link children)))
+      (should (equal (mapcar #'car task-one) '(title link children)))
+      (should (equal (mapcar #'car step-a) '(title level link)))
+      (should (equal (alist-get 'title step-a) "Step A")))))
+
+(ert-deftest org-mcp-test-depth-without-children-changes-nothing ()
+  "Depth expands the `children' field and asks for nothing else.
+A call that did not ask for children has nothing to expand, so depth
+costs it nothing and changes nothing: the two parameters compose
+without interacting."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let ((link (concat "id:" org-mcp-test--depth-project-id)))
+      (should
+       (equal
+        (org-mcp-test--read-depth link 3 ["title" "todo"])
+        '((title . "Project") (todo . "TODO")))))))
+
+(ert-deftest org-mcp-test-depth-not-a-count-is-refused ()
+  "A depth that is not a whole number of generations is refused.
+Reading it as none would expand nothing and say nothing about it,
+leaving a client to conclude that the file is flat."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let ((link (concat "id:" org-mcp-test--depth-project-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (depth . "deep"))
+       "depth must be a whole number of generations, not: \"deep\"")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (depth . -1))
+       "depth must be a whole number of generations, not: -1")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (depth . 1.5))
+       "depth must be a whole number of generations, not: 1.5"))))
+
+(ert-deftest org-mcp-test-depth-resource-carries-references ()
+  "The org:// resource serves the node alone, its children references.
+A resource URI has nowhere to carry a depth, and it is picked from a
+client's UI rather than by a model deciding how much to fetch, where
+an expansion would be a surprise.  It serves what a read asking for
+no depth serves, over a file that has three generations to expand."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-depth
+      (list org-mcp-test--depth-project-id)
+    (let* ((link (concat "id:" org-mcp-test--depth-project-id))
+           (response
+            (json-parse-string
+             (mcp-server-lib-process-jsonrpc
+              (mcp-server-lib-create-resources-read-request
+               (concat "org://" link))
+              mcp-server-lib-ert-server-id)
+             :object-type 'alist))
+           (contents
+            (alist-get 'contents (alist-get 'result response))))
+      (should-not (alist-get 'error response))
+      (should
+       (equal
+        (alist-get 'text (aref contents 0))
+        (mcp-server-lib-ert-call-tool
+         "org-node-read" `((link . ,link) (depth . 0))))))))
+
 ;;; One definition of a title
 
 (defconst org-mcp-test--content-cookie-title

@@ -33,7 +33,7 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =link=       | the link that names this node again                                                 |
 | =content=    | the body text, or a file's preamble before its first heading                        |
 | =properties= | the Org property drawer                                                             |
-| =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
+| =children=   | the direct children: references, or whole nodes as far as =depth= expands them      |
 
 Which form a node's =link= takes is [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]. A file's is the
 =id:= link of its own property drawer when the file has one, and
@@ -121,12 +121,14 @@ unasked:
 | =org-node-read=             | every field but =properties=             |
 | the =org://{link}= resource | every field but =properties=             |
 | =org-query=                 | every field but =content= and =children= |
-| a child inside a node       | =title=, =todo=, =level= and =link=      |
+| a child the call expanded   | the fields the call asked for            |
+| a child it did not          | =title=, =todo=, =level= and =link=      |
 
 A query leaves =content= and =children= out because filling them means reading
 every matched subtree; naming either in =fields= asks for exactly that, at that
-cost. A child always carries the four fields above, whatever the call asked of
-its parent: to see more of a child, read it by its =link=.
+cost. A child the call did not expand carries the four fields above, whatever
+it asked of the parent: to see more of that child, expand it with =depth= (see
+[[*Reading a subtree][Reading a subtree]]) or read it by its =link=.
 
 *** Naming a list of fields
 
@@ -154,6 +156,45 @@ A field name that is not a field, and a list name that is not configured, are
 both refused, and the refusal names the valid ones. Leaving an unknown name out
 silently would hand back a node missing the field the call asked for with
 nothing to say why.
+
+** Reading a subtree
+
+=depth= expands that many generations of children in place, so a project and
+its tasks arrive in one call instead of one call per heading. =org-node-read=
+takes it, and a call that sends none asks for none.
+
+| =depth= | The children come back as                              |
+|---------+--------------------------------------------------------|
+|       0 | references                                             |
+|       1 | whole nodes, whose own children are references         |
+|       2 | whole nodes one generation further down                |
+
+Every generation a call expands carries the fields it asked for, so an expanded
+child is the very node =org-node-read= returns for that child's =link=: there is
+one node shape and no separate kind for a child that came back inside its
+parent. The generation past =depth= comes back as references, so a walk always
+ends in an address you can follow.
+
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "children": [
+    {"title": "Write the spec", "todo": "TODO", "level": 2,
+     "link": "file:~/org/projects.org::*Write the spec",
+     "content": "Due before the review.",
+     "children": [
+       {"title": "Collect the numbers", "level": 3,
+        "link": "file:~/org/projects.org::*Collect the numbers"}
+     ]}
+  ]
+}
+#+end_src
+
+=depth= says how many nodes come back and =fields= how much of each, and the two
+do not interact. A call that did not ask for =children= has nothing to expand,
+so =depth= changes nothing for it.
 
 ** The two tag fields
 
@@ -183,9 +224,10 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
   =org-node-read=, and a refusal carries the same message. A resource URI carries
   no =files= parameter, so an =id:= link resolves only within the allowed
   files; to reach an ID in another file, call =org-node-read= with =files= (see
-  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= parameter either: a
-  resource is picked from a client's UI, which has nowhere to say how much of
-  the node it wants, so the resource always serves the default.
+  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= or =depth= parameter
+  either: a resource is picked from a client's UI, which has nowhere to say how
+  much of the node it wants, so the resource always serves the default node,
+  its children as references.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
 - *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
 
@@ -234,6 +276,7 @@ the same data as the resource for the same link; =org-read-outline= and
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
+  - =depth= (number, optional): how many generations of children to expand in place; none by default. See [[*Reading a subtree][Reading a subtree]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but =properties= when it asked for none (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=

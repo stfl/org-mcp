@@ -748,6 +748,28 @@ false to.  Any other VALUE is refused with an error naming NAME."
                                     name
                                     value))))
 
+(defun org-mcp--depth-given (depth)
+  "Return DEPTH, a call's `depth' parameter, as a generation count.
+A blank DEPTH, see `org-mcp--blank-param-p', is none: the call asks
+for no expansion and the node's children come back as references.
+A whole number is that many generations, and so is a string holding
+one, which is how a client following the tool schema sends every
+parameter.  Anything else is refused, since there is no such thing
+as a fraction of a generation or a walk of minus one."
+  (let ((count
+         (cond
+          ((org-mcp--blank-param-p depth)
+           0)
+          ((integerp depth)
+           depth)
+          ((and (stringp depth) (string-match-p "\\`[0-9]+\\'" depth))
+           (string-to-number depth)))))
+    (unless (and count (>= count 0))
+      (org-mcp--tool-validation-error
+       "depth must be a whole number of generations, not: %S"
+       depth))
+    count))
+
 (defun org-mcp--files-given (files)
   "Return FILES, a call's `files' parameter, or nil when it is blank.
 See `org-mcp--blank-param-p'.  Every tool taking `files' reads it
@@ -3034,7 +3056,7 @@ MCP Parameters:
 
 ;; Resource handlers
 
-(defun org-mcp--read-structured (link &optional fields files)
+(defun org-mcp--read-structured (link &optional fields depth files)
   "Return structured JSON for what LINK, a native Org link, points to.
 The org-node-read tool and the org://{link} resource both read through
 here, so they resolve a link the same way.  A file and a heading come
@@ -3048,18 +3070,25 @@ resource passes none and takes that default: a resource is picked
 from a client's UI, which has nowhere to say how much of the node it
 wants.
 
+DEPTH is the org-node-read tool's `depth' parameter, see
+`org-mcp--depth-given', and is resolved before the link is for the
+same reason.  The resource passes none and takes the node alone: a
+join is a client's decision about how much to fetch, and a resource
+is picked from a UI where an unbounded expansion is a surprise.
+
 FILES is the org-node-read tool's `files' parameter; see
 `org-mcp--link-target'.  The resource passes none."
   (let ((fields
          (org-mcp--node-fields-given
-          fields org-mcp--node-read-fields)))
+          fields org-mcp--node-read-fields))
+        (depth (org-mcp--depth-given depth)))
     (org-mcp--read-link link
                         (lambda ()
                           (json-encode
-                           (org-mcp--node-at-point fields)))
+                           (org-mcp--node-at-point fields depth)))
                         (lambda (_file)
                           (json-encode
-                           (org-mcp--node-at-point fields nil t)))
+                           (org-mcp--node-at-point fields depth t)))
                         files)))
 
 (defun org-mcp--handle-org-resource (params)
@@ -3757,11 +3786,13 @@ Returns: Same format as org-query tool, sorted by
 
 ;; Read tools
 
-(defun org-mcp--tool-node-read (link &optional fields files)
+(defun org-mcp--tool-node-read (link &optional fields depth files)
   "Tool handler for org-node-read.
 LINK is a native Org link to a heading or a whole file.
 FIELDS, when non-nil, says how much of the node to return; see
 `org-mcp--node-fields-given'.
+DEPTH, when non-nil, says how many generations of children to
+expand in place; see `org-mcp--depth-given'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 Returns structured JSON.
@@ -3779,10 +3810,12 @@ MCP Parameters:
   fields - How much of the node to return (array of strings, or a
           string naming a configured list, optional); defaults to
           every field but properties
+  depth - How many generations of children to expand in place
+          (number, optional); defaults to none
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (org-mcp--read-structured link fields files))
+  (org-mcp--read-structured link fields depth files))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
@@ -4298,8 +4331,9 @@ itself says which.  Nothing is ever sent as null.
          file:{path}::*{title}; a file without an ID is file:{path}
   content - Body text, or a file's preamble before its first heading
   properties - The Org property drawer
-  children - The direct children, each a node carrying title, todo,
-             level and link
+  children - The direct children: references carrying title, todo,
+             level and link, or, as far as depth expands them, nodes
+             carrying the same fields as this one
 "
   "How a node reads, for every tool description that returns one.
 One shape serves a file, a heading, a child and a query result, so
@@ -4841,7 +4875,17 @@ Parameters:
           Defaults to every field below but properties.
 "
      org-mcp--fields-description
-     "  files - Files and directories to look up an id: link in (array of
+     "  depth - How many generations of children to expand in place
+          (number, optional)
+          Defaults to none, which returns the children as
+          references.  Every generation a call expands carries the
+          same fields as the node itself, so an expanded child is
+          the node a read of its link returns, and the generation
+          past depth comes back as references again.  With no
+          children among the fields there is nothing to expand and
+          depth changes nothing.
+          null, false, \"\" and [] ask for none.
+  files - Files and directories to look up an id: link in (array of
           strings, optional)
           An id: link names no file, so without files it resolves
           only within the allowed files.  With files, the ID is
