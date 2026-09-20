@@ -3060,9 +3060,16 @@ After insertion, point is left on the heading line at end-of-line."
       ;; This is what avoids the "creates a sibling of the parent
       ;; instead of a child" pitfall of bare `org-insert-heading' when
       ;; the parent has no children.
+      ;;
+      ;; INVISIBLE-OK says that point is where the caller means even
+      ;; when it is inside a folded region.  Without it
+      ;; `org-insert-heading' walks back to the nearest *visible*
+      ;; heading and inserts at the end of that one's subtree, so a
+      ;; parent the user has folded hands its new child to whichever
+      ;; heading the fold ends on.
       (progn
         (org-mcp--ensure-newline)
-        (org-insert-heading nil nil (1+ parent-level))
+        (org-insert-heading nil t (1+ parent-level))
         (insert title))
     ;; Top-level heading
     ;; Check if there are no headlines yet (empty buffer or only
@@ -3079,7 +3086,7 @@ After insertion, point is left on the heading line at end-of-line."
         ;; Has headlines - use `org-insert-heading'
         ;; Ensure proper spacing before inserting
         (org-mcp--ensure-newline)
-        (org-insert-heading nil nil t))
+        (org-insert-heading nil t t))
       (insert title))))
 
 (defun org-mcp--replace-body-content

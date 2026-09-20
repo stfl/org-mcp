@@ -15443,5 +15443,37 @@ is the first time anything has opened it."
         other-file org-mcp-test--folded-target-under-parent)
        (should (string= (org-mcp-test--read-file test-file) ""))))))
 
+(defconst org-mcp-test--folded-made-under-parent
+  (concat
+   "\\`#\\+STARTUP: overview\n"
+   "\\* Outer\n"
+   "\\*\\* Parent\n"
+   "Parent body\\.\n"
+   "\\*\\*\\* TODO Made\n"
+   "\\*\\* Follower\n"
+   "Follower body\\.\n"
+   "\\* Elsewhere\n"
+   "\\'")
+  "The complete file once org-node-create has added Made under Parent.
+Made stands between Parent's body and Follower, where the same call
+against the same file unfolded puts it: `org-insert-heading' spends
+the blank line that ended Parent's subtree on the new entry either
+way.")
+
+(ert-deftest org-mcp-test-node-create-under-a-folded-parent ()
+  "org-node-create adds the node under the parent it names, folded or not.
+This one predates the epic: the heading goes in through
+`org-insert-heading', which relocates to a visible heading unless it
+is told that an invisible one is where the caller means."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--folded-destination))
+    (org-mcp-test--add-todo-and-check
+     "Made" "TODO" nil nil
+     (org-mcp-test--file-link test-file "*Parent")
+     nil
+     (file-name-nondirectory test-file)
+     test-file
+     org-mcp-test--folded-made-under-parent)))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
