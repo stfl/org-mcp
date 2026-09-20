@@ -11943,10 +11943,11 @@ Other Task's heading line ends with a target.")
   "Reads and writes link a heading by its ID, else custom ID, else title.
 A heading with both an ID and a custom ID is linked by the ID, an empty
 ID counts as none, and a title link leaves out the TODO keyword, the
-priority, the statistics cookie and the tags, as Org does.  The form
-does not follow the link the call was sent: every write here is
-addressed by a title link.  org-node-read's `id' field is the ID its `link'
-names."
+priority, the statistics cookie and the tags, as Org does.  The title
+the node reports leaves out the same, so the title a read returns is
+the search a later call sends.  The form does not follow the link the
+call was sent: every write here is addressed by a title link.
+org-node-read's `id' field is the ID its `link' names."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-link-kinds
       (list org-mcp-test--link-beta-id org-mcp-test--link-both-id)
     (let ((expected
@@ -11955,7 +11956,7 @@ names."
              ("Gamma" . ,(org-mcp-test--file-link test-file "*Gamma"))
              ("Both" . ,(concat "id:" org-mcp-test--link-both-id))
              ("Blank ID" . ,(org-mcp-test--file-link test-file "*Blank ID"))
-             ("Decorated [1/2]"
+             ("Decorated"
               . ,(org-mcp-test--file-link test-file "*Decorated")))))
       (should
        (equal
@@ -11968,12 +11969,8 @@ names."
            (org-mcp-test--call-read (format "file:%s" test-file)))))
         expected))
       (pcase-dolist (`(,title . ,link) expected)
-        ;; Org's title search ignores the statistics cookie in the
-        ;; heading but not in the search string.
         (let* ((search
-                (org-mcp-test--file-link
-                 test-file
-                 (concat "*" (string-trim-right title " \\[1/2\\]"))))
+                (org-mcp-test--file-link test-file (concat "*" title)))
                (heading
                 (json-read-from-string (org-mcp-test--call-read search))))
           (should (equal (alist-get 'link heading) link))
@@ -13086,6 +13083,49 @@ the file's own name as its title."
       (should
        (equal (org-mcp-test--node-shape-read (concat "file:" test-file))
               node)))))
+
+;;; One definition of a title
+
+(defconst org-mcp-test--content-cookie-title
+  "* TODO [#A] Ship  v2 [1/3]\nBody.\n"
+  "A heading whose title carries doubled whitespace and a cookie.")
+
+(defconst org-mcp-test--regex-cookie-title-renamed
+  "\\`\\* TODO \\[#A\\] Ship v3\nBody\\.\n\\'"
+  "Regex matching the cookie-title file after the rename.")
+
+(ert-deftest org-mcp-test-title-normalization-is-org-s ()
+  "The title a node reports is normalized by Org's own predicate.
+`org-link--normalize-string' removes statistics cookies and collapses
+runs of whitespace, and `org-link-search' normalizes a heading that
+way before matching a `::*title' link against it.  Pinning it here
+makes a change in Org fail loudly rather than drift through every read
+and every write precondition."
+  (should
+   (equal (org-link--normalize-string "Ship  v2 [1/3]") "Ship v2"))
+  (should (equal (org-link--normalize-string "Done [50%]") "Done"))
+  (should (equal (org-link--normalize-string " Ship\tv2 ") "Ship v2"))
+  (should (equal (org-link--normalize-string "50% Done") "50% Done")))
+
+(ert-deftest org-mcp-test-title-resolved-is-title-accepted ()
+  "A title a link resolves by is a title a write accepts.
+The heading is reached by a title link differing from the heading as
+written in letter case, in spacing and by a statistics cookie.  The
+node reports the title Org compares against, and sending a title back
+as `before' renames the heading instead of being refused — the
+refusal a byte-exact comparison produced for a call the link had just
+resolved."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-cookie-title))
+    (let ((link (org-mcp-test--file-link test-file "*ship v2")))
+      (should
+       (equal
+        (alist-get
+         'title (json-read-from-string (org-mcp-test--call-read link)))
+        "Ship v2"))
+      (org-mcp-test--call-rename-headline-and-check
+       link "SHIP  V2" "Ship v3" test-file
+       org-mcp-test--regex-cookie-title-renamed))))
 
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

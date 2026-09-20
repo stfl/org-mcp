@@ -34,10 +34,15 @@ A field the node has no value for is left out rather than sent as =null=.
 
 A file's =link= is the =id:= link of its own property drawer when the file has
 one, and =file:/path/to/file.org= otherwise; either names the whole file in a
-later call. A heading's title leaves out its TODO keyword, its priority, its
-statistics cookie and its tags, and runs of whitespace in it collapse to one
-space — the same title Org matches a =::*title= link against, so a heading a
-link reaches is a heading a write addressed the same way can change.
+later call.
+
+A heading's =title= leaves out its TODO keyword, its priority, its statistics
+cookies and its tags, and runs of whitespace in it collapse to one space. That
+is the text Org itself matches a =file:...::*title= link against, so a title
+read here is a title that resolves, and one a write takes as =before= (see
+[[file:writing.org::*org-node-set-title][org-node-set-title]]). Letter case survives in what you read and makes no
+difference to either comparison: =* TODO Ship v2 [1/3]= reads as =Ship v2=, and
+=file:/path/to/file.org::*ship v2= reaches it.
 
 Which of the fields a response carries depends on the call: =org-node-read= and
 the resource return every one but =properties=, a query result every one but

@@ -1022,6 +1022,38 @@ Org reports inheritance, not something a caller should have to know."
       (cl-remove-if
        (lambda (tag) (get-text-property 0 'inherited tag)) tags)))))
 
+(defun org-mcp--title-at-point ()
+  "Return the title of the heading at point, as Org reads it.
+`org-get-heading' drops the TODO keyword, the priority cookie, the
+tags and the COMMENT keyword, and Org's own
+`org-link--normalize-string' then drops statistics cookies and
+collapses runs of whitespace.  That is the normalization
+`org-link-search' applies to a heading before matching a `::*title'
+link against it, so every read, every write precondition and Org's
+own link resolution agree on what a heading is called.
+
+`ol.el' exports no public equivalent, and this private function is
+load-bearing in seven places inside `ol.el' itself.  A test pins its
+behaviour, so a change in Org fails the suite loudly instead of
+drifting through every read; reimplementing the rule here with a
+regexp would be the second definition this one exists to remove."
+  (org-link--normalize-string (org-get-heading t t t t)))
+
+(defun org-mcp--titles-equal-p (a b)
+  "Return non-nil when A and B name the same heading to Org.
+The comparison is the one `org-link-search' makes when it resolves a
+`::*title' link: both titles are normalized as
+`org-mcp--title-at-point' normalizes a heading, split into words and
+compared letter case aside.  A write precondition therefore accepts
+every title that reaches the heading through a link, rather than
+refusing the call a link has just resolved."
+  (cl-flet ((words
+             (title)
+             (mapcar
+              #'upcase
+              (split-string (org-link--normalize-string title)))))
+    (equal (words a) (words b))))
+
 (defun org-mcp--heading-metadata-at-point ()
   "Return canonical heading metadata at point as a plist.
 
@@ -1052,7 +1084,7 @@ locale-dependent reformatting)."
          (deadl (org-element-property :deadline el))
          (clsd (org-element-property :closed el)))
     (list
-     :title (org-element-property :raw-value el)
+     :title (org-mcp--title-at-point)
      :todo (org-element-property :todo-keyword el)
      :priority (and priority-char (char-to-string priority-char))
      :tags (car tag-sets)
@@ -1781,7 +1813,7 @@ element API."
                  'heading
                  (save-excursion
                    (org-back-to-heading t)
-                   (org-get-heading t t t t)))
+                   (org-mcp--title-at-point)))
                 (cons 'start (org-mcp--clock-element-start-str el))
                 (cons
                  'allowed (and (org-mcp--find-allowed-file file) t))
@@ -1801,7 +1833,7 @@ element API."
                            (heading
                             (save-excursion
                               (org-back-to-heading t)
-                              (org-get-heading t t t t))))
+                              (org-mcp--title-at-point))))
                       (throw 'found
                              (list
                               (cons 'file (expand-file-name file))
@@ -2927,8 +2959,8 @@ MCP Parameters:
 
       ;; Verify current title matches
       (beginning-of-line)
-      (let ((actual-title (org-get-heading t t t t)))
-        (unless (string= actual-title before)
+      (let ((actual-title (org-mcp--title-at-point)))
+        (unless (org-mcp--titles-equal-p actual-title before)
           (org-mcp--state-mismatch-error
            before actual-title "Title")))
 
@@ -3682,7 +3714,7 @@ MCP Parameters:
                            (heading
                             (save-excursion
                               (org-back-to-heading t)
-                              (org-get-heading t t t t))))
+                              (org-mcp--title-at-point))))
                       (push `((file . ,clock-file)
                               (heading . ,heading)
                               (start . ,start-str)
@@ -3813,7 +3845,7 @@ MCP Parameters:
                                      ,(org-mcp--clock-format-timestamp
                                        clock-start))
                                     (heading
-                                     . ,(org-get-heading t t t t))
+                                     . ,(org-mcp--title-at-point))
                                     ,@
                                     (when (> resolved-count 0)
                                       `((resolved
@@ -4804,8 +4836,8 @@ Returns JSON object:
     (only present in that case; file/heading/start/link are omitted)
   file - File path of active clock (string, only if active
     in allowed file)
-  heading - Heading title with active clock (string, only if active
-    in allowed file)
+  heading - Title of the heading with the active clock, the title a
+    read reports (string, only if active in allowed file)
   start - Start timestamp string (string, only if active
     in allowed file)
   link - Link to the heading with the active clock (string, only if
@@ -4861,7 +4893,7 @@ Returns JSON object:
           not on disk; tell the user it needs saving (boolean)
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
-  heading - The heading title (string)
+  heading - The heading's title, as a read reports it (string)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
@@ -4908,7 +4940,7 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   clocked_out - Always true (boolean)
-  heading - The heading title (string)
+  heading - The heading's title, as a read reports it (string)
   start - Start timestamp (string)
   end - End timestamp (string)
   duration - Duration as H:MM (string)
@@ -5002,7 +5034,7 @@ Parameters:
 Returns JSON object:
   open_clocks - Array of open clocks, each with:
     file - File path (string)
-    heading - Heading title (string)
+    heading - The heading's title, as a read reports it (string)
     start - Start timestamp (string)
     link - Link to the heading (string): id:{id} when it has an ID,
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
