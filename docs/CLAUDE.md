@@ -49,8 +49,9 @@ part. Grep for the old heading across `../README.org`, `../CONTRIBUTING.org` and
 `just lint` org-lints these pages, `README.org` and `CONTRIBUTING.org`, each from
 its own directory, so a relative link resolves the way a reader follows it. A
 link to a file that does not exist fails the commit. The file list is the
-`org-lint` script in `Eask`; it globs `docs/*.org`, so a new page is linted
-without being named, and a page in a new subdirectory is not.
+`org-lint` script in `Eask`: `README.org`, `CONTRIBUTING.org`, and every `.org`
+file under `docs/` at any depth, so a new page is linted without being named,
+wherever it sits.
 
 ## Org markup, not Markdown
 

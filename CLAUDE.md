@@ -12,9 +12,8 @@ touching `org-mcp.el` or `org-mcp-test.el`.
 
 ## Commands
 
-The three command lines below are here because an agent working through the
-shell never loads a page; why they are what they are, and everything else about
-building and testing, belongs to `CONTRIBUTING.org` and is not repeated here.
+The command lines below are here because an agent working through the shell
+never loads a page. Why they are what they are belongs to `CONTRIBUTING.org`.
 They run inside the Nix devshell:
 
 ```sh
