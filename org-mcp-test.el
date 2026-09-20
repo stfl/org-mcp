@@ -15340,5 +15340,108 @@ them.  The descendant is checked too: the shift reaches all of them."
             (should (string-suffix-p ":" line))
             (should (= (length line) (abs org-tags-column)))))))))
 
+;;; A destination folded in the buffer
+
+;; Emacs folds a file with `#+STARTUP: overview' as it visits it, so
+;; every heading below the top level is invisible, which is the state
+;; a user's own buffer is usually in.  A placement that asks Org for
+;; the next *visible* heading then leaves the node wherever the fold
+;; happens to end, and the call reports success with a link that
+;; resolves to it.  These tests pin the placement against the text of
+;; the file, which is what the client is promised.
+
+(defconst org-mcp-test--folded-target-id
+  "fedcba98-7654-3210-fedc-ba9876543210"
+  "ID of Target in `org-mcp-test--folded-source'.")
+
+(defconst org-mcp-test--folded-destination
+  (concat
+   "#+STARTUP: overview\n"
+   "* Outer\n"
+   "** Parent\n"
+   "Parent body.\n"
+   "\n"
+   "** Follower\n"
+   "Follower body.\n"
+   "* Elsewhere\n")
+  "A file whose Parent is folded by the time a call reaches it.
+Parent and Follower are both under a level-1 heading, so `overview'
+hides them and leaves Elsewhere visible.  The blank line Org leaves
+before a new entry ends Parent's subtree, so a placement stops on it
+rather than on a heading, and the next heading Org can see from there
+is Elsewhere: a placement that follows the fold puts the node at the
+end of Follower instead of at the end of Parent.")
+
+(defconst org-mcp-test--folded-target
+  (concat
+   "* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--folded-target-id "\n"
+   ":END:\n"
+   "Target body.\n")
+  "The node a refile moves under the folded Parent.")
+
+(defconst org-mcp-test--folded-source
+  (concat org-mcp-test--folded-destination org-mcp-test--folded-target)
+  "The folded destination with the node to move already in it.")
+
+(defconst org-mcp-test--folded-target-under-parent
+  (concat
+   "\\`#\\+STARTUP: overview\n"
+   "\\* Outer\n"
+   "\\*\\* Parent\n"
+   "Parent body\\.\n"
+   "\n"
+   "\\*\\*\\* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--folded-target-id "\n"
+   ":END:\n"
+   "Target body\\.\n"
+   "\\*\\* Follower\n"
+   "Follower body\\.\n"
+   "\\* Elsewhere\n"
+   "\\'")
+  "The complete destination file once Target is Parent's last child.
+Target stands between Parent's body and Follower, one level deeper
+than Parent, so a node that went to the end of Follower's subtree or
+that came back a level fails here.")
+
+(ert-deftest org-mcp-test-node-refile-under-a-folded-parent ()
+  "A refile puts the node under the parent it names, folded or not.
+The parent's subtree ends on a blank line, and the heading after it
+is folded, so the placement has to read the file's text rather than
+what is visible in it."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--folded-source
+      (list org-mcp-test--folded-target-id)
+    (let ((link (concat "id:" org-mcp-test--folded-target-id)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-refile"
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest link))
+         (parent . ,(org-mcp-test--file-link test-file "*Parent"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--folded-target-under-parent))))
+
+(ert-deftest org-mcp-test-node-refile-into-a-folded-file ()
+  "A refile into another file reads that file's text, not its folds.
+The destination file is folded as Emacs visits it for the move, which
+is the first time anything has opened it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--folded-target)
+       (other-file org-mcp-test--folded-destination))
+    (org-mcp-test--with-id-tracking
+     (list test-file other-file)
+     (list (cons org-mcp-test--folded-target-id test-file))
+     (let ((link (concat "id:" org-mcp-test--folded-target-id)))
+       (mcp-server-lib-ert-call-tool
+        "org-node-refile"
+        `((link . ,link)
+          (before . ,(org-mcp-test--verbs-digest link))
+          (parent . ,(org-mcp-test--file-link other-file "*Parent"))))
+       (org-mcp-test--verify-file-matches
+        other-file org-mcp-test--folded-target-under-parent)
+       (should (string= (org-mcp-test--read-file test-file) ""))))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here

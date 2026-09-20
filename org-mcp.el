@@ -3143,6 +3143,14 @@ in the same state."
     (when (featurep 'org-inlinetask)
       (org-inlinetask-remove-END-maybe))))
 
+(defun org-mcp--goto-next-heading-start ()
+  "Move point to the start of the next heading, or to the end of the buffer.
+Point stays where it is when it already starts one.  The search reads
+the buffer's text and not its visibility, so a heading the user has
+folded is a heading here."
+  (unless (and (bolp) (org-at-heading-p))
+    (outline-next-heading)))
+
 (defun org-mcp--paste-subtree-under
     (text parent-target sibling-target)
   "Paste TEXT, a subtree cut from this buffer, under PARENT-TARGET.
@@ -3164,10 +3172,10 @@ is."
     (org-mcp--position-for-new-child sibling-target parent-level)
     ;; `org-paste-subtree' pastes before the heading point starts, and
     ;; walks to the next *visible* heading when point starts none.
-    ;; Point goes to the start of that heading here, so that a heading
-    ;; folded in the user's buffer cannot carry the subtree past it.
-    (unless (bolp)
-      (forward-line 1))
+    ;; Point goes to the start of that heading here, so the paste never
+    ;; begins that walk: a heading the user has folded would carry the
+    ;; subtree past it and make the node a child of the wrong parent.
+    (org-mcp--goto-next-heading-start)
     (org-paste-subtree
      (if parent-level
          (1+ parent-level)
