@@ -1345,7 +1345,8 @@ the call that reads it in full.")
 The same node a read returns, without the body and the children a
 match list would read every matched subtree to fill.  A query also
 carries the whole Org drawer and every computed field unasked, which
-is not a field list and lives in `org-mcp--tool-query'.")
+is not a field list: it is the default each of `org-mcp--tool-query'
+and `org-mcp--tool-view' passes for those two parameters.")
 
 (defun org-mcp--node-field (name)
   "Return the node field NAME names, or refuse NAME as not one.
