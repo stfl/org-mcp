@@ -12,6 +12,14 @@ set -u
 
 OUTFILE=".test-output.txt"
 
+# A dependency too old for the code under test fails the suite in a
+# hundred places that each look like something else, so say so first.
+# Quiet on success, like the rest of this script.
+if ! deps=$(eask exec emacs --batch -l scripts/check-deps.el 2>&1); then
+    printf '%s\n' "$deps"
+    exit 1
+fi
+
 output=$(eask run script test 2>&1)
 rc=$?
 
