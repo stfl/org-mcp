@@ -1,0 +1,120 @@
+#+TITLE: Contributing to org-mcp
+
+This page is for changing org-mcp: the environment, the checks a commit has to
+pass, and the conventions the code keeps. Using org-mcp is the [[file:README.org][README]].
+
+* The devshell
+
+Every tool the checks need — Emacs 31, eask, just, shellcheck, shfmt, zizmor —
+comes from the Nix devshell, and nothing is expected on your own =PATH=:
+
+#+begin_src bash
+nix develop            # a shell with the tools
+nix develop --command just check    # or a single command in it
+#+end_src
+
+With direnv, =.envrc= enters the shell for you when you =cd= into the checkout.
+
+Scripts in this repository never enter the devshell themselves: they are written
+against a =PATH= that already has their tools, and the caller provides it.
+
+* The checks
+
+=just check= is the whole gate, and the pre-commit hook runs exactly it:
+
+| Recipe          | Does                                                                     |
+|-----------------+--------------------------------------------------------------------------|
+| =just fmt=      | elisp-autofmt on =org-mcp.el=, =shfmt -i 4= on the shell scripts         |
+| =just lint=     | byte-compile, elisp-lint, script byte-compile, org-lint, shellcheck, zizmor |
+| =just test=     | the ERT suite, through =scripts/run-tests.sh=                            |
+| =just check=    | all three, in that order                                                 |
+
+Both quiet stages keep their evidence: a failing lint stage writes
+=.lint-output.txt=, and the test run always writes =.test-output.txt=, with the
+ERT summary on success and the failure block on failure.
+
+=just lint= org-lints =README.org= and every =docs/*.org= page, each from its own
+directory, so a link to a page that does not exist fails the commit.
+
+* Formatting
+
+=just fmt= is the only formatter, and =scripts/format-elisp.el= refuses to run
+under an Emacs other than 31 or one without elisp-autofmt, so the layout is the
+same on every machine.
+
+=org-mcp.el= is laid out at 70 columns, which it carries as a file-local
+variable; other Elisp in the repository goes to the 100 columns
+=.dir-locals.el= sets. =.dir-locals.el= also carries the =elisp-lint-indent-specs=
+for the macros in this repository — a new =with-= macro belongs in that list, or
+the linter reindents every use of it.
+
+* Committing
+
+The pre-commit hook runs =just check=, which needs the devshell, so commit from
+inside it:
+
+#+begin_src bash
+nix develop --command git commit
+#+end_src
+
+Commit subjects follow the =type(scope): summary= form the history uses, written
+in the imperative: =fix(clock): let the session clock decide which clock is
+active=.
+
+* Writing the code
+
+org-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful, stable
+mapping between MCP primitives and Org's existing semantics, so a change does not
+reinvent what Org already does. Before adding or changing parsing, navigation,
+clock, drawer, tag or TODO-state logic, look for the Org API first:
+
+| Instead of                            | Use                                                        |
+|---------------------------------------+------------------------------------------------------------|
+| manual level-regex walks              | =org-find-olp=, =org-get-outline-path=                     |
+| a level regex over the tree           | =org-map-entries=, =org-map-tree=, =org-element-map=       |
+| hand-rolled drawer skipping           | =org-end-of-meta-data=                                     |
+| chained =org-entry-get=               | =org-heading-components=, =org-element-at-point=           |
+| inserting heading asterisks by hand   | =org-insert-subheading=                                    |
+| CLOCK regex scanners                  | =org-clock-in= / =-out=, =org-find-open-clocks=, =org-clock-resolve= |
+| custom drawer deletion                | =org-remove-empty-drawer-at=                               |
+| custom time and duration parsers      | =org-time-string-to-time=, =org-duration-from-minutes=     |
+| manual LOGBOOK formatting             | =org-add-log-setup= + =org-store-log-note=                 |
+| destructuring =org-todo-keywords=     | =org-todo-keywords-1=, =org-done-keywords=                 |
+| custom tag parsing or tag regexps     | =org-tag-alist-to-groups=, =org-tag-re=                    |
+| regex-based block or drawer detection | =org-element-parse-buffer=                                 |
+
+When an Org API is genuinely missing or unsuitable, say why in a comment next to
+the workaround, so the next person can re-evaluate it when Org moves on. Code
+that already duplicates Org is replaced rather than extended.
+
+* Tests
+
+The suite lives in =org-mcp-test.el= and runs with =just test=.
+
+Org content under test is written as =defconst= constants, one for the file
+before the call and one for the file after it, rather than built inline. The
+result is then verified with a single regular expression matching the complete
+Org file, so a test that passes has pinned the whole file, not the one line it
+was looking at.
+
+* What a change owes the documentation
+
+A change that adds, removes or renames an MCP tool, a resource template or a
+=defcustom= updates the page that documents it in the same commit:
+
+| Change                                    | Page                                              |
+|-------------------------------------------+---------------------------------------------------|
+| a read tool, a resource, a discovery tool | [[file:docs/reading.org][Reading Org content]]              |
+| a write tool, or write behaviour          | [[file:docs/writing.org][Changing Org content]]             |
+| a query or GTD tool, or its settings      | [[file:docs/queries.org][Searching and GTD queries]]        |
+| a clock tool or clock setting             | [[file:docs/clocking.org][Clock tracking]]                   |
+| which files a call may reach              | [[file:docs/file-access.org][Which files a call reaches]]       |
+| link forms taken or returned              | [[file:docs/links.org][Addressing headings with links]]   |
+| installing, or registering with a client  | [[file:docs/installation.org][Installing org-mcp]]               |
+
+The README changes only when what org-mcp /is/ changes, or what it costs to run:
+the tool count, the quickstart, a new limit. Everything else belongs to a page
+above, linked from the README's table.
+
+Terminology is fixed in [[file:CONTEXT.md][CONTEXT.md]]: the words there are the words the docs and the
+error messages use.

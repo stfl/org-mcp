@@ -1,34 +1,122 @@
 #+TITLE: org-mcp
 
-[[https://github.com/laurynas-biveinis/org-mcp/actions/workflows/elisp-test.yml][https://github.com/laurynas-biveinis/org-mcp/actions/workflows/elisp-test.yml/badge.svg]]
-[[https://github.com/laurynas-biveinis/org-mcp/actions/workflows/super-linter.yml][https://github.com/laurynas-biveinis/org-mcp/actions/workflows/super-linter.yml/badge.svg]]
-[[https://melpa.org/#/org-mcp][https://melpa.org/packages/org-mcp-badge.svg]]
-[[https://stable.melpa.org/#/org-mcp][file:https://stable.melpa.org/packages/org-mcp-badge.svg]]
+org-mcp turns your running Emacs into an MCP server over your Org files. An MCP
+client — Claude Code, Claude Desktop, any other — reads your outline, searches it
+with org-ql, and writes back to it through 29 tools and one resource, while the
+files stay where Org keeps them.
 
-* Overview
+The writes go through the buffer you are editing, not around it. A tool edits the
+canonical buffer visiting the file, so your unsaved work survives the call, and
+every write answers with a =saved= flag saying whether the change reached disk.
 
-org-mcp is an Emacs package that implements a Model Context Protocol (MCP) server for Org-mode. It enables AI assistants and other MCP clients to interact with your Org files through a structured API.
+This is a fork of [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], installed from git. MELPA ships the
+upstream package, which has neither the GTD query tools nor the clock tools.
 
-
-* Usage
-
-**WARNING:** some of the tools in this package give LLMs WRITE access to your Org
-files, and, once in a thousand invocations, LLMs *will* try to delete everything,
+*WARNING:* some of the tools in this package give LLMs WRITE access to your Org
+files, and, once in a thousand invocations, LLMs /will/ try to delete everything,
 because they are like that. Backups and automatic versioning on every change are
 strongly advised.
 
+* Quickstart
+
+1. Install the package. In Doom Emacs, in =packages.el=:
+
+   #+begin_src emacs-lisp
+   (package! org-mcp
+     :recipe (:host github :repo "stfl/org-mcp"
+              :files (:defaults "org-mcp-stdio.sh")))
+   #+end_src
+
+2. Decide which files clients may touch. With an agenda already configured,
+   there is nothing to do: org-mcp falls back to =org-agenda-files=. Otherwise
+   name them, absolute or relative to =org-directory=:
+
+   #+begin_src emacs-lisp
+   (setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+   #+end_src
+
+3. Install the two stdio shims and start the server, in Emacs:
+
+   #+begin_example
+   M-x mcp-server-lib-install RET
+   M-x org-mcp-install RET
+   M-x mcp-server-lib-start RET
+   #+end_example
+
+4. Register the server with your client:
+
+   #+begin_src bash
+   claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
+   #+end_src
+
+A client that then calls =org-read= with
+={"link": "id:550e8400-e29b-41d4-a716-446655440000"}= gets the heading, its
+metadata and its children:
+
+#+begin_src json
+{
+  "title": "Project Alpha",
+  "todo": "TODO",
+  "priority": "A",
+  "tags": ["work", "urgent"],
+  "scheduled": "<2026-03-26 Thu>",
+  "deadline": "<2026-04-01 Mon>",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "level": 1,
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "content": "Body text here...",
+  "children": [
+    {"title": "Subtask", "todo": "NEXT", "level": 2,
+     "link": "file:~/org/projects.org::*Subtask"}
+  ]
+}
+#+end_src
+
+Every heading comes back with the link that addresses it, and that link is what
+the next call sends — the same text =org-store-link= gives you in Emacs.
+
+* What it does not do
+
+- *It creates no identifiers.* No tool adds an =ID= or a =CUSTOM_ID=. A heading
+  without one is addressed by its title, which reaches the first heading of that
+  title and breaks when you rename it. A client that wants a stable address sets
+  the property itself.
+- *It does not save your dirty buffers.* A write into a buffer that already held
+  your unsaved edits stays in that buffer and answers =saved: false=; the file on
+  disk keeps what it had until you save.
+- *It reaches the files you allow, and no others.* A file outside
+  =org-mcp-allowed-files= is refused unless =org-mcp-file-scope-override= permits
+  it, and then for one call only. Remote (TRAMP) paths are refused before a
+  connection is opened, and so are encrypted =.org.gpg= files.
+- *It blocks Emacs while it searches.* A query over a named directory walks the
+  tree and reads every Org file in it in Emacs's single thread, and Emacs does not
+  respond meanwhile. Point it at narrow directories.
+- *The GTD query tools are opt-in.* =query-inbox=, =query-next= and
+  =query-backlog= stay unregistered until you set the query functions that define
+  them.
+- *It resolves links, it does not follow them.* Link types other than =id:= and
+  =file:= are refused before any file is opened, as are regexp searches, and a
+  search that matches nothing is an error rather than a new heading.
+
+* Requirements
+
+Emacs 30.1 or later, with =mcp-server-lib= and =org-ql=. CI covers Emacs 30.2 and
+31.1 on Linux and macOS. [[file:docs/installation.org][Installing org-mcp]] carries the dependency versions.
 
 * Where to go next
 
-| Page                                                          | Answers                                                              |
-|---------------------------------------------------------------+----------------------------------------------------------------------|
-| [[file:docs/installation.org][Installing org-mcp]]            | Installing the package and the shims, registering an MCP client      |
-| [[file:docs/file-access.org][Which files a call reaches]]     | The allowed files, naming a file outside them, finding an ID's file  |
-| [[file:docs/links.org][Addressing headings with links]]       | The link forms a call takes, what is refused, what comes back        |
-| [[file:docs/reading.org][Reading Org content]]                | The =org://{link}= resource, the read tools, the discovery tools     |
-| [[file:docs/writing.org][Changing Org content]]               | What a write does to your buffers and your files, every write tool   |
-| [[file:docs/queries.org][Searching and GTD queries]]          | org-ql queries and the three GTD query tools                         |
-| [[file:docs/clocking.org][Clock tracking]]                    | Clocking in and out, adding, deleting and repairing clock entries    |
+| Page                                                      | Answers                                                             |
+|-----------------------------------------------------------+---------------------------------------------------------------------|
+| [[file:docs/installation.org][Installing org-mcp]]        | Installing the package and the shims, registering an MCP client     |
+| [[file:docs/file-access.org][Which files a call reaches]] | The allowed files, naming a file outside them, finding an ID's file |
+| [[file:docs/links.org][Addressing headings with links]]   | The link forms a call takes, what is refused, what comes back       |
+| [[file:docs/reading.org][Reading Org content]]            | The =org://{link}= resource, the read tools, the discovery tools    |
+| [[file:docs/writing.org][Changing Org content]]           | What a write does to your buffers and your files, every write tool  |
+| [[file:docs/queries.org][Searching and GTD queries]]      | org-ql queries and the three GTD query tools                        |
+| [[file:docs/clocking.org][Clock tracking]]                | Clocking in and out, adding, deleting and repairing clock entries   |
+
+Changing the code is [[file:CONTRIBUTING.org][CONTRIBUTING]]: the devshell, the checks, and what a change owes
+the documentation.
 
 * License
 
