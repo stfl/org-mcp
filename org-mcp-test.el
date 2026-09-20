@@ -9172,6 +9172,37 @@ return that effective set."
                test-file "Tagged Parent" 'local_tags)
               '("ptag"))))))
 
+(ert-deftest org-mcp-test-tags-agree-on-a-child-inside-a-node ()
+  "A child expanded inside its parent carries the tags a read gives it.
+The third read path is a walk: `depth' expands a child in place, and
+that child is built by the same builder from the same
+`org-get-tags' call, so what the walk shows and what a read of the
+child shows are one answer rather than two that agree by accident."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (let* ((parent
+              (json-parse-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-read"
+                `((link
+                   . ,(org-mcp-test--file-link
+                       test-file "*Tagged Parent"))
+                  (depth . 1)))
+               :object-type 'alist))
+             (child (aref (alist-get 'children parent) 0)))
+        (should (equal (alist-get 'title child) "Tagged Child"))
+        (should
+         (equal (alist-get 'tags child) ["filetag" "ptag" "ctag"]))
+        (should (equal (alist-get 'local_tags child) ["ctag"]))
+        (should
+         (equal (alist-get 'tags child)
+                (alist-get
+                 'tags
+                 (org-mcp-test--read-structured
+                  test-file "Tagged Child"))))))))
+
 (ert-deftest org-mcp-test-read-local-tags-equal-tags-without-inheritance ()
   "With inheritance off, `tags' and `local_tags' are the same list."
   (org-mcp-test--with-temp-org-files
