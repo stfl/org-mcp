@@ -375,9 +375,10 @@ produced what it reads. With inheritance off the two fields carry the same
 tags.
 
 Either field is absent when its list is empty, as the other optional fields
-are. =org-node-set-tags= replaces the tags written on the heading and leaves
-inherited ones where they are, so =local_tags= is the field to work from when
-changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
+are. The three tag tools write the tags on the heading and leave inherited ones
+where they are, so =local_tags= is the field to work from when changing them —
+and it is the set =org-node-set-tags= asks for in its =before= (see [[file:writing.org::*Three tools for one tag set][Three tools
+for one tag set]]).
 
 ** The two digests
 

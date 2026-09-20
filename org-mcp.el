@@ -2904,6 +2904,22 @@ other public API that does.  Revisit if Org gains one."
           (push token current)))))
     (nreverse groups)))
 
+(defun org-mcp--validate-tag-names (tags)
+  "Refuse any of TAGS that Org could not write as a tag.  Returns TAGS.
+Org permits free-form tags in headlines, so the test is `org-tag-re'
+and nothing else: a name is not required to appear in
+`org-tag-alist' or `org-tag-persistent-alist'.
+
+This is the whole of what a call naming tags to take away has to
+pass.  Mutual exclusivity is a rule about the tags a heading ends up
+carrying, and a call that only removes tags cannot break it — two
+tags from one group can always be removed together."
+  (let ((tag-name-re (concat "\\`" org-tag-re "\\'")))
+    (dolist (tag tags)
+      (unless (string-match-p tag-name-re tag)
+        (org-mcp--tool-validation-error "Invalid tag name: %s" tag))))
+  tags)
+
 (defun org-mcp--validate-and-normalize-tags (tags)
   "Validate and normalize TAGS.
 TAGS can be a single tag string or list of tag strings.
@@ -2913,12 +2929,13 @@ Org permits free-form tags in headlines, so any name matching
 `org-tag-re' is accepted regardless of whether it appears in
 `org-tag-alist' or `org-tag-persistent-alist'.  Mutual-exclusivity
 groups (`:startgroup' / `:endgroup') in those alists are still
-enforced because they express a conflict, not an allow-list."
-  (let ((tag-list (org-mcp--normalize-tags-to-list tags))
-        (tag-name-re (concat "\\`" org-tag-re "\\'")))
-    (dolist (tag tag-list)
-      (unless (string-match-p tag-name-re tag)
-        (org-mcp--tool-validation-error "Invalid tag name: %s" tag)))
+enforced because they express a conflict, not an allow-list.  They
+are enforced over the tags the call names, not over the tags the
+heading ends up with: a heading whose tags already break a group was
+not written here, and refusing an unrelated call because of it
+reports a conflict the caller did not cause."
+  (let ((tag-list (org-mcp--normalize-tags-to-list tags)))
+    (org-mcp--validate-tag-names tag-list)
     (when org-tag-alist
       (org-mcp--validate-mutex-tag-groups tag-list org-tag-alist))
     (when org-tag-persistent-alist
@@ -4210,9 +4227,137 @@ MCP Parameters:
         (setq new-deadline
               (or (org-entry-get (point) "DEADLINE") ""))))))
 
-(defun org-mcp--tool-node-set-tags (link &optional after files)
-  "Set tags on the headline LINK names.
-AFTER is a string, a list of strings, or nil/empty to clear all tags.
+(defun org-mcp--tag-set-given (value name)
+  "Return VALUE, the tag-set parameter NAME of a call, as a list.
+One tag arrives as a string and several as an array; `[]' is the
+empty set, the tag set of a heading that carries none, and a value
+like any other here.
+
+The rest of `org-mcp--blank-param-p' — \"\", null, false — is what a
+client sends for a parameter it is not using.  Every tag-set
+parameter is required, so such a value is a parameter left out
+rather than a set to act on, and it is refused with the message an
+omitted parameter gets, so that the two spellings of one mistake
+read alike.  Blank therefore names no set at all, and in particular
+never means the empty one: nothing a client fills a parameter with
+absent-mindedly can take a tag away."
+  (when (and (org-mcp--blank-param-p value) (not (equal value [])))
+    (org-mcp--tool-validation-error "Missing required parameter: %s"
+                                    name))
+  (org-mcp--normalize-tags-to-list value))
+
+(defun org-mcp--tags-for-message (tags)
+  "Return TAGS as the text of a refusal, or `(no tags)' when empty.
+Sorted, because what the message reports is a comparison of sets: a
+reader who sees one order here and another in the file should not go
+looking for a difference that is not there."
+  (if tags
+      (mapconcat #'identity (sort (copy-sequence tags) #'string<)
+                 ", ")
+    "(no tags)"))
+
+(defun org-mcp--tag-inherited-from (tag)
+  "Return where TAG, in effect on the heading at point, is written.
+The heading itself does not carry it, so the answer is the nearest
+ancestor whose own tags include it, named by its title — or the
+file, when no ancestor does, since that is where `#+FILETAGS:' puts
+one.  Point does not move."
+  (save-excursion
+    (let ((source nil))
+      (while (and (not source) (org-up-heading-safe))
+        (when (member tag (org-get-tags nil t))
+          (setq source (format "'%s'" (org-mcp--title-at-point)))))
+      (or source "the file's #+FILETAGS:"))))
+
+(defun org-mcp--tags-after-add (added own effective)
+  "Return the tags a heading carries itself once ADDED are added.
+OWN is what it carries now and EFFECTIVE what is in effect on it,
+inherited tags included.  A tag already in EFFECTIVE is left out:
+the heading has it, and writing it on the heading as well would make
+a local copy of an inherited tag rather than add anything.  The
+result therefore differs from OWN only by tags the heading did not
+have, which is what makes the call a no-op when it asks for nothing
+new and lets two clients adding different tags both keep theirs.
+A tag ADDED names twice is added once, as a set has it."
+  (cl-remove-duplicates
+   (append
+    own (cl-remove-if (lambda (tag) (member tag effective)) added))
+   :test #'string=
+   :from-end t))
+
+(defun org-mcp--tags-after-remove (removed own effective)
+  "Return the tags a heading carries itself once REMOVED are gone.
+OWN is what it carries now and EFFECTIVE what is in effect on it.  A
+tag in neither is nothing to take away, and the call passes over it.
+Runs at the heading, so a refusal can say where an inherited tag is
+written.
+
+A tag the heading only inherits is refused.  Taking it away means
+editing the heading it is written on, which this call does not name,
+and writing an empty local override here is not a thing Org has: the
+tag would stay in effect while the call claimed to have removed it.
+
+The refusal is the unmarked validation class.  The client's belief is
+not stale — a read showing the tag under `tags' and not under
+`local_tags' said exactly this — so reading again resolves nothing,
+and Org vetoed nothing either.  What has to change is the call:
+drop the tag from it, or address the heading that carries it."
+  (dolist (tag removed)
+    (when (and (member tag effective) (not (member tag own)))
+      (org-mcp--tool-validation-error
+       "Cannot remove tag '%s': the heading inherits it from %s and \
+does not carry it itself"
+       tag (org-mcp--tag-inherited-from tag))))
+  (cl-remove-if (lambda (tag) (member tag removed)) own))
+
+(defun org-mcp--write-own-tags (link files tags-of)
+  "Write on the heading LINK names the tags TAGS-OF chooses.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+TAGS-OF is called at the heading, inside the change, with the tags
+the heading carries itself and the tags in effect on it, and returns
+the tags to write on it.  A refusal it raises is raised before
+anything is written, and a set it returns unchanged writes nothing
+at all.  `org-set-tags' writes a heading's own tags and nothing
+above it, so this is the whole of what the three tag tools share,
+and they differ only in the set TAGS-OF returns.
+
+The response reports that heading's own tags as `before' and
+`after', and the tags it has from elsewhere as `inherited', so a
+client sees the same partition a read gives it under `local_tags'
+and `tags'."
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         (own-before nil)
+         (own-after nil)
+         (inherited nil))
+    (org-mcp--modify-and-save file-path "write tags"
+                              `((before . ,(vconcat own-before))
+                                (after . ,(vconcat own-after))
+                                (inherited . ,(vconcat inherited)))
+      (org-mcp--goto-heading target)
+      (let* ((sets (org-mcp--tag-sets-at-point))
+             (wanted (funcall tags-of (cdr sets) (car sets))))
+        (setq own-before (cdr sets))
+        ;; A call asking for the tags the heading already carries
+        ;; writes nothing: `org-set-tags' would rewrite the heading
+        ;; to align the tag column, and a change to the file is not
+        ;; what a heading that is already as asked for deserves.
+        (when (cl-set-exclusive-or wanted (cdr sets) :test #'string=)
+          (org-set-tags wanted)))
+      (let ((sets (org-mcp--tag-sets-at-point)))
+        (setq own-after (cdr sets))
+        (setq inherited
+              (cl-remove-if
+               (lambda (tag) (member tag (cdr sets))) (car sets)))))))
+
+(defun org-mcp--tool-node-add-tags (link after &optional files)
+  "Add tags to the headline LINK names.
+AFTER is the tags to add, one as a string or several as an array.
+A tag the headline already has, written on it or inherited, is left
+alone.  Nothing is taken away, so the call destroys nothing and
+asserts nothing: it takes no `before'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4223,35 +4368,109 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  after - Tags to set (string or array, optional)
+  after - Tags to add (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
-          nil or empty to clear all tags
+          A tag the headline already has or inherits is left alone
           Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (previous-tags nil)
-         (new-tags nil))
+  (let ((added
+         (org-mcp--validate-and-normalize-tags
+          (org-mcp--tag-set-given after "after"))))
+    (org-mcp--write-own-tags
+     link files
+     (lambda (own effective)
+       (org-mcp--tags-after-add added own effective)))))
 
-    ;; Validate tags if provided
-    (let ((tag-list
-           (if (or (null after) (equal after "") (equal after []))
-               nil
-             (org-mcp--validate-and-normalize-tags after))))
+(defun org-mcp--tool-node-remove-tags (link after &optional files)
+  "Remove tags from the headline LINK names.
+AFTER is the tags to remove, one as a string or several as an array.
+Every other tag is left alone, so a tag the client never saw
+survives and the call destroys nothing unseen: it takes no `before'.
+A tag the headline does not have is nothing to take away; a tag it
+only inherits is refused, since this call writes nowhere but on the
+headline.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
 
-      (org-mcp--modify-and-save file-path "set tags"
-                                `((before . ,(or previous-tags []))
-                                  (after . ,(or new-tags [])))
-        (org-mcp--goto-heading target)
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  after - Tags to remove (string or array, required)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          A tag the headline does not have is passed over
+          A tag it only inherits is refused
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let ((removed
+         (org-mcp--validate-tag-names
+          (org-mcp--tag-set-given after "after"))))
+    (org-mcp--write-own-tags
+     link files
+     (lambda (own effective)
+       (org-mcp--tags-after-remove removed own effective)))))
 
-        (setq previous-tags (vconcat (org-get-tags nil t)))
+(defun org-mcp--tool-node-set-tags (link before after &optional files)
+  "Replace the tags written on the headline LINK names.
+BEFORE is the entire set of tags the headline is asserted to carry
+itself, `[]' for one that carries none, compared as a set since Org
+tag order carries no meaning.  Any other set is a conflict and
+nothing is written.  The assertion covers the whole set because the
+call destroys every tag it does not list, including tags the client
+never saw; a client that knows which tags it means to change reaches
+for `org-node-add-tags' or `org-node-remove-tags' and asserts
+nothing.
 
-        (org-set-tags tag-list)
+The assertion is over the headline's own tags, never the set in
+effect on it: `org-set-tags' writes local tags only, so asserting
+the effective set would assert values this call cannot change and
+would refuse because an ancestor was edited.
 
-        (setq new-tags (vconcat (org-get-tags nil t)))))))
+AFTER is the tags to write, `[]' to leave the headline carrying none
+of its own.  Inherited tags are untouched either way.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The tags the headline carries itself now (string or
+           array, required); the `local_tags' of a read, not its
+           `tags'.  Send [] to assert that it carries none.  Order
+           makes no difference; any other set is refused as a
+           conflict and nothing is written
+  after - Tags to write (string or array, required)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          [] leaves the headline carrying no tags of its own
+          Validated against org-tag-alist if configured
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let ((asserted (org-mcp--tag-set-given before "before"))
+        (wanted
+         (org-mcp--validate-and-normalize-tags
+          (org-mcp--tag-set-given after "after"))))
+    (org-mcp--write-own-tags
+     link files
+     (lambda (own _effective)
+       (when (cl-set-exclusive-or asserted own :test #'string=)
+         (org-mcp--state-mismatch-error
+          (org-mcp--tags-for-message asserted)
+          (org-mcp--tags-for-message own) "Tags"))
+       wanted))))
 
 (defun org-mcp--tool-node-set-priority (link &optional after files)
   "Set priority on the headline LINK names.
@@ -5349,9 +5568,10 @@ itself says which.  Nothing is ever sent as null.
          org-tags-exclude-from-inheritance direct, both of which
          org-config-tags reports
   local_tags - The tags written on the heading itself: local to the
-         heading, not to this machine.  They are the set
-         org-node-set-tags replaces, and are identical to tags when
-         inheritance is off
+         heading, not to this machine.  They are the set the three
+         tag tools write, and the set org-node-set-tags asserts in
+         its before; they are identical to tags when inheritance is
+         off
   scheduled - Scheduled timestamp
   deadline - Deadline timestamp
   closed - Closed timestamp
@@ -5853,32 +6073,130 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
-    #'org-mcp--tool-node-set-tags
-    :id "org-node-set-tags"
+    #'org-mcp--tool-node-add-tags
+    :id "org-node-add-tags"
     :description
     (concat
-     "Set tags on an Org headline, replacing any existing tags.
+     "Add tags to an Org headline, leaving its other tags alone.
 
 Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  after - Tags to set (string or array, optional)
+     "  after - Tags to add (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
-          Omit or empty to clear all tags
-          Validated against org-tag-alist if configured
+          A tag the headline already has, written on it or
+          inherited, is left alone rather than written twice
           Must follow Org tag rules (alphanumeric, _, @)
           Respects mutually exclusive tag groups
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
+The call takes nothing away, so it asserts nothing and takes no
+before.  Use org-node-set-tags when you mean to replace the whole
+set.
+
+Example - adding one tag:
+  {\"link\": \"id:abc-123\", \"after\": \"urgent\"}
+
 Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - Array of previous tags
-  after - Array of new tags
+  before - Array of the tags the headline carried itself
+  after - Array of the tags it carries itself now
+  inherited - Array of the tags in effect on it from elsewhere
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-remove-tags
+    :id "org-node-remove-tags"
+    :description
+    (concat
+     "Remove tags from an Org headline, leaving its other tags alone.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  after - Tags to remove (string or array, required)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          A tag the headline does not have is passed over
+          A tag it only inherits is refused, naming where the tag
+          is written
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+The call takes away only what it names, so a tag you never saw
+survives it and it asserts nothing: it takes no before.  This is how
+to clear tags you have read.
+
+Example - removing one tag:
+  {\"link\": \"id:abc-123\", \"after\": \"urgent\"}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  before - Array of the tags the headline carried itself
+  after - Array of the tags it carries itself now
+  inherited - Array of the tags in effect on it from elsewhere
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-set-tags
+    :id "org-node-set-tags"
+    :description
+    (concat
+     "Replace the tags written on an Org headline.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The tags the headline carries itself now (string or
+           array, required)
+           This is the local_tags of a read, not its tags
+           Send [] to assert that it carries none of its own
+           Order makes no difference; any other set is refused as a
+           conflict and nothing is written
+  after - Tags to write (string or array, required)
+          Single tag: \"work\"
+          Multiple tags: [\"work\", \"urgent\"]
+          [] leaves the headline carrying no tags of its own
+          Must follow Org tag rules (alphanumeric, _, @)
+          Respects mutually exclusive tag groups
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+The call destroys every tag it does not list, including tags you
+never saw, so before asserts the whole prior set.  When you know
+which tags you mean to change, org-node-add-tags and
+org-node-remove-tags name them and assert nothing.
+
+Inherited tags are left where they are, by all three tools.
+
+Example - replacing the set:
+  {\"link\": \"id:abc-123\", \"before\": [\"work\"],
+   \"after\": [\"work\", \"urgent\"]}
+
+Example - leaving the headline no tags of its own:
+  {\"link\": \"id:abc-123\", \"before\": [\"work\", \"urgent\"],
+   \"after\": []}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  before - Array of the tags the headline carried itself
+  after - Array of the tags it carries itself now
+  inherited - Array of the tags in effect on it from elsewhere
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

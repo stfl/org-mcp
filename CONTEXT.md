@@ -94,6 +94,12 @@ A slug identifying a heading within its own file. Headings in files outside the
 index carry one instead of an ID, and a link to one always names its file.
 _Avoid_: CUSTOM_ID slug, anchor
 
+**Own tags**:
+The tags written on a heading itself, as against the tags in effect on it,
+which include the ones it inherits. A write reaches a heading's own tags only,
+and a tag assertion is over them. A read returns them as `local_tags`.
+_Avoid_: direct tags, private tags, explicit tags
+
 **Link**:
 A native Org link, the text Org resolves inside `[[…]]`, naming a heading or a
 file. It is the only way a call names a heading, and the form every write
