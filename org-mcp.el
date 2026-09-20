@@ -1701,8 +1701,8 @@ looks whole and is not."
 
 (defun org-mcp--spend-node (budget file-node)
   "Spend one node of BUDGET, or refuse the walk at the node at point.
-BUDGET is the cell `org-mcp--node-at-point' hands its walk, holding
-the nodes the walk may still return.  When it is empty the walk is
+BUDGET is the cell `org-mcp--projected-node-at-point' hands the
+walk, holding the nodes the walk may still return.  When it is empty the walk is
 refused rather than cut short: a caller handed a subtree that was
 silently shortened believes it has seen the whole thing.
 
@@ -1717,19 +1717,22 @@ a shallower depth, or read that node on its own.  \
 org-mcp-read-max-nodes sets the ceiling"
      org-mcp-read-max-nodes (org-mcp--node-link-at-point file-node))))
 
-(defun org-mcp--node-at-point (fields &optional depth file-node)
-  "Return the node at point as an alist carrying FIELDS.
+(defun org-mcp--node-at-point
+    (fields properties computed depth file-node budget)
+  "Return the node at point as an alist carrying FIELDS, within BUDGET.
 One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
 
 FIELDS is a list of node field names, in the order the node lists
 them; `org-mcp--node-fields' names every one there is.  A field the
 node has no value for -- no TODO state, no tag of its own, an empty
-body -- is left out rather than sent as null.
+body -- is left out rather than sent as null.  PROPERTIES and
+COMPUTED are the node\='s two other namespaces, see
+`org-mcp--projected-node-at-point\='.
 
 DEPTH is how many generations of children the `children' field
-expands in place, and defaults to none.  See
-`org-mcp--child-node-fields' for what each generation carries.
+expands in place; see `org-mcp--child-projection\=' for what each
+generation carries.
 
 FILE-NODE non-nil builds the node of the file the buffer visits: a
 node at level 0, carrying the file's title, a link to the file and
@@ -1737,25 +1740,10 @@ its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
 no position before that heading.
 
-The walk is given `org-mcp-read-max-nodes' nodes to spend and is
-refused when it wants more; every caller gets its own budget, so a
-list of matches is bounded one match at a time."
-  (org-mcp--node-at-point-within
-   fields
-   nil
-   nil
-   (or depth 0)
-   file-node
-   (list org-mcp-read-max-nodes)))
-
-(defun org-mcp--node-at-point-within
-    (fields properties computed depth file-node budget)
-  "Return the node at point carrying FIELDS, within BUDGET.
-FIELDS, DEPTH and FILE-NODE are `org-mcp--node-at-point\='s, which
-holds what a node is.  PROPERTIES and COMPUTED are the node\='s two
-other namespaces, see `org-mcp--projected-node-at-point\='.  BUDGET
-is the walk\='s, which `org-mcp--spend-node\=' spends one node of per
-node built, this one included."
+BUDGET is the walk\='s, which `org-mcp--spend-node\=' spends one node
+of per node built, this one included.  Every caller is given its own,
+`org-mcp-read-max-nodes' nodes to spend, so a list of matches is
+bounded one match at a time."
   (org-mcp--spend-node budget file-node)
   (let* ((meta
           (unless file-node
@@ -1822,7 +1810,7 @@ node built, this one included."
                     (lambda (position)
                       (save-excursion
                         (goto-char position)
-                        (org-mcp--node-at-point-within
+                        (org-mcp--node-at-point
                          child-fields
                          child-properties
                          child-computed
@@ -1869,7 +1857,7 @@ would write this server\='s opinion into the user\='s file.
 All three reach every generation DEPTH expands, so an expanded child
 is the node a read of its link returns; see
 `org-mcp--child-projection\='."
-  (org-mcp--node-at-point-within
+  (org-mcp--node-at-point
    fields
    properties
    computed
