@@ -634,13 +634,25 @@ level 3 with its children at level 4. An =id:= link to the node, or to anything
 under it, keeps working across files: Org registers the IDs in the subtree
 against the file they land in.
 
-Refiling here is not Org's own =org-refile= command, and two things that
-command does are not done:
+=org-log-refile= governs the record of the move, as it does for a refile you
+make by hand. Set to =time= or =note=, it puts a =Refiled on [timestamp]= entry
+on the node, in the file the node landed in — the one where you will next read
+the node, and where Org writes it too. Unset, nothing is written. Placement is
+Org's: the entry goes into the drawer =org-log-into-drawer= names, or into the
+one a =LOG_INTO_DRAWER= property on the node names instead, and the template is
+whatever your =org-log-note-headings= holds for =refile=.
 
-- A =LOGBOOK= entry is not recorded, whatever =org-log-refile= is set to. A
-  refile you make by hand leaves the record that setting asks for; one made
-  through this tool leaves none.
-- =org-after-refile-insert-hook= does not run.
+The entry carries a timestamp and no note text under it, whichever of the two
+settings you use. =note= asks for prose a person types into a buffer, and a
+tool call has no person to ask — Org makes the same substitution itself when it
+refiles in bulk from the agenda, where there is nobody to ask either. Anything
+more to say about the move is a second call to [[*org-node-add-note][org-node-add-note]].
+
+Refiling here is not Org's own =org-refile= command, and one thing that command
+does is not done: =org-after-refile-insert-hook= does not run. It is your own
+code, and the point Org runs it from is, here, the middle of one change spanning
+two files; a hook that edits a buffer or fails there would leave a call unable
+to say what it wrote, in files it could no longer put back.
 
 Tags are aligned: the node and every heading under it arrive with their tags at
 =org-tags-column=, because Org shifts the subtree by promoting or demoting each

@@ -38,6 +38,7 @@
 (require 'org-archive)
 (require 'org-id)
 (require 'org-ql)
+(require 'org-refile)
 (require 'org-clock)
 (require 'url-util)
 
@@ -2548,7 +2549,9 @@ clocks exist."
     (note purpose &optional state prev-state)
   "Insert NOTE at current heading via Org's log-note machinery.
 
-NOTE is the user-supplied note text (may be multi-line).
+NOTE is the user-supplied note text (may be multi-line).  An empty
+NOTE writes the entry's heading line alone, which is the entry Org
+writes for a purpose it takes no prose for.
 PURPOSE is a symbol from `org-log-note-headings' (e.g. `note', `state').
 STATE and PREV-STATE are the new and previous TODO state strings used
 when PURPOSE is `state'.
@@ -3226,6 +3229,31 @@ is."
        1)
      text)))
 
+(defun org-mcp--log-refile-at-point ()
+  "Record the refile of the node at point, as `org-log-refile' asks.
+Nothing is written when `org-log-refile' is nil, and the entry goes
+where `org-log-note-headings' and `org-log-into-drawer' put it, so a
+node carrying `LOG_INTO_DRAWER' gets its own drawer.  Called at the
+node's new heading, in the buffer of the file it landed in, which is
+where `org-refile' both reads the setting and writes the entry.
+
+Org's own path to it, `org-add-log-setup', cannot be used here: it
+hangs the write on `post-command-hook', and with `org-log-refile' set
+to `note' that hook opens a `*Org Note*' buffer and waits for a
+person to type in it.  An MCP call has no person and no command loop
+to return to, so the entry is written through
+`org-mcp--insert-log-note', which is this server's non-interactive
+way to the same `org-store-log-note'.
+
+The entry therefore carries the heading line alone, with no note body
+under it, whether `org-log-refile' is `time' or `note'.  That is the
+entry Org itself writes for a refile nobody can be asked about: a
+bulk refile from the agenda forbids `note' and records the timestamp
+instead.  A caller with something to say about the move says it with
+org-node-add-note, which is the tool for prose in a LOGBOOK."
+  (when org-log-refile
+    (org-mcp--insert-log-note "" 'refile)))
+
 (defun org-mcp--refile-subtree-to (text parent-target sibling-target)
   "Put TEXT, a subtree just cut from this buffer, under PARENT-TARGET.
 Returns the link to the node where it lands.  SIBLING-TARGET is the
@@ -3242,7 +3270,17 @@ The subtree is cut before it is put down, and only the buffer it was
 cut from is inside the calling change group.  A destination that does
 not resolve therefore refuses with both files as they were, because
 nothing has been written when the search fails; a failure after the
-subtree is down leaves it in both files rather than in neither."
+subtree is down leaves it in both files rather than in neither.
+
+The node's arrival is recorded where Org records it, see
+`org-mcp--log-refile-at-point'.  What is not run is
+`org-after-refile-insert-hook': it is arbitrary user code, and the
+place `org-refile' runs it from is, here, the middle of a change
+group over two files.  A hook that moves point, edits either buffer
+or signals leaves the call unable to say what it wrote, and an error
+raised after the subtree is down cannot be undone back to a file the
+client would recognise.  Running one is a decision for a caller who
+knows what is on the hook; org-mcp declines it for everyone."
   (let* ((destination (plist-get parent-target :file))
          (elsewhere
           (not
@@ -3259,7 +3297,13 @@ subtree is down leaves it in both files rather than in neither."
       (org-with-wide-buffer
        (org-mcp--paste-subtree-under
         text parent-target sibling-target)
-       (setq link (org-mcp--link-at-point))))
+       (setq link (org-mcp--link-at-point))
+       ;; Last in the buffer's own form: `org-store-log-note' ends by
+       ;; restoring a window configuration, which leaves whichever
+       ;; buffer that configuration shows current.  Nothing here reads
+       ;; the buffer after it, and the enclosing `save-excursion'
+       ;; hands the right one back to the caller.
+       (org-mcp--log-refile-at-point)))
     (when elsewhere
       (org-mcp--maybe-save-buffer
        buffer destination (plist-get context :modified-p))
@@ -4371,7 +4415,9 @@ sibling that is not a child of that parent is no sibling.
 
 The subtree arrives whole, its LOGBOOK with it, and nothing in it
 records where it was: a refile is undone by refiling it back, by a
-caller that knows where back is.
+caller that knows where back is.  What the LOGBOOK does gain is the
+entry `org-log-refile' asks for, a timestamp and no note body; see
+`org-mcp--log-refile-at-point'.
 
 MCP Parameters:
   link - Link to the node to refile
@@ -5910,6 +5956,11 @@ the node records where it was: a refile is undone by refiling it
 back, by a caller that knows where back is.  Use org-node-archive
 when the node is being retired, since that writes the node's origin
 into it.
+
+A user who logs refiles - org-log-refile - gets the LOGBOOK entry
+that setting asks for, timestamped and with no note under it, the
+same entry a refile by hand leaves.  Say anything more about the
+move with org-node-add-note.
 
 Parameters:
   link - Link to the node to refile (string, required)

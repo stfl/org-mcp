@@ -14494,6 +14494,23 @@ has two children, so a move can name a position among them.")
 It is the same at every level, so a move that drops a drawer or the
 LOGBOOK on the way fails wherever the node lands.")
 
+(defconst org-mcp-test--verbs-target-drawers-refile-logged
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "- Refiled on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\]\n"
+   "- Note taken on \\[2026-03-20 Fri 09:00\\] \\\\\\\\\n"
+   "  Decided this one\\.\n"
+   ":END:\n"
+   "Target body\\.\n")
+  "`org-mcp-test--verbs-target-drawers' after a logged refile.
+The refile entry joins the LOGBOOK the node already carries, above
+the note that was in it, where Org puts the newest entry.  It is the
+heading line of `org-log-note-headings' and nothing else: no note
+body follows it, because no one was asked for one.")
+
 (defconst org-mcp-test--verbs-target-refiled
   (concat
    "\\`\\* TODO Keep :work:\n"
@@ -14510,6 +14527,23 @@ LOGBOOK on the way fails wherever the node lands.")
   "The complete file after Target moves under Home, after First child.
 Every generation is one level deeper than it was and the LOGBOOK
 travels with the node.")
+
+(defconst org-mcp-test--verbs-target-refiled-logged
+  (concat
+   "\\`\\* TODO Keep :work:\n"
+   "Keep body\\.\n"
+   "\\* TODO Home\n"
+   "Home body\\.\n"
+   "\\*\\* First child\n"
+   "\\*\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers-refile-logged
+   "\\*\\*\\* Child\n"
+   "\\*\\*\\*\\* Grandchild\n"
+   "\\*\\* Second child\n"
+   "\\'")
+  "The same file as `org-mcp-test--verbs-target-refiled', refile logged.
+The move is the one that file records; the only difference is the
+entry `org-log-refile' asked for.")
 
 (defconst org-mcp-test--verbs-target-last-child
   (concat
@@ -14595,6 +14629,48 @@ the top level lands.")
    "\\* TODO Project Two\n"
    "\\'")
   "The complete second file after Target moves under Project One.")
+
+(defconst org-mcp-test--verbs-other-with-target-logged
+  (concat
+   "\\`#\\+TITLE: Projects\n"
+   "\n"
+   "\\* TODO Project One\n"
+   "Project body\\.\n"
+   "\\*\\* Existing child\n"
+   "\\*\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers-refile-logged
+   "\\*\\*\\* Child\n"
+   "\\*\\*\\*\\* Grandchild\n"
+   "\\* TODO Project Two\n"
+   "\\'")
+  "The complete second file after a logged refile of Target into it.
+The entry is in this file, the one the node landed in, and not in
+the one it left.")
+
+(defconst org-mcp-test--refile-log-drawer-content
+  (concat
+   "* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":LOG_INTO_DRAWER: NOTES\n"
+   ":END:\n"
+   "* TODO Home\n")
+  "A node naming its own log drawer, and somewhere to refile it to.")
+
+(defconst org-mcp-test--refile-log-drawer-after
+  (concat
+   "\\`\\* TODO Home\n"
+   "\\*\\* TODO Target\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--verbs-target-id "\n"
+   ":LOG_INTO_DRAWER: NOTES\n"
+   ":END:\n"
+   ":NOTES:\n"
+   "- Refiled on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\]\n"
+   ":END:\n"
+   "\\'")
+  "The complete file after Target, which names a log drawer, is refiled.
+The entry is in the drawer the node names, not in a LOGBOOK.")
 
 (defconst org-mcp-test--verbs-other-with-target-at-top
   (concat
@@ -15068,6 +15144,179 @@ name when it is not there.  Neither file is written."
        test-file)
       (should
        (string= (org-mcp-test--read-file other-file) other-before)))))
+
+;; What a refile records.  `org-log-refile' is the user's setting for
+;; it, and a refile made here leaves the record a refile made by hand
+;; leaves: the same entry, in the same place, governed by the same
+;; variables.  These tests are the ones that say an agent's moves are
+;; not the invisible ones.
+
+(ert-deftest org-mcp-test-node-refile-logs-the-move-org-logs ()
+  "`org-log-refile' set to `time' puts a refile entry in the LOGBOOK.
+The entry joins the LOGBOOK the node already carries and travels
+with the node, so the record of the move is on the node wherever it
+went."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((org-log-refile 'time)
+          (org-log-into-drawer t)
+          (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent . ,(org-mcp-test--file-link test-file "*Home"))
+                 (previous_sibling
+                  .
+                  ,(org-mcp-test--file-link
+                    test-file "*First child")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-refiled-logged))))
+
+(ert-deftest org-mcp-test-node-refile-logs-a-note-setting-without-asking ()
+  "`org-log-refile' set to `note' records the move and waits for no one.
+Org's own route to the entry arms `post-command-hook' and opens an
+`*Org Note*' buffer for a person to type in, which an MCP call has
+nobody to finish.  The call returns, the hook is not armed, no note
+buffer is left behind, and the entry written is the one the `time'
+setting writes: a heading line with no note body under it."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((org-log-refile 'note)
+          (org-log-into-drawer t)
+          (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent . ,(org-mcp-test--file-link test-file "*Home"))
+                 (previous_sibling
+                  .
+                  ,(org-mcp-test--file-link
+                    test-file "*First child")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (should-not (memq 'org-add-log-note post-command-hook))
+      (should-not (get-buffer "*Org Note*"))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-refiled-logged))))
+
+(ert-deftest org-mcp-test-node-refile-logs-nothing-when-unset ()
+  "`org-log-refile' unset leaves the node exactly as it travelled.
+A user who does not log refiles gets no entry from org-mcp either:
+the setting is the whole decision, and the LOGBOOK the node carries
+arrives untouched."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((org-log-refile nil)
+          (org-log-into-drawer t)
+          (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent . ,(org-mcp-test--file-link test-file "*Home"))
+                 (previous_sibling
+                  .
+                  ,(org-mcp-test--file-link
+                    test-file "*First child")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (should-not (get-buffer "*Org Note*"))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-refiled))))
+
+(ert-deftest org-mcp-test-node-refile-logs-into-the-drawer-the-node-names ()
+  "A node's own `LOG_INTO_DRAWER' says where its refile entry goes.
+Placement is Org's, through `org-log-into-drawer', so the per-heading
+property outranks the global setting here as everywhere else."
+  (org-mcp-test--with-id-setup test-file
+      org-mcp-test--refile-log-drawer-content
+      (list org-mcp-test--verbs-target-id)
+    (let ((org-log-refile 'time)
+          (org-log-into-drawer nil)
+          (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent
+                  .
+                  ,(org-mcp-test--file-link test-file "*Home")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--refile-log-drawer-after))))
+
+(ert-deftest org-mcp-test-node-refile-logs-in-the-file-it-lands-in ()
+  "A cross-file refile writes its entry into the file the node landed in.
+That is where `org-refile' writes it and where a reader of the node
+will look for it; the file the node left keeps no trace of the
+move."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((org-log-refile 'time)
+          (org-log-into-drawer t)
+          (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent
+                  .
+                  ,(org-mcp-test--file-link
+                    other-file "*Project One")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-gone)
+      (org-mcp-test--verify-file-matches
+       other-file org-mcp-test--verbs-other-with-target-logged))))
+
+(ert-deftest org-mcp-test-node-refile-does-not-run-the-insert-hook ()
+  "`org-after-refile-insert-hook' does not run, by decision.
+It is arbitrary user code, and `org-refile' runs it where org-mcp is
+midway through a change group over two files: a hook that edits a
+buffer or signals there leaves a call that cannot say what it wrote.
+The file is what a refile alone makes of it."
+  (org-mcp-test--with-verbs-file test-file
+    (let* ((ran nil)
+           (org-after-refile-insert-hook
+            (list
+             (lambda ()
+               (setq ran t)
+               (insert "hook was here\n"))))
+           (link (org-mcp-test--verbs-link)))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-refile"
+               `((link . ,link)
+                 (before . ,(org-mcp-test--verbs-digest))
+                 (parent . ,(org-mcp-test--file-link test-file "*Home"))
+                 (previous_sibling
+                  .
+                  ,(org-mcp-test--file-link
+                    test-file "*First child")))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (should-not ran)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-refiled))))
 
 (ert-deftest org-mcp-test-node-archive-writes-where-the-node-came-from ()
   "org-node-archive moves the node out and records where it was.
