@@ -67,7 +67,7 @@ heading's tags works from =local_tags= without reading the heading again (see
   - =properties= (array of strings, or a string, optional): which Org drawer properties to return; ="all"= by default, as on =org-query=. See [[file:reading.org::*Asking for properties][Asking for properties]]
   - =computed= (array of strings, or a string, optional): which computed fields to return; ="all"= by default, as on =org-query=. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
 - *Returns:* the JSON object =org-query= returns, sorted by =org-mcp-query-sort-fn= when one is configured
-- *Configuration:* requires =org-mcp-views=; the tool is not registered while it is =nil=
+- *Configuration:* requires =org-mcp-views=, read when =org-mcp-enable= registers the tools; the tool is not registered while it is =nil= (see [[*Configuring views and filters][Configuring views and filters]])
 - *Scope:* always runs over the allowed files; a =files= parameter is refused
 
 Example:
@@ -134,6 +134,16 @@ agenda block beside it cannot answer differently.
 
 (setq org-mcp-query-sort-fn #'my-rank-comparator)
 #+end_src
+
+Set =org-mcp-views= before =org-mcp-enable=. That call is where org-mcp reads
+it: it decides whether =org-view= is registered at all, and it builds the
+description that names the views and their filters and ranges. A value set or
+changed after enabling reaches no client — the tool is missing, or it offers
+the views of the earlier value, with nothing said either way. Run
+=org-mcp-disable= and =org-mcp-enable= again to publish the new value.
+=org-mcp-filters= and =org-mcp-query-sort-fn= are read at call time, but the
+filter names are in that same description, so a new filter wants the same
+re-enable to be discoverable.
 
 Each entry of =org-mcp-views= is =(NAME . PLIST)=, =NAME= the symbol a call
 names the view by:
