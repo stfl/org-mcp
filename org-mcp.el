@@ -146,6 +146,21 @@ When nil, no sorting is applied."
 (defconst org-mcp--server-id "org-mcp"
   "Server ID for org-mcp MCP server registration.")
 
+(defconst org-mcp-version
+  (eval-when-compile
+    (require 'lisp-mnt)
+    ;; `byte-compile-current-file' names the file while the compiler
+    ;; runs; `bound-and-true-p' because bytecomp is not loaded when this
+    ;; file is loaded from source.
+    (lm-version
+     (or (bound-and-true-p byte-compile-current-file)
+         load-file-name
+         buffer-file-name)))
+  "Version org-mcp reports as `serverInfo.version' in the handshake.
+Read from this file's `Version:' header, at compile time when the
+package is byte-compiled, so it cannot drift from the package
+metadata the way a second copy of the string would.")
+
 ;; Error handling helpers
 
 (defun org-mcp--id-not-found-error (id)
@@ -4893,6 +4908,7 @@ Registrations are reference counted, so a second call needs a second
 already registered keeps the properties it was registered with."
   (mcp-server-lib-register-server
    :id org-mcp--server-id
+   :version org-mcp-version
    :tools
    (append
     org-mcp--core-tool-specs

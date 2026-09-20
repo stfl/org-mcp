@@ -939,11 +939,15 @@ setup outside requests may still create IDs."
      (unwind-protect
          ;; `org-mcp-enable' registers the server record itself, so the
          ;; helper leaves it alone and `initialize' reports org-mcp's own
-         ;; serverInfo rather than the helper's test values.
+         ;; serverInfo rather than the helper's test values.  The version
+         ;; is spelled out rather than taken from `org-mcp-version', so
+         ;; that this pins what a client receives instead of re-deriving
+         ;; it from the same header the server reads.  A release bumps it
+         ;; here too.
          (prog1 (mcp-server-lib-ert-with-server
                   :tools t
                   :resources t
-                  :version mcp-server-lib-default-server-version
+                  :version "0.9.0"
                   ,@body)
            (should-not org-mcp-test--created-ids))
        (org-mcp-disable)
