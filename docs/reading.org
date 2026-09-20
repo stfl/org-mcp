@@ -387,7 +387,8 @@ change]]). =digest= covers the node's whole subtree: its heading, its body, its
 drawers and every descendant under it, up to where the next heading of the same
 level or a shallower one begins — the whole file, for a file node.
 =content_digest= covers the body alone, exactly the region =content= is read
-from and =org-node-set-content= writes within, which for a file is its preamble.
+from: for a heading, the region =org-node-set-content= writes within, and for a
+file, its preamble.
 
 A token is opaque. It says which version of a region you read, and the way to
 use one is to send back the token you were given. How org-mcp builds one is
