@@ -270,12 +270,12 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
-  - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). In append mode it is the content to append and cannot be empty or whitespace-only
   - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
-- *Special behavior (replace mode):* When =before= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
+- *Special behavior (replace mode):* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
 Example:
 #+begin_src json

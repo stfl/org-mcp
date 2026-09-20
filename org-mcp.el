@@ -3133,7 +3133,8 @@ MCP Parameters:
                     (string-empty-p after)
                     (string-match-p "\\`[[:space:]]*\\'" after))
             (org-mcp--tool-validation-error
-             "after cannot be empty or whitespace-only"))
+             "after is the content to append and cannot be empty or \
+whitespace-only"))
 
           (org-mcp--validate-body-no-unbalanced-blocks after)
 
@@ -3197,7 +3198,8 @@ MCP Parameters:
                         (string-match-p
                          "\\`[[:space:]]*\\'" body-content)))
                   (org-mcp--tool-validation-error
-                   "Cannot use empty before with non-empty body")
+                   "An empty before asserts the node has no content, \
+and this node has some; send the part of the content to replace")
                 ;; Normal occurrence counting
                 (let ((case-fold-search nil)
                       (search-pos 0))
@@ -4595,6 +4597,8 @@ Parameters:
   after - Replacement or appended text (string, required)
           Cannot introduce headlines at same or higher level
           Must maintain balanced #+BEGIN/#+END blocks
+          In append mode it is the content to append and cannot
+          be empty or whitespace-only
   append - Append instead of replacing (optional, default false):
            true or \"true\" append; false, \"false\" and null
            replace; any other value is refused
@@ -4612,10 +4616,10 @@ Returns JSON object:
          CUSTOM_ID, else file:{path}::*{title}
 
 Special behavior - Empty before (replace mode):
-  When before is \"\", the tool adds content to empty nodes:
-  - Only works if node body is empty or whitespace-only
-  - Error if node already has content
-  - Useful for adding initial content to newly created headlines")
+  An empty before asserts the node has no content:
+  - It is how initial content reaches a node that has none
+  - A node that already has content is refused, and the refusal
+    asks for the part of the content to replace")
     :read-only nil)
    ;; Entry update tools
    (list

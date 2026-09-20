@@ -5353,15 +5353,22 @@ content here."
        (org-mcp-test--file-link test-file "*Third Child #3")))))
 
 (ert-deftest org-mcp-test-edit-body-empty-old-non-empty-body ()
-  "Test error when before is empty but body has content."
+  "An empty before is refused when the node already has content.
+The refusal names the assertion the call made, what the tool found
+instead and what to send in its place, because a client has only the
+message to act on."
   (org-mcp-test--with-id-setup test-file
       org-mcp-test--content-nested-siblings
       `(,org-mcp-test--content-with-id-id)
-    (org-mcp-test--call-edit-body-expecting-error
-     test-file
-     org-mcp-test--content-with-id-link
-     "" ; Empty before
-     "replacement")))
+    (should
+     (string=
+      "An empty before asserts the node has no content, \
+and this node has some; send the part of the content to replace"
+      (org-mcp-test--call-tool-expecting-error
+       test-file "org-node-set-content"
+       `((link . ,org-mcp-test--content-with-id-link)
+         (before . "")
+         (after . "replacement")))))))
 
 (ert-deftest org-mcp-test-edit-body-empty-with-properties ()
   "Test adding content to empty body with properties drawer.
@@ -8489,6 +8496,25 @@ not membership in the configured alist."
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-append-body-empty))))
+
+(ert-deftest org-mcp-test-edit-body-append-empty-after ()
+  "Append mode refuses an empty or whitespace-only after.
+The refusal says what after is on an append call, so a client reading
+it knows which argument to fix and what it is for."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-empty-body))
+    (let ((link (org-mcp-test--file-link test-file "*Empty Body Task")))
+      (dolist (after '("" "  " "\n\t"))
+        (should
+         (string=
+          "after is the content to append and cannot be empty or \
+whitespace-only"
+          (org-mcp-test--call-tool-expecting-error
+           test-file "org-node-set-content"
+           `((link . ,link)
+             (before . "")
+             (after . ,after)
+             (append . t)))))))))
 
 (ert-deftest org-mcp-test-edit-body-append-before-children ()
   "Test that appended content goes before child headlines."
