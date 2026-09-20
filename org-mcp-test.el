@@ -162,6 +162,13 @@ This is actually a child of Third Parent, not First Parent!"
   "* TODO Task with Tags :work:urgent:\nTask description."
   "TODO task with tags and body.")
 
+(defconst org-mcp-test--content-inherited-tags
+  "#+FILETAGS: filetag
+* Tagged Parent :ptag:
+** TODO Tagged Child :ctag:
+Child body."
+  "A file tag, a tagged parent and a tagged child below it.")
+
 (defconst org-mcp-test--content-slash-not-nested-before
   "* Parent
 ** Real Child
@@ -3139,11 +3146,13 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-config-tags"
     "org-config-todo"
     "org-node-add-note"
+    "org-node-add-tags"
     "org-node-archive"
     "org-node-create"
     "org-node-delete"
     "org-node-read"
     "org-node-refile"
+    "org-node-remove-tags"
     "org-node-set-content"
     "org-node-set-deadline"
     "org-node-set-priority"
@@ -8522,70 +8531,536 @@ found '<2026-03-15 Sun>'\\'"
 found '<2026-03-15 Sun>'\\'"
      test-file)))
 
-;;; Tests for org-node-set-tags
+;;; Tests for the three tag tools
+;;
+;; org-node-add-tags and org-node-remove-tags name what they change
+;; and assert nothing; org-node-set-tags replaces the set and asserts
+;; the whole of it.  Every test pins the tool's own response as well
+;; as the file: a wrong `before', `after' or `inherited' is what a
+;; client acts on, and a file assertion cannot see it.
 
-(ert-deftest org-mcp-test-set-tags-add ()
-  "Test adding tags to a bare task."
+(defconst org-mcp-test--pattern-tags-one-added
+  (concat
+   "\\`\\* TODO Simple Task[ \t]+:work:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after one tag is added to the bare task.")
+
+(defconst org-mcp-test--pattern-tags-unseen-kept
+  (concat
+   "\\`\\* TODO Task with Tags[ \t]+:work:urgent:personal:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after a third tag joins the two the task carries.")
+
+(defconst org-mcp-test--pattern-tags-one-removed
+  (concat
+   "\\`\\* TODO Task with Tags[ \t]+:urgent:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after one of the task's two tags is removed.")
+
+(defconst org-mcp-test--pattern-tags-work-only
+  (concat
+   "\\`\\* TODO Task with Tags[ \t]+:work:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after a replacement keeps one of the task's two tags.")
+
+(defconst org-mcp-test--content-mutex-tagged
+  "* TODO Task with Tags :work:personal:\nTask description."
+  "A task carrying two tags of one mutually exclusive group.")
+
+(defconst org-mcp-test--pattern-child-tag-restored
+  (concat
+   "\\`#\\+FILETAGS: filetag\n"
+   "\\* Tagged Parent[ \t]+:ptag:\n"
+   "\\*\\* TODO Tagged Child[ \t]+:ctag:\n"
+   "Child body\\.\n?\\'")
+  "Pattern after the child is taken through an add, a remove and a set.")
+
+(defconst org-mcp-test--pattern-child-tag-added
+  (concat
+   "\\`#\\+FILETAGS: filetag\n"
+   "\\* Tagged Parent[ \t]+:ptag:\n"
+   "\\*\\* TODO Tagged Child[ \t]+:ctag:own:\n"
+   "Child body\\.\n?\\'")
+  "Pattern after the child is given a tag of its own.")
+
+(defconst org-mcp-test--pattern-child-tag-copied-down
+  (concat
+   "\\`#\\+FILETAGS: filetag\n"
+   "\\* Tagged Parent[ \t]+:ptag:\n"
+   "\\*\\* TODO Tagged Child[ \t]+:ctag:ptag:\n"
+   "Child body\\.\n?\\'")
+  "Pattern after the parent's tag is written on the child as well.
+Reached only with inheritance off, where the child does not have
+that tag until it is written there.")
+
+(defun org-mcp-test--call-tag-tool (tool params)
+  "Call TOOL with PARAMS through the MCP boundary, parsing the response."
+  (json-read-from-string (mcp-server-lib-ert-call-tool tool params)))
+
+(defun org-mcp-test--should-report-tags (result before after inherited)
+  "Assert RESULT reports a saved change carrying these three tag fields.
+BEFORE and AFTER are the heading's own tags either side of the call
+and INHERITED the tags in effect on it from elsewhere, each as the
+vector the response carries."
+  (should (equal (alist-get 'success result) t))
+  (should (eq (alist-get 'saved result) t))
+  (should (equal (alist-get 'before result) before))
+  (should (equal (alist-get 'after result) after))
+  (should (equal (alist-get 'inherited result) inherited)))
+
+(ert-deftest org-mcp-test-add-tags-two-adds-in-a-row-both-land ()
+  "Two calls adding different tags each keep what the other added.
+Add destroys nothing, which is why it needs no assertion: the second
+call plans from a heading the first has already changed, and it is
+still right."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((org-tag-alist '("work" "personal" "urgent"))
-           (link (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,link)
-                     (after . ["work" "urgent"])))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (eq (alist-get 'saved result) t))
-      (should (equal (alist-get 'before result) []))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "work")))
+       [] ["work"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-one-added)
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "urgent")))
+       ["work"] ["work" "urgent"] [])
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-set))))
 
-(ert-deftest org-mcp-test-set-tags-replace ()
-  "Test replacing existing tags."
+(ert-deftest org-mcp-test-add-tags-a-tag-already-there-is-a-no-op ()
+  "Adding a tag the heading carries leaves the file byte for byte.
+It is written once and not twice, and the call that asks for nothing
+new writes nothing at all."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-tags))
-    (let* ((org-tag-alist '("work" "personal" "urgent"))
-           (link (org-mcp-test--file-link test-file "*Task with Tags"))
-           (params `((link . ,link)
-                     (after . "personal")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags"))
+          (before (org-mcp-test--read-file test-file)))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "work")))
+       ["work" "urgent"] ["work" "urgent"] [])
+      (should (string= (org-mcp-test--read-file test-file) before)))))
+
+(ert-deftest org-mcp-test-add-tags-a-tag-named-twice-is-added-once ()
+  "A repeated tag in one call is written once, as a set has it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . ["work" "work"])))
+       [] ["work"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-one-added))))
+
+(ert-deftest org-mcp-test-add-tags-keeps-a-tag-the-client-never-saw ()
+  "A tag the call does not name survives it.
+The heading carries two tags and the call names a third, so the two
+it says nothing about are still there afterwards."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "personal")))
+       ["work" "urgent"] ["work" "urgent" "personal"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-unseen-kept))))
+
+(ert-deftest org-mcp-test-add-tags-an-inherited-tag-is-not-copied-down ()
+  "Adding a tag the heading inherits leaves the heading alone.
+The heading has the tag already, and writing it there as well would
+make a local copy of an inherited tag rather than add anything."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil)
+          (link (org-mcp-test--file-link test-file "*Tagged Child"))
+          (before (org-mcp-test--read-file test-file)))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "ptag")))
+       ["ctag"] ["ctag"] ["filetag" "ptag"])
+      (should (string= (org-mcp-test--read-file test-file) before)))))
+
+(ert-deftest org-mcp-test-add-tags-writes-an-uninherited-tag ()
+  "With inheritance off the parent's tag is not the child's until written.
+The policy is Org's, so the same call writes the tag here and leaves
+it alone where the child already inherits it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance nil)
+          (link (org-mcp-test--file-link test-file "*Tagged Child")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-add-tags" `((link . ,link) (after . "ptag")))
+       ["ctag"] ["ctag" "ptag"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-child-tag-copied-down))))
+
+(ert-deftest org-mcp-test-remove-tags-takes-only-what-it-names ()
+  "Removing one tag leaves every other tag where it is."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-remove-tags" `((link . ,link) (after . "work")))
+       ["work" "urgent"] ["urgent"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-one-removed))))
+
+(ert-deftest org-mcp-test-remove-tags-a-tag-that-is-absent-is-a-no-op ()
+  "Removing a tag the heading does not have changes nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags"))
+          (before (org-mcp-test--read-file test-file)))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-remove-tags" `((link . ,link) (after . "personal")))
+       ["work" "urgent"] ["work" "urgent"] [])
+      (should (string= (org-mcp-test--read-file test-file) before)))))
+
+(ert-deftest org-mcp-test-remove-tags-clears-the-tags-a-read-returned ()
+  "Naming every tag a read reported as the heading's own clears them.
+That is one of the two spellings of clearing, and the one that
+asserts nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-remove-tags"
+        `((link . ,link) (after . ["work" "urgent"])))
+       ["work" "urgent"] [] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-clear))))
+
+(ert-deftest org-mcp-test-remove-tags-refuses-an-inherited-tag ()
+  "A tag the heading only inherits cannot be removed here.
+The refusal names the heading the tag is written on, which is where
+removing it would have to happen."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (org-mcp-test--call-tool-refused
+       "org-node-remove-tags"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Tagged Child"))
+         (after . "ptag"))
+       (concat
+        "\\`"
+        (regexp-quote
+         (concat
+          "Cannot remove tag 'ptag': the heading inherits it from "
+          "'Tagged Parent' and does not carry it itself"))
+        "\\'")
+       test-file))))
+
+(ert-deftest org-mcp-test-remove-tags-refuses-a-file-tag ()
+  "A tag the file gives every heading is refused the same way.
+No heading carries it, so the refusal names the file's own line
+rather than an ancestor."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (org-mcp-test--call-tool-refused
+       "org-node-remove-tags"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Tagged Child"))
+         (after . "filetag"))
+       (concat
+        "\\`"
+        (regexp-quote
+         (concat
+          "Cannot remove tag 'filetag': the heading inherits it from "
+          "the file's #+FILETAGS: and does not carry it itself"))
+        "\\'")
+       test-file))))
+
+(ert-deftest org-mcp-test-set-tags-replaces-the-asserted-set ()
+  "A set the heading carries is accepted and the replacement is written."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((org-tag-alist '("work" "personal" "urgent"))
+          (link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link)
+          (before . ["work" "urgent"])
+          (after . "personal")))
+       ["work" "urgent"] ["personal"] [])
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-replace))))
 
-(ert-deftest org-mcp-test-set-tags-clear ()
-  "Test clearing all tags."
+(ert-deftest org-mcp-test-set-tags-before-is-compared-as-a-set ()
+  "The order tags are asserted in makes no difference.
+Org writes tags in an order, but that order says nothing, so the
+assertion is a comparison of sets."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-tags))
-    (let* ((link (org-mcp-test--file-link test-file "*Task with Tags"))
-           (params `((link . ,link)))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'after result) []))
+    (let ((org-tag-alist '("work" "personal" "urgent"))
+          (link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link)
+          (before . ["urgent" "work"])
+          (after . "personal")))
+       ["work" "urgent"] ["personal"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-replace))))
+
+(ert-deftest org-mcp-test-set-tags-destroys-a-tag-the-client-never-saw ()
+  "Replacement takes away every tag the call does not list.
+That is the whole difference between the deltas and this tool, and
+it is why this one asserts the entire prior set: a client that sent
+a stale set would be destroying a tag it had never read."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link)
+          (before . ["work" "urgent"])
+          (after . "work")))
+       ["work" "urgent"] ["work"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-work-only))))
+
+(ert-deftest org-mcp-test-set-tags-refuses-a-stale-before ()
+  "A prior set the heading does not carry is a conflict.
+The refusal names both sets in one order, since what it reports is a
+comparison of sets and an order in the message would invite a reader
+to look for a difference that is not there."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-tags"
+     `((link
+        .
+        ,(org-mcp-test--file-link test-file "*Task with Tags"))
+       (before . ["work"])
+       (after . ["personal"]))
+     (concat
+      "\\`"
+      (regexp-quote
+       "conflict: Tags mismatch: expected 'work', found 'urgent, work'")
+      "\\'")
+     test-file)))
+
+(ert-deftest org-mcp-test-set-tags-empty-before-asserts-no-own-tags ()
+  "An empty prior set asserts that the heading carries none of its own.
+It is an assertion like any other, not a parameter left blank."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link) (before . []) (after . ["work" "urgent"])))
+       [] ["work" "urgent"] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-set))))
+
+(ert-deftest org-mcp-test-set-tags-empty-before-on-a-tagged-heading ()
+  "An empty prior set is refused where the heading carries tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-tags"
+     `((link
+        .
+        ,(org-mcp-test--file-link test-file "*Task with Tags"))
+       (before . [])
+       (after . ["personal"]))
+     (concat
+      "\\`"
+      (regexp-quote
+       "conflict: Tags mismatch: expected '(no tags)', \
+found 'urgent, work'")
+      "\\'")
+     test-file)))
+
+(ert-deftest org-mcp-test-set-tags-clears-with-an-empty-after ()
+  "An empty set written leaves the heading no tags of its own.
+That is the other spelling of clearing, and the one that pays for it
+by asserting the whole set it destroys."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link) (before . ["work" "urgent"]) (after . [])))
+       ["work" "urgent"] [] [])
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-tags-clear))))
+
+(ert-deftest org-mcp-test-set-tags-asserts-own-tags-not-inherited-ones ()
+  "The prior set is the heading's own tags, never the set in effect.
+The call writes local tags only, so asserting what the heading
+inherits would assert values it cannot change and would refuse
+because an ancestor was edited."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil)
+          (link (org-mcp-test--file-link test-file "*Tagged Child")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link) (before . ["ctag"]) (after . ["ctag" "own"])))
+       ["ctag"] ["ctag" "own"] ["filetag" "ptag"])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-child-tag-added))))
+
+(ert-deftest org-mcp-test-set-tags-refuses-an-effective-set-as-before ()
+  "Asserting the tags in effect is refused where they differ from the own set.
+A client that sent what a read returned under `tags' rather than
+under `local_tags' is told which of the two the tool compares."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-tags"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Tagged Child"))
+         (before . ["ctag" "ptag" "filetag"])
+         (after . ["ctag" "own"]))
+       (concat
+        "\\`"
+        (regexp-quote
+         "conflict: Tags mismatch: expected 'ctag, filetag, ptag', \
+found 'ctag'")
+        "\\'")
+       test-file))))
+
+(ert-deftest org-mcp-test-tag-tools-refuse-a-blank-tag-set ()
+  "A blank tag set is a parameter left out, on all three tools.
+Clients fill a parameter they are not using with a blank, so a blank
+that cleared the heading's tags would make a well-behaved client
+destroy them.  `[]' is how a call says the empty set."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (dolist (blank '("" :json-false nil))
+        (dolist (tool '("org-node-add-tags" "org-node-remove-tags"))
+          (org-mcp-test--call-tool-refused
+           tool
+           `((link . ,link) (after . ,blank))
+           "\\`Missing required parameter: after\\'"
+           test-file))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ["work" "urgent"]) (after . ,blank))
+         "\\`Missing required parameter: after\\'"
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ,blank) (after . ["personal"]))
+         "\\`Missing required parameter: before\\'"
+         test-file)))))
+
+(ert-deftest org-mcp-test-tag-tools-refuse-an-omitted-tag-set ()
+  "A tag set left out altogether is refused before anything is read.
+The parameter is the assertion on org-node-set-tags and the change
+itself on the other two, so none of them has a meaning without it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (dolist (tool '("org-node-add-tags" "org-node-remove-tags"))
+        (org-mcp-test--call-tool-refused
+         tool `((link . ,link))
+         "\\`Missing required parameter: after\\'" test-file))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-tags" `((link . ,link) (after . ["personal"]))
+       "\\`Missing required parameter: before\\'" test-file))))
+
+(ert-deftest org-mcp-test-tag-tools-publish-their-parameters-as-required ()
+  "The schema says which tag parameters a call must carry.
+A client discovers them there and never from the handler, so a
+parameter published as optional is a guard that is off whatever the
+handler then does with it."
+  (org-mcp-test--with-enabled
+    (dolist (id '("org-node-add-tags" "org-node-remove-tags"))
+      (should
+       (equal (org-mcp-test--registered-tool-required id)
+              '("link" "after"))))
+    (should
+     (equal (org-mcp-test--registered-tool-required "org-node-set-tags")
+            '("link" "before" "after")))))
+
+(ert-deftest org-mcp-test-tag-tools-write-own-tags-alike-under-inheritance ()
+  "The three tools treat a heading's own tags the same either way.
+Inheritance decides what a heading has from elsewhere, and the tools
+write what it has itself, so the same run over the same child leaves
+the same file and reports the same own sets whether inheritance is
+on or off.  Only `inherited' differs, which is the one field that is
+about the setting."
+  (dolist (inheritance '(t nil))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-inherited-tags))
+      (let* ((org-use-tag-inheritance inheritance)
+             (org-tags-exclude-from-inheritance nil)
+             (elsewhere
+              (if inheritance
+                  ["filetag" "ptag"]
+                []))
+             (link (org-mcp-test--file-link test-file "*Tagged Child")))
+        (org-mcp-test--should-report-tags
+         (org-mcp-test--call-tag-tool
+          "org-node-add-tags" `((link . ,link) (after . "own")))
+         ["ctag"] ["ctag" "own"] elsewhere)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-child-tag-added)
+        (org-mcp-test--should-report-tags
+         (org-mcp-test--call-tag-tool
+          "org-node-remove-tags" `((link . ,link) (after . "ctag")))
+         ["ctag" "own"] ["own"] elsewhere)
+        (org-mcp-test--should-report-tags
+         (org-mcp-test--call-tag-tool
+          "org-node-set-tags"
+          `((link . ,link) (before . ["own"]) (after . ["ctag"])))
+         ["own"] ["ctag"] elsewhere)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-child-tag-restored)))))
 
 (ert-deftest org-mcp-test-set-tags-invalid-name ()
   "Test that invalid tag names are rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
-      (org-mcp-test--assert-error-and-file
-       test-file
-       (let* ((request
-               (mcp-server-lib-create-tools-call-request
-                "org-node-set-tags" 1
-                `((link . ,link)
-                  (after . "invalid tag!"))))
-              (response (mcp-server-lib-process-jsonrpc-parsed
-                         request mcp-server-lib-ert-server-id))
-              (result (mcp-server-lib-ert-process-tool-response response)))
-         (error "Expected error but got success: %s" result))))))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-tags"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (before . [])
+       (after . "invalid tag!"))
+     "\\`Invalid tag name: invalid tag!\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-tags-invalid-name ()
+  "A name Org could not have written is refused rather than passed over.
+Removing it would change nothing, but the call is a mistake and
+saying so is more use than silence."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-tags"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (after . "invalid tag!"))
+     "\\`Invalid tag name: invalid tag!\\'"
+     test-file)))
 
 (ert-deftest org-mcp-test-set-tags-free-form-with-alist ()
   "Free-form tags are accepted even when `org-tag-alist' is configured.
@@ -8593,33 +9068,49 @@ Org permits free-form tags, so we only enforce `org-tag-re' here,
 not membership in the configured alist."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let* ((org-tag-alist '("work" "personal"))
-           (link (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,link)
-                     (after . "nonexistent")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'after result) ["nonexistent"])))))
+    (let ((org-tag-alist '("work" "personal"))
+          (link (org-mcp-test--file-link test-file "*Simple Task")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-set-tags"
+        `((link . ,link) (before . []) (after . "nonexistent")))
+       [] ["nonexistent"] []))))
 
 (ert-deftest org-mcp-test-set-tags-mutex-violation ()
   "Test that mutually exclusive tags are rejected."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-tag-alist '(:startgroup "work" "personal" :endgroup "urgent"))
-          (link (org-mcp-test--file-link test-file "*Simple Task")))
-      (org-mcp-test--assert-error-and-file
-       test-file
-       (let* ((request
-               (mcp-server-lib-create-tools-call-request
-                "org-node-set-tags" 1
-                `((link . ,link)
-                  (after . ["work" "personal"]))))
-              (response (mcp-server-lib-process-jsonrpc-parsed
-                         request mcp-server-lib-ert-server-id))
-              (result (mcp-server-lib-ert-process-tool-response response)))
-         (error "Expected error but got success: %s" result))))))
+    (let ((org-tag-alist
+           '(:startgroup "work" "personal" :endgroup "urgent")))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-tags"
+       `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+         (before . [])
+         (after . ["work" "personal"]))
+       (concat
+        "\\`"
+        (regexp-quote
+         "Tags 'work', 'personal' are mutually exclusive \
+(cannot use together)")
+        "\\'")
+       test-file))))
+
+(ert-deftest org-mcp-test-remove-tags-ignores-mutex-groups ()
+  "Two tags of one group can be removed together.
+Mutual exclusivity is a rule about what a heading ends up carrying,
+and a call that only takes tags away cannot break it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-mutex-tagged))
+    (let ((org-tag-alist
+           '(:startgroup "work" "personal" :endgroup "urgent"))
+          (link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (org-mcp-test--should-report-tags
+       (org-mcp-test--call-tag-tool
+        "org-node-remove-tags"
+        `((link . ,link) (after . ["work" "personal"])))
+       ["work" "personal"] [] [])
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-tags-clear))))
 
 (ert-deftest org-mcp-test-set-tags-id-link ()
   "Test setting tags via an `id:' link."
@@ -8628,11 +9119,23 @@ not membership in the configured alist."
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
-          (params `((link . ,link)
-                    (after . "work")))
-          (result-text
-           (mcp-server-lib-ert-call-tool "org-node-set-tags" params))
-          (result (json-read-from-string result-text)))
+          (result
+           (org-mcp-test--call-tag-tool
+            "org-node-set-tags"
+            `((link . ,link) (before . []) (after . "work")))))
+     (should (equal (alist-get 'success result) t))
+     (should (equal (alist-get 'link result) link)))))
+
+(ert-deftest org-mcp-test-add-tags-id-link ()
+  "Test adding a tag via an `id:' link."
+  (org-mcp-test--with-id-setup
+   test-file
+   org-mcp-test--content-todo-with-test-id
+   `(,org-mcp-test--crud-test-id)
+   (let* ((link (concat "id:" org-mcp-test--crud-test-id))
+          (result
+           (org-mcp-test--call-tag-tool
+            "org-node-add-tags" `((link . ,link) (after . "work")))))
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'link result) link)))))
 
@@ -9491,13 +9994,6 @@ has its body up to the end of its subtree.  The file stays unchanged."
 ;; `org-use-tag-inheritance' and `org-tags-exclude-from-inheritance'
 ;; around the call and assert what every read path returns under it.
 
-(defconst org-mcp-test--content-inherited-tags
-  "#+FILETAGS: filetag
-* Tagged Parent :ptag:
-** TODO Tagged Child :ctag:
-Child body."
-  "A file tag, a tagged parent and a tagged child below it.")
-
 (defun org-mcp-test--read-tags (file headline field)
   "Return FIELD of HEADLINE in FILE as a list, read through org-node-read.
 FIELD is `tags' or `local_tags'."
@@ -10283,7 +10779,7 @@ heading, and a tool that needs a heading refuses it."
         "does not point to a heading"
         (org-mcp-test--call-tool-expecting-error
          test-file "org-node-set-tags"
-         `((link . ,(format "file:%s" test-file)) (after . "work")))))
+         `((link . ,(format "file:%s" test-file)) (before . []) (after . "work")))))
       (org-mcp-test--add-todo-and-check
        "New Task" "TODO" nil nil (format "file:%s" test-file) nil
        (file-name-nondirectory test-file)
@@ -10335,7 +10831,7 @@ heading at the top level of the file."
                       "* Existing"))
                     (org-mcp-test--call-tool-refused
                      "org-node-set-tags"
-                     (funcall with-files `((link . ,link) (after . "work")))
+                     (funcall with-files `((link . ,link) (before . []) (after . "work")))
                      (concat
                       "\\`Link does not point to a heading: "
                       (regexp-quote link) "\\'")
@@ -10449,7 +10945,7 @@ file, the buffer of the running clock, nor the running clock changes."
       (let ((result
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
-               "org-node-set-tags" `((link . ,link) (after . "work"))))))
+               "org-node-set-tags" `((link . ,link) (before . []) (after . "work"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--regex-links-beta-tagged)))))
@@ -10463,7 +10959,7 @@ file, the buffer of the running clock, nor the running clock changes."
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
                "org-node-set-tags"
-               `((link . ,(format form test-file)) (after . "work"))))))
+               `((link . ,(format form test-file)) (before . []) (after . "work"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--regex-links-alpha-tagged)))))
@@ -10477,7 +10973,7 @@ file, the buffer of the running clock, nor the running clock changes."
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
                "org-node-set-tags"
-               `((link . ,(format form test-file)) (after . "work"))))))
+               `((link . ,(format form test-file)) (before . []) (after . "work"))))))
         (should (equal (alist-get 'success result) t))
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--regex-links-gamma-tagged)))))
@@ -10607,7 +11103,7 @@ file, the buffer of the running clock, nor the running clock changes."
                     (format "file+sys:%s::*Gamma" test-file)))
             (dolist (call
                      `(("org-node-text" (link . ,link))
-                       ("org-node-set-tags" (link . ,link) (after . "work"))))
+                       ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))))
               (should
                (string-match-p
                 "not supported"
@@ -10636,7 +11132,7 @@ file, the buffer of the running clock, nor the running clock changes."
               "[[/ssh:nonexistent.invalid:/tmp/notes.org::*Gamma]]"))
       (dolist (call
                `(("org-node-text" (link . ,link))
-                 ("org-node-set-tags" (link . ,link) (after . "work"))))
+                 ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))))
         (should
          (string-match-p
           "Send a full path"
@@ -10727,7 +11223,7 @@ remote method records no operation."
                     (format "[[file:%s::*Task][Task]]" path)))
             (dolist (call
                      `(("org-node-text" (link . ,link))
-                       ("org-node-set-tags" (link . ,link) (after . "work"))
+                       ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))
                        ("org-node-create"
                         (title . "New Task")
                         (todo . "TODO")
@@ -10773,7 +11269,7 @@ without `#' carries no hint."
                          (format "[[%s#missing#]]" dir)))
             (dolist (call
                      `(("org-node-text" (link . ,link))
-                       ("org-node-set-tags" (link . ,link) (after . "work"))))
+                       ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))))
               (should
                (string-match-p
                 (concat
@@ -10841,7 +11337,7 @@ unchanged."
          (concat "\\`Cannot resolve link " (regexp-quote escaped))
          escaped-file)
         (org-mcp-test--call-tool-refused
-         "org-node-set-tags" `((link . ,escaped) (after . "oops"))
+         "org-node-set-tags" `((link . ,escaped) (before . []) (after . "oops"))
          (concat "\\`Cannot resolve link " (regexp-quote escaped))
          escaped-file)))))
 
@@ -10866,7 +11362,7 @@ unchanged."
           (link (format "file:%s::*Gamma" other-file)))
       (dolist (call
                `(("org-node-text" (link . ,link))
-                 ("org-node-set-tags" (link . ,link) (after . "work"))))
+                 ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))))
         (should
          (string-match-p
           "not in allowed list"
@@ -10885,7 +11381,7 @@ unchanged."
       (let ((link (format "id:%s" org-mcp-test--link-beta-id)))
         (dolist (call
                  `(("org-node-text" (link . ,link))
-                   ("org-node-set-tags" (link . ,link) (after . "work"))))
+                   ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))))
           (let ((message
                  (org-mcp-test--call-tool-expecting-error
                   other-file (car call) (cdr call))))
@@ -10919,7 +11415,7 @@ file, once a file outside the allowed files."
                                   (link . "id:no-such-id"))
                                  ("org-node-set-tags"
                                   (link . "[[id:no-such-id][Gone]]")
-                                  (after . "work"))))
+                                  (before . []) (after . "work"))))
                         (should
                          (string=
                           (org-mcp-test--call-tool-expecting-error
@@ -10954,7 +11450,7 @@ allowed file."
                       (org-mcp-test--call-tool-refused
                        "org-node-text" `((link . ,link)) refusal)
                       (org-mcp-test--call-tool-refused
-                       "org-node-set-tags" `((link . ,link) (after . "work"))
+                       "org-node-set-tags" `((link . ,link) (before . []) (after . "work"))
                        refusal test-file)
                       (should
                        (string-match-p
@@ -11806,7 +12302,7 @@ up in the parent's file."
                         (link . ,link) (before . "") (after . "2026-03-27"))
                        ("org-node-set-deadline"
                         (link . ,link) (before . "") (after . "2026-03-28"))
-                       ("org-node-set-tags" (link . ,link) (after . "work"))
+                       ("org-node-set-tags" (link . ,link) (before . []) (after . "work"))
                        ("org-node-set-priority"
                         (link . ,link) (before . "") (after . "A"))
                        ("org-node-add-note" (link . ,link) (note . "Checked"))
@@ -12341,7 +12837,7 @@ starts with\\.  "
                     (dolist (call
                              `(("org-node-read" (link . ,form))
                                ("org-node-text" (link . ,form))
-                               ("org-node-set-tags" (link . ,form) (after . "work"))
+                               ("org-node-set-tags" (link . ,form) (before . []) (after . "work"))
                                ("org-node-create"
                                 (title . "New Task")
                                 (todo . "TODO")
@@ -12835,7 +13331,7 @@ not an id: or file: link to the heading")
                    "\\`The change was made, but no link to it could be made: "
                    reason)
                   (org-mcp-test--call-tool-with-error
-                   "org-node-set-tags" `((link . ,gamma) (after . "work")))))
+                   "org-node-set-tags" `((link . ,gamma) (before . []) (after . "work")))))
                 (org-mcp-test--verify-file-matches
                  test-file org-mcp-test--regex-links-gamma-tagged)
                 (org-mcp-test--verify-no-modified-buffer test-file))
@@ -12872,7 +13368,7 @@ each link leads a later write to its own heading."
               (json-read-from-string
                (mcp-server-lib-ert-call-tool
                 "org-node-set-tags"
-                `((link . ,(org-mcp-test--file-link test-file "*Beta")) (after . "work"))))))
+                `((link . ,(org-mcp-test--file-link test-file "*Beta")) (before . []) (after . "work"))))))
             (delta
              (alist-get
               'link (org-mcp-test--set-seen (org-mcp-test--file-link test-file "*Delta")))))
@@ -14102,7 +14598,7 @@ change never touched keeps its token, which is why there are two."
        `((link
           .
           ,(org-mcp-test--file-link test-file "*Grandchild"))
-         (after . ["later"])))
+         (before . []) (after . ["later"])))
       (let ((after (org-mcp-test--read-fields link fields)))
         (should-not
          (equal (alist-get 'digest after) (alist-get 'digest before)))
@@ -15318,7 +15814,7 @@ entire, so that is what it asserts."
       (mcp-server-lib-ert-call-tool
        "org-node-set-tags"
        `((link . ,(org-mcp-test--file-link test-file "*Grandchild"))
-         (after . ["later"])))
+         (before . []) (after . ["later"])))
       (org-mcp-test--call-tool-refused
        "org-node-delete"
        `((link . ,link) (before . ,stale))
@@ -16391,7 +16887,7 @@ a replacement that took the whole body with it shows here.")
                  `((link
                     .
                     ,(org-mcp-test--file-link test-file "*Simple Task"))
-                   (after . ["work" "urgent"]))))))
+                   (before . []) (after . ["work" "urgent"]))))))
           (should (equal (alist-get 'success result) t))
           (org-mcp-test--verify-served-matches
            test-file org-mcp-test--dirty-tags-regex)
@@ -16517,7 +17013,7 @@ its way out would be visible."
      ((link . ,link) (before . "") (after . "not-a-date"))
      "\\`Invalid date format 'not-a-date'")
     ("org-node-set-tags"
-     ((link . ,link) (after . "invalid tag!"))
+     ((link . ,link) (before . []) (after . "invalid tag!"))
      "\\`Invalid tag name: invalid tag!")
     ("org-node-set-priority"
      ((link . ,link) (before . "") (after . "Z"))

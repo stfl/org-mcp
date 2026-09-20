@@ -16,7 +16,8 @@ into =properties_set= and =properties_deleted=, and the clock tools report
 fields of their own.
 
 Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
-=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-set-tags=,
+=org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-add-tags=,
+=org-node-remove-tags=, =org-node-set-tags=,
 =org-node-set-priority=, =org-node-set-properties=, =org-node-set-scheduled=,
 =org-node-set-deadline=, =org-node-create=, =org-node-set-title=,
 =org-node-add-note=, =org-node-delete=, =org-node-archive=,
@@ -165,6 +166,11 @@ field as a read returned it — for a timestamp that is the raw Org string,
 brackets, repeater and delay included, and not the ISO shorthand =after= also
 takes, because comparing an input spelling against a stored one would refuse
 writes over a difference the file does not have.
+
+A change that destroys nothing asserts nothing, and that is a fact about the
+call rather than a concession: adding a tag and removing one name what they
+change and leave the rest of the set alone, so neither takes a =before=, while
+replacing the set takes the whole of it (see [[*Three tools for one tag set]]).
 
 The three tools that take a whole node away require it. =digest= is what their
 =before= holds, and they take no =after=: the verb is the change. Nothing
@@ -558,30 +564,149 @@ Example:
 }
 #+end_src
 
-** org-node-set-tags
-- *Description:* Set tags on an Org headline, replacing any existing tags
+** Three tools for one tag set
+
+Tags have three write tools. =org-node-add-tags= and =org-node-remove-tags= are
+deltas: each names the tags it changes and leaves every other tag alone.
+=org-node-set-tags= is a replacement: it writes the set you give it and takes
+away everything else.
+
+Which of them needs a precondition follows from what it destroys. A delta
+destroys only what the call names, so a tag you never read survives it and there
+is nothing unseen to assert — neither delta takes a =before=. A replacement
+destroys every tag the call does not list, tags you never read included, so it
+asserts the whole prior set. It is the same rule the whole-node verbs follow at
+a wider radius: you assert what you are about to destroy, at the size you are
+about to destroy it (see [[*Knowing what you are about to change]]).
+
+So a client that knows which tags it means to change reaches for a delta and
+pays nothing, and a client that means to impose an exact set pays for the blast
+radius it chose.
+
+All three write the tags on the headline itself and leave inherited ones where
+they are, and all three report that partition back: =before= and =after= are the
+headline's own tags, =inherited= the tags in effect on it from elsewhere. Those
+are the =local_tags= and the rest of the =tags= of a read (see [[file:reading.org::*The two tag fields][The two tag fields]]).
+The =before= of =org-node-set-tags= is the own set too — never the set in
+effect. The call writes local tags only, so asserting the effective set would
+assert values it cannot change, and would refuse because an /ancestor/ was
+edited.
+
+Clearing a headline's tags has two spellings and neither is a blank parameter:
+name the tags a read returned as its own to =org-node-remove-tags=, or send
+=after: []= to =org-node-set-tags= with the full prior own set in =before=. A
+blank =after= — =""=, =null= or =false= — is a required parameter left out and
+is refused on all three, because that is what a client sends for a parameter it
+is not using, and a blank that cleared the set would let a well-behaved client
+destroy it.
+
+** org-node-add-tags
+- *Description:* Add tags to an Org headline, leaving its other tags alone
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =after= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =after= (string or array, required): Single tag ="work"= or array =["work", "urgent"]=. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= and =after= arrays, plus the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
-The tool writes the tags on the headline itself and leaves inherited ones where
-they are, so the response's =before= and =after= are that headline's own tags —
-the =local_tags= of a read, not its =tags= (see [[file:reading.org::*The two tag fields][The two tag fields]]).
+A tag the headline already has is left alone rather than written a second time,
+whether it has it of its own or by inheritance — writing an inherited tag on the
+headline would make a local copy of it rather than add anything. So the call is
+idempotent, and two clients adding different tags both keep theirs.
+
+A call that asks for nothing the headline does not already have writes nothing
+at all, and the file is left byte for byte as it was.
 
 Example:
 #+begin_src json
-# Set tags:
+# Add one tag:
+{
+  "link": "id:abc-123",
+  "after": "urgent"
+}
+#+end_src
+
+** org-node-remove-tags
+- *Description:* Remove tags from an Org headline, leaving its other tags alone
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =after= (string or array, required): Single tag ="work"= or array =["work", "urgent"]=. Every other tag is left alone
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+
+A tag the headline does not have is nothing to take away and the call passes
+over it. A tag it only /inherits/ is refused, and the refusal names the headline
+the tag is written on, or the file when =#+FILETAGS:= is where it comes from:
+
+#+begin_example
+Cannot remove tag 'work': the heading inherits it from 'Project Alpha' and does not carry it itself
+#+end_example
+
+That refusal is unmarked validation rather than a conflict. Nothing about your
+belief is stale — a read showing the tag under =tags= and not under =local_tags=
+said exactly this — so reading again resolves nothing, and Org vetoed nothing
+either. What has to change is the call: drop the tag from it, or address the
+headline that carries it.
+
+Two tags of one mutually exclusive group can be removed together: the group is a
+rule about the tags a headline ends up carrying, and a call that only takes tags
+away cannot break it.
+
+Example:
+#+begin_src json
+# Remove one tag:
+{
+  "link": "id:abc-123",
+  "after": "urgent"
+}
+
+# Clear the tags a read returned as the headline's own:
 {
   "link": "id:abc-123",
   "after": ["work", "urgent"]
 }
+#+end_src
 
-# Clear all tags:
+** org-node-set-tags
+- *Description:* Replace the tags written on an Org headline
+- *Parameters:*
+  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here
+  - =after= (string or array, required): Single tag ="work"= or array =["work", "urgent"]=. =[]= leaves the headline carrying no tags of its own. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
+- *Refuses with:* =conflict:= when =before= is not the set the headline carries, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+The call takes away every tag it does not list, so =before= asserts the entire
+prior set rather than the part of it you mean to change. A refusal names both
+sets, each written in one order, because what it reports is a comparison of sets
+and an order would invite you to look for a difference that is not there.
+
+Example:
+#+begin_src json
+# Replace the set:
 {
-  "link": "id:abc-123"
+  "link": "id:abc-123",
+  "before": ["work"],
+  "after": ["work", "urgent"]
+}
+
+# Leave the headline no tags of its own:
+{
+  "link": "id:abc-123",
+  "before": ["work", "urgent"],
+  "after": []
+}
+
+# The set has moved on since you read it:
+{
+  "error": "conflict: Tags mismatch: expected 'work', found 'urgent, work'"
+}
+
+# A headline that carries no tags of its own:
+{
+  "error": "conflict: Tags mismatch: expected '(no tags)', found 'urgent, work'"
 }
 #+end_src
 

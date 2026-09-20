@@ -54,8 +54,8 @@ a call chooses otherwise, each in either direction: naming =content= in
 computed fields out of a match list that does not need them.
 
 Both tag fields come with a result asked nothing, so a client about to replace a
-heading's tags works from =local_tags= without reading the heading again (see
-[[file:reading.org::*The two tag fields][The two tag fields]]).
+heading's tags has the =local_tags= that =org-node-set-tags= asserts without
+reading the heading again (see [[file:reading.org::*The two tag fields][The two tag fields]]).
 
 ** org-view
 - *Description:* Run a named view — a question the workflow has a name for — restricted by a named filter, at a named range
