@@ -13332,6 +13332,26 @@ surface."
       (should (equal (org-mcp-test--read-fields link []) default))
       (should (equal (org-mcp-test--read-fields link "") default)))))
 
+(ert-deftest org-mcp-test-fields-default-says-the-digests-are-out ()
+  "A tool's description says the digests are not in its default.
+It is the text a model reads before deciding whether it must ask for
+a digest, so a description promising every field is the one that
+sends a client into a write with no token to assert with.  The node a
+default read returns is checked against the same claim, so the
+sentence and the list cannot drift apart."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (dolist (tool '("org-node-read" "org-query"))
+      (should
+       (string-match-p
+        "Defaults to every field below[^.]*digests"
+        (org-mcp-test--registered-tool-description tool))))
+    (let ((node
+           (org-mcp-test--read-fields
+            (concat "id:" org-mcp-test--node-shape-parent-id) nil)))
+      (should-not (assq 'digest node))
+      (should-not (assq 'content_digest node)))))
+
 (ert-deftest org-mcp-test-fields-unknown-name-refused ()
   "A field that does not exist is refused, naming the ones that do.
 Silently leaving it out would hand a client a node missing the field

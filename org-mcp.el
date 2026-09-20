@@ -5979,7 +5979,9 @@ Parameters:
          org:// resource URI, is refused.
   fields - How much of the node to return (array of strings, or a
           string, optional)
-          Defaults to every field below.
+          Defaults to every field below but the two digests: a
+          digest is for a call about to change something, so no
+          node is hashed unasked; naming one asks for exactly that.
 "
      org-mcp--fields-description
      "  depth - How many generations of children to expand in place
@@ -6072,9 +6074,9 @@ Parameters:
             (deadline :to today)
   fields - How much of each matching node to return (array of
           strings, or a string, optional)
-          Defaults to every field below but content and children,
-          which a match list would read every matched subtree to
-          fill; naming either asks for exactly that.
+          Defaults to every field below but content, children and
+          the two digests, which a match list would read every
+          matched subtree to fill; naming one asks for exactly that.
 "
      org-mcp--fields-description
      "  properties - Which Org drawer properties to return (array of
