@@ -410,10 +410,12 @@ to see of them, so a node read without its children still carries a token over
 the subtree below it.
 
 Read a token on the read immediately before you act on it, rather than from a
-list you kept. Both regions take in =:LOGBOOK:= drawers and =CLOCK:= lines,
-which move as notes and clocks are written — including by org-mcp's own clock
-tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier call can name a
-version that the client's own clocking has left behind.
+list you kept. =digest= takes in the heading's =:LOGBOOK:= drawer and its
+=CLOCK:= lines, which move as notes and clocks are written — including by
+org-mcp's own clock tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier
+call can name a version that the client's own clocking has left behind. A body
+starts past those lines, so =content_digest= moves for what is written into the
+body itself, a log note Org keeps outside a drawer among it.
 
 * Available MCP Resources
 

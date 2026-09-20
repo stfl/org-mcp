@@ -298,8 +298,11 @@ it held, and JSON null spells the same empty assertion \"\" does.
 BEFORE is a required parameter, so it never meets
 `org-mcp--blank-param-p': \"\" says there was no value, never that
 the call sent none.  Anything that is neither a string nor null is a
-malformed call.  A value that disagrees with FOUND is a conflict, and
-CONTEXT names the field the refusal reports."
+malformed call, and so is a digest, which
+`org-mcp--assert-field-value' refuses here on behalf of every field
+setter that asserts this way.  A value that disagrees with FOUND is
+a conflict, and CONTEXT names the field the refusal reports."
+  (org-mcp--assert-field-value before context)
   (let ((asserted
          (cond
           ((null before)
@@ -1700,6 +1703,17 @@ node asked for a digest always carries one."
                                      t))
               0 16)))
 
+(defun org-mcp--digest-form-p (before)
+  "Return non-nil when BEFORE carries a digest rather than a value.
+`before' says what the client believed was there in one of two
+forms — the value itself, or a token over the region that held it —
+and `org-mcp--digest-prefix' is what tells the two apart.  The
+algorithm rides in front of the token rather than in a parameter of
+its own because a value can look like a token: a body of sixteen
+hexadecimal characters is a body a client may assert."
+  (and (stringp before)
+       (string-prefix-p org-mcp--digest-prefix before)))
+
 (defun org-mcp--digest-given (before)
   "Return BEFORE, the subtree digest a whole-node verb asserts with.
 A verb that takes a node away takes every descendant with it, so the
@@ -1711,12 +1725,31 @@ A value in no such form matches no subtree at all.  Calling that a
 malformed call sends the client back to a read for a token; calling
 it a conflict would send it back to read the same file and assert
 with the same value again."
-  (unless (and (stringp before)
-               (string-prefix-p org-mcp--digest-prefix before))
+  (unless (org-mcp--digest-form-p before)
     (org-mcp--tool-validation-error
      "before must be the digest a read of this node returned, starting `%s': %S"
      org-mcp--digest-prefix before))
   before)
+
+(defun org-mcp--assert-field-value (before context)
+  "Refuse the call when BEFORE is a digest where a field's value belongs.
+A digest is a token over a region of the file, and a setter that
+changes one field is not defined over a region: a token over the
+body would refuse a priority change because a clock line moved, and
+a token over the subtree would refuse it because a descendant was
+edited.  That over-sensitivity is what the field-scoped assertion
+exists to avoid, so the two forms of `before' are not
+interchangeable.  CONTEXT names the field, so a refusal says which
+assertion arrived in the wrong form.
+
+The refusal is unmarked, the validation class: no version of the
+file makes a token over a region the value of one field, so reading
+the node again and sending the same token back refuses the call
+again.  What has to change is the call."
+  (when (org-mcp--digest-form-p before)
+    (org-mcp--tool-validation-error
+     "%s is asserted with the value it holds, not with a digest: '%s' covers a region and this call changes one field"
+     context before)))
 
 (defun org-mcp--assert-subtree (digest undone)
   "Refuse unless DIGEST is the digest of the subtree of the heading at point.
@@ -3607,6 +3640,8 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
+  (org-mcp--assert-field-value before "State")
+
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          (actual-prev nil)
@@ -3877,6 +3912,7 @@ MCP Parameters:
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (org-mcp--validate-headline-title after)
+  (org-mcp--assert-field-value before "Title")
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file)))
@@ -3896,12 +3932,152 @@ MCP Parameters:
 
       (org-edit-headline (org-mcp--title-keeping-cookie after)))))
 
+(defun org-mcp--body-occurrences (text body)
+  "Return the number of times TEXT occurs in BODY.
+Letter case matters, as it does in the replacement that follows, so
+a body and an assertion differing only in case are two different
+strings here."
+  (let ((case-fold-search nil)
+        (count 0)
+        (from 0))
+    (while (string-match (regexp-quote text) body from)
+      (setq count (1+ count))
+      (setq from (match-end 0)))
+    count))
+
+(defun org-mcp--replace-whole-body (bounds digest after)
+  "Replace the body region BOUNDS covers with AFTER, asserting DIGEST.
+DIGEST is the `content_digest' a read of the node returned.  What
+the call replaces is the region entire, so what it asserts is the
+region entire: a client that read the body holds a token over it and
+needs no part of it echoed back.
+
+The refusal names the token the call sent and not the one the body
+carries now, for the reason `org-mcp--assert-subtree' gives at the
+other radius: the current token is the one value that would make the
+same call succeed, and a caller asserting a token it never read
+asserts nothing."
+  (unless (string= digest (org-mcp--digest bounds))
+    (org-mcp--tool-conflict-error
+     "Content mismatch: expected '%s'; the body has changed since that read, so read the node again for a current content_digest; nothing was written"
+     digest))
+  (delete-region (car bounds) (cdr bounds))
+  (goto-char (car bounds))
+  (org-mcp--insert-body-text after))
+
+(defun org-mcp--replace-body-substring (bounds before after)
+  "Replace the one occurrence of BEFORE in the body BOUNDS covers.
+AFTER takes its place.  BEFORE is the part of the body the client
+read and means to change, asserted to occur exactly once; \"\"
+asserts the body holds nothing, which is how initial content reaches
+a node that has none.
+
+Every refusal here answers a `before' the client believed it read,
+so every one of them is a conflict: the body the call was planned
+against is not the body the file holds, and the recovery is to read
+the node again and send the replacement against what is there."
+  (let* ((begin (car bounds))
+         (end (cdr bounds))
+         (body (buffer-substring-no-properties begin end))
+         (blank (string-match-p "\\`[[:space:]]*\\'" body)))
+    (cond
+     ((string= before "")
+      (unless blank
+        (org-mcp--tool-conflict-error
+         "An empty before asserts the node has no content, \
+and this node has some; send the part of the content to replace"))
+      (delete-region begin end)
+      (goto-char begin)
+      (org-mcp--insert-body-text after))
+     (blank
+      (org-mcp--tool-conflict-error "Node has no body content"))
+     (t
+      (let ((occurrences (org-mcp--body-occurrences before body)))
+        (cond
+         ((= occurrences 0)
+          (org-mcp--tool-conflict-error "Body text not found: %s"
+                                        before))
+         ((> occurrences 1)
+          (org-mcp--tool-conflict-error
+           "Text appears %d times (must be unique)"
+           occurrences)))
+        (org-mcp--replace-body-content
+         before after body begin end))))))
+
+(defun org-mcp--append-to-body (link after files)
+  "Append AFTER to the body of the node LINK names.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+Appending destroys nothing, so it asserts nothing: the call goes
+through whatever has become of the node since it was read, which is
+why it is no way to retry a refused replacement."
+  (when (or (null after)
+            (string-empty-p after)
+            (string-match-p "\\`[[:space:]]*\\'" after))
+    (org-mcp--tool-validation-error
+     "after is the content to append and cannot be empty or \
+whitespace-only"))
+
+  (org-mcp--validate-body-no-unbalanced-blocks after)
+
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file)))
+
+    (org-mcp--modify-and-save file-path "append body" nil
+      (org-mcp--goto-heading target)
+
+      (org-mcp--validate-body-no-headlines after (org-current-level))
+
+      ;; Save the heading position for the response's link
+      (let ((heading-pos (point)))
+        (goto-char (cdr (org-mcp--body-bounds)))
+        (org-mcp--insert-body-text after)
+        ;; Return to the heading for the response's link
+        (goto-char heading-pos)))))
+
+(defun org-mcp--write-body (link before after files)
+  "Replace part or all of the body of the node LINK names with AFTER.
+BEFORE says what the client believed the body held, in one of the
+two forms it takes, and which form it takes picks what the call
+replaces: the `content_digest' a read returned replaces the body
+entire, and anything else is a substring of the body and replaces
+that substring.  The prefix is the whole of the discrimination, so a
+client that means to rewrite the body says so by asserting the
+region rather than by setting a flag.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'."
+  (org-mcp--validate-body-no-unbalanced-blocks after)
+
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         ;; The replacement leaves point at the end of the new body,
+         ;; which is the first child's heading when there is one; the
+         ;; response links to the heading whose body changed.
+         (heading nil))
+
+    (org-mcp--modify-and-save file-path "edit body" nil
+      (org-mcp--goto-heading target)
+      (setq heading (point-marker))
+
+      (org-mcp--validate-body-no-headlines after (org-current-level))
+
+      (let ((bounds (org-mcp--body-bounds)))
+        (if (org-mcp--digest-form-p before)
+            (org-mcp--replace-whole-body bounds before after)
+          (org-mcp--replace-body-substring bounds before after)))
+
+      (goto-char heading)
+      (set-marker heading nil))))
+
 (defun org-mcp--tool-node-set-content
     (link before after &optional append files)
   "Edit or append to body content of an Org node.
 LINK is the link to the node to edit.
-BEFORE is the substring to search for, asserted unique; append mode
-destroys nothing and does not read it.
+BEFORE is what the client believed the body held: the node's
+`content_digest', which replaces the body entire, or a substring of
+the body, asserted unique, which replaces that substring.  Append
+mode destroys nothing and does not read it.
 AFTER is the replacement or appended text.
 APPEND if non-nil, append AFTER to end of body instead of replacing.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -3914,9 +4090,11 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  before - Substring to replace within the body.  Must be unique.
-           Use \"\" to add to empty nodes.  Append mode does not
-           read it; send \"\".
+  before - What the body holds now, in one of two forms.  A
+           substring of the body, which must be unique, replaces
+           that substring; the content_digest a read of this node
+           returned replaces the body entire.  Use \"\" to add to
+           empty nodes.  Append mode does not read it; send \"\".
   after - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
            default false); true or \"true\" append, false, \"false\"
@@ -3926,113 +4104,9 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let ((append (org-mcp--boolean-param append "append")))
-    (if append
-        ;; Append mode
-        (progn
-          (when (or (null after)
-                    (string-empty-p after)
-                    (string-match-p "\\`[[:space:]]*\\'" after))
-            (org-mcp--tool-validation-error
-             "after is the content to append and cannot be empty or \
-whitespace-only"))
-
-          (org-mcp--validate-body-no-unbalanced-blocks after)
-
-          (let* ((target (org-mcp--link-target link files))
-                 (file-path (plist-get target :file)))
-
-            (org-mcp--modify-and-save file-path "append body" nil
-              (org-mcp--goto-heading target)
-
-              (org-mcp--validate-body-no-headlines
-               after (org-current-level))
-
-              ;; Save the heading position for the response's link
-              (let ((heading-pos (point)))
-                (goto-char (cdr (org-mcp--body-bounds)))
-                (org-mcp--insert-body-text after)
-                ;; Return to the heading for the response's link
-                (goto-char heading-pos)))))
-
-      ;; Replace mode
-      (org-mcp--validate-body-no-unbalanced-blocks after)
-
-      (let*
-          ((target (org-mcp--link-target link files))
-           (file-path (plist-get target :file))
-           ;; The replacement leaves point at the end of the new body,
-           ;; which is the first child's heading when there is one; the
-           ;; response links to the heading whose body changed.
-           (heading nil))
-
-        (org-mcp--modify-and-save file-path "edit body" nil
-          (org-mcp--goto-heading target)
-          (setq heading (point-marker))
-
-          (org-mcp--validate-body-no-headlines
-           after (org-current-level))
-
-          ;; Get body boundaries
-          (let* ((bounds (org-mcp--body-bounds))
-                 (body-begin (car bounds))
-                 (body-end (cdr bounds))
-                 (body-content
-                  (buffer-substring-no-properties
-                   body-begin body-end))
-                 (occurrence-count 0))
-
-            ;; Check if body is empty
-            (when (string-match-p "\\`[[:space:]]*\\'" body-content)
-              ;; Empty BEFORE + empty body -> add content
-              (if (string= before "")
-                  ;; Treat as single replacement
-                  (setq occurrence-count 1)
-                (org-mcp--tool-validation-error
-                 "Node has no body content")))
-
-            ;; Count occurrences (unless already handled above)
-            (unless (= occurrence-count 1)
-              ;; Empty BEFORE with non-empty body is an error
-              (if (and (string= before "")
-                       (not
-                        (string-match-p
-                         "\\`[[:space:]]*\\'" body-content)))
-                  (org-mcp--tool-validation-error
-                   "An empty before asserts the node has no content, \
-and this node has some; send the part of the content to replace")
-                ;; Normal occurrence counting
-                (let ((case-fold-search nil)
-                      (search-pos 0))
-                  (while (string-match
-                          (regexp-quote before) body-content
-                          search-pos)
-                    (setq occurrence-count (1+ occurrence-count))
-                    (setq search-pos (match-end 0))))))
-
-            ;; Validate occurrences
-            (cond
-             ((= occurrence-count 0)
-              (org-mcp--tool-validation-error
-               "Body text not found: %s"
-               before))
-             ((> occurrence-count 1)
-              (org-mcp--tool-validation-error
-               "Text appears %d times (must be unique)"
-               occurrence-count)))
-
-            ;; Perform replacement.  An empty BEFORE got here only with
-            ;; a blank body, which AFTER replaces as a whole.
-            (if (string= before "")
-                (progn
-                  (delete-region body-begin body-end)
-                  (goto-char body-begin)
-                  (org-mcp--insert-body-text after))
-              (org-mcp--replace-body-content
-               before after body-content body-begin body-end)))
-
-          (goto-char heading)
-          (set-marker heading nil))))))
+  (if (org-mcp--boolean-param append "append")
+      (org-mcp--append-to-body link after files)
+    (org-mcp--write-body link before after files)))
 
 (defun org-mcp--validate-properties (properties what)
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
@@ -5813,16 +5887,22 @@ Returns JSON object:
     :description
     (concat
      "Edit or append to the body content of an Org headline.  In replace
-mode (default), finds and replaces a unique substring within the
-headline's body text.  In append mode, inserts new content after
-existing body content but before any child headlines.
+mode (default), replaces either a unique substring of the headline's
+body text or the body entire, whichever before names.  In append
+mode, inserts new content after existing body content but before any
+child headlines.
 
 Parameters:
   link - Link to the headline to edit (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - Substring to find and replace (string, required)
-           Must appear exactly once in the body
+     "  before - What the body holds now (string, required)
+           A substring of the body replaces that substring, and
+           must appear exactly once
+           The content_digest of this node replaces the body
+           entire: send back the token a read handed you, prefix
+           and all, and take it from the read you planned this
+           call from rather than from a list you kept
            Use empty string \"\" only for adding to empty nodes
            Append mode does not read it; send \"\"
   after - Replacement or appended text (string, required)
@@ -5840,6 +5920,10 @@ Parameters:
 Example - replacing part of the body:
   {\"link\": \"id:abc-123\", \"before\": \"This is a placeholder.\",
    \"after\": \"Implementation started.\"}
+
+Example - rewriting the body entire:
+  {\"link\": \"id:abc-123\", \"before\": \"sha256:1b4f0e9851971998\",
+   \"after\": \"The whole body, written afresh.\"}
 
 Example - adding to the end of the body:
   {\"link\": \"id:abc-123\", \"before\": \"\",
@@ -5863,7 +5947,15 @@ Special behavior - Append mode:
   Append adds to the body and destroys nothing, so it checks
   nothing about the body it adds to.  It is therefore not a way
   to retry a replace that was refused: read the node again and
-  send the replace against the body it holds now.")
+  send the replace against the body it holds now.
+
+Refusals (replace mode):
+  Every refusal over before is marked conflict:, whichever form
+  it took - the substring is not there, is there more than once,
+  the node has no body, the node has one where \"\" said it had
+  none, or the digest is not the body's.  Each answers a before
+  the client believed it read, so the recovery is the same: read
+  the node again and plan against what it holds now.")
     :read-only nil)
    ;; Entry update tools
    (list
