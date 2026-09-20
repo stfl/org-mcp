@@ -55,6 +55,7 @@ Example response for a headline:
   "todo": "TODO",
   "priority": "A",
   "tags": ["work", "urgent"],
+  "local_tags": ["urgent"],
   "scheduled": "<2026-03-26 Thu>",
   "deadline": "<2026-04-01 Mon>",
   "id": "550e8400-e29b-41d4-a716-446655440000",
@@ -94,7 +95,8 @@ Example response for a headline:
   "title": "Project Alpha",
   "todo": "TODO",
   "priority": "A",
-  "tags": ["work"],
+  "tags": ["work", "urgent"],
+  "local_tags": ["urgent"],
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "level": 1,
   "link": "id:550e8400-e29b-41d4-a716-446655440000",
@@ -108,6 +110,23 @@ Example response for a headline:
 
 =id= is the ID the heading's =link= names, so it is absent when =link= is a
 =file:= link.
+
+*** The two tag fields
+
+=tags= is the set of tags in effect on the heading; =local_tags= is the part of
+it written on the heading itself — /local/ to the heading, not to this machine.
+Which of a parent's or a file's tags reach a heading is Org's decision, not
+org-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
+=nil=, a list of tags or a regexp, and =org-tags-exclude-from-inheritance=
+names the tags no heading inherits whatever the first says.
+=org-get-tag-config= reports both values, so a client can tell which policy
+produced what it reads. With inheritance off the two fields carry the same
+tags.
+
+Either field is absent when its list is empty, as the other optional fields
+are. =org-set-tags= replaces the tags written on the heading and leaves
+inherited ones where they are, so =local_tags= is the field to work from when
+changing them (see [[file:writing.org::*org-set-tags][org-set-tags]]).
 
 ** org-read-outline
 - *Description:* Get hierarchical structure of an Org file as JSON outline

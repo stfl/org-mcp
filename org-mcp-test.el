@@ -9169,7 +9169,133 @@ has its body up to the end of its subtree.  The file stays unchanged."
       (should-not (assq 'deadline result))
       (should-not (assq 'closed result))
       (should-not (assq 'id result))
-      (should-not (assq 'tags result)))))
+      (should-not (assq 'tags result))
+      (should-not (assq 'local_tags result)))))
+
+;;; Tag inheritance tests
+;;
+;; Tags follow Org's own configuration, so these bind
+;; `org-use-tag-inheritance' and `org-tags-exclude-from-inheritance'
+;; around the call and assert what every read path returns under it.
+
+(defconst org-mcp-test--content-inherited-tags
+  "#+FILETAGS: filetag
+* Tagged Parent :ptag:
+** TODO Tagged Child :ctag:
+Child body."
+  "A file tag, a tagged parent and a tagged child below it.")
+
+(defun org-mcp-test--read-tags (file headline field)
+  "Return FIELD of HEADLINE in FILE as a list, read through org-read.
+FIELD is `tags' or `local_tags'."
+  (append
+   (alist-get field (org-mcp-test--read-structured file headline))
+   nil))
+
+(defun org-mcp-test--ql-tags (title)
+  "Return the tags org-ql-query reports for the match titled TITLE.
+The query matches every TODO heading in the allowed files."
+  (let* ((result (org-mcp-test--call-ql-query "(todo)"))
+         (match
+          (seq-find
+           (lambda (m) (equal (alist-get 'title m) title))
+           (alist-get 'matches result))))
+    (should match)
+    (append (alist-get 'tags match) nil)))
+
+(ert-deftest org-mcp-test-tags-inherited-agree-across-read-paths ()
+  "org-read and org-ql-query report the same tags for one heading.
+The child inherits a file tag and its parent's tag, and both paths
+return that effective set."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Child" 'tags)
+              '("filetag" "ptag" "ctag")))
+      (should
+       (equal (org-mcp-test--ql-tags "Tagged Child")
+              '("filetag" "ptag" "ctag"))))))
+
+(ert-deftest org-mcp-test-tags-without-inheritance-agree-across-read-paths ()
+  "With inheritance off, both read paths return the heading's own tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance nil)
+          (org-tags-exclude-from-inheritance nil))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Child" 'tags)
+              '("ctag")))
+      (should
+       (equal (org-mcp-test--ql-tags "Tagged Child") '("ctag"))))))
+
+(ert-deftest org-mcp-test-tags-inheritance-list-form ()
+  "A list `org-use-tag-inheritance' inherits only the tags it names."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance '("ptag"))
+          (org-tags-exclude-from-inheritance nil))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Child" 'tags)
+              '("ptag" "ctag")))
+      (should
+       (equal (org-mcp-test--ql-tags "Tagged Child")
+              '("ptag" "ctag"))))))
+
+(ert-deftest org-mcp-test-tags-inheritance-regexp-form ()
+  "A regexp `org-use-tag-inheritance' inherits only matching tags."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance "\\`p")
+          (org-tags-exclude-from-inheritance nil))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Child" 'tags)
+              '("ptag" "ctag")))
+      (should
+       (equal (org-mcp-test--ql-tags "Tagged Child")
+              '("ptag" "ctag"))))))
+
+(ert-deftest org-mcp-test-tags-excluded-from-inheritance ()
+  "An excluded tag stays on the parent and never reaches the child."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance '("ptag")))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Parent" 'tags)
+              '("filetag" "ptag")))
+      (should
+       (equal (org-mcp-test--read-tags test-file "Tagged Child" 'tags)
+              '("filetag" "ctag"))))))
+
+(ert-deftest org-mcp-test-read-local-tags-are-written-on-the-heading ()
+  "`local_tags' carries only the tags written on the heading itself."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (should
+       (equal (org-mcp-test--read-tags
+               test-file "Tagged Child" 'local_tags)
+              '("ctag")))
+      (should
+       (equal (org-mcp-test--read-tags
+               test-file "Tagged Parent" 'local_tags)
+              '("ptag"))))))
+
+(ert-deftest org-mcp-test-read-local-tags-equal-tags-without-inheritance ()
+  "With inheritance off, `tags' and `local_tags' are the same list."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-inherited-tags))
+    (let ((org-use-tag-inheritance nil)
+          (org-tags-exclude-from-inheritance nil))
+      (let ((result
+             (org-mcp-test--read-structured test-file "Tagged Child")))
+        (should (equal (alist-get 'tags result) ["ctag"]))
+        (should
+         (equal (alist-get 'tags result)
+                (alist-get 'local_tags result)))))))
 
 ;;; GTD query tool tests
 
