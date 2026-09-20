@@ -8915,44 +8915,6 @@ QUERY is the org-ql query sexp as a string."
       (should
        (equal link (org-mcp-test--file-link test-file "*Simple Task"))))))
 
-;;; Extra-properties tests
-
-(defconst org-mcp-test--content-parent-child
-  "* [#A] Parent
-** TODO Child Task
-Child body."
-  "Parent with priority A and a child TODO.")
-
-(ert-deftest org-mcp-test-ql-extra-properties ()
-  "Extra properties from `org-mcp-ql-extra-properties' appear in results."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-parent-child))
-    (let ((org-mcp-ql-extra-properties
-           `((parent-priority
-              . ,(lambda ()
-                   (let ((p (save-excursion
-                              (when (org-up-heading-safe)
-                                (org-element-property
-                                 :priority (org-element-at-point))))))
-                     (when p (char-to-string p)))))
-             (rank . ,(lambda () 42)))))
-      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'children result))
-             (match (aref matches 0)))
-        (should (equal (alist-get 'parent-priority match) "A"))
-        (should (equal (alist-get 'rank match) 42))))))
-
-(ert-deftest org-mcp-test-ql-extra-properties-nil-omitted ()
-  "Extra properties returning nil are omitted from results."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-mcp-ql-extra-properties
-           `((nope . ,(lambda () nil)))))
-      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'children result))
-             (match (aref matches 0)))
-        (should-not (assq 'nope match))))))
-
 (defconst org-mcp-test--content-ql-tags-scheduled-deadline
   "* TODO Tagged Task                                                 :work:home:
 SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
@@ -13124,12 +13086,17 @@ FIELDS is sent as the `fields' parameter, as a client sends it."
     "org-node-read" `((link . ,link) (fields . ,fields)))))
 
 (defun org-mcp-test--query-fields (query fields)
-  "Return the nodes `org-query' matches QUERY with, asking for FIELDS."
+  "Return the nodes `org-query' matches QUERY with, asking for FIELDS.
+The drawer a query carries unasked is turned off, so what comes back
+is the fields and nothing else."
   (alist-get
    'children
    (json-read-from-string
     (mcp-server-lib-ert-call-tool
-     "org-query" `((query . ,query) (fields . ,fields))))))
+     "org-query"
+     `((query . ,query)
+       (fields . ,fields)
+       (properties . "none"))))))
 
 (ert-deftest org-mcp-test-fields-named-explicitly ()
   "A call naming the fields it wants receives those and no others.
@@ -13168,10 +13135,10 @@ field named there that the builder does not build fails here rather
 than reaching a client as a refusal.
 
 A heading carries every field but `closed' here, which stands for
-the fields left out when empty.  A file carries the eight a file has;
-its own property drawer is not among them, so `properties' on a file
-is one of the empty ones.  Both digests are there for either: a
-region always has one, even when it is empty."
+the fields left out when empty.  A file carries the ones a file has.
+No field of either is the Org drawer: that is a namespace of the
+user's, asked for in its own parameter.  Both digests are there for
+either: a region always has one, even when it is empty."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
       (list org-mcp-test--node-shape-parent-id)
     (let ((every (vconcat (mapcar #'symbol-name org-mcp--node-fields))))
@@ -13317,7 +13284,7 @@ that learns the parameter on either endpoint has learned it on
 both."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
       (list org-mcp-test--node-shape-parent-id)
-    (let ((fields ["title" "todo" "local_tags" "properties" "link"]))
+    (let ((fields ["title" "todo" "local_tags" "link"]))
       (should
        (equal
         (aref (org-mcp-test--query-fields "(todo \"TODO\")" fields) 0)
@@ -13533,6 +13500,383 @@ region."
           (org-mcp-test--digest-of
            (org-mcp-test--region-of
             test-file "Rewritten body." "** DONE Child One"))))))))
+;;; Asking for the properties you want
+
+;; A node's Org drawer is a namespace of the user's, asked for in a
+;; parameter of its own and answered under one key.  These tests ask at
+;; the seam a client asks at.
+
+(defconst org-mcp-test--content-property-namespace
+  (concat
+   "* Parent\n"
+   ":PROPERTIES:\n"
+   ":TITLE:    a property, not the heading\n"
+   ":Effort:   1:00\n"
+   ":END:\n")
+  "A heading whose drawer holds a property named like a node field.")
+
+(defun org-mcp-test--read-properties (link properties)
+  "Return the node `org-node-read' serves for LINK asking for PROPERTIES.
+PROPERTIES is sent as the `properties' parameter, as a client sends
+it, and the node is cut down to the one field the drawer could
+collide with, so what the test reads is the two namespaces side by
+side."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read"
+    `((link . ,link)
+      (fields . ["title"])
+      (properties . ,properties)))))
+
+(defun org-mcp-test--query-properties (query properties)
+  "Return the nodes `org-query' matches QUERY with, asking for PROPERTIES."
+  (alist-get
+   'children
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool
+     "org-query"
+     `((query . ,query)
+       (fields . ["title"])
+       (properties . ,properties))))))
+
+(ert-deftest org-mcp-test-properties-named-explicitly ()
+  "A call naming the properties it wants receives those and no others.
+A name the drawer does not hold contributes nothing, as a field with
+no value does, so the answer says what the node has rather than what
+the call asked about."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-properties link ["Effort"])
+        '((title . "Parent") (properties . ((EFFORT . "1:00"))))))
+      (should
+       (equal
+        (org-mcp-test--read-properties link ["Owner"])
+        '((title . "Parent")))))))
+
+(ert-deftest org-mcp-test-properties-match-as-org-matches-them ()
+  "A property name is matched the way Org matches one, ignoring case.
+The drawer of the file under test writes `Effort'; a call naming it
+in any case asks for the same property, and reads it back under the
+name Org keeps."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+          (answer
+           '((title . "Parent") (properties . ((EFFORT . "1:00"))))))
+      (should (equal (org-mcp-test--read-properties link ["effort"])
+                     answer))
+      (should (equal (org-mcp-test--read-properties link ["EFFORT"])
+                     answer)))))
+
+(ert-deftest org-mcp-test-properties-whole-drawer-or-none ()
+  "A call takes the whole drawer, or none of it, by naming a group.
+Naming each property is the way to ask for some of them; \"all\" is
+how a call that does not know the names reaches them, and \"none\"
+is how one that has the fields it came for leaves them behind."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "all")
+        `((title . "Parent")
+          (properties
+           . ((EFFORT . "1:00")
+              (ID . ,org-mcp-test--node-shape-parent-id))))))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "none")
+        '((title . "Parent")))))))
+
+(ert-deftest org-mcp-test-properties-kept-apart-from-fields ()
+  "A property cannot shadow the node field of the same name.
+A drawer holds names the user chose, so one of them is called TITLE
+here.  It arrives under `properties', beside the field `title', and
+neither has anything to say about the other."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-property-namespace))
+    (let ((link (org-mcp-test--file-link test-file "*Parent")))
+      (should
+       (equal
+        (org-mcp-test--read-properties link "all")
+        '((title . "Parent")
+          (properties
+           . ((EFFORT . "1:00")
+              (TITLE . "a property, not the heading"))))))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . ["TITLE"]))
+       "Unknown node field: TITLE\\.  Valid fields: title, todo, "))))
+
+(ert-deftest org-mcp-test-properties-file-drawer-is-a-drawer ()
+  "A file's own property drawer is a drawer like any other.
+A file is a node, so the properties parameter reaches its top-level
+drawer the way it reaches a heading's."
+  (org-mcp-test--with-id-setup
+      test-file org-mcp-test--content-file-node-id
+      (list org-mcp-test--node-shape-file-id)
+    (should
+     (equal
+      (org-mcp-test--read-properties (concat "file:" test-file) "all")
+      `((title . ,(file-name-nondirectory test-file))
+        (properties
+         . ((ID . ,org-mcp-test--node-shape-file-id))))))))
+
+(ert-deftest org-mcp-test-properties-default-is-the-endpoint-s ()
+  "What a call carries unasked is what that endpoint is for.
+A read carries the whole node and no drawer: a drawer holds what the
+user put there, and a client asks for the properties it knows what
+to do with.  A query is the call that asks about properties, so it
+hands the drawer back with every match."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+          (drawer
+           `((EFFORT . "1:00")
+             (ID . ,org-mcp-test--node-shape-parent-id))))
+      (should-not
+       (alist-get 'properties (org-mcp-test--node-shape-read link)))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (aref
+          (alist-get
+           'children
+           (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+          0))
+        drawer))
+      (should
+       (equal
+        (org-mcp-test--read-properties link [])
+        '((title . "Parent"))))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (aref (org-mcp-test--query-properties "(todo \"TODO\")" []) 0))
+        drawer)))))
+
+(ert-deftest org-mcp-test-properties-mean-the-same-on-both-endpoints ()
+  "The same `properties' asks the same thing of a read and of a query.
+One heading reached two ways comes back as one node, drawer
+included, so a client that learns the parameter on either endpoint
+has learned it on both."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (dolist (asked (list ["Effort"] "all" "none"))
+      (should
+       (equal
+        (aref (org-mcp-test--query-properties "(todo \"TODO\")" asked) 0)
+        (org-mcp-test--read-properties
+         (concat "id:" org-mcp-test--node-shape-parent-id) asked))))))
+
+(ert-deftest org-mcp-test-properties-special-property-refused ()
+  "A special property is refused rather than answered empty.
+Org computes those rather than storing them, so no drawer holds one,
+and a call that asked for one and got nothing back would read that
+as a node without it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["TODO"]))
+       "Not a drawer property: TODO\\.  Org computes it rather than \
+storing it; the node's own fields carry what it says\\.  Special \
+properties: TODO, TAGS, ")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["deadline"]))
+       "Not a drawer property: deadline\\.")
+      (org-mcp-test--call-tool-refused
+       "org-query"
+       `((query . "(todo \"TODO\")") (properties . ["ALLTAGS"]))
+       "Not a drawer property: ALLTAGS\\."))))
+
+(ert-deftest org-mcp-test-properties-malformed-refused ()
+  "A `properties' that is neither names nor a group is refused.
+The refusal names both ways of writing one, since a call that sent
+something else cannot tell which it got wrong."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . "everything"))
+       "properties takes an array of names, or \"all\" or \"none\" \
+as a string, not: \"everything\"")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . [42]))
+       "A property name is a string, not: 42")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (properties . ["not a name"]))
+       "Invalid property name: 'not a name'"))))
+
+;;; Asking for the computed fields you want
+
+;; A computed field is a configured function's answer at the moment of
+;; reading.  It belongs to no drawer, so it arrives apart from one.
+
+(defconst org-mcp-test--content-computed-clash
+  (concat
+   "* TODO Parent\n"
+   ":PROPERTIES:\n"
+   ":RANK:     written down\n"
+   ":END:\n")
+  "A heading whose drawer holds a property named like a computed field.")
+
+(defmacro org-mcp-test--with-computed-fields (&rest body)
+  "Run BODY with two computed fields configured.
+`rank' answers for every node and `nothing' for none, so one test
+can tell a field with a value from a field without one."
+  (declare (indent 0) (debug t))
+  `(let ((org-mcp-computed-fields
+          (list (cons 'rank (lambda () 12))
+                (cons 'nothing (lambda () nil)))))
+     ,@body))
+
+(defun org-mcp-test--read-computed (link computed)
+  "Return the node `org-node-read' serves for LINK asking for COMPUTED.
+COMPUTED is sent as the `computed' parameter, as a client sends it,
+and the node is cut down to its title so that what the test reads is
+the computed fields beside one field of the node's own."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read"
+    `((link . ,link)
+      (fields . ["title"])
+      (computed . ,computed)))))
+
+(defun org-mcp-test--query-computed (query computed)
+  "Return the nodes `org-query' matches QUERY with, asking for COMPUTED."
+  (alist-get
+   'children
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool
+     "org-query"
+     `((query . ,query)
+       (fields . ["title"])
+       (properties . "none")
+       (computed . ,computed))))))
+
+(ert-deftest org-mcp-test-computed-named-explicitly ()
+  "A call naming the computed fields it wants receives those.
+A function that answers with nothing leaves its field out, the way a
+node field with no value is left out."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+        (should
+         (equal
+          (org-mcp-test--read-computed link ["rank"])
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link ["nothing"])
+          '((title . "Parent"))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "all")
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "none")
+          '((title . "Parent"))))))))
+
+(ert-deftest org-mcp-test-computed-is-the-user-s-configuration ()
+  "The computed fields are the user's, not a set baked into the server.
+Out of the box nothing is configured, so there is nothing to ask
+for and every name is refused, naming what is configured."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-computed link "all")
+        '((title . "Parent"))))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (computed . ["rank"]))
+       "Unknown computed field: rank\\.  Configured computed \
+fields: none")
+      (org-mcp-test--with-computed-fields
+        (org-mcp-test--call-tool-refused
+         "org-node-read" `((link . ,link) (computed . ["renk"]))
+         "Unknown computed field: renk\\.  Configured computed \
+fields: rank, nothing")
+        (org-mcp-test--call-tool-refused
+         "org-query"
+         `((query . "(todo \"TODO\")") (computed . "every"))
+         "computed takes an array of names, or \"all\" or \"none\" \
+as a string, not: \"every\"")))))
+
+(ert-deftest org-mcp-test-computed-kept-apart-from-properties ()
+  "A computed value never arrives where a stored one does.
+The heading's drawer holds a RANK the user wrote down and the
+workflow computes a `rank' of its own.  They come back under
+separate keys, so a client writing the drawer back writes what the
+file said rather than what this server worked out."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-computed-clash))
+    (org-mcp-test--with-computed-fields
+      (should
+       (equal
+        (json-read-from-string
+         (mcp-server-lib-ert-call-tool
+          "org-node-read"
+          `((link . ,(org-mcp-test--file-link test-file "*Parent"))
+            (fields . ["title"])
+            (properties . "all")
+            (computed . "all"))))
+        '((title . "Parent")
+          (properties . ((RANK . "written down")))
+          (computed . ((rank . 12)))))))))
+
+(ert-deftest org-mcp-test-computed-default-is-the-endpoint-s ()
+  "A query carries the computed fields unasked; a read carries none.
+A workflow configures them for the matches it ranks and groups, so
+they come with a match list without being asked for, and a read that
+wants one says so."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+        (should-not
+         (alist-get 'computed (org-mcp-test--node-shape-read link)))
+        (should
+         (equal
+          (alist-get
+           'computed
+           (aref
+            (alist-get
+             'children
+             (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+            0))
+          '((rank . 12))))
+        (should
+         (equal
+          (aref (org-mcp-test--query-computed "(todo \"TODO\")" []) 0)
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (aref
+           (org-mcp-test--query-computed "(todo \"TODO\")" "none")
+           0)
+          '((title . "Parent"))))))))
+
+(ert-deftest org-mcp-test-computed-means-the-same-on-both-endpoints ()
+  "The same `computed' asks the same thing of a read and of a query."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (dolist (asked (list ["rank"] "all" "none"))
+        (should
+         (equal
+          (aref (org-mcp-test--query-computed "(todo \"TODO\")" asked)
+                0)
+          (org-mcp-test--read-computed
+           (concat "id:" org-mcp-test--node-shape-parent-id)
+           asked)))))))
 
 ;;; One definition of a title
 
