@@ -3552,15 +3552,17 @@ lists those roots as absolute paths."
          `((override_roots . ,(vconcat roots))))))))
 
 (defun org-mcp--tool-node-set-todo
-    (link after &optional before note files)
+    (link before after &optional note files)
   "Update the TODO state of the headline LINK names.
 Returns the link to the updated headline, and as the response's
 `after' the state Org left it in, which is the state asked for
 unless Org made another of it: a repeating entry moved to a done
 keyword comes back in its not-done keyword.  A change Org vetoes is refused and nothing
 is written; see `org-mcp--set-todo-state'.
+BEFORE is the TODO state the headline is asserted to hold, \"\" for
+a headline that has none.  A headline in any other state is a
+conflict and nothing is written.
 AFTER is the new TODO state to set.
-BEFORE, when provided, is checked against the actual state.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -3572,10 +3574,10 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
+  before - The TODO state the headline holds now (string, required)
+           Send \"\" to assert that it has no TODO keyword; any
+           other state is refused and nothing is written
   after - New TODO state (must be in `org-todo-keywords')
-  before - Expected current TODO state (string, optional)
-           When provided, must match the actual state or the tool
-           errors; omit to skip the check
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
@@ -3598,11 +3600,14 @@ MCP Parameters:
       (beginning-of-line)
       (setq actual-prev (or (org-get-todo-state) ""))
 
-      ;; Check current state matches (only when caller provided it)
-      (when before
-        (unless (string= actual-prev before)
-          (org-mcp--state-mismatch-error
-           before (or (org-get-todo-state) "(no state)") "State")))
+      ;; Check current state matches
+      (unless (string= actual-prev before)
+        (org-mcp--state-mismatch-error
+         before
+         (if (string-empty-p actual-prev)
+             "(no state)"
+           actual-prev)
+         "State"))
 
       ;; Update the state, refusing a change Org vetoes and reading
       ;; back what Org made of the one it took.
@@ -3872,7 +3877,8 @@ MCP Parameters:
     (link before after &optional append files)
   "Edit or append to body content of an Org node.
 LINK is the link to the node to edit.
-BEFORE is the substring to search for (replace mode only).
+BEFORE is the substring to search for, asserted unique; append mode
+destroys nothing and does not read it.
 AFTER is the replacement or appended text.
 APPEND if non-nil, append AFTER to end of body instead of replacing.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -3885,13 +3891,15 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  before - Substring to replace within the body (replace mode only).
-           Must be unique.  Use \"\" to add to empty nodes.
-           Ignored when append is true.
+  before - Substring to replace within the body.  Must be unique.
+           Use \"\" to add to empty nodes.  Append mode does not
+           read it; send \"\".
   after - Replacement or appended text
   append - Append to end of body instead of replacing (optional,
            default false); true or \"true\" append, false, \"false\"
-           and null replace, and any other value is refused
+           and null replace, and any other value is refused.
+           Append verifies nothing about the prior body, so it is
+           not a way to retry a refused replace.
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -5548,9 +5556,10 @@ Parameters:
   link - Link to the headline to update (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - Expected current TODO state (string, optional)
-           When provided, must match actual state or tool will error
-           Omit to skip the state check
+     "  before - The TODO state the headline holds now (string, required)
+           Send \"\" to assert that it has no TODO keyword
+           Any other state is refused as a conflict and nothing is
+           written; read the headline again and re-plan
   after - New TODO state to set (string, required)
           Must be valid keyword from org-todo-keywords
   note - Optional note to attach to this state transition (string, optional)
@@ -5558,6 +5567,13 @@ Parameters:
          Empty or whitespace-only values are ignored
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
+
+Example - starting a task:
+  {\"link\": \"id:abc-123\", \"before\": \"TODO\",
+   \"after\": \"IN-PROGRESS\"}
+
+Example - giving a headline its first TODO keyword:
+  {\"link\": \"id:abc-123\", \"before\": \"\", \"after\": \"TODO\"}
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -5662,15 +5678,19 @@ Parameters:
   link - Link to the headline to rename (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - Expected current title without TODO/tags (string,
-           required)
-           Must match actual title or tool will error
-           Used to prevent race conditions
+     "  before - The title the headline holds now, without TODO state
+           or tags (string, required)
+           Any other title is refused as a conflict and nothing is
+           written; read the headline again and re-plan
   after - New title without TODO state or tags (string, required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
+
+Example - renaming a headline:
+  {\"link\": \"id:abc-123\", \"before\": \"Draft the spec\",
+   \"after\": \"Draft the write-safety spec\"}
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -5696,10 +5716,10 @@ Parameters:
   link - Link to the headline to edit (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - Substring to find and replace (string, required in
-           replace mode, ignored when append is true)
+     "  before - Substring to find and replace (string, required)
            Must appear exactly once in the body
            Use empty string \"\" only for adding to empty nodes
+           Append mode does not read it; send \"\"
   after - Replacement or appended text (string, required)
           Cannot introduce headlines at same or higher level
           Must maintain balanced #+BEGIN/#+END blocks
@@ -5708,10 +5728,17 @@ Parameters:
   append - Append instead of replacing (optional, default false):
            true or \"true\" append; false, \"false\" and null
            replace; any other value is refused
-           When true, after goes at the end of the body and before
-           is ignored
+           When true, after goes at the end of the body
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
+
+Example - replacing part of the body:
+  {\"link\": \"id:abc-123\", \"before\": \"This is a placeholder.\",
+   \"after\": \"Implementation started.\"}
+
+Example - adding to the end of the body:
+  {\"link\": \"id:abc-123\", \"before\": \"\",
+   \"after\": \"Meeting notes.\", \"append\": true}
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -5725,7 +5752,13 @@ Special behavior - Empty before (replace mode):
   An empty before asserts the node has no content:
   - It is how initial content reaches a node that has none
   - A node that already has content is refused, and the refusal
-    asks for the part of the content to replace")
+    asks for the part of the content to replace
+
+Special behavior - Append mode:
+  Append adds to the body and destroys nothing, so it checks
+  nothing about the body it adds to.  It is therefore not a way
+  to retry a replace that was refused: read the node again and
+  send the replace against the body it holds now.")
     :read-only nil)
    ;; Entry update tools
    (list
