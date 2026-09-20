@@ -17,5 +17,8 @@
                                                  (org-mcp-test--with-add-todo-setup . 2)
                                                  (org-mcp-test--with-id-tracking . 2)
                                                  (org-mcp-test--with-id-setup . 2)
+                                                 (org-mcp-test--with-verbs-file . 1)
+                                                 (org-mcp-test--with-verbs-files . 2)
+                                                 (org-mcp-test--with-dirty-buffer . 2)
                                                  (org-mcp-test--get-tag-config-and-check . defun)
                                                  (mcp-server-lib-ert-with-server . defun))))))
