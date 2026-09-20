@@ -3664,11 +3664,11 @@ MCP Parameters:
            (total . ,(length matches))
            (files_searched . ,(length target-files))))))))
 
-;; GTD query tools
+;; Views
 
-(defun org-mcp--run-gtd-query (query-sexp fields)
+(defun org-mcp--run-view (query-sexp fields)
   "Run QUERY-SEXP via `org-ql-select', each match carrying FIELDS.
-A GTD query always runs over the allowed files: org-view takes no
+A view always runs over the allowed files: org-view takes no
 `files' parameter, and mcp-server-lib refuses a call passing one
 with an \"Unexpected parameter\" error before any handler runs.
 FIELDS is resolved before this runs, so every match is built from
@@ -3712,8 +3712,6 @@ Returns JSON-encoded results in the same format as org-query."
        `((children . ,(vconcat matches))
          (total . ,(length matches))
          (files_searched . ,(length target-files)))))))
-
-;; Views
 
 (defconst org-mcp--view-parameters '(:filter :range)
   "The parameters a view declares, in the order its query takes them.
@@ -3874,7 +3872,7 @@ MCP Parameters:
          (node-fields
           (org-mcp--node-fields-given
            fields org-mcp--node-query-fields)))
-    (org-mcp--run-gtd-query
+    (org-mcp--run-view
      (org-mcp--view-query view declaration arguments) node-fields)))
 
 ;; Read tools
@@ -5069,7 +5067,7 @@ Returns JSON object:
 Each element is a `mcp-server-lib-register-server\=' `:tools\=' spec,
 `(HANDLER :id STR :description STR [:read-only BOOL])\='.  The clock
 tools live in `org-mcp--clock-tool-specs\=' and the tools that depend
-on configuration in `org-mcp--gtd-tool-specs\='.")
+on configuration in `org-mcp--view-tool-specs\='.")
 
 (defun org-mcp--view-catalogue ()
   "Return the configured views as lines of the org-view description.
@@ -5144,7 +5142,7 @@ Returns JSON object:
 "
    org-mcp--node-description))
 
-(defun org-mcp--gtd-tool-specs ()
+(defun org-mcp--view-tool-specs ()
   "Return the spec for org-view when `org-mcp-views' configures one.
 The tool is left out while no view is configured, so a client never
 sees a tool that has nothing to answer with, and it carries the
@@ -5460,7 +5458,7 @@ registration keeps the properties of the first."
    :tools
    (append
     org-mcp--core-tool-specs
-    (org-mcp--gtd-tool-specs)
+    (org-mcp--view-tool-specs)
     org-mcp--clock-tool-specs)
    :resources org-mcp--resource-specs))
 

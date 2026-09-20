@@ -3015,7 +3015,7 @@ NEW-TITLE is the invalid new title that should be rejected."
        ;; Check that the tool list is empty
        (should (= (length tools) 0))))))
 
-(defconst org-mcp-test--non-gtd-tool-ids
+(defconst org-mcp-test--unconditional-tool-ids
   '("org-clock-active"
     "org-clock-add"
     "org-clock-dangling"
@@ -3080,7 +3080,7 @@ control."
       (should
        (equal
         (org-mcp-test--registered-tool-ids)
-        org-mcp-test--non-gtd-tool-ids)))))
+        org-mcp-test--unconditional-tool-ids)))))
 
 (ert-deftest org-mcp-test-file-resource-read ()
   "Test that reading org:// resource returns structured JSON."
@@ -9274,7 +9274,8 @@ return that effective set."
 
 ;;; View tool tests
 
-(defmacro org-mcp-test--with-gtd-tools (file-specs bindings &rest body)
+(defmacro org-mcp-test--with-configured-server
+    (file-specs bindings &rest body)
   "Create temp org files and enable org-mcp with BINDINGS in force.
 FILE-SPECS are (VAR CONTENT) pairs.  BINDINGS is a list of let-style
 bindings for the settings that must be set before `org-mcp-enable'."
@@ -9356,7 +9357,7 @@ carrying a literal query rather than a function.")
 (defmacro org-mcp-test--with-views (&rest body)
   "Run BODY over `org-mcp-test--content-views' with the test views."
   (declare (indent defun) (debug t))
-  `(org-mcp-test--with-gtd-tools
+  `(org-mcp-test--with-configured-server
        ((test-file org-mcp-test--content-views))
        ((org-mcp-views org-mcp-test--views)
         (org-mcp-filters org-mcp-test--filters)
@@ -9477,7 +9478,7 @@ narrow one."
 
 (ert-deftest org-mcp-test-view-refuses-a-literal-query-it-must-feed ()
   "A view declaring a parameter its literal query cannot take is refused."
-  (org-mcp-test--with-gtd-tools
+  (org-mcp-test--with-configured-server
       ((test-file org-mcp-test--content-views))
       ((org-mcp-views '((broken :query (todo "TODO") :filter t)))
        (org-mcp-filters org-mcp-test--filters)
@@ -9511,7 +9512,7 @@ it declares cannot reach")))
 
 (ert-deftest org-mcp-test-view-sorts-by-the-configured-comparator ()
   "A view answers in the order `org-mcp-query-sort-fn' puts matches in."
-  (org-mcp-test--with-gtd-tools
+  (org-mcp-test--with-configured-server
       ((test-file org-mcp-test--content-views))
       ((org-mcp-views org-mcp-test--views)
        (org-mcp-filters org-mcp-test--filters)
@@ -9532,12 +9533,12 @@ it declares cannot reach")))
        (equal
         (org-mcp-test--registered-tool-ids)
         (sort
-         (cons "org-view" (copy-sequence org-mcp-test--non-gtd-tool-ids))
+         (cons "org-view" (copy-sequence org-mcp-test--unconditional-tool-ids))
          #'string<))))))
 
 (ert-deftest org-mcp-test-view-tool-not-registered-without-views ()
   "The org-view tool stays away while no view is configured."
-  (org-mcp-test--with-gtd-tools
+  (org-mcp-test--with-configured-server
       ((test-file org-mcp-test--content-views))
       ((org-mcp-views nil))
     (org-mcp-test--call-tool-refused
@@ -12540,7 +12541,7 @@ Gamma's title link, although the edit ends on a CLOCK line."
 The user's buffer is narrowed to Alpha.  org-query and org-view both
 return Gamma with its own title and link, and the narrowing is
 unchanged afterwards."
-  (org-mcp-test--with-gtd-tools
+  (org-mcp-test--with-configured-server
       ((test-file org-mcp-test--content-links))
       ((org-mcp-views '((todo :name "Todo" :query (todo))))
        (org-mcp-query-sort-fn nil))
@@ -12606,7 +12607,7 @@ buffer is unmodified with its text untouched, and Org's ID locations
 have not grown.  Every node in a result carries its link, the file's
 own among them, and each link reads back to itself through
 org-node-read."
-  (org-mcp-test--with-gtd-tools
+  (org-mcp-test--with-configured-server
       ((test-file org-mcp-test--content-read-tools))
       ((org-mcp-views '((todo :name "Todo" :query (todo))))
        (org-mcp-query-sort-fn nil)
