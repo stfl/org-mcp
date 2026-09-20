@@ -907,14 +907,22 @@ decodes to its byte, `%0A' and `%0D' included."
    (url-unhex-string (encode-coding-string string 'utf-8) t) 'utf-8))
 
 (defun org-mcp--node-text-at-point ()
-  "Extract content of current headline including the headline itself.
-Point should be at the headline."
-  (let ((start (line-beginning-position)))
-    (org-end-of-subtree t t)
-    ;; Remove trailing newline if present
-    (when (and (> (point) start) (= (char-before) ?\n))
-      (backward-char))
-    (buffer-substring-no-properties start (point))))
+  "Return the text of the subtree at point, its heading included.
+The text is the region `org-mcp--subtree-bounds' delimits, with one
+trailing newline dropped: the region runs up to the next heading, and
+a caller reading one subtree has no use for the line break that
+separates it from that heading.
+
+The trim belongs to this read and to nothing else.  A caller that
+needs the region itself takes it from `org-mcp--subtree-bounds', not
+from what this returns, so a presentation decision made here stays
+here.  Point does not move."
+  (let* ((bounds (org-mcp--subtree-bounds))
+         (text
+          (buffer-substring-no-properties (car bounds) (cdr bounds))))
+    (if (string-suffix-p "\n" text)
+        (substring text 0 -1)
+      text)))
 
 (defun org-mcp--link-at-point ()
   "Return the native Org link to the heading at point.
@@ -1113,6 +1121,24 @@ locale-dependent reformatting)."
      :scheduled (and sched (org-element-property :raw-value sched))
      :deadline (and deadl (org-element-property :raw-value deadl))
      :closed (and clsd (org-element-property :raw-value clsd)))))
+
+(defun org-mcp--subtree-bounds ()
+  "Return the subtree of the heading at point as (BEGIN . END).
+BEGIN is the heading's first star and END is where the next heading
+of the same level or a shallower one begins, or the end of the
+buffer.  That is the region Org's own parser gives the headline, so
+every descendant lies inside it whatever depth a caller asked to see.
+
+This is the one definition of a subtree's extent: a caller reading
+the text verbatim and a caller measuring the region resolve to the
+same bytes rather than to two walks that agree by coincidence.  Point
+does not move."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((el (org-element-at-point)))
+      (cons
+       (org-element-property :begin el)
+       (org-element-property :end el)))))
 
 (defun org-mcp--body-bounds ()
   "Return the body of the heading at point as (BEGIN . END).
