@@ -1417,6 +1417,79 @@ FILES, when provided, is sent as the `files' parameter."
   (let ((params `((link . ,link) ,@(when files `((files . ,files))))))
     (mcp-server-lib-ert-call-tool "org-node-text" params)))
 
+;; Helpers for writing into a buffer the user is editing
+;;
+;; org-mcp writes through the buffer the user is editing and leaves
+;; the file alone until the user saves it (docs/adr/0002).  So a test
+;; that reads the file back cannot tell a write that did nothing from
+;; one that did everything in the buffer, which is the damage that
+;; reaches disk at the user's next save.  A test reaching into the
+;; buffer itself cannot tell either, because it never asks the server
+;; what it believes the content is: a call that wrote around the live
+;; buffer would pass it while handing a client stale bytes.  So a
+;; write into a dirty buffer is read back through the server.
+
+(defconst org-mcp-test--user-edit "Typed by hand, not saved.\n"
+  "An edit of the user's own, parting a buffer from its file.
+It is unrelated to anything a call under test touches, so a call
+that writes around the buffer, or that loses the edit, shows up.")
+
+(defun org-mcp-test--served-text (file)
+  "Return the text org-node-text serves for FILE, as a client reads it.
+The read goes through the server, which answers from the buffer
+visiting FILE when there is one."
+  (org-mcp-test--call-read-headline (concat "file:" file)))
+
+(defun org-mcp-test--verify-served-matches (file expected-pattern)
+  "Verify the whole text the server serves for FILE matches EXPECTED-PATTERN."
+  (should (string-match-p expected-pattern (org-mcp-test--served-text file))))
+
+(defmacro org-mcp-test--with-dirty-buffer (spec file &rest body)
+  "Run BODY over FILE with a buffer visiting it the user has edited.
+SPEC is (BUFFER-VAR ON-DISK-VAR).  BUFFER-VAR is bound to the buffer,
+ON-DISK-VAR to the bytes FILE held before it was opened, which stay
+its bytes for as long as nothing saves the buffer.  The buffer holds
+`org-mcp-test--user-edit' and nothing else that FILE does not, so BODY
+can pin what it gained.  It is killed afterwards, unmodified, so no
+test leaves an unsaved buffer behind for the next one."
+  (declare (indent 2) (debug t))
+  (let ((buffer-var (nth 0 spec))
+        (on-disk-var (nth 1 spec)))
+    `(let ((,buffer-var nil))
+       (unwind-protect
+           (let ((,on-disk-var (org-mcp-test--read-file ,file)))
+             (setq ,buffer-var (find-file-noselect ,file))
+             (with-current-buffer ,buffer-var
+               (save-restriction
+                 (widen)
+                 (goto-char (point-max))
+                 (insert org-mcp-test--user-edit))
+               (should (buffer-modified-p)))
+             ,@body)
+         (when ,buffer-var
+           (with-current-buffer ,buffer-var
+             (set-buffer-modified-p nil))
+           (kill-buffer ,buffer-var))))))
+
+(defun org-mcp-test--assert-unsaved (result file on-disk buffer)
+  "Assert RESULT says the write has not reached disk, and it has not.
+FILE still holds ON-DISK byte for byte, and BUFFER is still the
+user's to save, so the change is waiting in it."
+  (should (eq (alist-get 'saved result) :json-false))
+  (should (string= (org-mcp-test--read-file file) on-disk))
+  (should (buffer-modified-p buffer)))
+
+(defun org-mcp-test--assert-content-unmoved (buffer file on-disk)
+  "Assert a refused write moved nothing, in FILE or in BUFFER.
+The server serves ON-DISK and the user's edit and nothing else, FILE
+holds ON-DISK, and BUFFER is still the user's to save."
+  (should
+   (string=
+    (org-mcp-test--served-text file)
+    (concat on-disk org-mcp-test--user-edit)))
+  (should (string= (org-mcp-test--read-file file) on-disk))
+  (should (buffer-modified-p buffer)))
+
 ;; Helper functions for testing clock MCP tools
 
 (defun org-mcp-test--call-clock-add (link start end)
@@ -2069,8 +2142,20 @@ local name itself, which Emacs routes to it only because
 The refusal arrives as a tool error or, from the resource-style
 validation, as a JSON-RPC error; either way its message must match
 the regexp EXPECTED-MESSAGE.  When FILE is non-nil, it must be
-byte-for-byte unchanged afterwards."
+byte-for-byte unchanged afterwards.
+
+A buffer holding the user's unsaved edits must be unchanged too, and
+the file alone cannot say so: a refusal that damaged such a buffer
+leaves the file exactly as it found it, and the damage reaches disk
+at the user's next save.  So while a modified buffer visits FILE,
+what the server serves for it is pinned across the call as well.  An
+unmodified buffer holds what FILE holds, which the bytes already say."
   (let* ((before (and file (org-mcp-test--read-file-raw file)))
+         (served-before
+          (and file
+               (let ((visiting (find-buffer-visiting file)))
+                 (and visiting (buffer-modified-p visiting)))
+               (org-mcp-test--served-text file)))
          (response
           (mcp-server-lib-process-jsonrpc-parsed
            (mcp-server-lib-create-tools-call-request tool-name 1 params)
@@ -2083,7 +2168,9 @@ byte-for-byte unchanged afterwards."
     (should (stringp message))
     (should (string-match-p expected-message message))
     (when file
-      (should (string= (org-mcp-test--read-file-raw file) before)))))
+      (should (string= (org-mcp-test--read-file-raw file) before)))
+    (when served-before
+      (should (string= (org-mcp-test--served-text file) served-before)))))
 
 (defun org-mcp-test--assert-scope-refused (file)
   "Assert that reading and writing the Task heading in FILE is refused.
@@ -14553,69 +14640,6 @@ LINK defaults to Target's."
        (list org-mcp-test--verbs-target-id)
      ,@body))
 
-;; A buffer the user is editing is where org-mcp writes, and the file
-;; is left alone until the user saves it (docs/adr/0002).  So a test
-;; that only reads the file back cannot tell a verb that did nothing
-;; from one that did everything in the buffer, which is the damage
-;; that reaches disk at the user's next save.  These verbs are read
-;; back through the server instead, which answers from the buffer.
-;;
-;; The two helpers below are local to the whole-node verbs on purpose.
-;; Every other write endpoint is owed the same round trip, and a
-;; shared helper for it, which is issue #35 and not this ticket.
-
-(defconst org-mcp-test--verbs-user-edit
-  "Typed by hand, not saved.\n"
-  "An edit of the user's own, parting a buffer from its file.
-It is unrelated to anything the verbs under test touch, so a verb
-that writes around the buffer, or that loses the edit, shows up.")
-
-(defun org-mcp-test--verbs-served-text (file)
-  "Return the text org-node-text serves for FILE, as a client reads it.
-The read goes through the server, which answers from the buffer
-visiting FILE when there is one.  Reaching into that buffer instead
-would never ask the server what it believes the content is, and a
-verb that wrote around the buffer would pass."
-  (org-mcp-test--call-read-headline (concat "file:" file)))
-
-(defmacro org-mcp-test--with-dirty-buffer (buffer-var file &rest body)
-  "Run BODY with BUFFER-VAR bound to a buffer visiting FILE, unsaved.
-The buffer holds `org-mcp-test--verbs-user-edit' and nothing else
-that FILE does not, so BODY can pin what the buffer gained.  The
-buffer is killed afterwards, unmodified, so no test leaves an
-unsaved buffer behind for the next one."
-  (declare (indent 2) (debug t))
-  `(let ((,buffer-var nil))
-     (unwind-protect
-         (progn
-           (setq ,buffer-var (find-file-noselect ,file))
-           (with-current-buffer ,buffer-var
-             (save-restriction
-               (widen)
-               (goto-char (point-max))
-               (insert org-mcp-test--verbs-user-edit))
-             (should (buffer-modified-p)))
-           ,@body)
-       (when ,buffer-var
-         (with-current-buffer ,buffer-var
-           (set-buffer-modified-p nil))
-         (kill-buffer ,buffer-var)))))
-
-(defun org-mcp-test--verbs-assert-only-user-edit (buffer file on-disk)
-  "Assert BUFFER holds ON-DISK plus the user's edit, and FILE holds ON-DISK.
-That is what a refused call leaves behind: the file untouched, and
-the buffer differing from it by the user's own edit and nothing
-else."
-  (should (string= (org-mcp-test--read-file file) on-disk))
-  (should (buffer-modified-p buffer))
-  (with-current-buffer buffer
-    (save-restriction
-      (widen)
-      (should
-       (string=
-        (buffer-string)
-        (concat on-disk org-mcp-test--verbs-user-edit))))))
-
 (defmacro org-mcp-test--with-verbs-files (file-var other-var &rest body)
   "Bind FILE-VAR and OTHER-VAR to the two verb fixtures for BODY.
 Both are allowed files, and Target's ID is registered in FILE-VAR,
@@ -15104,22 +15128,19 @@ unsaved edit, so the server is asked what the node's file holds now:
 the node is gone from its answer, the user's edit is still in it,
 and `saved' says the change has not reached disk."
   (org-mcp-test--with-verbs-file test-file
-    (org-mcp-test--with-dirty-buffer buffer test-file
-      (let ((on-disk (org-mcp-test--read-file test-file))
-            (result
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let ((result
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
                "org-node-delete"
                `((link . ,(org-mcp-test--verbs-link))
                  (before . ,(org-mcp-test--verbs-digest)))))))
-        (should (eq (alist-get 'saved result) :json-false))
-        (let ((served (org-mcp-test--verbs-served-text test-file)))
+        (let ((served (org-mcp-test--served-text test-file)))
           (should-not (string-match-p "TODO Target" served))
           (should-not (string-match-p "Grandchild" served))
           (should (string-match-p "Typed by hand" served))
           (should (string-match-p "TODO Home" served)))
-        (should (string= (org-mcp-test--read-file test-file) on-disk))
-        (should (buffer-modified-p buffer))))))
+        (org-mcp-test--assert-unsaved result test-file on-disk buffer)))))
 
 (ert-deftest org-mcp-test-node-delete-refused-leaves-the-buffer-alone ()
   "A refused delete takes nothing out of the buffer either.
@@ -15133,18 +15154,16 @@ from its file by the user's edit and nothing else."
       (mcp-server-lib-ert-call-tool
        "org-node-set-title"
        `((link . ,link) (before . "Target") (after . "Target renamed")))
-      (let ((on-disk (org-mcp-test--read-file test-file)))
-        (org-mcp-test--with-dirty-buffer buffer test-file
-          (org-mcp-test--call-tool-refused
-           "org-node-delete"
-           `((link . ,link) (before . ,stale))
-           "\\`conflict: Subtree mismatch: .*nothing was deleted\\'"
-           test-file)
-          (let ((served (org-mcp-test--verbs-served-text test-file)))
-            (should (string-match-p "TODO Target renamed" served))
-            (should (string-match-p "Grandchild" served)))
-          (org-mcp-test--verbs-assert-only-user-edit
-           buffer test-file on-disk))))))
+      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+        (org-mcp-test--call-tool-refused
+         "org-node-delete"
+         `((link . ,link) (before . ,stale))
+         "\\`conflict: Subtree mismatch: .*nothing was deleted\\'"
+         test-file)
+        (let ((served (org-mcp-test--served-text test-file)))
+          (should (string-match-p "TODO Target renamed" served))
+          (should (string-match-p "Grandchild" served)))
+        (org-mcp-test--assert-content-unmoved buffer test-file on-disk)))))
 
 (ert-deftest org-mcp-test-node-archive-through-a-dirty-buffer ()
   "An archive takes the node out of the buffer and writes the archive.
@@ -15154,22 +15173,18 @@ what the node's file holds now, and the node is gone from it."
   (org-mcp-test--with-verbs-file test-file
     (let ((archive (concat test-file "_archive")))
       (unwind-protect
-          (org-mcp-test--with-dirty-buffer buffer test-file
-            (let ((on-disk (org-mcp-test--read-file test-file))
-                  (result
+          (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+            (let ((result
                    (json-read-from-string
                     (mcp-server-lib-ert-call-tool
                      "org-node-archive"
                      `((link . ,(org-mcp-test--verbs-link))
                        (before . ,(org-mcp-test--verbs-digest)))))))
-              (should (eq (alist-get 'saved result) :json-false))
-              (let ((served
-                     (org-mcp-test--verbs-served-text test-file)))
+              (let ((served (org-mcp-test--served-text test-file)))
                 (should-not (string-match-p "TODO Target" served))
                 (should (string-match-p "Typed by hand" served)))
-              (should
-               (string= (org-mcp-test--read-file test-file) on-disk))
-              (should (buffer-modified-p buffer))
+              (org-mcp-test--assert-unsaved
+               result test-file on-disk buffer)
               ;; The archive file was org-mcp's to save, and it is on
               ;; disk with the node in it.
               (let ((archived (org-mcp-test--read-file archive)))
@@ -15188,28 +15203,25 @@ what the node's file holds now, and the node is gone from it."
       (mcp-server-lib-ert-call-tool
        "org-node-set-title"
        `((link . ,link) (before . "Target") (after . "Target renamed")))
-      (let ((on-disk (org-mcp-test--read-file test-file)))
-        (org-mcp-test--with-dirty-buffer buffer test-file
-          (org-mcp-test--call-tool-refused
-           "org-node-archive"
-           `((link . ,link) (before . ,stale))
-           "\\`conflict: Subtree mismatch: .*nothing was archived\\'"
-           test-file)
-          (should (string-match-p
-                   "TODO Target renamed"
-                   (org-mcp-test--verbs-served-text test-file)))
-          (org-mcp-test--verbs-assert-only-user-edit
-           buffer test-file on-disk)
-          (should-not (file-exists-p archive)))))))
+      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+        (org-mcp-test--call-tool-refused
+         "org-node-archive"
+         `((link . ,link) (before . ,stale))
+         "\\`conflict: Subtree mismatch: .*nothing was archived\\'"
+         test-file)
+        (should (string-match-p
+                 "TODO Target renamed"
+                 (org-mcp-test--served-text test-file)))
+        (org-mcp-test--assert-content-unmoved buffer test-file on-disk)
+        (should-not (file-exists-p archive))))))
 
 (ert-deftest org-mcp-test-node-refile-through-a-dirty-source-buffer ()
   "A refile out of a buffer the user is editing leaves that file alone.
 The node reaches the other file, which org-mcp saves, and leaves the
 buffer it came from unsaved with the user's edit still in it."
   (org-mcp-test--with-verbs-files test-file other-file
-    (org-mcp-test--with-dirty-buffer buffer test-file
-      (let ((on-disk (org-mcp-test--read-file test-file))
-            (result
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let ((result
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
                "org-node-refile"
@@ -15219,16 +15231,14 @@ buffer it came from unsaved with the user's edit still in it."
                   .
                   ,(org-mcp-test--file-link
                     other-file "*Project One")))))))
-        (should (eq (alist-get 'saved result) :json-false))
-        (let ((served (org-mcp-test--verbs-served-text test-file)))
+        (let ((served (org-mcp-test--served-text test-file)))
           (should-not (string-match-p "TODO Target" served))
           (should (string-match-p "Typed by hand" served)))
         (should
          (string-match-p
           "TODO Target"
-          (org-mcp-test--verbs-served-text other-file)))
-        (should (string= (org-mcp-test--read-file test-file) on-disk))
-        (should (buffer-modified-p buffer))
+          (org-mcp-test--served-text other-file)))
+        (org-mcp-test--assert-unsaved result test-file on-disk buffer)
         (org-mcp-test--verify-file-matches
          other-file org-mcp-test--verbs-other-with-target)))))
 
@@ -15238,9 +15248,8 @@ The node is written into the destination buffer and stays there
 unsaved, while the file it left was org-mcp's to save and reaches
 disk.  `saved' answers for both files, so it is false."
   (org-mcp-test--with-verbs-files test-file other-file
-    (org-mcp-test--with-dirty-buffer buffer other-file
-      (let ((on-disk (org-mcp-test--read-file other-file))
-            (result
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) other-file
+      (let ((result
              (json-read-from-string
               (mcp-server-lib-ert-call-tool
                "org-node-refile"
@@ -15250,14 +15259,11 @@ disk.  `saved' answers for both files, so it is false."
                   .
                   ,(org-mcp-test--file-link
                     other-file "*Project One")))))))
-        (should (eq (alist-get 'saved result) :json-false))
-        (let ((served (org-mcp-test--verbs-served-text other-file)))
+        (let ((served (org-mcp-test--served-text other-file)))
           (should (string-match-p "TODO Target" served))
           (should (string-match-p "Grandchild" served))
           (should (string-match-p "Typed by hand" served)))
-        (should
-         (string= (org-mcp-test--read-file other-file) on-disk))
-        (should (buffer-modified-p buffer))
+        (org-mcp-test--assert-unsaved result other-file on-disk buffer)
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--verbs-target-gone)))))
 
@@ -15269,9 +15275,8 @@ disk.  `saved' answers for both files, so it is false."
       (mcp-server-lib-ert-call-tool
        "org-node-set-title"
        `((link . ,link) (before . "Target") (after . "Target renamed")))
-      (let ((on-disk (org-mcp-test--read-file test-file))
-            (other-before (org-mcp-test--read-file other-file)))
-        (org-mcp-test--with-dirty-buffer buffer test-file
+      (let ((other-before (org-mcp-test--read-file other-file)))
+        (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
           (org-mcp-test--call-tool-refused
            "org-node-refile"
            `((link . ,link)
@@ -15283,12 +15288,12 @@ disk.  `saved' answers for both files, so it is false."
            test-file)
           (should (string-match-p
                    "TODO Target renamed"
-                   (org-mcp-test--verbs-served-text test-file)))
+                   (org-mcp-test--served-text test-file)))
           (should-not
            (string-match-p
             "Target"
-            (org-mcp-test--verbs-served-text other-file)))
-          (org-mcp-test--verbs-assert-only-user-edit
+            (org-mcp-test--served-text other-file)))
+          (org-mcp-test--assert-content-unmoved
            buffer test-file on-disk)
           (should
            (string=
@@ -15322,7 +15327,7 @@ them.  The descendant is checked too: the shift reaches all of them."
        `((link . ,link)
          (before . ,(org-mcp-test--verbs-digest link))
          (parent . ,(org-mcp-test--file-link test-file "*Child"))))
-      (let ((served (org-mcp-test--verbs-served-text test-file)))
+      (let ((served (org-mcp-test--served-text test-file)))
         ;; Both headings are two levels deeper than they were.
         (should
          (string-match-p "^\\*\\*\\* TODO Tagged " served))
