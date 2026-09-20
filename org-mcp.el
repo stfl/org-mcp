@@ -2805,10 +2805,10 @@ lists those roots as absolute paths."
 (defun org-mcp--tool-node-set-todo
     (link after &optional before note files)
   "Update the TODO state of the headline LINK names.
-Returns the link to the updated headline, and as `new_state' the
-state Org left it in, which is the state asked for unless Org made
-another of it: a repeating entry moved to a done keyword comes back
-in its not-done keyword.  A change Org vetoes is refused and nothing
+Returns the link to the updated headline, and as the response's
+`after' the state Org left it in, which is the state asked for
+unless Org made another of it: a repeating entry moved to a done
+keyword comes back in its not-done keyword.  A change Org vetoes is refused and nothing
 is written; see `org-mcp--set-todo-state'.
 AFTER is the new TODO state to set.
 BEFORE, when provided, is checked against the actual state.
@@ -2838,8 +2838,8 @@ MCP Parameters:
          (actual-prev nil)
          (actual-new nil))
     (org-mcp--modify-and-save file-path "update"
-                              `((previous_state . ,actual-prev)
-                                (new_state . ,actual-new))
+                              `((before . ,actual-prev)
+                                (after . ,actual-new))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (org-mcp--validate-todo-state after)
@@ -3085,8 +3085,7 @@ MCP Parameters:
 
     ;; Rename the headline in the file
     (org-mcp--modify-and-save file-path "rename"
-                              `((previous_title . ,before)
-                                (new_title . ,after))
+                              `((before . ,before) (after . ,after))
       ;; Navigate to the headline
       (org-mcp--goto-heading target)
 
@@ -3370,9 +3369,8 @@ MCP Parameters:
          (new-scheduled nil))
 
     (org-mcp--modify-and-save file-path "update scheduled"
-                              `((previous_scheduled
-                                 . ,previous-scheduled)
-                                (new_scheduled . ,new-scheduled))
+                              `((before . ,previous-scheduled)
+                                (after . ,new-scheduled))
       (org-mcp--goto-heading target)
 
       (setq previous-scheduled
@@ -3414,9 +3412,8 @@ MCP Parameters:
          (new-deadline nil))
 
     (org-mcp--modify-and-save file-path "update deadline"
-                              `((previous_deadline
-                                 . ,previous-deadline)
-                                (new_deadline . ,new-deadline))
+                              `((before . ,previous-deadline)
+                                (after . ,new-deadline))
       (org-mcp--goto-heading target)
 
       (setq previous-deadline
@@ -3466,10 +3463,8 @@ MCP Parameters:
              (org-mcp--validate-and-normalize-tags after))))
 
       (org-mcp--modify-and-save file-path "set tags"
-                                `((previous_tags
-                                   .
-                                   ,(or previous-tags []))
-                                  (new_tags . ,(or new-tags [])))
+                                `((before . ,(or previous-tags []))
+                                  (after . ,(or new-tags [])))
         (org-mcp--goto-heading target)
 
         (setq previous-tags (vconcat (org-get-tags nil t)))
@@ -3516,9 +3511,8 @@ MCP Parameters:
          (new-priority nil))
 
     (org-mcp--modify-and-save file-path "set priority"
-                              `((previous_priority
-                                 . ,previous-priority)
-                                (new_priority . ,new-priority))
+                              `((before . ,previous-priority)
+                                (after . ,new-priority))
       (org-mcp--goto-heading target)
 
       (setq previous-priority
@@ -4461,8 +4455,10 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_state - The previous TODO state (string, empty for none)
-  new_state - The new TODO state that was set (string)
+  before - The TODO state the headline held (string, empty for none)
+  after - The TODO state Org left it in (string): the one asked for,
+          unless Org made another of it, as it does when it repeats
+          a repeating entry instead of finishing it
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -4572,8 +4568,8 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_title - The previous headline title (string)
-  new_title - The new title that was set (string)
+  before - The previous headline title (string)
+  after - The new title that was set (string)
   link - Link to the renamed headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -4680,8 +4676,8 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_scheduled - Previous SCHEDULED value (string, empty if none)
-  new_scheduled - New SCHEDULED value (string, empty if removed)
+  before - Previous SCHEDULED value (string, empty if none)
+  after - New SCHEDULED value (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -4707,8 +4703,8 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_deadline - Previous DEADLINE value (string, empty if none)
-  new_deadline - New DEADLINE value (string, empty if removed)
+  before - Previous DEADLINE value (string, empty if none)
+  after - New DEADLINE value (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -4738,8 +4734,8 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_tags - Array of previous tags
-  new_tags - Array of new tags
+  before - Array of previous tags
+  after - Array of new tags
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -4766,8 +4762,8 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  previous_priority - Previous priority (string, empty if none)
-  new_priority - New priority (string, empty if removed)
+  before - Previous priority (string, empty if none)
+  after - New priority (string, empty if removed)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

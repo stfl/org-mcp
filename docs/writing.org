@@ -9,6 +9,12 @@ the server itself.
 Write tools create no identifiers. Each write response carries, as =link=, the
 link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]).
 
+A write that replaces one value answers with =before= and =after=: the value the
+tool found and the value it left, under the same two words the call sends. Only
+a transition carries the pair — =org-node-set-properties= partitions what it did
+into =properties_set= and =properties_deleted=, and the clock tools report
+fields of their own.
+
 Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
 =org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-set-tags=,
 =org-node-set-priority=, =org-node-set-properties=, =org-node-set-scheduled=,
@@ -123,11 +129,11 @@ theirs in [[file:clocking.org][Clock tracking]].
   - =after= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_state=, =new_state= and the link to the updated headline
+- *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
 
-=new_state= reports the state Org left the headline in, which is not always the
-one asked for. Moving a repeating entry to a done keyword makes Org run the
+The response's =after= reports the state Org left the headline in, which is not
+always the one asked for. Moving a repeating entry to a done keyword makes Org run the
 repeat: the timestamp advances and the entry comes back in its not-done
 keyword, =TODO= or whatever =REPEAT_TO_STATE= names, and that is what the
 response carries.
@@ -145,8 +151,8 @@ Example:
 {
   "success": true,
   "saved": true,
-  "previous_state": "TODO",
-  "new_state": "IN-PROGRESS",
+  "before": "TODO",
+  "after": "IN-PROGRESS",
   "link": "file:~/org/projects.org::*Project Alpha"
 }
 
@@ -154,8 +160,8 @@ Example:
 {
   "success": true,
   "saved": true,
-  "previous_state": "TODO",
-  "new_state": "TODO",
+  "before": "TODO",
+  "after": "TODO",
   "link": "file:~/org/tasks.org::*Water the plants"
 }
 
@@ -177,7 +183,7 @@ Example:
   - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
   - =after= (string, required): New headline title (without TODO state or tags)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
+- *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline
 - *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
@@ -193,8 +199,8 @@ Example:
 {
   "success": true,
   "saved": true,
-  "previous_title": "Original Task",
-  "new_title": "Updated Task Name",
+  "before": "Original Task",
+  "after": "Updated Task Name",
   "link": "file:~/org/projects.org::*Updated Task Name"
 }
 
@@ -338,7 +344,7 @@ Example:
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
@@ -362,7 +368,7 @@ Example:
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
@@ -386,12 +392,12 @@ Example:
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
+- *Returns:* Success status, =saved= flag, =before= and =after= arrays, plus the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
-The tool writes the tags on the headline itself and leaves inherited ones
-where they are, so =previous_tags= and =new_tags= are that headline's own tags
-— the =local_tags= of a read, not its =tags= (see [[file:reading.org::*The two tag fields][The two tag fields]]).
+The tool writes the tags on the headline itself and leaves inherited ones where
+they are, so the response's =before= and =after= are that headline's own tags —
+the =local_tags= of a read, not its =tags= (see [[file:reading.org::*The two tag fields][The two tag fields]]).
 
 Example:
 #+begin_src json
@@ -413,7 +419,7 @@ Example:
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. Omit or empty string to remove priority
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
