@@ -3169,7 +3169,11 @@ them with, so `parent' and `previous_sibling' put a node that moves
 where they put a node that is made.
 
 Org shifts the pasted subtree to the level of its new place, every
-descendant under it with it, and leaves point on its heading."
+descendant under it with it, and leaves point on its heading.  An
+`ID' anywhere in TEXT is re-registered against this buffer's file,
+which `org-paste-subtree' does through `org-id-paste-tracker', so an
+`id:' link to the node or to a descendant resolves to where it now
+is."
   (let ((parent-level
          (org-mcp--navigate-to-parent-or-top parent-target)))
     (org-mcp--position-for-new-child sibling-target parent-level)
@@ -3184,6 +3188,47 @@ descendant under it with it, and leaves point on its heading."
          (1+ parent-level)
        1)
      text)))
+
+(defun org-mcp--move-subtree-to (text parent-target sibling-target)
+  "Put TEXT, a subtree just cut from this buffer, under PARENT-TARGET.
+Returns the link to the node where it lands.  SIBLING-TARGET is the
+child of that parent the node is to follow, or nil; see
+`org-mcp--paste-subtree-under', which places it.
+
+The parent may be in another file, which is where the subtree then
+goes.  That file's buffer is written like the file the node left and
+saved through `org-mcp--maybe-save-buffer', so a buffer the user has
+edits in is left for the user to save; `org-mcp--unsaved-change-p'
+says when it is, and the response's `saved' answers for both files.
+
+The subtree is cut before it is put down, and only the buffer it was
+cut from is inside the calling change group.  A destination that does
+not resolve therefore refuses with both files as they were, because
+nothing has been written when the search fails; a failure after the
+subtree is down leaves it in both files rather than in neither."
+  (let* ((destination (plist-get parent-target :file))
+         (elsewhere
+          (not
+           (org-mcp--paths-equal-p
+            destination (buffer-file-name (buffer-base-buffer)))))
+         (context
+          (and elsewhere (org-mcp--file-buffer-context destination)))
+         (buffer
+          (if elsewhere
+              (plist-get context :buffer)
+            (current-buffer)))
+         (link nil))
+    (with-current-buffer buffer
+      (org-with-wide-buffer
+       (org-mcp--paste-subtree-under
+        text parent-target sibling-target)
+       (setq link (org-mcp--link-at-point))))
+    (when elsewhere
+      (org-mcp--maybe-save-buffer
+       buffer destination (plist-get context :modified-p))
+      (when (buffer-modified-p buffer)
+        (setq org-mcp--unsaved-change-p t)))
+    link))
 
 (defun org-mcp--archive-location-at-point ()
   "Return the file `org-archive-subtree' would move the node at point to.
@@ -3247,11 +3292,17 @@ A node cannot become a child of itself or of one of its own
 descendants, and it cannot be asked to follow itself: the heading the
 move is addressed to goes away with the node, and the paste is left
 with nowhere to land.  Both headings are found before anything is
-cut, so the refusal leaves the file as it was."
+cut, so the refusal leaves the file as it was.
+
+A destination in another file is outside the subtree by construction
+and is not looked for here, where only this buffer can be searched."
   (pcase-dolist (`(,name . ,target)
                  `(("parent" . ,parent-target)
                    ("previous_sibling" . ,sibling-target)))
-    (when target
+    (when (and target
+               (org-mcp--paths-equal-p
+                (plist-get target :file)
+                (buffer-file-name (buffer-base-buffer))))
       (let ((position
              (save-excursion
                (when (org-mcp--target-heading-p target)
@@ -4259,13 +4310,17 @@ BEFORE is the digest of the subtree, as a read of the node returned
 it; the call is refused when the subtree no longer carries it, see
 `org-mcp--assert-subtree'.
 PARENT is the link to the node's new parent, or to a whole file for
-its top level, and must name a node in the same file.
+its top level.  It may name a node in any file a call reaches, and
+the node moves to that file; see `org-mcp--move-subtree-to'.
 PREVIOUS_SIBLING is an optional link to the child of that parent the
-node is to follow; see `org-mcp--paste-subtree-under'.
+node is to follow, looked up in the parent's file; see
+`org-mcp--paste-subtree-under'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
-see `org-mcp--link-target'.  It applies to LINK only: the move stays
-within one file, so an `id:' PARENT or PREVIOUS_SIBLING is looked for
-in the file LINK named and no index is consulted for either.
+see `org-mcp--link-target'.  It applies to LINK only, as on every
+other write tool: it says where to find the node the call acts on.
+PARENT and PREVIOUS_SIBLING are resolved without it — a `file:' link
+names its own file, and an `id:' one is looked up in Emacs's ID index
+and refused by name when the index does not hold it.
 
 The subtree arrives whole, its LOGBOOK with it, and nothing in it
 records where it was: a move is undone by moving it back, by a
@@ -4291,30 +4346,32 @@ MCP Parameters:
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          (digest (org-mcp--digest-given before))
-         ;; The move stays within one file, so the parent and the
-         ;; sibling are looked for in the file the node is in: no ID
-         ;; index is consulted for either, and neither is FILES, which
-         ;; is how the client found that file in the first place.
-         (parent-target (org-mcp--link-target parent nil file-path))
+         ;; FILES says where to find the node, not where to put it.
+         (parent-target (org-mcp--link-target parent))
+         ;; The sibling is a child of the parent, so it is looked for
+         ;; in the parent's file, wherever that is: no ID index is
+         ;; consulted for it, which lets it be any link the parent's
+         ;; children answer to.
          (sibling-target
           (when-let* ((sibling
                        (org-mcp--link-given previous_sibling)))
-            (org-mcp--link-target sibling nil file-path))))
-    (unless (org-mcp--paths-equal-p
-             file-path (plist-get parent-target :file))
-      (org-mcp--tool-validation-error
-       "A move stays within one file: the node is in %s and parent is in %s"
-       (abbreviate-file-name file-path)
-       (abbreviate-file-name (plist-get parent-target :file))))
-    (org-mcp--modify-and-save file-path "move" nil
+            (org-mcp--link-target sibling
+                                  nil
+                                  (plist-get parent-target :file))))
+         (moved nil)
+         ;; A move to another file writes that file's buffer too;
+         ;; `saved' covers that write as well.
+         (org-mcp--unsaved-change-p nil))
+    (org-mcp--modify-and-save file-path "move" `((link . ,moved))
       (org-mcp--goto-heading target)
       (org-mcp--assert-subtree digest "nothing was moved")
       (org-mcp--assert-destination-outside
        (org-mcp--subtree-bounds) parent-target sibling-target)
-      (org-mcp--paste-subtree-under
-       (org-mcp--cut-subtree-at-point)
-       parent-target
-       sibling-target))))
+      (setq moved
+            (org-mcp--move-subtree-to
+             (org-mcp--cut-subtree-at-point)
+             parent-target
+             sibling-target)))))
 
 ;; org-ql integration
 
@@ -5845,13 +5902,16 @@ Returns JSON object:
     :description
     (concat
      "Move an Org node, and every descendant under it, under a different
-parent in the same file.
+parent.  The parent may be in another file, and the node then moves
+to that file: an inbox item filed into a project is one call.
 
 The subtree arrives whole, its LOGBOOK and its drawers with it, and
-Org shifts it to the level of its new place.  Nothing in the node
-records where it was: a move is undone by moving it back, by a
-caller that knows where back is.  Use org-node-archive when the node
-is being retired, since that writes the node's origin into it.
+Org shifts it to the level of its new place.  An id: link to the
+node, or to anything under it, keeps working across the move.
+Nothing in the node records where it was: a move is undone by moving
+it back, by a caller that knows where back is.  Use org-node-archive
+when the node is being retired, since that writes the node's origin
+into it.
 
 Parameters:
   link - Link to the node to move (string, required)
@@ -5866,23 +5926,28 @@ Parameters:
            makes it stale
   parent - Link to the node's new parent (string, required), in any
            form link takes, or file:{absolute-path} for the top
-           level of the file.  It names a node in the file the moved
-           node is in; a move does not cross files
+           level of that file, as org-node-create's parent takes it.
+           It may name a node in any file this server may reach; the
+           node moves to that file
   previous_sibling - Link to the child of parent the node is to
                      follow (string, optional), in any form link
-                     takes.  Omitted, null, false or blank, the node
-                     becomes the parent's last child, or, at the top
-                     level, the file's first heading
-  files - Files and directories to look up the id: link in (array of
-          strings, optional); see org-node-read.  It applies to link
-          only, and is refused unless link is an id: link; an id:
-          parent or previous_sibling is looked for in the file link
-          named
+                     takes, looked up in the parent's file.
+                     Omitted, null, false or blank, the node becomes
+                     the parent's last child, or, at the top level,
+                     the file's first heading
+  files - Files and directories to look up the id: link in link in
+          (array of strings, optional); see org-node-read.  It
+          applies to link only - it says where to find the node the
+          call moves - and is refused unless link is an id: link.
+          parent and previous_sibling are resolved without it, so an
+          id: parent must be one Emacs's ID index holds, and is
+          refused by name when it is not
 
 Returns JSON object:
   success - Always true on success (boolean)
-  saved - False when the change is only in the user's open Emacs
-          buffer, not on disk; tell the user it needs saving (boolean)
+  saved - False when the change is only in an open Emacs buffer, not
+          on disk; when the node moved to another file, it answers
+          for both files (boolean)
   link - Link to the node in its new place (string): id:{id} when it
          has an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

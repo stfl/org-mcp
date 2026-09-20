@@ -85,6 +85,17 @@ among the allowed files, and a remote directory in the list permits nothing.
 
 =org-config-allowed-files= reports the policy to clients.
 
+* Writes that reach a second file
+
+=org-node-move= writes two files when the new parent is in another one. Both
+are checked here like any file a call names: the destination goes through the
+allowed files and =org-mcp-file-scope-override= exactly as the file the node
+came from did, so filing a node into another project cannot become a way to
+write somewhere a call may not reach.
+
+The archive file below is the one exception, and it is the user's own setting
+rather than a caller's parameter.
+
 * The archive file
 
 =org-node-archive= writes a second file: the one your =org-archive-location=,
@@ -185,9 +196,12 @@ named.
   clock's file, with or without =files=, since =clock_out= must name the
   running clock.
 - =org-node-move= looks the =id:= link of =link= up in =files=, which applies
-  to =link= only.  It looks =parent= and =previous_sibling= up in the file
-  =link= named, with or without =files=, since a move stays within one file,
-  so either of them may be any link.
+  to =link= only: =files= says where to find the node the call moves, never
+  where to put it.  An =id:= =parent= is therefore looked up in the ID index
+  like any =id:= link sent without =files=, and refused by name when the index
+  does not hold it.  =previous_sibling= is looked up in the parent's file,
+  with or without =files=, since the sibling must be a child of the parent, so
+  it may be any link.
 
 An =org-node-set-todo= call that names the file holding the ID:
 

@@ -14649,6 +14649,49 @@ because it is what says where the node was.")
    "\\'")
   "The complete file after Target moves to the top level of its file.")
 
+(defconst org-mcp-test--verbs-other-content
+  (concat
+   "#+TITLE: Projects\n"
+   "\n"
+   "* TODO Project One\n"
+   "Project body.\n"
+   "** Existing child\n"
+   "* TODO Project Two\n")
+  "A second file a node moves into.
+It opens with a preamble, so a move to its top level has to land
+after the preamble and before every heading, where a node created at
+the top level lands.")
+
+(defconst org-mcp-test--verbs-other-with-target
+  (concat
+   "\\`#\\+TITLE: Projects\n"
+   "\n"
+   "\\* TODO Project One\n"
+   "Project body\\.\n"
+   "\\*\\* Existing child\n"
+   "\\*\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\*\\*\\* Child\n"
+   "\\*\\*\\*\\* Grandchild\n"
+   "\\* TODO Project Two\n"
+   "\\'")
+  "The complete second file after Target moves under Project One.")
+
+(defconst org-mcp-test--verbs-other-with-target-at-top
+  (concat
+   "\\`#\\+TITLE: Projects\n"
+   "\n"
+   "\\* TODO Target\n"
+   org-mcp-test--verbs-target-drawers
+   "\\*\\* Child\n"
+   "\\*\\*\\* Grandchild\n"
+   "\\* TODO Project One\n"
+   "Project body\\.\n"
+   "\\*\\* Existing child\n"
+   "\\* TODO Project Two\n"
+   "\\'")
+  "The complete second file after Target moves to its top level.")
+
 (defun org-mcp-test--verbs-link ()
   "Return the link to Target in `org-mcp-test--verbs-content'."
   (concat "id:" org-mcp-test--verbs-target-id))
@@ -14667,6 +14710,19 @@ LINK defaults to Target's."
   `(org-mcp-test--with-id-setup ,file-var org-mcp-test--verbs-content
        (list org-mcp-test--verbs-target-id)
      ,@body))
+
+(defmacro org-mcp-test--with-verbs-files (file-var other-var &rest body)
+  "Bind FILE-VAR and OTHER-VAR to the two verb fixtures for BODY.
+Both are allowed files, and Target's ID is registered in FILE-VAR,
+so a move between them is a move between two files a call reaches."
+  (declare (indent 2) (debug t))
+  `(org-mcp-test--with-temp-org-files
+       ((,file-var org-mcp-test--verbs-content)
+        (,other-var org-mcp-test--verbs-other-content))
+     (org-mcp-test--with-id-tracking
+      (list ,file-var ,other-var)
+      (list (cons org-mcp-test--verbs-target-id ,file-var))
+      ,@body)))
 
 (ert-deftest org-mcp-test-node-delete-takes-the-whole-subtree ()
   "org-node-delete takes the node and every generation under it.
@@ -14888,21 +14944,176 @@ costs the file nothing."
        "\\`parent .* is the node being moved, or a node under it\\'"
        test-file))))
 
-(ert-deftest org-mcp-test-node-move-refuses-a-parent-in-another-file ()
-  "A move stays within one file, and says so when a parent is elsewhere."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--verbs-content)
-       (other-file "* Elsewhere\n"))
-    (org-mcp-test--with-id-tracking
-     (list test-file other-file)
-     (list (cons org-mcp-test--verbs-target-id test-file))
-     (org-mcp-test--call-tool-refused
-      "org-node-move"
-      `((link . ,(org-mcp-test--verbs-link))
-        (before . ,(org-mcp-test--verbs-digest))
-        (parent . ,(org-mcp-test--file-link other-file "*Elsewhere")))
-      "\\`A move stays within one file:"
-      test-file))))
+(ert-deftest org-mcp-test-node-move-crosses-files ()
+  "A node moves into another file, its whole subtree with it.
+This is the filing a GTD workflow is made of: an item leaves the
+inbox for a project.  The subtree arrives under its new parent with
+its LOGBOOK and its drawers, and it is gone from the file it left."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let* ((link (org-mcp-test--verbs-link))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-move"
+              `((link . ,link)
+                (before . ,(org-mcp-test--verbs-digest))
+                (parent
+                 .
+                 ,(org-mcp-test--file-link
+                   other-file "*Project One")))))))
+      (should (eq (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--verbs-target-gone)
+      (org-mcp-test--verify-file-matches
+       other-file org-mcp-test--verbs-other-with-target))))
+
+(ert-deftest org-mcp-test-node-move-crosses-files-to-a-top-level ()
+  "A parent naming another file moves the node to that file's top level.
+It lands after the preamble and before every heading there, where a
+node created at the top level lands, so `parent' means the same on a
+move as on org-node-create wherever the file is."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (mcp-server-lib-ert-call-tool
+     "org-node-move"
+     `((link . ,(org-mcp-test--verbs-link))
+       (before . ,(org-mcp-test--verbs-digest))
+       (parent . ,(concat "file:" other-file))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--verbs-target-gone)
+    (org-mcp-test--verify-file-matches
+     other-file org-mcp-test--verbs-other-with-target-at-top)))
+
+(ert-deftest org-mcp-test-node-move-across-files-keeps-the-id-resolving ()
+  "An `id:' link to a node that changed file still finds it.
+Org re-registers the IDs in a pasted subtree against the file they
+land in, so a client holding the link it moved the node by can read
+the node straight back."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-move"
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest))
+         (parent
+          .
+          ,(org-mcp-test--file-link other-file "*Project One"))))
+      (org-mcp-test--should-resolve-to link "Target"))))
+
+(ert-deftest org-mcp-test-node-move-across-files-reports-both-saves ()
+  "`saved' answers for the file the node arrives in as well.
+The destination is written like any file org-mcp writes and left
+unsaved when the user already had edits in its buffer, so a client
+told the move was saved can believe it of both files."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((buffer nil))
+      (unwind-protect
+          (progn
+            (setq buffer (find-file-noselect other-file))
+            (with-current-buffer buffer
+              (goto-char (point-max))
+              (insert "The user was typing here.\n"))
+            (let ((result
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-node-move"
+                     `((link . ,(org-mcp-test--verbs-link))
+                       (before . ,(org-mcp-test--verbs-digest))
+                       (parent
+                        .
+                        ,(org-mcp-test--file-link
+                          other-file "*Project One")))))))
+              (should (eq (alist-get 'saved result) :json-false)))
+            ;; The node left its own file, which was clean and is
+            ;; saved; the file it arrived in is the user's to save.
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--verbs-target-gone)
+            (should-not
+             (string-match-p
+              "Target" (org-mcp-test--read-file other-file)))
+            (org-mcp-test--verify-buffer-matches
+             buffer "\\*\\* TODO Target"))
+        (when buffer
+          (with-current-buffer buffer
+            (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
+(ert-deftest org-mcp-test-node-move-across-files-refuses-a-stale-digest ()
+  "A stale token refuses a cross-file move and leaves both files alone.
+Two files are at stake, and a refusal has to be worth nothing to
+either of them."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link))
+          (other-before (org-mcp-test--read-file other-file)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-title"
+       `((link . ,link) (before . "Target") (after . "Target renamed")))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,link)
+         (before . ,stale)
+         (parent
+          .
+          ,(org-mcp-test--file-link other-file "*Project One")))
+       "\\`conflict: Subtree mismatch: .*nothing was moved\\'"
+       test-file)
+      (should
+       (string= (org-mcp-test--read-file other-file) other-before)))))
+
+(ert-deftest org-mcp-test-node-move-refuses-a-parent-out-of-reach ()
+  "A move is no way to write a file a call may not reach.
+The destination is checked like any file a call names, before
+anything is cut, so the node stays where it is."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((org-mcp-allowed-files (list test-file)))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,(org-mcp-test--verbs-link))
+         (before . ,(org-mcp-test--verbs-digest))
+         (parent
+          .
+          ,(org-mcp-test--file-link other-file "*Project One")))
+       "the referenced file not in allowed list"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-move-refuses-a-parent-heading-not-there ()
+  "A parent naming a heading that is not there refuses the move.
+The search runs in the file the parent names, and a search that ends
+on nothing is refused rather than left to land the node at some
+other place in that file.  Neither file is written."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((other-before (org-mcp-test--read-file other-file)))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,(org-mcp-test--verbs-link))
+         (before . ,(org-mcp-test--verbs-digest))
+         (parent
+          .
+          ,(org-mcp-test--file-link other-file "*No such heading")))
+       "\\`Cannot resolve link"
+       test-file)
+      (should
+       (string= (org-mcp-test--read-file other-file) other-before)))))
+
+(ert-deftest org-mcp-test-node-move-refuses-an-unknown-id-parent ()
+  "An `id:' parent Emacs's ID index does not hold refuses the move.
+`files' says where to find the node the call moves, never where to
+put it, so an `id:' parent is looked for in the index and refused by
+name when it is not there.  Neither file is written."
+  (org-mcp-test--with-verbs-files test-file other-file
+    (let ((other-before (org-mcp-test--read-file other-file)))
+      (org-mcp-test--call-tool-refused
+       "org-node-move"
+       `((link . ,(org-mcp-test--verbs-link))
+         (before . ,(org-mcp-test--verbs-digest))
+         (parent . "id:99999999-8888-7777-6666-555555555555")
+         (files . ,(vector test-file)))
+       "\\`Cannot find ID"
+       test-file)
+      (should
+       (string= (org-mcp-test--read-file other-file) other-before)))))
 
 (ert-deftest org-mcp-test-node-archive-writes-where-the-node-came-from ()
   "org-node-archive moves the node out and records where it was.

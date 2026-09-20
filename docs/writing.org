@@ -63,10 +63,12 @@ file and a function it runs afterwards, such as one on =after-save-hook=,
 fails, buffer and file hold the change, and the error says that the change was
 made, so a client does not repeat the call.
 
-=org-node-archive= writes two files, the node's own and the archive. Org
-copies the subtree into the archive before it cuts it from the file it was in,
-so a failure between the two leaves the node in both files rather than in
-neither, and the =saved= flag answers for both.
+=org-node-archive=, and =org-node-move= when the new parent is in another
+file, write two files. The =saved= flag answers for both: it is =false= when
+either change is sitting in a buffer that already had unsaved edits. Only the
+file the node leaves is put back on a failure, so a failure after the node has
+been written to the other file leaves it in both rather than in neither. A
+refusal happens before either file is written.
 
 A failed write puts back text only: a clock that =org-todo= stopped
 (=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
@@ -513,7 +515,7 @@ them:
 | Tool               | If it was the wrong node                                               |
 |--------------------+------------------------------------------------------------------------|
 | =org-node-delete=  | nothing to undo: the text is gone, and nothing records it was there     |
-| =org-node-move=    | move it back, if you know where back was; the node does not say         |
+| =org-node-move=    | move it back, if you know where back was; the node does not say, and it may be in another file |
 | =org-node-archive= | find it in the archive file, which carries the outline path it came from |
 
 ** org-node-delete
@@ -582,20 +584,27 @@ Example:
 #+end_src
 
 ** org-node-move
-- *Description:* Move a node, and every descendant under it, under a different parent in the same file
+- *Description:* Move a node, and every descendant under it, under a different parent, in this file or another
 - *Parameters:*
   - =link= (string, required): link to the node to move (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the node's =digest=, as for [[*org-node-delete][org-node-delete]]
-  - =parent= (string, required): link to the node's new parent, in any form that addresses a heading, or =file:/path/to/file.org= for the top level of the file. It must name a node in the file the moved node is in; a move that would cross files is refused
-  - =previous_sibling= (string, optional): link to the child of =parent= the node is to follow. Omitted, =null=, =false= or blank, the node becomes the parent's last child, or, at the top level, the file's first heading. The same parameter =org-node-create= takes, meaning the same thing
-  - =files= (array of strings, optional): Files and directories to look up the =id:= link in =link= in, instead of the ID index. It applies to =link= only; =parent= and =previous_sibling= are looked up in the file =link= names, so either may be any link (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]])
+  - =parent= (string, required): link to the node's new parent, in any form that addresses a heading, or =file:/path/to/file.org= for the top level of that file — exactly what =org-node-create= takes. It may name a node in any file a call reaches, and the node then moves to that file
+  - =previous_sibling= (string, optional): link to the child of =parent= the node is to follow, looked up in the parent's file. Omitted, =null=, =false= or blank, the node becomes the parent's last child, or, at the top level, the file's first heading. The same parameter =org-node-create= takes, meaning the same thing
+  - =files= (array of strings, optional): Files and directories to look up the =id:= link in =link= in, instead of the ID index. It applies to =link= only — it says where to find the node the call moves, never where to put it — so an =id:= =parent= must be one the ID index holds (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]])
 - *Returns:* Success status, =saved= flag, and the link to the node in its new place
-- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is moved; unmarked validation otherwise — a =parent= in another file, and a =parent= or =previous_sibling= that is the node itself or a node under it, which would leave the move nowhere to land (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is moved; unmarked validation otherwise — a =parent= org-mcp cannot reach or cannot find, and a =parent= or =previous_sibling= that is the node itself or a node under it, which would leave the move nowhere to land (see [[*How a refusal is classed]])
 - *Recovery:* move it back. The subtree arrives whole, its LOGBOOK and its drawers with it, but nothing in it records where it was, so undoing a move means knowing where the node came from. When the node is being retired rather than rearranged, [[*org-node-archive][org-node-archive]] is the tool that writes that down for you
 
 Org shifts the moved subtree to the level of its new place, every generation
 under it with it, so a top-level node moved under a level-2 parent arrives at
-level 3 with its children at level 4.
+level 3 with its children at level 4. An =id:= link to the node, or to anything
+under it, keeps working across a move between files: Org registers the IDs in
+the subtree against the file they land in.
+
+A move to another file writes both files, and both have to be within reach —
+the destination is checked like any file a call names, so a move is no way to
+write outside the allowed files (see [[file:file-access.org::*Configuring allowed files][Configuring allowed files]]). A refused
+move writes neither.
 
 Example:
 #+begin_src json
