@@ -12,7 +12,7 @@ fmt: elisp-autofmt shfmt
 
 # Format org-mcp.el with the devshell's Emacs and elisp-autofmt.
 elisp-autofmt:
-    @scripts/quiet.sh emacs -Q --batch -l scripts/elisp-autofmt.el org-mcp.el
+    @scripts/quiet.sh emacs -Q --batch -l scripts/format-elisp.el org-mcp.el
 
 shfmt:
     @shfmt -i 4 -l -w scripts/quiet.sh scripts/run-tests.sh

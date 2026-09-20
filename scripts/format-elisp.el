@@ -1,10 +1,10 @@
-;;; elisp-autofmt.el --- Format Elisp files with elisp-autofmt -*- lexical-binding: t; -*-
+;;; format-elisp.el --- Format Elisp files with elisp-autofmt -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; Usage, from the repository root inside the Nix devshell:
 ;;
-;;   emacs -Q --batch -l scripts/elisp-autofmt.el FILE...
+;;   emacs -Q --batch -l scripts/format-elisp.el FILE...
 ;;
 ;; `just fmt' runs it on org-mcp.el.  The devshell provides Emacs 31
 ;; with elisp-autofmt, and the Python its formatter runs on, so every
@@ -50,4 +50,4 @@
 ;; The files are formatted; keep Emacs from visiting them as well.
 (setq command-line-args-left nil)
 
-;;; elisp-autofmt.el ends here
+;;; format-elisp.el ends here
