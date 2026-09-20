@@ -525,9 +525,10 @@ made, so a client does not repeat the call.
 
 A failed write puts back text only: a clock that =org-todo= stopped
 (=org-clock-out-when-done=) stays stopped, and a closed clock whose save failed
-stays closed and unsaved in its buffer. =org-clock-in= closes the running clock
-before it opens the new one; a failure while opening the new clock leaves the
-old one closed.
+stays closed and unsaved in its buffer. Closing a clock also stops the Emacs
+clock the CLOCK line belongs to, and putting the line back open does not start
+it again. =org-clock-in= closes the running clock before it opens the new one;
+a failure while opening the new clock leaves the old one closed.
 
 *** org-get-todo-config
 - *Description:* Get TODO keyword configuration for understanding task states
@@ -1217,12 +1218,22 @@ Example:
 #+end_src
 
 *** org-clock-out
-- *Description:* Clock out the currently active clock. Supports optional link validation and custom end time
+- *Description:* Clock out the currently active clock. Org writes the close, so the Emacs clock the CLOCK line belongs to stops with it and a following =org-clock-in= needs no =clock_out=. Supports optional link validation and custom end time
 - *Parameters:*
   - =link= (string, optional): link (see [[*Addressing headings with links]]) to validate against the active clock, such as =file:/path/to/file.org=. If provided, its file must match the active clock's file; =null=, =false= or a blank string count as none
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[*Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
+
+A call is refused when:
+
+- a clock runs in a file outside the allowed files, as =org-clock-in= refuses one.  org-mcp writes no file outside the allowed files, and says nothing about that clock, neither its file nor its heading nor its start, so the user has to clock out of it in Emacs:
+  #+begin_example
+  A clock is running in a file outside the allowed files.  Ask the user to clock out of it in Emacs
+  #+end_example
+- no clock runs at all.
+- =end_time= is before the running clock's start, or cannot be parsed.
+- =link= names a file other than the running clock's, or is no link org-mcp takes or names a file outside the allowed files.
 
 Example:
 #+begin_src json

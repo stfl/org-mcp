@@ -821,7 +821,7 @@ line of its own below it.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
    ":END:\n"
    "\\'")
   "Regex matching the complete file after org-clock-out closes the CLOCK entry.")
@@ -5845,7 +5845,7 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
    ":END:\n"
    "\n"
    "\\* TODO Task Two\n"
@@ -6157,6 +6157,33 @@ This exercises the write path in org-mcp--complete-and-save."
                              org-mcp-test--clock-task-with-open-clock)))
         (kill-buffer buffer)))))
 
+(ert-deftest org-mcp-test-clock-out-failed-after-save-hook ()
+  "Test a save failing after the file holds the close says the close was made.
+A buffer-local `after-save-hook' fails once the file holds the closed
+CLOCK line.  The close stays in buffer and file, the buffer reads
+unmodified, and the error says the change was made, so a client does
+not close the clock a second time."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((buffer (find-file-noselect test-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (add-hook 'after-save-hook
+                        (lambda () (error "Save hook failed"))
+                        nil t))
+            (org-mcp-test--call-tool-refused
+             "org-clock-out" '((end_time . "2026-01-01T11:00:00"))
+             "\\`The change was made and saved, but .*Save hook failed")
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--clock-out-expected-regex)
+            (org-mcp-test--verify-buffer-matches
+             buffer org-mcp-test--clock-out-expected-regex)
+            (org-mcp-test--verify-no-modified-buffer test-file)
+            (with-current-buffer buffer
+              (kill-local-variable 'after-save-hook)))
+        (kill-buffer buffer)))))
+
 ;;; Tests for org-clock-into-drawer behavior (nil and custom drawer name)
 
 (defconst org-mcp-test--clock-task-with-open-clock-no-drawer
@@ -6184,7 +6211,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   (concat
    "\\`\\* TODO Task One\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
    "\\'")
   "File contents after clock-out with `org-clock-into-drawer' nil.")
 
@@ -6447,26 +6474,30 @@ lands in that buffer, so the response covers both edits."
 
 (defconst org-mcp-test--clock-task-with-spaced-open-clock
   "* TODO Task One\n:LOGBOOK:\nCLOCK:  [2026-01-01 Thu 10:00]\n:END:\n"
-  "Org file whose open CLOCK line has two spaces after `CLOCK:'.
-Org reads the line as a clock; org-clock-out's own search does not.")
+  "Org file whose open CLOCK line has two spaces after `CLOCK:'.")
 
-(ert-deftest org-mcp-test-clock-out-refuses-clock-line-not-found ()
-  "Test clock-out fails, changing nothing, when it cannot find the CLOCK line.
-The session clock runs on a line Org reads as a clock but org-clock-out
-does not find, so there is no clock to close and no heading to link."
+(defconst org-mcp-test--clock-out-spaced-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK:  \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents after clock-out closes a CLOCK line spaced that way.")
+
+(ert-deftest org-mcp-test-clock-out-spaced-clock-line ()
+  "Test clock-out closes every CLOCK line Org itself reads as a clock.
+The session clock runs on a line whose timestamp is two spaces after
+`CLOCK:'.  Org's clock-out reads it, so the line keeps its spacing and
+the close is appended to it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-with-spaced-open-clock))
     (org-mcp-test--with-session-clock test-file
-      (should
-       (string-match-p
-        "\\`Cannot find the CLOCK line of the active clock started at \
-\\[2026-01-01 Thu 10:00\\]"
-        (org-mcp-test--call-tool-expecting-error
-         test-file "org-clock-out" '((end_time . "2026-01-01T11:00:00")))))
-      (should
-       (string= (org-mcp-test--read-file test-file)
-                org-mcp-test--clock-task-with-spaced-open-clock))
-      (org-mcp-test--verify-no-modified-buffer test-file))))
+      (let ((result (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'clocked_out result) t)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-out-spaced-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-add-custom-drawer ()
   "Test clock-add uses custom drawer name from `org-clock-into-drawer'."
@@ -6642,6 +6673,31 @@ Ask the user to clock out of it before clocking in\\'"
           (should (eq (org-clock-is-active) (find-buffer-visiting outside-file)))
           (should (= (marker-position org-clock-marker) position)))))))
 
+(ert-deftest org-mcp-test-clock-out-refuses-session-clock-outside-allowed-files ()
+  "Test clock-out refuses while the session clock runs outside the allowed files.
+The refusal is the whole message, so neither the file, the heading nor
+the start of that clock reaches the client, and org-mcp writes no file
+outside the allowed files.  Neither the file, the buffer of the
+running clock, nor the running clock changes."
+  (org-mcp-test--with-temp-org-files
+      ((allowed-file org-mcp-test--clock-task-content)
+       (outside-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-mcp-allowed-files (list allowed-file)))
+      (org-mcp-test--with-session-clock outside-file
+        (let ((position (marker-position org-clock-marker)))
+          (should
+           (string-match-p
+            "\\`A clock is running in a file outside the allowed files\\.  \
+Ask the user to clock out of it in Emacs\\'"
+            (org-mcp-test--call-tool-expecting-error
+             outside-file "org-clock-out"
+             '((end_time . "2026-01-01T11:00:00")))))
+          (should (string= (org-mcp-test--read-file outside-file)
+                           org-mcp-test--clock-task-with-open-clock))
+          (org-mcp-test--verify-no-modified-buffer outside-file)
+          (should (eq (org-clock-is-active) (find-buffer-visiting outside-file)))
+          (should (= (marker-position org-clock-marker) position)))))))
+
 (defconst org-mcp-test--clock-in-after-clock-out-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
@@ -6658,14 +6714,16 @@ Ask the user to clock out of it before clocking in\\'"
 Task One's clock keeps the end org-clock-out gave it.")
 
 (ert-deftest org-mcp-test-clock-in-after-clock-out-of-session-clock ()
-  "Test clock-in needs no clock_out once the Emacs clock's line is closed.
-org-clock-out closes Task One's CLOCK line, where the Emacs clock still
-points.  That clock no longer runs, so clocking in to Task Two needs no
-clock_out, and Task One keeps its 10:30 end."
+  "Test clock-out stops the Emacs clock, so the next clock-in needs no clock_out.
+Closing Task One's CLOCK line through Org stops the Emacs clock the
+line belongs to, leaving `org-clock-marker' unset rather than pointing
+at a closed clock.  No clock runs then, so clocking in to Task Two
+needs no clock_out, and Task One keeps its 10:30 end."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
     (org-mcp-test--with-session-clock test-file
       (org-mcp-test--call-clock-out "2026-01-01T10:30:00")
+      (should-not (org-clock-is-active))
       (let ((result (org-mcp-test--call-clock-in
                      (org-mcp-test--file-link test-file "*Task Two")
                      "2026-01-01T11:00:00")))
@@ -9075,7 +9133,7 @@ Line 10 is the Beta heading.")
    "\\* TODO Gamma\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
-   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => 2:15\n"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] =>  *2:15\n"
    ":END:\n"
    "Gamma body\\.\n"
    "\\'")

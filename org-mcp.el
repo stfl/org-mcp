@@ -1579,9 +1579,9 @@ way, widened, and the user's narrowing is restored afterwards."
 The Emacs session's own running clock is authoritative: whenever
 `org-clock-is-active' reports one whose CLOCK line is still open, that
 clock is described, whether or not its file is in the allowed list.
-A line closed since, as the org-clock-out tool closes it without
-stopping the Emacs clock, leaves no clock running there.  With no
-running clock, allowed files are scanned in order with
+A line closed since by a hand that left the Emacs clock pointing at
+it, such as the user's own edit, leaves no clock running there.  With
+no running clock, allowed files are scanned in order with
 `org-find-open-clocks', each in full even where the user's buffer is
 narrowed, see `org-mcp--with-wide-clock-buffer', and the first
 dangling CLOCK line is described, which keeps clocks left unclosed by
@@ -3602,6 +3602,11 @@ MCP Parameters:
 
 (defun org-mcp--tool-clock-out (&optional link end_time files)
   "Clock out the currently active clock.
+A clock running in a file outside the allowed files is refused, as
+clocking in refuses it: org-mcp writes no file outside them, and the
+refusal names neither that file nor the heading and start of the clock
+it holds, which `org-mcp--tool-clock-get-active' withholds too.
+The clock is closed through Org, so Emacs's own clock stops with it.
 LINK, when not blank, must name a heading or file in the active
 clock's file; see `org-mcp--link-given'.
 END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
@@ -3623,6 +3628,10 @@ MCP Parameters:
   (let ((active (org-mcp--clock-find-active)))
     (unless active
       (org-mcp--tool-validation-error "No active clock to stop"))
+    (unless (alist-get 'allowed active)
+      (org-mcp--tool-validation-error
+       "A clock is running in a file outside the allowed files.  Ask \
+the user to clock out of it in Emacs"))
     (let* ((active-file (alist-get 'file active))
            (now (current-time))
            (end
@@ -3646,11 +3655,7 @@ MCP Parameters:
           (unless (org-mcp--paths-equal-p link-file active-file)
             (org-mcp--tool-validation-error
              "Link file does not match active clock file"))))
-      (let* ((duration (float-time (time-subtract end start-time)))
-             (close-text
-              (format "--%s => %s"
-                      (org-mcp--clock-format-timestamp end)
-                      (org-mcp--clock-duration-string duration))))
+      (let ((duration (float-time (time-subtract end start-time))))
         (org-mcp--modify-and-save active-file "clock-out"
                                   `((clocked_out . t)
                                     (heading
@@ -3664,20 +3669,22 @@ MCP Parameters:
                                      .
                                      ,(org-mcp--clock-duration-string
                                        duration)))
-          ;; Find the active clock line by its exact start timestamp
-          (unless (re-search-forward (concat
-                                      "^\\([ \t]*CLOCK: \\["
-                                      (regexp-quote start-str)
-                                      "\\]\\)[ \t]*$")
-                                     nil t)
-            (org-mcp--tool-validation-error
-             "Cannot find the CLOCK line of the active clock started at \
-[%s] in %s"
-             start-str active-file))
-          (goto-char (match-end 1))
-          (insert close-text)
-          ;; The response links to the heading clocked out of
-          (org-back-to-heading t))))))
+          ;; Org writes the close itself, so every CLOCK line it reads
+          ;; as a clock is closed, its clock-out settings apply as they
+          ;; do to an interactive clock-out, and the Emacs clock the
+          ;; line belongs to stops: `org-clock-marker' is left unset
+          ;; rather than pointing at a closed clock, which a later
+          ;; clock-in would read as a clock still running.
+          (let* ((marker (alist-get 'marker active))
+                 (heading
+                  (progn
+                    (goto-char (marker-position marker))
+                    (org-back-to-heading t)
+                    (point))))
+            (org-clock-clock-out (cons marker start-time) nil end)
+            ;; The response links to the heading clocked out of, which
+            ;; stays where it is: the close is written below it.
+            (goto-char heading)))))))
 
 (defun org-mcp--tool-clock-add (link start end &optional files)
   "Add a completed clock entry to the heading LINK names.
@@ -4663,6 +4670,11 @@ Returns JSON object:
    :id "org-clock-out"
    :description
    "Clock out the currently active clock.
+
+Closing the clock stops the Emacs clock it belongs to, so a clock-in
+after it needs no clock_out.  A clock running outside the allowed
+files is refused: org-mcp writes no file outside them and reports
+nothing about that clock, so ask the user to clock out of it in Emacs.
 
 Rounding is applied per org-clock-rounding-minutes.
 
