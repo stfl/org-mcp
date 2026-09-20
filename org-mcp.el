@@ -697,35 +697,42 @@ reports it as the `saved' response field.  A tool that also edits
 another buffer binds it around `org-mcp--modify-and-save' so the
 response covers both edits.")
 
+(defun org-mcp--link-of-change ()
+  "Return the link to the heading at point, for a response to report.
+No identifier is created for it.  When no link can be made, whatever
+the error, the tool error says that the change itself was made, so a
+client does not repeat it."
+  (condition-case err
+      (org-mcp--link-at-point)
+    (error
+     (org-mcp--tool-validation-error
+      "The change was made%s, but no link to it could be made: %s"
+      (if org-mcp--unsaved-change-p
+          " and left unsaved"
+        "")
+      (if (eq (car err) 'mcp-server-lib-tool-error)
+          (cadr err)
+        (error-message-string err))))))
+
 (defun org-mcp--complete-and-save (response-alist)
   "Return the JSON response for a change to the heading at point.
 RESPONSE-ALIST is an alist of response fields.  The `link' field is
-the heading's link from `org-mcp--link-at-point'; no identifier is
-created for it.  The `saved' field is false when
-`org-mcp--unsaved-change-p' is non-nil.  When no link can be made,
-whatever the error, the tool error says that the change itself was
-made, so a client does not repeat it."
-  (let
-      ((link
-        (condition-case err
-            (org-mcp--link-at-point)
-          (error
-           (org-mcp--tool-validation-error
-            "The change was made%s, but no link to it could be made: %s"
-            (if org-mcp--unsaved-change-p
-                " and left unsaved"
-              "")
-            (if (eq (car err) 'mcp-server-lib-tool-error)
-                (cadr err)
-              (error-message-string err)))))))
-    (json-encode
-     (append
-      `((success . t)
-        (saved
-         .
-         ,(if org-mcp--unsaved-change-p
-              :json-false t)))
-      response-alist `((link . ,link))))))
+the heading's link from `org-mcp--link-of-change', unless
+RESPONSE-ALIST already carries one: a verb that takes the whole node
+away leaves no heading at point to link to and names the link the
+node had instead, read while the node was still there.  The `saved'
+field is false when `org-mcp--unsaved-change-p' is non-nil."
+  (json-encode
+   (append
+    `((success . t)
+      (saved
+       .
+       ,(if org-mcp--unsaved-change-p
+            :json-false t)))
+    (if (assq 'link response-alist)
+        response-alist
+      (append
+       response-alist `((link . ,(org-mcp--link-of-change))))))))
 
 (defun org-mcp--maybe-save-buffer
     (buf file-path preexisting-modified-p)
@@ -1599,6 +1606,11 @@ descendant under it, whatever depth the call asked to see."
       (cons (point-min) (point-max))
     (org-mcp--subtree-bounds)))
 
+(defconst org-mcp--digest-prefix "sha256:"
+  "The whole of a digest token's prefix, naming the algorithm behind it.
+`org-mcp--digest' writes it, so the form org-mcp hands a client and
+the form org-mcp takes back are one string and cannot drift apart.")
+
 (defun org-mcp--digest (bounds)
   "Return the digest of the buffer region BOUNDS covers.
 BOUNDS is (BEGIN . END) in the current buffer.  The token is
@@ -1617,7 +1629,7 @@ its reader, and a decision made for a reader is not a safety
 boundary.  Every region has a digest, an empty one included, so a
 node asked for a digest always carries one."
   (concat
-   "sha256:"
+   org-mcp--digest-prefix
    (substring (secure-hash
                'sha256
                (encode-coding-string (buffer-substring-no-properties
