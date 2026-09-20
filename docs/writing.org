@@ -113,6 +113,31 @@ and a client that cares reads the file to find out which it was.
 Every tool below names the classes it can refuse with; the clock tools name
 theirs in [[file:clocking.org][Clock tracking]].
 
+* Knowing what you are about to change
+
+A write changes the file as it stands, while the client that sends it planned
+from a node it read a moment earlier. The file can move in between: the user
+edits the buffer, a capture lands, another client writes, a clock tool adds a
+=CLOCK:= line.
+
+=digest= and =content_digest= are how a client tells whether it did. Ask for
+one on the read you plan from, keep it, and read it again when you come to
+write: an unchanged token says the region is as you left it, and a different
+one says your plan was made against something the file no longer holds (see
+[[file:reading.org::*The two digests][The two digests]]). Ask on the read before the write rather than reaching for a
+token from a list you kept — both regions take in =:LOGBOOK:= drawers and
+=CLOCK:= lines, so a kept token goes stale for reasons your own clocking
+caused.
+
+Which token to ask for follows what you are about to change, because what you
+assert is what you would destroy. A field change carries the field's own value,
+which is what =before= holds on =org-node-set-todo= and =org-node-set-title=: a
+heading that has grown a clock line since you read it is still the heading
+whose state you meant to change, and a token over its subtree would refuse that
+write for nothing. A body rewritten whole is the =content_digest= region, the
+one =org-node-set-content= works inside. A subtree is =digest=, because
+everything under the node goes with it.
+
 * Write tools
 
 ** org-node-set-todo

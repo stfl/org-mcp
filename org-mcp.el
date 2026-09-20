@@ -1210,6 +1210,8 @@ it unless TEXT ends in one or a line break follows point."
     level
     link
     content
+    content_digest
+    digest
     properties
     children)
   "Every field a node can carry.
@@ -1407,6 +1409,43 @@ region."
       (cons (point-min) (or (car children) (point-max)))
     (org-mcp--body-bounds)))
 
+(defun org-mcp--node-subtree-bounds (file-node)
+  "Return the subtree of the node at point as (BEGIN . END).
+FILE-NODE non-nil means the node is the file the buffer visits, and
+its subtree is the whole of it.  Otherwise it is the region
+`org-mcp--subtree-bounds' delimits: the heading, its body and every
+descendant under it, whatever depth the call asked to see."
+  (if file-node
+      (cons (point-min) (point-max))
+    (org-mcp--subtree-bounds)))
+
+(defun org-mcp--digest (bounds)
+  "Return the digest of the buffer region BOUNDS covers.
+BOUNDS is (BEGIN . END) in the current buffer.  The token is
+`sha256:' followed by the first 16 hexadecimal characters of the
+SHA-256 of the region's text as UTF-8 bytes.
+
+The token is opaque to the client that receives it: it says which
+version of a region the client read, and a client asserts by sending
+back the one it was given rather than by computing one.  The prefix
+names the algorithm, so a token made by a later one is told apart
+from this one without a second field to carry the answer.
+
+The region is what is digested, never a tool's rendering of it: a
+read that trims or formats what it returns is making a decision for
+its reader, and a decision made for a reader is not a safety
+boundary.  Every region has a digest, an empty one included, so a
+node asked for a digest always carries one."
+  (concat
+   "sha256:"
+   (substring (secure-hash
+               'sha256
+               (encode-coding-string (buffer-substring-no-properties
+                                      (car bounds) (cdr bounds))
+                                     'utf-8
+                                     t))
+              0 16)))
+
 (defun org-mcp--node-properties ()
   "Return the Org property drawer of the heading at point, or nil.
 `org-mcp--special-properties' are left out: Org computes them rather
@@ -1415,6 +1454,17 @@ than storing them, and each is a node field in its own right."
    (lambda (pair)
      (member (car pair) org-mcp--special-properties))
    (org-entry-properties nil 'standard)))
+
+(defun org-mcp--node-needs-children-p (fields file-node)
+  "Return non-nil when a node carrying FIELDS must find its children.
+A node asked for `children' needs their positions to build them.  A
+file node, FILE-NODE non-nil, needs them for its body as well: a
+file's body is the preamble before its first heading, so both
+`content' and `content_digest' are bounded by the first child."
+  (or (memq 'children fields)
+      (and file-node
+           (or (memq 'content fields)
+               (memq 'content_digest fields)))))
 
 (defun org-mcp--node-at-point
     (fields &optional child-fields file-node)
@@ -1439,8 +1489,7 @@ no position before that heading."
           (unless file-node
             (org-mcp--heading-metadata-at-point)))
          (children
-          (when (or (memq 'children fields)
-                    (and file-node (memq 'content fields)))
+          (when (org-mcp--node-needs-children-p fields file-node)
             (org-mcp--node-child-positions file-node)))
          (link
           (when (or (memq 'link fields) (memq 'id fields))
@@ -1487,6 +1536,12 @@ no position before that heading."
                          (car bounds) (cdr bounds))))
                   (unless (string-blank-p text)
                     (string-trim text))))
+               ('content_digest
+                (org-mcp--digest
+                 (org-mcp--node-content-bounds file-node children)))
+               ('digest
+                (org-mcp--digest
+                 (org-mcp--node-subtree-bounds file-node)))
                ('properties (org-mcp--node-properties))
                ('children
                 (vconcat
@@ -3627,7 +3682,8 @@ MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
   fields - How much of each matching node to return (array of
           strings, or a string naming a configured list, optional);
-          defaults to every field but content and children
+          defaults to every field but content, children and the two
+          digests
   files - Files and directories to search, replacing the allowed
           files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
@@ -3780,7 +3836,7 @@ MCP Parameters:
          - any of these bracketed, as [[link]] or [[link][description]]
   fields - How much of the node to return (array of strings, or a
           string naming a configured list, optional); defaults to
-          every field but properties
+          every field but properties and the two digests
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -4299,6 +4355,15 @@ itself says which.  Nothing is ever sent as null.
          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
          file:{path}::*{title}; a file without an ID is file:{path}
   content - Body text, or a file's preamble before its first heading
+  content_digest - Opaque token over the region content is read from
+         and org-node-set-content writes within.  Send back the token
+         you were given to say what you believed was there; never
+         compute one.  content is trimmed for reading and the token
+         is not, so two nodes carrying the same content can carry
+         different tokens.  A node with an empty body still has one
+  digest - Opaque token over the node's whole subtree, every
+         descendant included whatever depth was asked for.  A change
+         anywhere under the node changes it
   properties - The Org property drawer
   children - The direct children, each a node carrying title, todo,
              level and link

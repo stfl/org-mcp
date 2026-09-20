@@ -13142,9 +13142,10 @@ field named there that the builder does not build fails here rather
 than reaching a client as a refusal.
 
 A heading carries every field but `closed' here, which stands for
-the fields left out when empty.  A file carries the six a file has;
+the fields left out when empty.  A file carries the eight a file has;
 its own property drawer is not among them, so `properties' on a file
-is one of the empty ones."
+is one of the empty ones.  Both digests are there for either: a
+region always has one, even when it is empty."
   (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
       (list org-mcp-test--node-shape-parent-id)
     (let ((every (vconcat (mapcar #'symbol-name org-mcp--node-fields))))
@@ -13160,7 +13161,14 @@ is one of the empty ones."
         (mapcar
          #'car
          (org-mcp-test--read-fields (concat "file:" test-file) every))
-        '(title file level link content children))))))
+        '(title
+          file
+          level
+          link
+          content
+          content_digest
+          digest
+          children))))))
 
 (ert-deftest org-mcp-test-fields-one-field-is-a-reference ()
   "A node asked for with one field is a reference to it.
@@ -13290,6 +13298,215 @@ both."
         (org-mcp-test--read-fields
          (concat "id:" org-mcp-test--node-shape-parent-id)
          fields))))))
+
+;;; The digests a client asserts with
+
+;; Two fields a client asks for when it means to change something:
+;; `digest' over the whole subtree and `content_digest' over the body.
+;; Each is a token over a buffer region, and these tests cut the region
+;; out of the file itself and hash it the way the documentation says
+;; org-mcp hashes it, so a token taken over the wrong region, or built
+;; some other way, fails here rather than reaching a client.
+
+(defun org-mcp-test--digest-of (text)
+  "Return the digest org-mcp emits for a region holding TEXT.
+The token is built here from the published recipe — `sha256:' and the
+first 16 hexadecimal characters of the SHA-256 of the region's UTF-8
+bytes — rather than by calling org-mcp, so that a change to how
+org-mcp builds one is a failure and not a silent agreement."
+  (concat
+   "sha256:"
+   (substring
+    (secure-hash 'sha256 (encode-coding-string text 'utf-8 t)) 0 16)))
+
+(defun org-mcp-test--region-of (file from to)
+  "Return the text of FILE between the strings FROM and TO.
+The region runs from where FROM begins to where TO begins, or to the
+end of FILE when TO is nil, so a test names the region a digest
+covers by what bounds it in the file."
+  (let* ((text (org-mcp-test--read-file file))
+         (begin (string-search from text))
+         (end (if to (string-search to text) (length text))))
+    (should begin)
+    (should end)
+    (substring text begin end)))
+
+(defconst org-mcp-test--content-digest-trim
+  "* One\nSame body.\n** Child\n* Two\nSame body.\n"
+  "Two headings whose bodies read alike and hash apart.
+One has a child, so its body region ends at that child and keeps the
+newline the body ends with.  Two has none, so its region ends where
+its last line does.  Both report the same `content', which is
+trimmed.")
+
+(ert-deftest org-mcp-test-digest-absent-until-asked-for ()
+  "Neither digest comes back unless the call asks for it.
+A digest is for a client about to change something; a read that only
+wants to see the node is not made to hash it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+           (unasked (org-mcp-test--node-shape-read link))
+           (asked
+            (org-mcp-test--read-fields
+             link ["digest" "content_digest"])))
+      (should-not (alist-get 'digest unasked))
+      (should-not (alist-get 'content_digest unasked))
+      (should-not
+       (alist-get
+        'digest
+        (aref
+         (alist-get
+          'children (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+         0)))
+      (should (alist-get 'digest asked))
+      (should (alist-get 'content_digest asked)))))
+
+(ert-deftest org-mcp-test-digest-covers-its-region ()
+  "Each digest is the hash of the region it is defined over.
+`digest' covers the subtree from the heading's stars to the next
+heading, descendants and drawers included.  `content_digest' covers
+the body between the drawer and the first child — the region
+`content' is read from and org-node-set-content writes within."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--read-fields
+            (concat "id:" org-mcp-test--node-shape-parent-id)
+            ["digest" "content_digest"])))
+      (should
+       (equal
+        (alist-get 'digest node)
+        (org-mcp-test--digest-of
+         (org-mcp-test--region-of
+          test-file "* TODO [#A] Parent" "* Second"))))
+      (should
+       (equal
+        (alist-get 'content_digest node)
+        (org-mcp-test--digest-of
+         (org-mcp-test--region-of
+          test-file "Parent body." "** DONE Child One")))))))
+
+(ert-deftest org-mcp-test-digest-of-a-file-covers-the-file ()
+  "A file is a node, and its two regions are the file and its preamble.
+Nothing about a digest is particular to a heading: the subtree of a
+file is all of it, and its body is what lies before its first
+heading."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--read-fields
+            (concat "file:" test-file) ["digest" "content_digest"])))
+      (should
+       (equal
+        (alist-get 'digest node)
+        (org-mcp-test--digest-of
+         (org-mcp-test--read-file test-file))))
+      (should
+       (equal
+        (alist-get 'content_digest node)
+        (org-mcp-test--digest-of
+         (org-mcp-test--region-of
+          test-file "#+TITLE:" "* TODO [#A] Parent")))))))
+
+(ert-deftest org-mcp-test-digest-of-an-empty-body ()
+  "A body with nothing in it has no content and a digest all the same.
+`content' is absent because there is nothing to read; the region is
+still a region, and a client asserting that a body is empty has a
+token to send back for it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((node
+           (org-mcp-test--read-fields
+            (org-mcp-test--file-link test-file "*Child Two")
+            ["content" "content_digest"])))
+      (should-not (alist-get 'content node))
+      (should
+       (equal
+        (alist-get 'content_digest node)
+        (org-mcp-test--digest-of ""))))))
+
+(ert-deftest org-mcp-test-digest-is-not-taken-over-trimmed-content ()
+  "The token covers the body's region, not the body a read returns.
+`content' is trimmed for its reader, so hashing what a read returns
+would make a presentation decision into a safety boundary.  Two
+headings whose bodies differ only in that trimming therefore carry
+one `content' and two tokens, which is the buffer telling the truth
+about itself."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-digest-trim))
+    (let* ((fields ["content" "content_digest"])
+           (one
+            (org-mcp-test--read-fields
+             (org-mcp-test--file-link test-file "*One") fields))
+           (two
+            (org-mcp-test--read-fields
+             (org-mcp-test--file-link test-file "*Two") fields)))
+      (should (equal (alist-get 'content one) "Same body."))
+      (should (equal (alist-get 'content two) "Same body."))
+      (should
+       (equal
+        (alist-get 'content_digest one)
+        (org-mcp-test--digest-of "Same body.\n")))
+      (should
+       (equal
+        (alist-get 'content_digest two)
+        (org-mcp-test--digest-of "Same body.")))
+      (should-not
+       (equal
+        (alist-get 'content_digest one)
+        (alist-get 'content_digest two))))))
+
+(ert-deftest org-mcp-test-digest-covers-every-descendant ()
+  "A change to a grandchild moves the subtree digest and nothing else.
+The call asks for the two tokens alone — no children, no body — and
+the subtree digest still moves when a grandchild is tagged: it covers
+the whole subtree whatever the call asked to see of it.  The body the
+change never touched keeps its token, which is why there are two."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+           (fields ["digest" "content_digest"])
+           (before (org-mcp-test--read-fields link fields)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-tags"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Grandchild"))
+         (after . ["later"])))
+      (let ((after (org-mcp-test--read-fields link fields)))
+        (should-not
+         (equal (alist-get 'digest after) (alist-get 'digest before)))
+        (should
+         (equal
+          (alist-get 'content_digest after)
+          (alist-get 'content_digest before)))))))
+
+(ert-deftest org-mcp-test-digest-follows-the-body-it-guards ()
+  "The body's token names the body the editor left behind.
+org-node-set-content writes within the region `content_digest'
+covers, so a token read before the write no longer matches after it,
+and the token read afterwards is the one over what was written.  A
+guard and the edit it guards cannot drift apart while they share a
+region."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+           (fields ["content_digest"])
+           (before (org-mcp-test--read-fields link fields)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-content"
+       `((link . ,link)
+         (before . "Parent body.")
+         (after . "Rewritten body.")))
+      (let ((after (org-mcp-test--read-fields link fields)))
+        (should-not (equal after before))
+        (should
+         (equal
+          (alist-get 'content_digest after)
+          (org-mcp-test--digest-of
+           (org-mcp-test--region-of
+            test-file "Rewritten body." "** DONE Child One"))))))))
 
 ;;; One definition of a title
 
