@@ -33,8 +33,9 @@ Both quiet stages keep their evidence: a failing lint stage writes
 =.lint-output.txt=, and the test run always writes =.test-output.txt=, with the
 ERT summary on success and the failure block on failure.
 
-=just lint= org-lints =README.org= and every =docs/*.org= page, each from its own
-directory, so a link to a page that does not exist fails the commit.
+=just lint= org-lints =README.org=, this page and every =docs/*.org= page, each
+from its own directory, so a link to a page that does not exist fails the
+commit.
 
 The suite checks its dependencies before it runs and stops with the remedy when
 the installed =mcp-server-lib= is older than the version =Eask= requires.

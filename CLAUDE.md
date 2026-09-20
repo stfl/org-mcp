@@ -8,12 +8,14 @@ stable mapping between MCP primitives and Org's existing semantics, so the
 default answer to "how do I parse/navigate/clock this?" is an Org function that
 already does it. `CONTRIBUTING.org` holds that rule with the table of APIs to
 reach for, the devshell, the checks and the test conventions. Read it before
-touching `org-mcp.el` or `org-mcp-test.el`, and do not restate it here.
+touching `org-mcp.el` or `org-mcp-test.el`.
 
 ## Commands
 
-Everything runs inside the Nix devshell, which provides Emacs 31, eask, just,
-shellcheck, shfmt and zizmor:
+The three command lines below are here because an agent working through the
+shell never loads a page; why they are what they are, and everything else about
+building and testing, belongs to `CONTRIBUTING.org` and is not repeated here.
+They run inside the Nix devshell:
 
 ```sh
 nix develop --command just check    # fmt + lint + test, the pre-commit gate

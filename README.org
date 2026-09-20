@@ -19,13 +19,17 @@ strongly advised.
 
 * Quickstart
 
-1. Install the package. In Doom Emacs, in =packages.el=:
+1. Install the package from git — =M-x package-vc-install RET
+   https://github.com/stfl/org-mcp RET=, or in Doom Emacs, in =packages.el=:
 
    #+begin_src emacs-lisp
    (package! org-mcp
      :recipe (:host github :repo "stfl/org-mcp"
               :files (:defaults "org-mcp-stdio.sh")))
    #+end_src
+
+   MELPA carries upstream org-mcp, not this fork; [[file:docs/installation.org][Installing org-mcp]] has the
+   difference and the other routes.
 
 2. Decide which files clients may touch. With an agenda already configured,
    there is nothing to do: org-mcp falls back to =org-agenda-files=. Otherwise

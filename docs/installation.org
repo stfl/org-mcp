@@ -12,9 +12,17 @@ org-mcp builds on =mcp-server-lib= 0.4.0 and =org-ql= 0.9, which come in with
 the package. The pins live in =Eask= and in the =Package-Requires= header of
 =org-mcp.el=.
 
-From [[https://melpa.org/#/org-mcp][MELPA]] or [[https://stable.melpa.org/#/org-mcp][MELPA Stable]]:
+This fork installs from git. On Emacs 30 or later:
 
-=M-x package-install RET org-mcp RET=
+=M-x package-vc-install RET https://github.com/stfl/org-mcp RET=
+
+straight.el and Doom, below, clone it the same way. Any of them puts
+=org-mcp-stdio.sh= beside =org-mcp.el=, which is where =M-x org-mcp-install=
+looks for it.
+
+MELPA carries the upstream package, [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], not this fork.
+=M-x package-install RET org-mcp RET= gets you a server without the clock tools
+and the GTD query tools these pages document.
 
 * Doom Emacs
 
