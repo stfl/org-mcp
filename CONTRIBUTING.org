@@ -129,6 +129,7 @@ kind of thing changed:
 | link forms taken or returned              | [[file:docs/links.org][Addressing headings with links]]   |
 | installing, or registering with a client  | [[file:docs/installation.org][Installing org-mcp]]               |
 | what the =initialize= handshake reports   | [[file:docs/installation.org][Installing org-mcp]]               |
+| how a client encodes an argument          | [[file:docs/installation.org][Installing org-mcp]]               |
 
 The README changes only when what org-mcp /is/ changes, or what it costs to run:
 the tool count, the quickstart, a new limit. Everything else belongs to a page

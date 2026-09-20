@@ -291,7 +291,7 @@ Example:
 - *Parameters:*
   - =title= (string, required): The headline text
   - =todo= (string, required): TODO state from =org-todo-keywords=
-  - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
+  - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"]), or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]])
   - =content= (string, optional): Body text to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
   - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
@@ -474,7 +474,7 @@ Example:
 - *Description:* Set tags on an Org headline, replacing any existing tags
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =after= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =after= (string or array, optional): Single tag ="work"=, array =["work", "urgent"]=, or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]]). This call replaces the whole local tag set, so more than one tag means more than one entry. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before= and =after= arrays, plus the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
