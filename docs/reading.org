@@ -16,7 +16,7 @@ A field the node has no value for is left out rather than sent as =null=.
 
 | Field        | Carries                                                                             |
 |--------------+-------------------------------------------------------------------------------------|
-| =title=      | the heading's title, or a file's =#+TITLE:= and its own file name when it sets none  |
+| =title=      | the heading's title, or a file's =#+TITLE:= and its own file name when it sets none |
 | =todo=       | the TODO state                                                                      |
 | =priority=   | the priority letter                                                                 |
 | =tags=       | the tags in effect on the heading                                                   |
@@ -27,14 +27,15 @@ A field the node has no value for is left out rather than sent as =null=.
 | =file=       | the absolute path of the file the node lives in                                     |
 | =id=         | the ID the node's =link= names                                                      |
 | =level=      | the heading level, =0= for a file                                                   |
-| =link=       | the link that names this node again (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]])              |
+| =link=       | the link that names this node again                                                 |
 | =content=    | the body text, or a file's preamble before its first heading                        |
 | =properties= | the Org property drawer                                                             |
 | =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
 
-A file's =link= is the =id:= link of its own property drawer when the file has
-one, and =file:/path/to/file.org= otherwise; either names the whole file in a
-later call.
+Which form a node's =link= takes is [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]. A file's is the
+=id:= link of its own property drawer when the file has one, and
+=file:/path/to/file.org= otherwise; either names the whole file in a later
+call.
 
 A heading's =title= leaves out its TODO keyword, its priority, its statistics
 cookies and its tags, and runs of whitespace in it collapse to one space. That
@@ -44,9 +45,9 @@ read here is a title that resolves, and one a write takes as =before= (see
 difference to either comparison: =* TODO Ship v2 [1/3]= reads as =Ship v2=, and
 =file:/path/to/file.org::*ship v2= reaches it.
 
-Which of the fields a response carries depends on the call: =org-node-read= and
-the resource return every one but =properties=, a query result every one but
-=content= and =children=, and a child every node carries returns =title=,
+Which fields a response carries depends on the call: =org-node-read= and the
+resource return every field but =properties=, a query result every field but
+=content= and =children=, and a child inside another node carries =title=,
 =todo=, =level= and =link=.
 
 Example, a heading:

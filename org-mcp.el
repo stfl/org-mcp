@@ -1171,7 +1171,7 @@ the call that reads it in full.")
     link
     content
     children)
-  "The fields `org-mcp--tool-node-read' and the org://{link} resource carry.")
+  "The fields the org-node-read tool and the org://{link} resource carry.")
 
 (defconst org-mcp--node-query-fields
   '(title
