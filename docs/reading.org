@@ -12,7 +12,10 @@ A node is a file or a heading, and both come back in the same shape: from
 node, and as a query result (see [[file:queries.org][Searching and GTD queries]]). One vocabulary
 walks a whole outline.
 
-A field the node has no value for is left out rather than sent as =null=.
+A node carries the fields the call asked for, minus any of those it has no value
+for. A key that is there has a value: nothing is ever sent as =null=. A key that
+is not there is either a field with nothing in it or a field the call never
+asked for, and the call tells the two apart, because it knows what it asked for.
 
 | Field        | Carries                                                                             |
 |--------------+-------------------------------------------------------------------------------------|
@@ -44,11 +47,6 @@ read here is a title that resolves, and one a write takes as =before= (see
 [[file:writing.org::*org-node-set-title][org-node-set-title]]). Letter case survives in what you read and makes no
 difference to either comparison: =* TODO Ship v2 [1/3]= reads as =Ship v2=, and
 =file:/path/to/file.org::*ship v2= reaches it.
-
-Which fields a response carries depends on the call: =org-node-read= and the
-resource return every field but =properties=, a query result every field but
-=content= and =children=, and a child inside another node carries =title=,
-=todo=, =level= and =link=.
 
 Example, a heading:
 #+begin_src json
@@ -87,6 +85,76 @@ Example, a file:
 }
 #+end_src
 
+** Asking for fields
+
+A call says how much of a node it wants in its =fields= parameter and gets
+exactly that. =org-node-read= and =org-query= both take it, and it means the
+same thing on each. Every representation is the same node: a reference — a node
+carrying its =link= alone — is a whole node asked for with less, and grows into
+one by asking for more.
+
+Fields are named directly, as an array:
+
+#+begin_src json
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "fields": ["title", "todo", "link"]
+}
+#+end_src
+
+or by the name of a list configured in advance, sent as a string, so that a
+call a client makes often stays short:
+
+#+begin_src json
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "fields": "outline"
+}
+#+end_src
+
+A call that sends no =fields= — or sends =null=, =false=, an empty string or an
+empty array, which mean the same as sending none — gets what that node carries
+unasked:
+
+| A node from                 | Carries unasked                          |
+|-----------------------------+------------------------------------------|
+| =org-node-read=             | every field but =properties=             |
+| the =org://{link}= resource | every field but =properties=             |
+| =org-query=                 | every field but =content= and =children= |
+| a child inside a node       | =title=, =todo=, =level= and =link=      |
+
+A query leaves =content= and =children= out because filling them means reading
+every matched subtree; naming either in =fields= asks for exactly that, at that
+cost. A child always carries the four fields above, whatever the call asked of
+its parent: to see more of a child, read it by its =link=.
+
+*** Naming a list of fields
+
+The named lists are =org-mcp-node-field-lists=, which is user configuration
+rather than a set org-mcp decides on. Two come configured:
+
+| Name        | Fields                           |
+|-------------+----------------------------------|
+| =reference= | =link=                           |
+| =outline=   | =title=, =todo=, =level=, =link= |
+
+Setting the variable replaces them, so a workflow that wants to keep either
+lists it alongside its own:
+
+#+begin_src emacs-lisp
+(setq org-mcp-node-field-lists
+      '((reference link)
+        (outline   title todo level link)
+        (planning  title todo scheduled deadline link)))
+#+end_src
+
+A call then asks for =fields: "planning"=.
+
+A field name that is not a field, and a list name that is not configured, are
+both refused, and the refusal names the valid ones. Leaving an unknown name out
+silently would hand back a node missing the field the call asked for with
+nothing to say why.
+
 ** The two tag fields
 
 =tags= is the set of tags in effect on the heading; =local_tags= is the part of
@@ -115,9 +183,11 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
   =org-node-read=, and a refusal carries the same message. A resource URI carries
   no =files= parameter, so an =id:= link resolves only within the allowed
   files; to reach an ID in another file, call =org-node-read= with =files= (see
-  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
+  [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= parameter either: a
+  resource is picked from a client's UI, which has nowhere to say how much of
+  the node it wants, so the resource always serves the default.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
-- *Returns:* the node the link names (see [[*The node][The node]])
+- *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -163,8 +233,9 @@ the same data as the resource for the same link; =org-read-outline= and
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
+  - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* the node the link names, with every field but =properties= (see [[*The node][The node]])
+- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but =properties= when it asked for none (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 ** org-read-outline

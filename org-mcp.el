@@ -95,6 +95,26 @@ check, so a symlink pointing out of a root is refused."
     (repeat :tag "Permit under these directories" directory))
   :group 'org-mcp)
 
+(defcustom org-mcp-node-field-lists
+  '((reference link) (outline title todo level link))
+  "Named lists of node fields a call can ask for by name.
+A call says how much of a node it wants in its `fields' parameter,
+either as a list of field names or, more shortly, as the name of a
+list here.  Each entry is (NAME FIELD...), NAME the name a call
+sends as a string and FIELD a field of `org-mcp--node-fields'; a
+call naming a list that is not here, or a list naming a field that
+does not exist, is refused.
+
+The two lists it starts with are the two shapes the surface itself
+has a word for: `reference' is a node carrying its link alone, the
+smallest thing a later call can be made from, and `outline' adds
+what it takes to show the node in an outline.  They are a starting
+point rather than the set: a workflow that asks the same question
+repeatedly gives that question a name here, and the whole point of
+the setting is that org-mcp does not decide which names exist."
+  :type '(alist :key-type symbol :value-type (repeat symbol))
+  :group 'org-mcp)
+
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
@@ -1150,6 +1170,30 @@ it unless TEXT ends in one or a line break follows point."
 
 ;; Nodes
 
+(defconst org-mcp--node-fields
+  '(title
+    todo
+    priority
+    tags
+    local_tags
+    scheduled
+    deadline
+    closed
+    file
+    id
+    level
+    link
+    content
+    properties
+    children)
+  "Every field a node can carry.
+`org-mcp--node-at-point' builds each of these and nothing else, and
+a field a call asks for is checked against this list before any
+file is opened.  The tool descriptions and docs/reading.org
+describe the same names to a client, so a field added here is added
+to the builder, to that page and to the node description in the
+same change.")
+
 (defconst org-mcp--node-child-fields '(title todo level link)
   "The fields a child node carries.
 A child is a node like any other, asked for with few fields: its
@@ -1191,6 +1235,82 @@ the call that reads it in full.")
 The same node a read returns, without the body and the children a
 match list would read every matched subtree to fill, and with the Org
 property drawer a query is asked about.")
+
+(defun org-mcp--node-field (name)
+  "Return the node field NAME names, or refuse NAME as not one.
+NAME is a string, the way a call's `fields' parameter sends it, or
+a symbol, the way `org-mcp-node-field-lists' holds it.  The match is
+by name and never by `intern', so nothing a call sends becomes a
+symbol, and the refusal names every field there is to ask for."
+  (let ((text (format "%s" name)))
+    (or (cl-find
+         text
+         org-mcp--node-fields
+         :key #'symbol-name
+         :test #'string=)
+        (org-mcp--tool-validation-error
+         "Unknown node field: %s.  Valid fields: %s"
+         text (mapconcat #'symbol-name org-mcp--node-fields ", ")))))
+
+(defun org-mcp--named-node-fields (name)
+  "Return the fields the list called NAME holds, or refuse NAME.
+The lists are `org-mcp-node-field-lists', which the user owns, so
+the refusal names the lists that are configured rather than a set
+this server decided on, and says how to ask for fields without
+naming a list at all."
+  (or (cdr
+       (cl-find
+        name
+        org-mcp-node-field-lists
+        :key (lambda (entry) (format "%s" (car entry)))
+        :test #'string=))
+      (org-mcp--tool-validation-error
+       "Unknown field list: %s.  Configured lists: %s.  \
+Fields are also named directly, as an array such as \
+[\"title\", \"link\"]"
+       name
+       (if org-mcp-node-field-lists
+           (mapconcat (lambda (entry) (format "%s" (car entry)))
+                      org-mcp-node-field-lists
+                      ", ")
+         "none"))))
+
+(defun org-mcp--node-field-names (fields)
+  "Return the field names a call's FIELDS parameter asks for.
+FIELDS is an array of names, which is the list of names itself, or
+a string naming a list in `org-mcp-node-field-lists'.  The names
+themselves are not checked here; `org-mcp--node-field' checks each
+one, so a name from a configured list is checked as a name a call
+spelled out is."
+  (cond
+   ((stringp fields)
+    (org-mcp--named-node-fields fields))
+   ((or (vectorp fields) (consp fields))
+    (append fields nil))
+   (t
+    (org-mcp--tool-validation-error
+     "fields takes an array of field names, or the name of a \
+configured list as a string, not: %S"
+     fields))))
+
+(defun org-mcp--node-fields-given (fields default)
+  "Return the node fields a call asking for FIELDS wants.
+FIELDS is the `fields' parameter of a call, see
+`org-mcp--node-field-names'.  A blank FIELDS, see
+`org-mcp--blank-param-p', means the call asks for nothing in
+particular and takes DEFAULT, the fields that endpoint carries when
+it is not asked.
+
+Every name is resolved here, at the parameter, rather than in
+`org-mcp--node-at-point': a node is then built from fields that are
+known to exist, and a call that misspells one is refused before a
+file is opened.  A field named twice is dropped to once, since it
+would otherwise be a key sent twice."
+  (if (org-mcp--blank-param-p fields)
+      default
+    (delete-dups
+     (mapcar
+      #'org-mcp--node-field (org-mcp--node-field-names fields)))))
 
 (defun org-mcp--file-title ()
   "Return the title of the file the current buffer visits.
@@ -1277,9 +1397,9 @@ One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
 
 FIELDS is a list of node field names, in the order the node lists
-them; `org-mcp--node-read-fields' names every one.  A field the node
-has no value for -- no TODO state, no tag of its own, an empty body
--- is left out rather than sent as null.
+them; `org-mcp--node-fields' names every one there is.  A field the
+node has no value for -- no TODO state, no tag of its own, an empty
+body -- is left out rather than sent as null.
 
 CHILD-FIELDS is what the `children' field builds each child with, and
 defaults to `org-mcp--node-child-fields'.
@@ -1351,6 +1471,10 @@ no position before that heading."
                       (org-mcp--node-at-point
                        (or child-fields org-mcp--node-child-fields))))
                   children)))
+               ;; A call's fields are resolved against
+               ;; `org-mcp--node-fields' before they reach here, so
+               ;; this catches a field list written in this file
+               ;; that the builder does not build.
                (_ (error "Unknown node field: %s" field)))))
         (when value
           (push (cons field value) node))))))
@@ -2886,24 +3010,33 @@ MCP Parameters:
 
 ;; Resource handlers
 
-(defun org-mcp--read-structured (link &optional files)
+(defun org-mcp--read-structured (link &optional fields files)
   "Return structured JSON for what LINK, a native Org link, points to.
 The org-node-read tool and the org://{link} resource both read through
 here, so they resolve a link the same way.  A file and a heading come
 back as the same node, `org-mcp--node-at-point' builds both, and the
-file is the one at level 0.  FILES is the org-node-read tool's `files'
-parameter; see `org-mcp--link-target'.  The resource passes none."
-  (org-mcp--read-link link
-                      (lambda ()
-                        (json-encode
-                         (org-mcp--node-at-point
-                          org-mcp--node-read-fields)))
-                      (lambda (_file)
-                        (json-encode
-                         (org-mcp--node-at-point
-                          org-mcp--node-read-fields
-                          nil t)))
-                      files))
+file is the one at level 0.
+
+FIELDS is the org-node-read tool's `fields' parameter, defaulting
+to `org-mcp--node-read-fields' and resolved before the link is, so
+a misspelled field is refused without opening a file.  The
+resource passes none and takes that default: a resource is picked
+from a client's UI, which has nowhere to say how much of the node it
+wants.
+
+FILES is the org-node-read tool's `files' parameter; see
+`org-mcp--link-target'.  The resource passes none."
+  (let ((fields
+         (org-mcp--node-fields-given
+          fields org-mcp--node-read-fields)))
+    (org-mcp--read-link link
+                        (lambda ()
+                          (json-encode
+                           (org-mcp--node-at-point fields)))
+                        (lambda (_file)
+                          (json-encode
+                           (org-mcp--node-at-point fields nil t)))
+                        files)))
 
 (defun org-mcp--handle-org-resource (params)
   "Handler for the org://{link} template.
@@ -3439,12 +3572,14 @@ MCP Parameters:
 
 ;; org-ql integration
 
-(defun org-mcp--ql-node-at-point ()
+(defun org-mcp--ql-node-at-point (fields)
   "Return the node at point for the `:action' of `org-ql-select'.
-It is the node a read returns, in the same shape, with the extra
-fields `org-mcp-ql-extra-properties' configures appended."
+It is the node a read returns, in the same shape, carrying FIELDS,
+with the extra fields `org-mcp-ql-extra-properties' configures
+appended.  Those are named by their own setting rather than by a
+call, so they come with every match whatever FIELDS says."
   (append
-   (org-mcp--node-at-point org-mcp--node-query-fields)
+   (org-mcp--node-at-point fields)
    (delq
     nil
     (mapcar
@@ -3453,15 +3588,20 @@ fields `org-mcp-ql-extra-properties' configures appended."
          (cons (car extra) value)))
      org-mcp-ql-extra-properties))))
 
-(defun org-mcp--tool-query (query &optional files)
+(defun org-mcp--tool-query (query &optional fields files)
   "Search Org files using an org-ql QUERY expression.
 QUERY is a string containing an org-ql query sexp.
+FIELDS says how much of each matching node to return; see
+`org-mcp--node-fields-given'.
 FILES names the files and directories to search, replacing the
 allowed files, see `org-mcp--with-file-set'; defaults to all
 allowed files.
 
 MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
+  fields - How much of each matching node to return (array of
+          strings, or a string naming a configured list, optional);
+          defaults to every field but content and children
   files - Files and directories to search, replacing the allowed
           files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
@@ -3478,8 +3618,14 @@ MCP Parameters:
       (org-mcp--tool-validation-error "Query must be a list, got: %s"
                                       (type-of query-sexp)))
     (org-mcp--with-file-set files
-      (let* ((target-files org-agenda-files)
-             (action #'org-mcp--ql-node-at-point)
+      (let* ( ;; Resolved before the query runs, so a misspelled
+             ;; field is refused rather than repeated per match.
+             (node-fields
+              (org-mcp--node-fields-given
+               fields org-mcp--node-query-fields))
+             (target-files org-agenda-files)
+             (action
+              (lambda () (org-mcp--ql-node-at-point node-fields)))
              (matches
               ;; Given no files, `org-ql-select' would search the
               ;; current buffer, which no call names.
@@ -3505,6 +3651,8 @@ MCP Parameters:
 A GTD query always runs over the allowed files: its tools take no
 `files' parameter, and mcp-server-lib refuses a call passing one
 with an \"Unexpected parameter\" error before any handler runs.
+They take no `fields' parameter either, so every match carries
+`org-mcp--node-query-fields', the fields org-query carries unasked.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-query."
   (org-mcp--with-file-set nil
@@ -3534,7 +3682,8 @@ Returns JSON-encoded results in the same format as org-query."
                        ;; narrowing would be read at the wrong place.
                        (org-with-wide-buffer
                         (goto-char (org-element-property :begin el))
-                        (org-mcp--ql-node-at-point))))
+                        (org-mcp--ql-node-at-point
+                         org-mcp--node-query-fields))))
                    elements))
               (error
                (org-mcp--tool-validation-error
@@ -3584,9 +3733,11 @@ Returns: Same format as org-query tool, sorted by
 
 ;; Read tools
 
-(defun org-mcp--tool-node-read (link &optional files)
+(defun org-mcp--tool-node-read (link &optional fields files)
   "Tool handler for org-node-read.
 LINK is a native Org link to a heading or a whole file.
+FIELDS, when non-nil, says how much of the node to return; see
+`org-mcp--node-fields-given'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 Returns structured JSON.
@@ -3601,10 +3752,13 @@ MCP Parameters:
          - file:/path/to/file.org (whole file)
          - id:{id} of the file-level property drawer (whole file)
          - any of these bracketed, as [[link]] or [[link][description]]
+  fields - How much of the node to return (array of strings, or a
+          string naming a configured list, optional); defaults to
+          every field but properties
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (org-mcp--read-structured link files))
+  (org-mcp--read-structured link fields files))
 
 (defun org-mcp--tool-read-outline (file)
   "Tool handler for org-read-outline.
@@ -4079,9 +4233,25 @@ Tool descriptions `concat' it after the parameter's first line.")
   "How the `files' parameter of a tool scanning a set of files works.
 Tool descriptions `concat' it after the parameter's first lines.")
 
+(defconst org-mcp--fields-description
+  "          Either an array of the field names below, such as
+          [\"title\", \"link\"], or the name of a list configured in
+          org-mcp-node-field-lists, sent as a string.  An unknown
+          field name and an unknown list name are both refused, and
+          the refusal names the valid ones.
+          null, false, \"\" and [] ask for the default.
+"
+  "How the `fields' parameter works, for every tool that takes one.
+Each such tool names its own default before this text, because the
+default is what that endpoint carries and not a property of the
+parameter.")
+
 (defconst org-mcp--node-description "
 A node is a file or a heading, and both come back in one shape.  A
-field the node has no value for is left out rather than sent as null.
+node carries the fields the call asked for, minus any it has no
+value for: a key that is there has a value, a key that is missing
+was either asked for and empty or never asked for, and the call
+itself says which.  Nothing is ever sent as null.
   title - The heading's title, or a file's #+TITLE: and its own name
           when it sets none
   todo - TODO state
@@ -4642,7 +4812,12 @@ Parameters:
      org-mcp--read-link-formats
      "         Any other string, such as a bare ID, a bare path or an
          org:// resource URI, is refused.
-  files - Files and directories to look up an id: link in (array of
+  fields - How much of the node to return (array of strings, or a
+          string, optional)
+          Defaults to every field below but properties.
+"
+     org-mcp--fields-description
+     "  files - Files and directories to look up an id: link in (array of
           strings, optional)
           An id: link names no file, so without files it resolves
           only within the allowed files.  With files, the ID is
@@ -4659,8 +4834,8 @@ Parameters:
           Every tool that names a heading takes files in the same
           way.
 
-Returns: JSON object, the node the link names, with its children.
-It carries every field below but properties.
+Returns: JSON object, the node the link names, carrying the fields
+the call asked for.
 "
      org-mcp--node-description "
 File must be in the allowed files, or permitted by
@@ -4724,15 +4899,21 @@ Parameters:
             (tags \"work\")
             (and (todo \"TODO\") (priority \"A\"))
             (deadline :to today)
-  files - Files and directories to search (array of strings, optional)
+  fields - How much of each matching node to return (array of
+          strings, or a string, optional)
+          Defaults to every field below but content and children,
+          which a match list would read every matched subtree to
+          fill; naming either asks for exactly that.
+"
+     org-mcp--fields-description
+     "  files - Files and directories to search (array of strings, optional)
           Replaces the allowed files for this call; when omitted, all
           allowed files are searched.
 "
      org-mcp--files-set-description "
 Returns JSON object:
   children - Array of matching nodes, the shape org-node-read
-             returns.  Each carries every field below but content
-             and children.
+             returns, each carrying the fields the call asked for.
   total - Number of matches (number)
   files_searched - Number of files searched (number)
 "
