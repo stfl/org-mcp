@@ -1150,6 +1150,30 @@ it unless TEXT ends in one or a line break follows point."
 
 ;; Nodes
 
+(defconst org-mcp--node-fields
+  '(title
+    todo
+    priority
+    tags
+    local_tags
+    scheduled
+    deadline
+    closed
+    file
+    id
+    level
+    link
+    content
+    properties
+    children)
+  "Every field a node can carry.
+`org-mcp--node-at-point' builds each of these and nothing else, and
+a field a call asks for is checked against this list before any
+file is opened.  The tool descriptions and docs/reading.org
+describe the same names to a client, so a field added here is added
+to the builder, to that page and to the node description in the
+same change.")
+
 (defconst org-mcp--node-child-fields '(title todo level link)
   "The fields a child node carries.
 A child is a node like any other, asked for with few fields: its
@@ -1277,9 +1301,9 @@ One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
 
 FIELDS is a list of node field names, in the order the node lists
-them; `org-mcp--node-read-fields' names every one.  A field the node
-has no value for -- no TODO state, no tag of its own, an empty body
--- is left out rather than sent as null.
+them; `org-mcp--node-fields' names every one there is.  A field the
+node has no value for -- no TODO state, no tag of its own, an empty
+body -- is left out rather than sent as null.
 
 CHILD-FIELDS is what the `children' field builds each child with, and
 defaults to `org-mcp--node-child-fields'.
@@ -1351,6 +1375,10 @@ no position before that heading."
                       (org-mcp--node-at-point
                        (or child-fields org-mcp--node-child-fields))))
                   children)))
+               ;; A call's fields are resolved against
+               ;; `org-mcp--node-fields' before they reach here, so
+               ;; this catches a field list written in this file
+               ;; that the builder does not build.
                (_ (error "Unknown node field: %s" field)))))
         (when value
           (push (cons field value) node))))))
