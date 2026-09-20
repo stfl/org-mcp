@@ -4362,9 +4362,11 @@ node is to follow, looked up in the parent's file; see
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.  It applies to LINK only, as on every
 other write tool: it says where to find the node the call acts on.
-PARENT and PREVIOUS_SIBLING are resolved without it — a `file:' link
-names its own file, and an `id:' one is looked up in Emacs's ID index
-and refused by name when the index does not hold it.
+PARENT and PREVIOUS_SIBLING are resolved without it.  A `file:' link
+names its own file; an `id:' PARENT is looked up in Emacs's ID index
+and refused by name when the index does not hold it, and an `id:'
+PREVIOUS_SIBLING is looked for in the parent's file alone, since a
+sibling that is not a child of that parent is no sibling.
 
 The subtree arrives whole, its LOGBOOK with it, and nothing in it
 records where it was: a refile is undone by refiling it back, by a
