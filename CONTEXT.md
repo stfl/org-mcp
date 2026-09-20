@@ -31,6 +31,52 @@ next actions or the backlog. It always runs over the allowed files and never
 takes a scope override.
 _Avoid_: agenda query, GTD endpoint
 
+## Nodes
+
+**Node**:
+A file or a heading: a title, its metadata, a body and its children, addressed
+by a link. One shape serves both, and serves a child and a query result alike,
+so a client learns one vocabulary to walk an outline.
+_Avoid_: headline, heading (when meaning the structure rather than the Org
+syntax), item, entry, match
+
+**Representation**:
+How much of a node a response carries: the fields a call asks for. A call
+names them as a list, or by the name of a list configured in advance. Every
+representation is the same node, never a different type, so a reference — a
+node carrying its link alone — grows into a full one by asking for more.
+_Avoid_: stub, lightweight child, projection (when addressed to a user)
+
+**Property**:
+A value from a node's own Org property drawer. It is part of the file, it
+survives a round trip, and a call names the properties it wants.
+_Avoid_: field, attribute
+
+**Computed field**:
+A value a configured function produces for a node when it is read, such as the
+rank a workflow ranks its items by. It is this server's answer at this moment,
+belongs to no drawer, and is never written back.
+_Avoid_: virtual property, extra property, derived property
+
+**Digest**:
+An opaque token standing for a node's exact content, its descendants included.
+A call that destroys or relocates a whole node sends back the digest it read,
+saying what it expects to act on; a node's own fields say that for a call that
+changes one field.
+_Avoid_: hash, fingerprint, checksum, etag
+
+**View**:
+A named query a workflow defines: one question asked of the outline, such as
+next actions or stuck projects. It is the atom an agenda command and a call
+are both composed from, so the two answer alike.
+_Avoid_: block, agenda, saved query, stored query, report
+
+**Filter**:
+A named restriction a view is asked under, such as one person's work or one
+project. A call names a filter rather than writing a query, so it can only ask
+what the configuration already knows.
+_Avoid_: tag filter, scope (which is the files a call reaches)
+
 ## Headings
 
 **Indexed file**:
