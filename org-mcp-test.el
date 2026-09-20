@@ -309,6 +309,12 @@ Second child content.
    "\\(?:.\\|\n\\)*\\'")
   "Regex matching complete buffer with Task One in IN-PROGRESS state.")
 
+(defconst org-mcp-test--expected-task-one-todo-regex
+  (concat
+   "\\`\\* TODO Task One"
+   "\\(?:.\\|\n\\)*\\'")
+  "Regex matching complete buffer with Task One in TODO state.")
+
 (defconst org-mcp-test--expected-task-with-id-in-progress-regex
   (concat
    "\\`\\* IN-PROGRESS Task with ID"
@@ -1223,16 +1229,17 @@ alist sent as the properties parameter."
 ;; Helper functions for testing org-node-set-todo MCP tool
 
 (defun org-mcp-test--call-update-todo-state
-    (link new-state &optional current-state note files)
+    (link new-state current-state &optional note files)
   "Call org-node-set-todo tool via JSON-RPC and return the result.
 LINK is the link to the headline, NEW-STATE is the new TODO state to set.
-CURRENT-STATE, when provided, is the expected current TODO state.
+CURRENT-STATE is the TODO state the headline is asserted to hold,
+\"\" for a headline that has none.
 NOTE, when provided, is a note to attach to the state transition.
 FILES, when provided, is sent as the `files' parameter."
   (let* ((params
           `((link . ,link)
             (after . ,new-state)
-            ,@(when current-state `((before . ,current-state)))
+            (before . ,current-state)
             ,@(when note `((note . ,note)))
             ,@(when files `((files . ,files)))))
          (result-text
@@ -1244,7 +1251,7 @@ FILES, when provided, is sent as the `files' parameter."
   "Call org-node-set-todo tool expecting an error and verify file unchanged.
 TEST-FILE is the test file path to verify remains unchanged.
 LINK is the link to the headline to update.
-CURRENT-STATE is the expected current TODO state (nil to omit).
+CURRENT-STATE is the TODO state the headline is asserted to hold.
 NEW-STATE is the new TODO state to set."
   (org-mcp-test--assert-error-and-file
    test-file
@@ -1252,7 +1259,7 @@ NEW-STATE is the new TODO state to set."
             (mcp-server-lib-create-tools-call-request
              "org-node-set-todo" 1
              `((link . ,link)
-               ,@(when current-state `((before . ,current-state)))
+               (before . ,current-state)
                (after . ,new-state))))
           (response (mcp-server-lib-process-jsonrpc-parsed request mcp-server-lib-ert-server-id))
           (result (mcp-server-lib-ert-process-tool-response response)))
@@ -2360,7 +2367,9 @@ outline path appended, is no link and refused as such."
              "names no local file by its full path")
             (org-mcp-test--call-tool-refused
              "org-node-set-todo"
-             `((link . ,heading-link) (after . "DONE"))
+             `((link . ,heading-link)
+               (before . "TODO")
+               (after . "DONE"))
              "names no local file by its full path")
             (org-mcp-test--assert-files-refused
              (vector remote) "not in allowed list")))
@@ -2394,7 +2403,9 @@ outline path appended, is no link and refused as such."
            "not in allowed list")
           (org-mcp-test--call-tool-refused
            "org-node-set-todo"
-           `((link . ,(concat "file:" link "::*Task")) (after . "DONE"))
+           `((link . ,(concat "file:" link "::*Task"))
+             (before . "TODO")
+             (after . "DONE"))
            "not in allowed list")
           (org-mcp-test--call-tool-refused
            "org-query" `((query . "(todo)") (files . ,(vector link)))
@@ -3151,14 +3162,24 @@ NEW-TITLE is the invalid new title that should be rejected."
      "tools/list" (mcp-server-lib-create-tools-list-request)))
    nil))
 
+(defun org-mcp-test--registered-tool (id)
+  "Return the tools/list entry for the tool ID."
+  (cl-find
+   id (org-mcp-test--registered-tools)
+   :key (lambda (tool) (alist-get 'name tool))
+   :test #'string=))
+
 (defun org-mcp-test--registered-tool-description (id)
   "Return the description tools/list gives for the tool ID."
-  (alist-get
-   'description
-   (cl-find
-    id (org-mcp-test--registered-tools)
-    :key (lambda (tool) (alist-get 'name tool))
-    :test #'string=)))
+  (alist-get 'description (org-mcp-test--registered-tool id)))
+
+(defun org-mcp-test--registered-tool-required (id)
+  "Return the required parameter names tools/list publishes for tool ID."
+  (append
+   (alist-get
+    'required
+    (alist-get 'inputSchema (org-mcp-test--registered-tool id)))
+   nil))
 
 (defun org-mcp-test--registered-tool-ids ()
   "Return the ids in the tools/list response, sorted.
@@ -3170,6 +3191,19 @@ control."
     (lambda (tool) (alist-get 'name tool))
     (org-mcp-test--registered-tools))
    #'string<))
+
+(ert-deftest org-mcp-test-guarded-writes-publish-before-as-required ()
+  "The three guarded write tools publish `before' as required.
+A client discovers the guard from the schema and never from the
+handler, so a parameter published as optional is a guard that is
+off, whatever the handler then does with it."
+  (org-mcp-test--with-enabled
+    (dolist (id
+             '("org-node-set-todo"
+               "org-node-set-title"
+               "org-node-set-content"))
+      (should
+       (member "before" (org-mcp-test--registered-tool-required id))))))
 
 (ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
@@ -3568,8 +3602,10 @@ Another task."))
           (org-mcp-test--call-update-todo-state-expecting-error
            test-file link "TODO" "IN-PROGRESS"))))))
 
-(ert-deftest org-mcp-test-update-todo-state-without-current-state ()
-  "Test TODO state update without providing before."
+(ert-deftest org-mcp-test-update-todo-state-matching-before ()
+  "A before the headline holds is accepted and the change goes through.
+The keywords log their transitions, so the assertion is checked on
+the same path a logging change takes."
   (let ((test-content "* TODO Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
@@ -3579,9 +3615,10 @@ Another task."))
                (org-mcp-test--file-link test-file "*Task One")))
           (let ((result
                  (org-mcp-test--call-update-todo-state
-                  link "IN-PROGRESS")))
+                  link "IN-PROGRESS" "TODO")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
+            (should (eq (alist-get 'saved result) t))
             (should (equal (alist-get 'before result) "TODO"))
             (should (equal (alist-get 'after result) "IN-PROGRESS"))
             (should
@@ -3590,8 +3627,27 @@ Another task."))
             (org-mcp-test--verify-file-matches
              test-file org-mcp-test--expected-task-one-in-progress-regex)))))))
 
-(ert-deftest org-mcp-test-update-todo-state-without-current-state-no-state ()
-  "Test TODO state update without before on headline with no TODO state."
+(ert-deftest org-mcp-test-update-todo-state-refuses-an-omitted-before ()
+  "A call that sends no before is refused and writes nothing.
+The precondition is the parameter itself, so a client that leaves it
+out has sent a malformed call rather than asked for an unguarded
+write."
+  (let ((test-content "* TODO Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-todo"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (after . "IN-PROGRESS"))
+         "\\`Missing required parameter: before\\'"
+         test-file)))))
+
+(ert-deftest org-mcp-test-update-todo-state-blank-before-asserts-no-state ()
+  "An empty before asserts the headline carries no TODO keyword.
+A required parameter never means \"not sent\", so the empty string is
+free to name the state a headline without a keyword is in."
   (let ((test-content "* Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
@@ -3600,15 +3656,51 @@ Another task."))
         (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (let ((result
-                 (org-mcp-test--call-update-todo-state
-                  link "TODO")))
+                 (org-mcp-test--call-update-todo-state link "TODO" "")))
             (should (= (length result) 5))
             (should (equal (alist-get 'success result) t))
+            (should (eq (alist-get 'saved result) t))
             (should (equal (alist-get 'before result) ""))
             (should (equal (alist-get 'after result) "TODO"))
             (should
              (equal (alist-get 'link result)
-                    (org-mcp-test--file-link test-file "*Task One")))))))))
+                    (org-mcp-test--file-link test-file "*Task One")))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--expected-task-one-todo-regex)))))))
+
+(ert-deftest org-mcp-test-update-todo-state-blank-before-on-a-keyword ()
+  "An empty before is refused on a headline that carries a keyword.
+The empty string asserts there is none, so a headline that has one
+is a conflict like any other mismatch."
+  (let ((test-content "* TODO Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO" "|" "DONE"))))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-todo"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (before . "")
+           (after . "DONE"))
+         "\\`conflict: State mismatch: expected '', found 'TODO'\\'"
+         test-file)))))
+
+(ert-deftest org-mcp-test-update-todo-state-keyword-before-on-no-state ()
+  "A keyword in before is refused on a headline that carries none.
+The refusal names what it found, which for a headline without a
+keyword reads `(no state)'; the value that asserts it is \"\"."
+  (let ((test-content "* Task One\nTask description."))
+    (org-mcp-test--with-temp-org-files
+        ((test-file test-content))
+      (let ((org-todo-keywords
+             '((sequence "TODO" "|" "DONE"))))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-todo"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (before . "TODO")
+           (after . "DONE"))
+         "\\`conflict: State mismatch: expected 'TODO', found '(no state)'\\'"
+         test-file)))))
 
 (defconst org-mcp-test--expected-task-one-done-with-note-regex
   (concat
@@ -3952,6 +4044,7 @@ Task body."
         (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (let* ((params `((link . ,link)
+                           (before . "TODO")
                            (after . "DONE")
                            (note . "Test note")))
                  (result-text (mcp-server-lib-ert-call-tool
@@ -3976,6 +4069,7 @@ LOGBOOK drawer."
         (let ((link
                (org-mcp-test--file-link test-file "*Task One")))
           (let* ((params `((link . ,link)
+                           (before . "TODO")
                            (after . "DONE")
                            (note . "Test note")))
                  (result-text (mcp-server-lib-ert-call-tool
@@ -3997,7 +4091,9 @@ keyword the repeat reset it to, not the done keyword asked for."
     (let ((org-log-repeat nil)
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
-             (result (org-mcp-test--call-update-todo-state link "DONE")))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO")))
         ;; Response fields
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
@@ -4016,7 +4112,9 @@ the state Org left the entry in."
     (let ((org-log-repeat nil)
           (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
-             (result (org-mcp-test--call-update-todo-state link "DONE")))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "NEXT"))
@@ -10220,7 +10318,8 @@ out of reach until a `file:' link names that file."
         (org-mcp-test--call-tool-refused
          "org-node-text" `((link . ,link)) "not in allowed list")
         (org-mcp-test--call-tool-refused
-         "org-node-set-todo" `((link . ,link) (after . "DONE"))
+         "org-node-set-todo"
+         `((link . ,link) (before . "TODO") (after . "DONE"))
          "not in allowed list"
          out))
       (org-mcp-test--with-id-tracking
@@ -10230,7 +10329,8 @@ out of reach until a `file:' link names that file."
           (org-mcp-test--call-tool-refused
            "org-node-text" `((link . ,link)) "not in allowed list")
           (org-mcp-test--call-tool-refused
-           "org-node-set-todo" `((link . ,link) (after . "DONE"))
+           "org-node-set-todo"
+           `((link . ,link) (before . "TODO") (after . "DONE"))
            "not in allowed list"
            with-id))
         (should
@@ -11256,7 +11356,9 @@ and a bare ID is refused as no link, leaving its file unchanged."
             (dolist (call
                      `(("org-node-text" (link . ,address))
                        ("org-node-set-todo"
-                        (link . ,address) (after . "DONE"))
+                        (link . ,address)
+                        (before . "TODO")
+                        (after . "DONE"))
                        ("org-node-create"
                         (title . "New Task")
                         (todo . "TODO")
@@ -11326,7 +11428,7 @@ up in the parent's file."
               "Beta"))
             (dolist (write
                      `(("org-node-set-todo"
-                        (link . ,link) (after . "TODO"))
+                        (link . ,link) (before . "") (after . "TODO"))
                        ("org-node-set-title"
                         (link . ,link)
                         (before . "Beta")
@@ -11439,6 +11541,7 @@ without `files'."
             (mcp-server-lib-ert-call-tool
              "org-node-set-todo"
              `((link . ,org-mcp-test--scope-id-link)
+               (before . "TODO")
                (after . "DONE")
                ,@param))
             (mcp-server-lib-ert-call-tool
@@ -12775,7 +12878,7 @@ default."
         (org-mcp-test--refusal-class
          (org-mcp-test--call-tool-expecting-error
           test-file "org-node-set-todo"
-          `((link . ,link) (after . "NOPE"))))
+          `((link . ,link) (before . "TODO") (after . "NOPE"))))
         'validation)))))
 
 (ert-deftest org-mcp-test-clock-out-refuses-without-a-running-clock ()
@@ -12830,6 +12933,7 @@ file and the buffer are untouched, and no save happens."
         (org-mcp-test--call-tool-expecting-error
          test-file "org-node-set-todo"
          `((link . ,(org-mcp-test--file-link test-file "*Parent"))
+           (before . "TODO")
            (after . "DONE")))
         (concat org-mcp-test--blocked-marker
                 "TODO state change from TODO to DONE blocked "
@@ -12850,6 +12954,7 @@ refusal carries the reason Org gives instead."
         (org-mcp-test--call-tool-expecting-error
          test-file "org-node-set-todo"
          `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (before . "TODO")
            (after . "DONE")))
         (concat org-mcp-test--blocked-marker
                 "TODO state change from TODO to DONE blocked "
@@ -12868,7 +12973,8 @@ the response reports the state Org left it in."
            '(org-block-todo-from-children-or-siblings-or-parent)))
       (let ((result
              (org-mcp-test--call-update-todo-state
-              (org-mcp-test--file-link test-file "*Child") "DONE")))
+              (org-mcp-test--file-link test-file "*Child") "DONE"
+              "TODO")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'after result) "DONE")))
       (org-mcp-test--verify-file-matches

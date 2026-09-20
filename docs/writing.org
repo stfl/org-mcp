@@ -175,12 +175,18 @@ is yours to act on.
 - *Description:* Update the TODO state of a specific headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, optional): Expected current TODO state - when provided, must match actual state or tool will error; omit to skip the state check
+  - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
   - =after= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+=before= and =after= both name a TODO state, so the call reads as the
+transition it performs. A headline that carries no TODO keyword is asserted
+with =""=, and that is the only spelling of it: the refusal writes a headline
+with no keyword as =(no state)= to keep the message readable, but the value to
+send is the empty string.
 
 The response's =after= reports the state Org left the headline in, which is not
 always the one asked for. Moving a repeating entry to a done keyword makes Org run the
@@ -215,9 +221,21 @@ Example:
   "link": "file:~/org/tasks.org::*Water the plants"
 }
 
+# Request giving a headline its first TODO keyword:
+{
+  "link": "file:/home/user/org/projects.org::*Project Beta",
+  "before": "",
+  "after": "TODO"
+}
+
 # State mismatch error:
 {
   "error": "conflict: State mismatch: expected 'TODO', found 'IN-PROGRESS'"
+}
+
+# Same error, on a headline that carries no TODO keyword:
+{
+  "error": "conflict: State mismatch: expected 'TODO', found '(no state)'"
 }
 
 # Org vetoed the change:
@@ -319,13 +337,20 @@ Example:
 - *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required in replace mode, ignored when =append= is true): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node
+  - =before= (string, required): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node. Append mode does not read it, and still expects the parameter: send ""
   - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). In append mode it is the content to append and cannot be empty or whitespace-only
   - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 - *Special behavior (replace mode):* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
+
+Replace mode is a transition: =before= is the text the body holds and =after=
+is what takes its place. Append mode is not. It adds to the end of the body
+and destroys nothing, so it asserts nothing: neither parameter says what the
+body held, and the call goes through whatever has happened to the node since
+it was read. It is therefore not a way to retry a replace that was refused —
+read the node again and send the replace against the body it holds now.
 
 Example:
 #+begin_src json
@@ -346,6 +371,7 @@ Example:
 # Append mode:
 {
   "link": "id:abc-123",
+  "before": "",
   "after": "Additional notes from meeting.",
   "append": true
 }
