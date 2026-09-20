@@ -12,6 +12,7 @@ itself.
   - =query= (string, required): org-ql query sexp as a string
   - =fields= (array of strings, or a string, optional): how much of each matching node to return; an array of field names, or the name of a configured list. It means here exactly what it means on =org-node-read=. See [[file:reading.org::*Asking for fields][Asking for fields]]
   - =properties= (array of strings, or a string, optional): which Org drawer properties each matching node returns; an array of property names, or ="all"= or ="none"=. Defaults to all. See [[file:reading.org::*Asking for properties][Asking for properties]]
+  - =computed= (array of strings, or a string, optional): which computed fields each matching node returns; an array of names, or ="all"= or ="none"=. Defaults to all. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[file:file-access.org::*Querying other files][Querying other files]]
 - *Returns:* JSON object with a =children= array of the matching nodes (see [[file:reading.org::*The node][The node]]), the =total= count, and the =files_searched= count
 
@@ -33,7 +34,7 @@ Example:
       "level": 1,
       "link": "file:~/org/tasks.org::*Urgent task",
       "properties": {"EFFORT": "2:00"},
-      "parent-priority": "A"
+      "computed": {"parent-priority": "A"}
     }
   ],
   "total": 1,
@@ -45,10 +46,11 @@ A result is the node =org-node-read= returns for the same heading. Asked
 nothing, a query leaves out =content= and =children= — a match list would read
 every matched subtree to fill those — and carries the heading's whole Org
 property drawer, because a query is the call that asks about properties.
-=fields= and =properties= are how a call chooses otherwise, each in either
-direction: naming =content= in =fields= returns the bodies, at that cost, and
-=properties: "none"= leaves the drawer out of a match list that does not need
-it.
+It carries every computed field the workflow configures for the
+same reason. =fields=, =properties= and =computed= are how a call chooses
+otherwise, each in either direction: naming =content= in =fields= returns the
+bodies, at that cost, and ="none"= leaves the drawer or the computed fields
+out of a match list that does not need them.
 
 Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags works from =local_tags= without reading the heading again (see
@@ -57,7 +59,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 ** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
 - *Parameters:* None
-- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying what it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -65,7 +67,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 - *Description:* Query next action items using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying what it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -73,7 +75,7 @@ heading's tags works from =local_tags= without reading the heading again (see
 - *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields and the properties it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, carrying what it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -90,17 +92,10 @@ The GTD query tools are opt-in.  Set the query functions and an optional sort co
 
 Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= and =org-mcp-query-next-fn= receive an optional tag-filter argument (an org-ql sexp or =nil=).  =org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=.
 
-* Configuring Extra Query Properties
+* Computed fields on a match
 
-=org-mcp-ql-extra-properties= lets you append computed values to every org-ql query result:
-
-#+begin_src emacs-lisp
-(setq org-mcp-ql-extra-properties
-      '((parent-priority . my-parent-priority-fn)
-        (rank . my-rank-fn)))
-#+end_src
-
-Each function is called at point with no arguments while a result is built.  Non-nil return values are appended to the node under the given key.
-
-These are named by this setting rather than by a call, so they come with every
-match whatever the call's =fields= asked for (see [[file:reading.org::*Asking for fields][Asking for fields]]).
+A workflow's own values — the rank it sorts by, the priority of a match's
+parent — are =org-mcp-computed-fields=, and every match carries them under
+=computed=, apart from the Org drawer under =properties=. They are configured
+rather than built in, and the setting is the same one =org-node-read= reads
+them through: [[file:reading.org::*Asking for computed fields][Asking for computed fields]] has the variable and the parameter.

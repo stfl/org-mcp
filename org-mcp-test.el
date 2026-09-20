@@ -8889,44 +8889,6 @@ QUERY is the org-ql query sexp as a string."
       (should
        (equal link (org-mcp-test--file-link test-file "*Simple Task"))))))
 
-;;; Extra-properties tests
-
-(defconst org-mcp-test--content-parent-child
-  "* [#A] Parent
-** TODO Child Task
-Child body."
-  "Parent with priority A and a child TODO.")
-
-(ert-deftest org-mcp-test-ql-extra-properties ()
-  "Extra properties from `org-mcp-ql-extra-properties' appear in results."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-parent-child))
-    (let ((org-mcp-ql-extra-properties
-           `((parent-priority
-              . ,(lambda ()
-                   (let ((p (save-excursion
-                              (when (org-up-heading-safe)
-                                (org-element-property
-                                 :priority (org-element-at-point))))))
-                     (when p (char-to-string p)))))
-             (rank . ,(lambda () 42)))))
-      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'children result))
-             (match (aref matches 0)))
-        (should (equal (alist-get 'parent-priority match) "A"))
-        (should (equal (alist-get 'rank match) 42))))))
-
-(ert-deftest org-mcp-test-ql-extra-properties-nil-omitted ()
-  "Extra properties returning nil are omitted from results."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-mcp-ql-extra-properties
-           `((nope . ,(lambda () nil)))))
-      (let* ((result (org-mcp-test--call-ql-query "(todo \"TODO\")"))
-             (matches (alist-get 'children result))
-             (match (aref matches 0)))
-        (should-not (assq 'nope match))))))
-
 (defconst org-mcp-test--content-ql-tags-scheduled-deadline
   "* TODO Tagged Task                                                 :work:home:
 SCHEDULED: <2024-03-15 Fri> DEADLINE: <2024-03-20 Wed>"
@@ -13493,6 +13455,172 @@ as a string, not: \"everything\"")
       (org-mcp-test--call-tool-refused
        "org-node-read" `((link . ,link) (properties . ["not a name"]))
        "Invalid property name: 'not a name'"))))
+
+;;; Asking for the computed fields you want
+
+;; A computed field is a configured function's answer at the moment of
+;; reading.  It belongs to no drawer, so it arrives apart from one.
+
+(defconst org-mcp-test--content-computed-clash
+  (concat
+   "* TODO Parent\n"
+   ":PROPERTIES:\n"
+   ":RANK:     written down\n"
+   ":END:\n")
+  "A heading whose drawer holds a property named like a computed field.")
+
+(defmacro org-mcp-test--with-computed-fields (&rest body)
+  "Run BODY with two computed fields configured.
+`rank' answers for every node and `nothing' for none, so one test
+can tell a field with a value from a field without one."
+  (declare (indent 0) (debug t))
+  `(let ((org-mcp-computed-fields
+          (list (cons 'rank (lambda () 12))
+                (cons 'nothing (lambda () nil)))))
+     ,@body))
+
+(defun org-mcp-test--read-computed (link computed)
+  "Return the node `org-node-read' serves for LINK asking for COMPUTED.
+COMPUTED is sent as the `computed' parameter, as a client sends it,
+and the node is cut down to its title so that what the test reads is
+the computed fields beside one field of the node's own."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read"
+    `((link . ,link)
+      (fields . ["title"])
+      (computed . ,computed)))))
+
+(defun org-mcp-test--query-computed (query computed)
+  "Return the nodes `org-query' matches QUERY with, asking for COMPUTED."
+  (alist-get
+   'children
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool
+     "org-query"
+     `((query . ,query)
+       (fields . ["title"])
+       (properties . "none")
+       (computed . ,computed))))))
+
+(ert-deftest org-mcp-test-computed-named-explicitly ()
+  "A call naming the computed fields it wants receives those.
+A function that answers with nothing leaves its field out, the way a
+node field with no value is left out."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+        (should
+         (equal
+          (org-mcp-test--read-computed link ["rank"])
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link ["nothing"])
+          '((title . "Parent"))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "all")
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "none")
+          '((title . "Parent"))))))))
+
+(ert-deftest org-mcp-test-computed-is-the-user-s-configuration ()
+  "The computed fields are the user's, not a set baked into the server.
+Out of the box nothing is configured, so there is nothing to ask
+for and every name is refused, naming what is configured."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-computed link "all")
+        '((title . "Parent"))))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (computed . ["rank"]))
+       "Unknown computed field: rank\\.  Configured computed \
+fields: none")
+      (org-mcp-test--with-computed-fields
+        (org-mcp-test--call-tool-refused
+         "org-node-read" `((link . ,link) (computed . ["renk"]))
+         "Unknown computed field: renk\\.  Configured computed \
+fields: rank, nothing")
+        (org-mcp-test--call-tool-refused
+         "org-query"
+         `((query . "(todo \"TODO\")") (computed . "every"))
+         "computed takes an array of names, or \"all\" or \"none\" \
+as a string, not: \"every\"")))))
+
+(ert-deftest org-mcp-test-computed-kept-apart-from-properties ()
+  "A computed value never arrives where a stored one does.
+The heading's drawer holds a RANK the user wrote down and the
+workflow computes a `rank' of its own.  They come back under
+separate keys, so a client writing the drawer back writes what the
+file said rather than what this server worked out."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-computed-clash))
+    (org-mcp-test--with-computed-fields
+      (should
+       (equal
+        (json-read-from-string
+         (mcp-server-lib-ert-call-tool
+          "org-node-read"
+          `((link . ,(org-mcp-test--file-link test-file "*Parent"))
+            (fields . ["title"])
+            (properties . "all")
+            (computed . "all"))))
+        '((title . "Parent")
+          (properties . ((RANK . "written down")))
+          (computed . ((rank . 12)))))))))
+
+(ert-deftest org-mcp-test-computed-default-is-the-endpoint-s ()
+  "A query carries the computed fields unasked; a read carries none.
+A workflow configures them for the matches it ranks and groups, so
+they come with a match list without being asked for, and a read that
+wants one says so."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+        (should-not
+         (alist-get 'computed (org-mcp-test--node-shape-read link)))
+        (should
+         (equal
+          (alist-get
+           'computed
+           (aref
+            (alist-get
+             'children
+             (org-mcp-test--call-ql-query "(todo \"TODO\")"))
+            0))
+          '((rank . 12))))
+        (should
+         (equal
+          (aref (org-mcp-test--query-computed "(todo \"TODO\")" []) 0)
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (aref
+           (org-mcp-test--query-computed "(todo \"TODO\")" "none")
+           0)
+          '((title . "Parent"))))))))
+
+(ert-deftest org-mcp-test-computed-means-the-same-on-both-endpoints ()
+  "The same `computed' asks the same thing of a read and of a query."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (dolist (asked (list ["rank"] "all" "none"))
+        (should
+         (equal
+          (aref (org-mcp-test--query-computed "(todo \"TODO\")" asked)
+                0)
+          (org-mcp-test--read-computed
+           (concat "id:" org-mcp-test--node-shape-parent-id)
+           asked)))))))
 
 ;;; One definition of a title
 

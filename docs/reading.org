@@ -34,11 +34,21 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =content=    | the body text, or a file's preamble before its first heading                        |
 | =children=   | the direct children, each a node carrying =title=, =todo=, =level= and =link=       |
 
-A node's Org property drawer is not among its fields. A drawer holds names you
-chose — =TITLE= as readily as =Effort= — and a field is named by org-mcp, so
-the two are kept in two namespaces and a property can never shadow a field. A
-call names the properties it wants in its own =properties= parameter (see
-[[*Asking for properties][Asking for properties]]) and they arrive together under the key =properties=.
+Two things a node carries are not fields, because their names are yours rather
+than org-mcp's: a drawer holds =TITLE= as readily as =Effort=. Each is asked
+for in a parameter of its own and arrives under one key, so no name of yours
+can shadow a field:
+
+| Key          | Carries                                                                |
+|--------------+------------------------------------------------------------------------|
+| =properties= | the Org drawer properties the call named (see [[*Asking for properties][Asking for properties]])       |
+| =computed=   | what a workflow computes for this node (see [[*Asking for computed fields][Asking for computed fields]]) |
+
+They stay apart in the answer because they answer different questions. A
+property is in the file and survives a write back. A computed field is
+org-mcp's answer at the moment you read it, belongs to no drawer, and no write
+puts it back — merged into one object you could not tell which was which
+without reading someone's Emacs configuration.
 
 Which form a node's =link= takes is [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]. A file's is the
 =id:= link of its own property drawer when the file has one, and
@@ -217,6 +227,59 @@ answer: Org computes them rather than storing them, so no drawer holds one, and
 what they say a node says in its own fields. Naming one is refused rather than
 answered empty.
 
+** Asking for computed fields
+
+A computed field is a value a workflow works out for a node as it is read — a
+ranking, the priority of a parent, whatever the workflow sorts and groups by.
+It is org-mcp's answer at that moment: it belongs to no drawer, and no write
+puts it back.
+
+Which ones exist is =org-mcp-computed-fields=, which is your configuration.
+Each entry pairs the name a call asks for with a function called at the node
+while the response is built:
+
+#+begin_src emacs-lisp
+(setq org-mcp-computed-fields
+      '((rank            . my-rank-fn)
+        (parent-priority . my-parent-priority-fn)))
+#+end_src
+
+Nothing is configured out of the box: what is worth computing is your
+workflow's question rather than org-mcp's. Until you set the variable, ="all"=
+is empty and every name is refused.
+
+The =computed= parameter then works as =properties= does — an array of names,
+or ="all"= or ="none"= — and =org-node-read= and =org-query= both take it:
+
+#+begin_src json
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "computed": ["rank"]
+}
+#+end_src
+
+#+begin_src json
+{
+  "title": "Ship v2",
+  "computed": {"rank": 12}
+}
+#+end_src
+
+A function that answers with nothing leaves its field out, as an empty field
+is left out. A name nobody configured is refused, and the refusal names the
+ones that are.
+
+| A node from                 | Carries unasked       |
+|-----------------------------+-----------------------|
+| =org-node-read=             | no computed fields    |
+| the =org://{link}= resource | no computed fields    |
+| =org-query=                 | every computed field  |
+| a child inside a node       | no computed fields    |
+
+A query carries them all because a workflow configures them for the matches it
+ranks; a read carries none, because a client asks for what it knows what to do
+with.
+
 ** The two tag fields
 
 =tags= is the set of tags in effect on the heading; =local_tags= is the part of
@@ -248,9 +311,10 @@ changing them (see [[file:writing.org::*org-node-set-tags][org-node-set-tags]]).
   [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). It carries no =fields= parameter either: a
   resource is picked from a client's UI, which has nowhere to say how much of
   the node it wants, so the resource always serves the default. It carries no
-  =properties= parameter for the same reason, and serves no drawer.
+  =properties= or =computed= parameter for the same reason, and serves
+  neither.
 - *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
-- *Returns:* the node the link names, with every field and no properties (see [[*The node][The node]])
+- *Returns:* the node the link names, with every field, no properties and no computed fields (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -298,8 +362,9 @@ the same data as the resource for the same link; =org-read-outline= and
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
   - =properties= (array of strings, or a string, optional): which Org drawer properties to return; an array of property names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for properties][Asking for properties]]
+  - =computed= (array of strings, or a string, optional): which computed fields to return; an array of names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field when it asked for none, and the properties =properties= named (see [[*The node][The node]])
+- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field when it asked for none, plus what =properties= and =computed= named (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 ** org-read-outline
