@@ -71,6 +71,48 @@ The running clock was closed and saved, but a function run by the save failed: .
 The running clock was closed but not saved: ...
 #+end_example
 
+* How a refusal is classed
+
+A refusal arrives as a message and never as an error code: the protocol org-mcp
+speaks carries none, and the =org://{link}= resource hands on the very message
+the tool refused with. The class a client acts on is therefore a marker at the
+front of the message, and it reads the same whichever path carried it.
+
+| Marker      | Says                                  | Recovery                           |
+|-------------+---------------------------------------+------------------------------------|
+| =conflict:= | the file is not as you believed it is | read it again and re-plan          |
+| =blocked:=  | Org itself refused the change         | tell the user why Org said no      |
+| /unmarked/  | the call was malformed                | correct the call and send it again |
+
+Unmarked is the default, and it is the largest class: a link org-mcp does not
+take, a state that is no TODO keyword, a timestamp that will not parse, a
+=priority= outside the configured range. Sending the same call again refuses it
+again, so something in the call has to change.
+
+A =conflict:= says the opposite: the call was well formed, and the file has
+moved on from what the call asserted about it. =current_state=, =current_title=
+and the =clock_out= of a running clock are the assertions org-mcp checks, and a
+conflict names what it found instead, so the recovery is to read the heading or
+the active clock again and decide afresh.
+
+A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
+an unchecked checkbox, an ordered subtree — refused the change, nothing was
+written, and the refusal carries Org's reason where Org names one:
+
+#+begin_example
+blocked: TODO state change from TODO to DONE blocked (by "TODO Write the tests")
+blocked: TODO state change from TODO to DONE blocked (by contained checkboxes)
+#+end_example
+
+One refusal stays unmarked on purpose. A link that resolves to no heading —
+=Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
+or one that never existed, which is a malformed call, and org-mcp cannot tell
+the two apart. It leaves the refusal in the default class rather than guess,
+and a client that cares reads the file to find out which it was.
+
+Every tool below names the classes it can refuse with; the clock tools name
+theirs in [[file:clocking.org][Clock tracking]].
+
 * Write tools
 
 ** org-update-todo-state
@@ -81,7 +123,14 @@ The running clock was closed but not saved: ...
   - =new_state= (string, required): New TODO state (must be valid in org-todo-keywords)
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, previous and new states, and the link to the updated headline
+- *Returns:* Success status, =saved= flag, =previous_state=, =new_state= and the link to the updated headline
+- *Refuses with:* =conflict:= when =current_state= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
+
+=new_state= reports the state Org left the headline in, which is not always the
+one asked for. Moving a repeating entry to a done keyword makes Org run the
+repeat: the timestamp advances and the entry comes back in its not-done
+keyword, =TODO= or whatever =REPEAT_TO_STATE= names, and that is what the
+response carries.
 
 Example:
 #+begin_src json
@@ -101,9 +150,23 @@ Example:
   "link": "file:~/org/projects.org::*Project Alpha"
 }
 
+# A repeating entry moved to DONE, which Org repeated instead:
+{
+  "success": true,
+  "saved": true,
+  "previous_state": "TODO",
+  "new_state": "TODO",
+  "link": "file:~/org/tasks.org::*Water the plants"
+}
+
 # State mismatch error:
 {
-  "error": "State mismatch: expected 'TODO', found 'IN-PROGRESS'"
+  "error": "conflict: State mismatch: expected 'TODO', found 'IN-PROGRESS'"
+}
+
+# Org vetoed the change:
+{
+  "error": "blocked: TODO state change from TODO to DONE blocked (by \"TODO Write the tests\")"
 }
 #+end_src
 
@@ -115,6 +178,7 @@ Example:
   - =new_title= (string, required): New headline title (without TODO state or tags)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, previous and new titles, and the link to the renamed headline
+- *Refuses with:* =conflict:= when =current_title= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -136,7 +200,7 @@ Example:
 
 # Title mismatch error:
 {
-  "error": "Title mismatch: expected 'Original Task', found 'Different Task'"
+  "error": "conflict: Title mismatch: expected 'Original Task', found 'Different Task'"
 }
 #+end_src
 
@@ -152,6 +216,7 @@ Example:
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent_link= in, instead of the ID index; it applies to =parent_link= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-set-properties= — use =todo_state=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
+- *Refuses with:* =blocked:= when Org vetoes =todo_state= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -203,6 +268,7 @@ Example:
   - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =new_body= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 - *Special behavior (replace mode):* When =old_body= is an empty string (""), the tool will only work if the node has no body content, allowing you to add initial content to empty nodes
 
 Example:
@@ -243,6 +309,7 @@ Example:
   - =properties= (object, required): JSON object of property name-value pairs. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do, so =false= keeps the property; =null= or empty string deletes it. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, arrays of =properties_set= and =properties_deleted=, plus the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -272,6 +339,7 @@ Example:
   - =scheduled= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_scheduled=, =new_scheduled=, and the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -295,6 +363,7 @@ Example:
   - =deadline= (string, optional): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). Omit or empty string to remove
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_deadline=, =new_deadline=, and the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -318,6 +387,7 @@ Example:
   - =tags= (string or array, optional): Single tag ="work"= or array =["work", "urgent"]=. Omit or empty to clear all tags. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 The tool writes the tags on the headline itself and leaves inherited ones
 where they are, so =previous_tags= and =new_tags= are that headline's own tags
@@ -344,6 +414,7 @@ Example:
   - =priority= (string, optional): Single character in the configured range (default ="A"= to ="C"=). Use =org-get-priority-config= to check valid range. Omit or empty string to remove priority
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_priority=, =new_priority=, and the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -367,6 +438,7 @@ Example:
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the headline's link
+- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:
 #+begin_src json

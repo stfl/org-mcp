@@ -56,14 +56,15 @@ Example responses:
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
   - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. The link a refusal names for the running clock is accepted as sent, even a title link that finds another heading of the same title first. An =id:= link is looked up in the running clock's file
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
+- *Refuses with:* =conflict:= when =clock_out= and the running clock disagree — a clock runs and =clock_out= is missing or names another heading, or none runs and =clock_out= is given — unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Every check runs before anything changes, so a refused call changes no file, no buffer's text and not the running clock. A call is refused when:
 
 - a clock runs and =clock_out= is missing or names another heading.  The error names the running clock's heading by its title and link, and when the clock started, so the client can ask the user whether to clock out of it.  A clock left running for days shows here before it is closed with that long a duration:
   #+begin_example
-  A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report) since 2026-03-23 Mon 09:00.  Ask the user whether to clock out of it, then send its link as clock_out
+  conflict: A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report) since 2026-03-23 Mon 09:00.  Ask the user whether to clock out of it, then send its link as clock_out
   #+end_example
-- a clock runs in a file outside the allowed files.  =org-clock-get-active= reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.
+- a clock runs in a file outside the allowed files.  =org-clock-get-active= reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.  Reading the active clock again tells the client nothing it does not already know, so this refusal is unmarked.
 - no clock runs and =clock_out= is given.
 - the new clock's start, =start_time= or else the current time, is before the running clock's start, since closing that clock there would give it a negative duration.
 - =start_time= cannot be parsed.
@@ -108,6 +109,7 @@ Example:
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
+- *Refuses with:* =conflict:= when no clock runs at all, unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Org writes the close, so Org's clock-out settings decide what the file ends up
 holding. With =org-clock-out-remove-zero-time-clocks=, a clock of no length
@@ -122,8 +124,11 @@ A call is refused when:
   #+begin_example
   A clock is running in a file outside the allowed files.  Ask the user to clock out of it in Emacs
   #+end_example
-- no clock runs at all.
-- =end_time= is before the running clock's start, or cannot be parsed.
+- no clock runs at all.  The client believed one did, so the refusal is a conflict:
+  #+begin_example
+  conflict: No active clock to stop
+  #+end_example
+- =end_time= is before the running clock's start, or cannot be parsed.  An =end_time= before the start is the client's to fix and stays unmarked: reading the clock again does not make the time it sent valid.
 - =link= names a file other than the running clock's, or is no link org-mcp takes or names a file outside the allowed files.
 
 Example:
@@ -149,6 +154,7 @@ Example:
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and the added clock entry details
+- *Refuses with:* unmarked validation only (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Example:
 #+begin_src json
@@ -178,6 +184,7 @@ Example:
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and the deleted entry details
+- *Refuses with:* unmarked validation only (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Example:
 #+begin_src json

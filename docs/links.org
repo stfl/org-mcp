@@ -78,6 +78,10 @@ org-mcp refuses:
   such a path is a link to a file that does not exist, refused as outside the
   allowed files with the same hint.
 
+A link that org-mcp takes but cannot resolve, =Cannot find ID '...'= among
+them, is refused in the unmarked default class; see [[file:writing.org::*How a refusal is classed][How a refusal is classed]]
+for what the classes are and why this one carries no marker.
+
 * Stable links
 
 A title link, =file:<path>::*<title>=, is a convenience. It resolves as it
