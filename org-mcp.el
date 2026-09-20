@@ -1390,8 +1390,28 @@ than storing them, and each is a node field in its own right."
      (member (car pair) org-mcp--special-properties))
    (org-entry-properties nil 'standard)))
 
-(defun org-mcp--node-at-point
-    (fields &optional child-fields file-node)
+(defun org-mcp--node-link-at-point (file-node)
+  "Return the link naming the node at point.
+FILE-NODE non-nil means the node is the file the buffer visits,
+which `org-mcp--file-link' names; otherwise it is the heading at
+point, which `org-mcp--link-at-point' names."
+  (if file-node
+      (org-mcp--file-link)
+    (org-mcp--link-at-point)))
+
+(defun org-mcp--child-node-fields (fields depth)
+  "Return the fields the children of a node asked for DEPTH carry.
+The same FIELDS render every generation a call expands, so a child
+inside a node is the node a call reading that child by its link
+gets.  The generation past DEPTH comes back as references, carrying
+`org-mcp--node-child-fields': a walk therefore ends in an address
+the caller can follow rather than in a node that looks whole and is
+not."
+  (if (> depth 0)
+      fields
+    org-mcp--node-child-fields))
+
+(defun org-mcp--node-at-point (fields &optional depth file-node)
   "Return the node at point as an alist carrying FIELDS.
 One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
@@ -1401,15 +1421,17 @@ them; `org-mcp--node-fields' names every one there is.  A field the
 node has no value for -- no TODO state, no tag of its own, an empty
 body -- is left out rather than sent as null.
 
-CHILD-FIELDS is what the `children' field builds each child with, and
-defaults to `org-mcp--node-child-fields'.
+DEPTH is how many generations of children the `children' field
+expands in place, and defaults to none.  See
+`org-mcp--child-node-fields' for what each generation carries.
 
 FILE-NODE non-nil builds the node of the file the buffer visits: a
 node at level 0, carrying the file's title, a link to the file and
 its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
 no position before that heading."
-  (let* ((meta
+  (let* ((depth (or depth 0))
+         (meta
           (unless file-node
             (org-mcp--heading-metadata-at-point)))
          (children
@@ -1418,9 +1440,7 @@ no position before that heading."
             (org-mcp--node-child-positions file-node)))
          (link
           (when (or (memq 'link fields) (memq 'id fields))
-            (if file-node
-                (org-mcp--file-link)
-              (org-mcp--link-at-point))))
+            (org-mcp--node-link-at-point file-node)))
          (node '()))
     (dolist (field fields (nreverse node))
       (let ((value
@@ -1469,7 +1489,8 @@ no position before that heading."
                     (save-excursion
                       (goto-char position)
                       (org-mcp--node-at-point
-                       (or child-fields org-mcp--node-child-fields))))
+                       (org-mcp--child-node-fields fields depth)
+                       (1- depth))))
                   children)))
                ;; A call's fields are resolved against
                ;; `org-mcp--node-fields' before they reach here, so
@@ -1484,12 +1505,15 @@ no position before that heading."
 The file node's `children' alone, each child carrying its own
 children, so the answer is the top-level headings and their direct
 ones.  The generation below those is left out, as are the fields a
-whole read carries."
+whole read carries: the file node is read one generation deep, and
+the tool answers with that one key of it."
   (org-mcp--with-org-file file-path
-    (org-mcp--node-at-point '(children)
-                            (append
-                             org-mcp--node-child-fields '(children))
-                            t)))
+    (list
+     (assq
+      'children
+      (org-mcp--node-at-point (append
+                               org-mcp--node-child-fields '(children))
+                              1 t)))))
 
 ;; Links
 
