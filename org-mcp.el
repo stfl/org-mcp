@@ -1668,12 +1668,19 @@ them did not happen.
 The token covers the whole subtree, so an edit to a descendant the
 client never read refuses the call.  That is the point of it: what
 these verbs take away is the subtree entire, and a guard asserts
-what it is about to destroy."
-  (let ((found (org-mcp--digest (org-mcp--subtree-bounds))))
-    (unless (string= digest found)
-      (org-mcp--tool-conflict-error
-       "Subtree mismatch: expected '%s', found '%s'; %s"
-       digest found undone))))
+what it is about to destroy.
+
+The refusal names the digest the call sent and not the one the
+subtree carries now.  The current one is the only value that would
+make the same call succeed, so handing it back would make resending
+it the cheapest recovery there is — and a call that asserts a digest
+the caller never read asserts nothing.  What the caller is owed is
+that the node has moved on from the read they planned from, which is
+what the message says; the recovery is to read it again."
+  (unless (string= digest (org-mcp--digest (org-mcp--subtree-bounds)))
+    (org-mcp--tool-conflict-error
+     "Subtree mismatch: expected '%s'; the subtree has changed since that read, so read the node again for a current digest; %s"
+     digest undone)))
 
 (defun org-mcp--assert-clock-outside-subtree ()
   "Refuse unless Emacs's running clock is outside the subtree at point.

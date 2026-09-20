@@ -2063,15 +2063,12 @@ local name itself, which Emacs routes to it only because
             file-name-handler-alist)))
      ,@body))
 
-(defun org-mcp-test--call-tool-refused
-    (tool-name params expected-message &optional file)
-  "Call TOOL-NAME with PARAMS and assert it is refused.
+(defun org-mcp-test--refusal-message (tool-name params)
+  "Call TOOL-NAME with PARAMS, assert it is refused, return the message.
 The refusal arrives as a tool error or, from the resource-style
-validation, as a JSON-RPC error; either way its message must match
-the regexp EXPECTED-MESSAGE.  When FILE is non-nil, it must be
-byte-for-byte unchanged afterwards."
-  (let* ((before (and file (org-mcp-test--read-file-raw file)))
-         (response
+validation, as a JSON-RPC error; the message reads the same either
+way, which is what a client acts on."
+  (let* ((response
           (mcp-server-lib-process-jsonrpc-parsed
            (mcp-server-lib-create-tools-call-request tool-name 1 params)
            mcp-server-lib-ert-server-id))
@@ -2081,7 +2078,18 @@ byte-for-byte unchanged afterwards."
               (alist-get 'text (aref (alist-get 'content result) 0))
             (alist-get 'message (alist-get 'error response)))))
     (should (stringp message))
-    (should (string-match-p expected-message message))
+    message))
+
+(defun org-mcp-test--call-tool-refused
+    (tool-name params expected-message &optional file)
+  "Call TOOL-NAME with PARAMS and assert it is refused.
+The refusal's message must match the regexp EXPECTED-MESSAGE.  When
+FILE is non-nil, it must be byte-for-byte unchanged afterwards."
+  (let ((before (and file (org-mcp-test--read-file-raw file))))
+    (should
+     (string-match-p
+      expected-message
+      (org-mcp-test--refusal-message tool-name params)))
     (when file
       (should (string= (org-mcp-test--read-file-raw file) before)))))
 
@@ -14662,6 +14670,37 @@ moved on from what it asserted."
        `((link . ,link) (before . ,stale))
        "\\`conflict: Subtree mismatch: .*nothing was deleted\\'"
        test-file))))
+
+(ert-deftest org-mcp-test-node-verbs-withhold-the-digest-they-found ()
+  "The conflict names the token the call sent, never the current one.
+The current digest is the one value that would make the same call
+succeed, so a refusal carrying it would make resending the call the
+cheapest recovery there is — and a caller asserting a digest it never
+read asserts nothing.  The refusal says the subtree moved and sends
+the caller back to a read instead."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((stale (org-mcp-test--verbs-digest))
+          (link (org-mcp-test--verbs-link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-title"
+       `((link . ,link) (before . "Target") (after . "Target renamed")))
+      (let ((fresh (org-mcp-test--verbs-digest link)))
+        (should-not (string= stale fresh))
+        (dolist (call
+                 `(("org-node-delete" . ((link . ,link) (before . ,stale)))
+                   ("org-node-archive" . ((link . ,link) (before . ,stale)))
+                   ("org-node-refile"
+                    .
+                    ((link . ,link)
+                     (before . ,stale)
+                     (parent
+                      .
+                      ,(org-mcp-test--file-link test-file "*Home"))))))
+          (let ((message
+                 (org-mcp-test--refusal-message (car call) (cdr call))))
+            (should (string-match-p (regexp-quote stale) message))
+            (should-not (string-match-p (regexp-quote fresh) message))
+            (should (string-match-p "read the node again" message))))))))
 
 (ert-deftest org-mcp-test-node-delete-refuses-after-a-descendant-moves ()
   "A change to a grandchild the client never read makes its token stale.

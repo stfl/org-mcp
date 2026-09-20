@@ -156,6 +156,14 @@ grades the requirement by how recoverable the verb is — an optional guard is a
 off guard, and it would be off at =org-node-archive=, whose damage is the one
 you are least likely to notice.
 
+A refusal over a =digest= names the token you sent and not the one the subtree
+carries now. The current token is the only value that would make the same call
+succeed, and a call asserting a digest you never read asserts nothing; what the
+refusal tells you is that the node has moved on from the read you planned from,
+and the way forward is to read it again. A =before= over a field is different:
+the state or the title such a refusal reports is a fact about the node, and it
+is yours to act on.
+
 * Write tools
 
 ** org-node-set-todo
@@ -556,7 +564,7 @@ Example:
 
 # The subtree moved since that read:
 {
-  "error": "conflict: Subtree mismatch: expected 'sha256:3f9c2a1b8e4d7c05', found 'sha256:e3b0c44298fc1c14'; nothing was deleted"
+  "error": "conflict: Subtree mismatch: expected 'sha256:3f9c2a1b8e4d7c05'; the subtree has changed since that read, so read the node again for a current digest; nothing was deleted"
 }
 
 # The clock is running in the node:
