@@ -13084,6 +13084,213 @@ the file's own name as its title."
        (equal (org-mcp-test--node-shape-read (concat "file:" test-file))
               node)))))
 
+;;; Asking for the fields you want
+
+;; A call says how much of a node it wants and gets exactly that.
+;; These tests ask at the seam a client asks at, so what they pin is
+;; the contract rather than the resolution behind it.
+
+(defun org-mcp-test--read-fields (link fields)
+  "Return the node `org-node-read' serves for LINK asking for FIELDS.
+FIELDS is sent as the `fields' parameter, as a client sends it."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-read" `((link . ,link) (fields . ,fields)))))
+
+(defun org-mcp-test--query-fields (query fields)
+  "Return the nodes `org-query' matches QUERY with, asking for FIELDS."
+  (alist-get
+   'children
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool
+     "org-query" `((query . ,query) (fields . ,fields))))))
+
+(ert-deftest org-mcp-test-fields-named-explicitly ()
+  "A call naming the fields it wants receives those and no others.
+The node lists them in the order the call did, and a field named
+twice is one key, since a node cannot carry the same key twice."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-fields link ["todo" "title"])
+        '((todo . "TODO") (title . "Parent"))))
+      (should
+       (equal
+        (org-mcp-test--read-fields link ["title" "title"])
+        '((title . "Parent")))))))
+
+(ert-deftest org-mcp-test-fields-absent-when-empty ()
+  "A field asked for that the node has no value for is left out.
+An absent key therefore means the node has nothing there, whether
+the call asked for the field or not; the call itself says which of
+the two it is, because it knows what it asked for."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (should
+     (equal
+      (org-mcp-test--read-fields
+       (concat "id:" org-mcp-test--node-shape-parent-id)
+       ["title" "closed" "todo"])
+      '((title . "Parent") (todo . "TODO"))))))
+
+(ert-deftest org-mcp-test-fields-every-field-is-askable ()
+  "Every field a node can carry is a field a call may ask for.
+The request is built from the list a call is checked against, so a
+field named there that the builder does not build fails here rather
+than reaching a client as a refusal.
+
+A heading carries every field but `closed' here, which stands for
+the fields left out when empty.  A file carries the six a file has;
+its own property drawer is not among them, so `properties' on a file
+is one of the empty ones."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((every (vconcat (mapcar #'symbol-name org-mcp--node-fields))))
+      (should
+       (equal
+        (mapcar
+         #'car
+         (org-mcp-test--read-fields
+          (concat "id:" org-mcp-test--node-shape-parent-id) every))
+        (remq 'closed org-mcp--node-fields)))
+      (should
+       (equal
+        (mapcar
+         #'car
+         (org-mcp-test--read-fields (concat "file:" test-file) every))
+        '(title file level link content children))))))
+
+(ert-deftest org-mcp-test-fields-one-field-is-a-reference ()
+  "A node asked for with one field is a reference to it.
+Asking for a child's own fields returns the child as its parent
+carries it, so a reference is a node with few fields rather than a
+shape of its own, and asking for more of the same node is how it
+grows into a whole one."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((parent
+            (org-mcp-test--node-shape-read
+             (concat "id:" org-mcp-test--node-shape-parent-id)))
+           (child (aref (alist-get 'children parent) 0))
+           (link (org-mcp-test--file-link test-file "*Child One")))
+      (should
+       (equal
+        (org-mcp-test--read-fields
+         link ["title" "todo" "level" "link"])
+        child))
+      (should
+       (equal
+        (org-mcp-test--read-fields link ["link"])
+        `((link . ,link)))))))
+
+(ert-deftest org-mcp-test-fields-named-list ()
+  "A call names a configured list instead of listing the fields.
+The two lists org-mcp is configured with out of the box are the two
+shapes the surface has a word for: a reference, and enough of a node
+to show it in an outline."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-fields link "reference")
+        `((link . ,link))))
+      (should
+       (equal
+        (org-mcp-test--read-fields link "outline")
+        `((title . "Parent")
+          (todo . "TODO")
+          (level . 1)
+          (link . ,link)))))))
+
+(ert-deftest org-mcp-test-fields-lists-are-user-configuration ()
+  "The set of named lists is the user's, not one baked into the server.
+A list configured here is a list a call can name, and the lists
+org-mcp ships with are gone once the user replaces them."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((org-mcp-node-field-lists '((planning title scheduled deadline)))
+          (link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-fields link "planning")
+        '((title . "Parent")
+          (scheduled . "<2026-03-26 Thu>")
+          (deadline . "<2026-04-01 Wed>"))))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . "outline"))
+       "Unknown field list: outline\\.  Configured lists: planning\\."))))
+
+(ert-deftest org-mcp-test-fields-blank-asks-for-the-default ()
+  "A blank `fields' means the call does not send one.
+Clients fill an optional parameter they do not use with an empty
+value, so an empty array and an empty string ask for what the
+endpoint carries unasked, as they do everywhere else in the
+surface."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let* ((link (concat "id:" org-mcp-test--node-shape-parent-id))
+           (default (org-mcp-test--node-shape-read link)))
+      (should (equal (org-mcp-test--read-fields link []) default))
+      (should (equal (org-mcp-test--read-fields link "") default)))))
+
+(ert-deftest org-mcp-test-fields-unknown-name-refused ()
+  "A field that does not exist is refused, naming the ones that do.
+Silently leaving it out would hand a client a node missing the field
+it asked for, with nothing to tell it why."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . ["titel"]))
+       "Unknown node field: titel\\.  Valid fields: title, todo, ")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . "summary"))
+       "Unknown field list: summary\\.  \
+Configured lists: reference, outline\\.")
+      (org-mcp-test--call-tool-refused
+       "org-node-read" `((link . ,link) (fields . "link"))
+       "Unknown field list: link\\.")
+      (org-mcp-test--call-tool-refused
+       "org-query" `((query . "(todo \"TODO\")") (fields . ["bodyy"]))
+       "Unknown node field: bodyy\\."))))
+
+(ert-deftest org-mcp-test-fields-query-carries-no-unasked-body ()
+  "A match list carries a body only when the call asked for one.
+Filling `content' means reading every matched subtree, so a query
+leaves it out unasked — and returns it for the asking, which is the
+whole of what the parameter is for."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((query "(todo \"TODO\")"))
+      (should-not
+       (alist-get
+        'content
+        (aref (alist-get 'children
+                         (org-mcp-test--call-ql-query query))
+              0)))
+      (should
+       (equal
+        (aref (org-mcp-test--query-fields query ["title" "content"]) 0)
+        '((title . "Parent") (content . "Parent body.")))))))
+
+(ert-deftest org-mcp-test-fields-mean-the-same-on-both-endpoints ()
+  "The same `fields' asks the same thing of a read and of a query.
+One heading reached two ways comes back as one node, so a client
+that learns the parameter on either endpoint has learned it on
+both."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((fields ["title" "todo" "local_tags" "properties" "link"]))
+      (should
+       (equal
+        (aref (org-mcp-test--query-fields "(todo \"TODO\")" fields) 0)
+        (org-mcp-test--read-fields
+         (concat "id:" org-mcp-test--node-shape-parent-id)
+         fields))))))
+
 ;;; One definition of a title
 
 (defconst org-mcp-test--content-cookie-title
