@@ -18,12 +18,29 @@ Each stage overwrites that one file, and the stages run in the order the `lint`
 recipe lists them, stopping at the first failure. So the file holds the failing
 stage's output, and after a green run the last stage's.
 
-`run-tests.sh` always writes `.test-output.txt`, whether or not the suite
-passed, and prints only the `Ran N tests` summary on success. On failure it
+`run-tests.sh` runs `check-deps.el` before the suite, then always writes
+`.test-output.txt`, whether or not the suite passed, and prints only the
+`Ran N tests` summary on success. On failure it
 prints the ERT block from the first `Test ` line onwards. When a test fails,
 read `.test-output.txt` rather than re-running the suite.
 
 Both output files are gitignored.
+
+## check-deps.el
+
+It is the preflight that keeps a stale dependency from failing the suite in a
+hundred places at once: silent when the installed mcp-server-lib is good,
+non-zero with the remedy when it is missing or older than the requirement. Keep
+it first in `run-tests.sh`; running it after the suite buys nothing.
+
+It probes a symbol that arrived in the required version — today
+`mcp-server-lib-server-registered-p`, which is 0.4.0. **Raising the floor in
+`Eask` obliges moving that probe to a symbol from the new version.** A probe
+left behind passes a copy that is too old, which then dies inside the ERT
+helpers, and the guard has moved the confusing failure rather than removed it.
+
+Its commentary carries why the `require` is soft and why it stays inside the
+`cond`. Both are load-bearing; read it before restructuring the file.
 
 ## format-elisp.el
 

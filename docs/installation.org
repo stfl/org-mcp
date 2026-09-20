@@ -8,7 +8,7 @@ version.
 
 Requires Emacs 30.1 or later. CI covers Emacs 30.2 and 31.1 on Linux and macOS.
 
-org-mcp builds on =mcp-server-lib= 0.2.0 and =org-ql= 0.9, which come in with
+org-mcp builds on =mcp-server-lib= 0.4.0 and =org-ql= 0.9, which come in with
 the package. The pins live in =Eask= and in the =Package-Requires= header of
 =org-mcp.el=.
 
@@ -91,5 +91,9 @@ Extra arguments are forwarded to =emacs-mcp-stdio.sh=, so callers can
 still pass =--socket=...= or override defaults if needed.
 
 Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib-start=. Stop it with =M-x mcp-server-lib-stop= when done.
+
+org-mcp names itself in the handshake: =initialize= reports =serverInfo= with
+the name =org-mcp= and org-mcp's own package version, and no =instructions=
+field, so a client can name the server and the version it is talking to.
 
 To remove the installed wrapper, run =M-x org-mcp-uninstall=.
