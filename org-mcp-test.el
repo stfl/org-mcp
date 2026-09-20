@@ -1434,6 +1434,17 @@ FILES, when provided, is sent as the `files' parameter."
 It is unrelated to anything a call under test touches, so a call
 that writes around the buffer, or that loses the edit, shows up.")
 
+(defun org-mcp-test--content-with-user-edit (content)
+  "Return CONTENT as a buffer holds it once the user has typed into it.
+`org-mcp-test--with-dirty-buffer' types the edit on a line of its own
+at the end, so a file whose last line has no newline gains one."
+  (concat
+   content
+   (if (or (string-empty-p content) (string-suffix-p "\n" content))
+       ""
+     "\n")
+   org-mcp-test--user-edit))
+
 (defun org-mcp-test--served-text (file)
   "Return the text org-node-text serves for FILE, as a client reads it.
 The read goes through the server, which answers from the buffer
@@ -1463,6 +1474,8 @@ test leaves an unsaved buffer behind for the next one."
                (save-restriction
                  (widen)
                  (goto-char (point-max))
+                 (unless (bolp)
+                   (insert "\n"))
                  (insert org-mcp-test--user-edit))
                (should (buffer-modified-p)))
              ,@body)
@@ -1486,7 +1499,7 @@ holds ON-DISK, and BUFFER is still the user's to save."
   (should
    (string=
     (org-mcp-test--served-text file)
-    (concat on-disk org-mcp-test--user-edit)))
+    (org-mcp-test--content-with-user-edit on-disk)))
   (should (string= (org-mcp-test--read-file file) on-disk))
   (should (buffer-modified-p buffer)))
 
@@ -3446,59 +3459,39 @@ Task description.
 Another task description."
   "Org file content with two TODO tasks, used for modified-buffer tests.")
 
-(defconst org-mcp-test--expected-modified-buffer-task-one-in-progress-regex
+(defconst org-mcp-test--dirty-task-one-in-progress-regex
   (concat
    "\\`\\* IN-PROGRESS Task One\n"
    "Task description\\.\n"
    "\\* TODO Task Two\n"
    "Another task description\\.\n"
-   "\\* TODO Task Three\n"
-   "Added in buffer\\."
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer after updating Task One to IN-PROGRESS.
-The buffer also keeps the unsaved Task Three edit made before the update.")
+  "Regex matching the whole file the server serves after Task One moves on.
+The file is served from the buffer the user is editing, so it carries
+that user's own unsaved edit as well as the new TODO state.")
 
 (ert-deftest org-mcp-test-update-todo-state-with-modified-buffer ()
-  "Test TODO state update succeeds on a pre-modified buffer without auto-saving.
-When the visited buffer was already dirty before org-mcp writes, the
-edit is applied in-buffer only — the file on disk must remain unchanged
-and the response must report `saved' as false."
+  "A TODO state lands in the buffer the user is editing, not around it.
+The buffer held the user's own unsaved edit before the call, so the
+change is the user's to save: the response says so, the file on disk
+keeps the state it had, and the server answers from the buffer with
+the new state and the user's edit both in it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-two-todo-tasks))
     (let ((org-todo-keywords
            '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
-      ;; Open the file in a buffer and modify it elsewhere
-      (let ((buffer (find-file-noselect test-file)))
-        (unwind-protect
-            (progn
-              ;; Make a modification at an unrelated location
-              (with-current-buffer buffer
-                (goto-char (point-max))
-                (insert "\n* TODO Task Three\nAdded in buffer.")
-                ;; Buffer is now modified but not saved
-                (should (buffer-modified-p)))
-
-              ;; Update TODO state — should succeed without auto-save
-              (let ((link
-                     (org-mcp-test--file-link test-file "*Task One")))
-                (let ((result
-                       (org-mcp-test--call-update-todo-state
-                        link "IN-PROGRESS" "TODO")))
-                  (should (equal (alist-get 'success result) t))
-                  (should (eq (alist-get 'saved result) :json-false))
-                  (should (equal (alist-get 'after result) "IN-PROGRESS")))
-                ;; Buffer must still be modified (never auto-saved)
-                (with-current-buffer buffer
-                  (should (buffer-modified-p)))
-                ;; Buffer content reflects the TODO change and the user edit
-                (org-mcp-test--verify-buffer-matches
-                 buffer
-                 org-mcp-test--expected-modified-buffer-task-one-in-progress-regex)
-                ;; Disk must still have the *original* content — no auto-save
-                (should (string= (org-mcp-test--read-file test-file)
-                                 org-mcp-test--content-two-todo-tasks))))
-          ;; Clean up: kill the buffer
-          (kill-buffer buffer))))))
+      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+        (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+               (result
+                (org-mcp-test--call-update-todo-state
+                 link "IN-PROGRESS" "TODO")))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) "IN-PROGRESS"))
+          (org-mcp-test--verify-served-matches
+           test-file org-mcp-test--dirty-task-one-in-progress-regex)
+          (org-mcp-test--assert-unsaved
+           result test-file on-disk buffer))))))
 
 (ert-deftest org-mcp-test-update-todo-state-nonexistent-id ()
   "Test TODO state update fails for non-existent ID."
@@ -5676,27 +5669,47 @@ behind it."
                "\\.  Drop org://")
        test-file))))
 
+(defconst org-mcp-test--dirty-read-content "* Task One\nOriginal body\n"
+  "A one-heading file for reads of a buffer the user is editing.")
+
 (ert-deftest org-mcp-test-tool-read-file-prefers-modified-buffer ()
-  "Test org-node-text file reads prefer modified visited buffers."
-  (let ((test-content "* Task One\nOriginal body\n"))
-    (org-mcp-test--with-temp-org-files
-        ((test-file test-content))
-      (let ((buffer (find-file-noselect test-file)))
-        (unwind-protect
-            (progn
-              (with-current-buffer buffer
-                (goto-char (point-max))
-                (insert "Unsaved change\n")
-                (should (buffer-modified-p)))
-              (let ((result-text
-                     (org-mcp-test--call-read-headline
-                      (concat "file:" test-file))))
-                (should (string-match-p "Unsaved change" result-text))
-                (should-not
-                 (string-match-p
-                  "Unsaved change"
-                  (org-mcp-test--read-file test-file)))))
-          (kill-buffer buffer))))))
+  "org-node-text serves a file from the buffer the user is editing.
+What comes back is the whole buffer: the file's own text and the
+user's unsaved edit, which the file on disk does not carry."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--dirty-read-content))
+    (org-mcp-test--with-dirty-buffer (_buffer on-disk) test-file
+      (should
+       (string=
+        (org-mcp-test--served-text test-file)
+        (org-mcp-test--content-with-user-edit on-disk)))
+      (should-not
+       (string-match-p
+        "Typed by hand"
+        (org-mcp-test--read-file test-file))))))
+
+(ert-deftest org-mcp-test-tool-read-node-prefers-modified-buffer ()
+  "org-node-read serves a node from the buffer the user is editing.
+The structured read walks the same buffer the verbatim one does, so
+the node's body carries the user's unsaved edit and the two agree on
+what the file holds."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--dirty-read-content))
+    (org-mcp-test--with-dirty-buffer (_buffer _on-disk) test-file
+      ;; A node's content comes back without the line break that
+      ;; separates it from what follows it, so the user's edit is its
+      ;; last line rather than a line and a break.
+      (should
+       (string=
+        (org-mcp-test--read-content test-file "Task One")
+        (concat
+         "Original body\n"
+         (string-trim-right org-mcp-test--user-edit))))
+      (should
+       (string-match-p
+        "Typed by hand"
+        (org-mcp-test--call-read-headline
+         (org-mcp-test--file-link test-file "*Task One")))))))
 
 ;; Tests for body extraction across various metadata layouts.  These
 ;; verify `org-mcp--extract-structured-heading' (via the org-node-read tool)
@@ -5872,71 +5885,63 @@ Body after everything."))
               (should-not (buffer-modified-p))))
         (kill-buffer buffer)))))
 
-(defconst org-mcp-test--clock-add-modified-buffer-expected-regex
+(defconst org-mcp-test--dirty-clock-add-regex
   (concat
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
-   "\n"
-   "\\* TODO Task Two\n"
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer after clock-add on a modified buffer.
-The buffer also keeps the unsaved Task Two edit made before the call.")
+  "Regex matching the whole file the server serves after a clock-add.
+The file is served from the buffer the user is editing, so it carries
+that user's own unsaved edit as well as the new CLOCK line.")
 
-(defconst org-mcp-test--clock-in-modified-buffer-expected-regex
+(defconst org-mcp-test--dirty-clock-in-regex
   (concat
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
    ":END:\n"
-   "\n"
-   "\\* TODO Task Two\n"
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer after clock-in on a modified buffer.
-The buffer also keeps the unsaved Task Two edit made before the call.")
+  "Regex matching the whole file the server serves after a clock-in.
+The file is served from the buffer the user is editing, so it carries
+that user's own unsaved edit as well as the open CLOCK line.")
 
-(defconst org-mcp-test--clock-out-modified-buffer-expected-regex
+(defconst org-mcp-test--dirty-clock-out-regex
   (concat
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
-   "\n"
-   "\\* TODO Task Two\n"
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer after clock-out on a modified buffer.
-The buffer also keeps the unsaved Task Two edit made before the call.")
+  "Regex matching the whole file the server serves after a clock-out.
+The file is served from the buffer the user is editing, so it carries
+that user's own unsaved edit as well as the closed CLOCK line.")
 
 (ert-deftest org-mcp-test-clock-add-modified-buffer-no-auto-save ()
-  "Test clock-add on a pre-modified buffer edits in-buffer without auto-save."
+  "A clock-add lands in the buffer the user is editing, not around it.
+The buffer held the user's own unsaved edit before the call, so the
+CLOCK line is the user's to save: the response says so, the file on
+disk keeps the content it had, and the server answers from the buffer
+with the CLOCK line and the user's edit both in it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (buffer (find-file-noselect test-file)))
-      (unwind-protect
-          (progn
-            ;; Dirty the buffer with an unrelated edit
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "\n* TODO Task Two\n")
-              (should (buffer-modified-p)))
-            (let ((result (org-mcp-test--call-clock-add
-                           link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
-              (should (equal (alist-get 'success result) t))
-              (should (eq (alist-get 'saved result) :json-false))
-              (should (equal (alist-get 'added result) t)))
-            ;; Buffer must still be modified
-            (with-current-buffer buffer
-              (should (buffer-modified-p)))
-            (org-mcp-test--verify-buffer-matches
-             buffer org-mcp-test--clock-add-modified-buffer-expected-regex)
-            ;; Disk must still equal the original content
-            (should (string= (org-mcp-test--read-file test-file)
-                             org-mcp-test--clock-task-content)))
-        (kill-buffer buffer)))))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+             (result
+              (org-mcp-test--call-clock-add
+               link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'added result) t))
+        (org-mcp-test--verify-served-matches
+         test-file org-mcp-test--dirty-clock-add-regex)
+        (org-mcp-test--assert-unsaved
+         result test-file on-disk buffer)))))
 
 (ert-deftest org-mcp-test-clock-in-saves-file-to-disk ()
   "Test org-clock-in saves the open CLOCK entry to disk."
@@ -5951,33 +5956,23 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
        test-file org-mcp-test--clock-in-expected-regex))))
 
 (ert-deftest org-mcp-test-clock-in-modified-buffer-no-auto-save ()
-  "Test clock-in on a pre-modified buffer edits in-buffer without auto-save.
-When the visited buffer was already dirty, org-mcp must not save to disk."
+  "A clock-in lands in the buffer the user is editing, not around it.
+The buffer held the user's own unsaved edit before the call, so the
+open CLOCK line is the user's to save: the response says so, the file
+on disk keeps the content it had, and the server answers from the
+buffer with the CLOCK line and the user's edit both in it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-content))
-    (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-           (buffer (find-file-noselect test-file)))
-      (unwind-protect
-          (progn
-            ;; Dirty the buffer with an unrelated edit
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "\n* TODO Task Two\n")
-              (should (buffer-modified-p)))
-            (let ((result (org-mcp-test--call-clock-in
-                           link "2026-01-01T10:00:00")))
-              (should (equal (alist-get 'success result) t))
-              (should (eq (alist-get 'saved result) :json-false))
-              (should (equal (alist-get 'clocked_in result) t)))
-            ;; Buffer must still be modified
-            (with-current-buffer buffer
-              (should (buffer-modified-p)))
-            (org-mcp-test--verify-buffer-matches
-             buffer org-mcp-test--clock-in-modified-buffer-expected-regex)
-            ;; Disk must still equal the original content
-            (should (string= (org-mcp-test--read-file test-file)
-                             org-mcp-test--clock-task-content)))
-        (kill-buffer buffer)))))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+             (result
+              (org-mcp-test--call-clock-in link "2026-01-01T10:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (org-mcp-test--verify-served-matches
+         test-file org-mcp-test--dirty-clock-in-regex)
+        (org-mcp-test--assert-unsaved
+         result test-file on-disk buffer)))))
 
 ;;; Tests for org-clock-in with resolve=true (dangling clock cleanup)
 
@@ -6188,31 +6183,22 @@ This exercises the write path in org-mcp--complete-and-save."
      test-file org-mcp-test--clock-out-expected-regex)))
 
 (ert-deftest org-mcp-test-clock-out-modified-buffer-no-auto-save ()
-  "Test clock-out on a pre-modified buffer edits in-buffer without auto-save."
+  "A clock-out lands in the buffer the user is editing, not around it.
+The buffer held the user's own unsaved edit before the call, so the
+closed CLOCK line is the user's to save: the response says so, the
+file on disk keeps the open clock it had, and the server answers from
+the buffer with the close and the user's edit both in it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-task-with-open-clock))
-    (let* ((buffer (find-file-noselect test-file)))
-      (unwind-protect
-          (progn
-            ;; Dirty the buffer with an unrelated edit
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "\n* TODO Task Two\n")
-              (should (buffer-modified-p)))
-            (let ((result (org-mcp-test--call-clock-out
-                           "2026-01-01T11:00:00")))
-              (should (equal (alist-get 'success result) t))
-              (should (eq (alist-get 'saved result) :json-false))
-              (should (equal (alist-get 'clocked_out result) t)))
-            ;; Buffer must still be modified
-            (with-current-buffer buffer
-              (should (buffer-modified-p)))
-            (org-mcp-test--verify-buffer-matches
-             buffer org-mcp-test--clock-out-modified-buffer-expected-regex)
-            ;; Disk must still equal the original content
-            (should (string= (org-mcp-test--read-file test-file)
-                             org-mcp-test--clock-task-with-open-clock)))
-        (kill-buffer buffer)))))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let ((result
+             (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_out result) t))
+        (org-mcp-test--verify-served-matches
+         test-file org-mcp-test--dirty-clock-out-regex)
+        (org-mcp-test--assert-unsaved
+         result test-file on-disk buffer)))))
 
 (ert-deftest org-mcp-test-clock-out-failed-after-save-hook ()
   "Test a save failing after the file holds the close says the close was made.
@@ -6369,7 +6355,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "* TODO Task Two\n")
   "File with an open clock on Task One and an unclocked Task Two.")
 
-(defconst org-mcp-test--clock-in-close-same-modified-buffer-expected-regex
+(defconst org-mcp-test--dirty-clock-in-close-same-regex
   (concat
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
@@ -6380,42 +6366,33 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
    ":END:\n"
-   "\\* TODO Task Three\n"
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer after clock-in to Task Two at 11:00.
-The buffer holds Task One's closed clock, Task Two's new clock, and the
-unsaved Task Three edit made before the call.")
+  "Regex matching the whole file served after clock-in to Task Two at 11:00.
+The file is served from the buffer the user is editing, so it carries
+Task One's closed clock, Task Two's new clock, and that user's own
+unsaved edit.")
 
 (ert-deftest org-mcp-test-clock-in-closes-active-same-modified-buffer ()
-  "Test clock-in when the active clock and the target share a dirty buffer.
-Both edits land in a buffer that already has unsaved edits, so the file
-on disk stays unchanged and the response reports `saved' as false."
+  "A clock-in closing a clock in the same dirty buffer lands in it.
+Both the close and the new clock are the user's to save, because the
+buffer holds the user's own unsaved edit: the response says so, the
+file on disk keeps the open clock it had, and the server answers from
+the buffer with both changes and the user's edit in it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--clock-in-close-same-file-open-clock-content))
-    (let ((buffer (find-file-noselect test-file)))
-      (unwind-protect
-          (progn
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "* TODO Task Three\n")
-              (should (buffer-modified-p)))
-            (let ((result (org-mcp-test--call-clock-in
-                           (org-mcp-test--file-link test-file "*Task Two")
-                           "2026-01-01T11:00:00" nil
-                           (org-mcp-test--file-link test-file "*Task One"))))
-              (should (equal (alist-get 'success result) t))
-              (should (eq (alist-get 'saved result) :json-false))
-              (should (equal (alist-get 'clocked_in result) t)))
-            (with-current-buffer buffer
-              (should (buffer-modified-p)))
-            (org-mcp-test--verify-buffer-matches
-             buffer
-             org-mcp-test--clock-in-close-same-modified-buffer-expected-regex)
-            (should
-             (string=
-              (org-mcp-test--read-file test-file)
-              org-mcp-test--clock-in-close-same-file-open-clock-content)))
-        (kill-buffer buffer)))))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let ((result
+             (org-mcp-test--call-clock-in
+              (org-mcp-test--file-link test-file "*Task Two")
+              "2026-01-01T11:00:00" nil
+              (org-mcp-test--file-link test-file "*Task One"))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (org-mcp-test--verify-served-matches
+         test-file org-mcp-test--dirty-clock-in-close-same-regex)
+        (org-mcp-test--assert-unsaved
+         result test-file on-disk buffer)))))
 
 (ert-deftest org-mcp-test-clock-in-closes-active-different-file ()
   "Test clock-in closes an active clock in a different file."
@@ -6449,51 +6426,41 @@ on disk stays unchanged and the response reports `saved' as false."
    "\\'")
   "Regex matching the complete file after clock-in at 11:00.")
 
-(defconst org-mcp-test--clock-closed-in-modified-buffer-expected-regex
+(defconst org-mcp-test--dirty-clock-closed-regex
   (concat
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
    "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
-   "\n"
-   "\\* TODO Task Two\n"
+   "Typed by hand, not saved\\.\n"
    "\\'")
-  "Regex matching the complete buffer whose open clock clock-in closed at 11:00.
-The buffer also keeps the unsaved Task Two edit made before the call.")
+  "Regex matching the whole file whose open clock clock-in closed at 11:00.
+The file carries the user's own unsaved edit as well as the close.")
 
 (ert-deftest org-mcp-test-clock-in-closes-active-in-modified-buffer ()
   "Test clock-in reports `saved' false when the clock it closes stays unsaved.
 The active clock sits in another allowed file whose buffer already has
-unsaved edits.  The target file reaches disk, but the closed clock only
-lands in that buffer, so the response covers both edits."
+unsaved edits.  The target file reaches disk, but the closed clock
+only lands in that buffer, so the response covers both edits and the
+server answers for that file from the buffer."
   (org-mcp-test--with-temp-org-files
       ((file-1 org-mcp-test--clock-task-with-open-clock)
        (file-2 org-mcp-test--clock-task-content))
-    (let ((buffer (find-file-noselect file-1)))
-      (unwind-protect
-          (progn
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "\n* TODO Task Two\n")
-              (should (buffer-modified-p)))
-            (let ((result (org-mcp-test--call-clock-in
-                           (org-mcp-test--file-link file-2 "*Task One")
-                           "2026-01-01T11:00:00" nil
-                           (org-mcp-test--file-link file-1 "*Task One"))))
-              (should (equal (alist-get 'success result) t))
-              (should (eq (alist-get 'saved result) :json-false))
-              (should (equal (alist-get 'clocked_in result) t)))
-            (org-mcp-test--verify-file-matches
-             file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
-            (with-current-buffer buffer
-              (should (buffer-modified-p)))
-            (org-mcp-test--verify-buffer-matches
-             buffer
-             org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
-            (should (string= (org-mcp-test--read-file file-1)
-                             org-mcp-test--clock-task-with-open-clock)))
-        (kill-buffer buffer)))))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) file-1
+      (let ((result
+             (org-mcp-test--call-clock-in
+              (org-mcp-test--file-link file-2 "*Task One")
+              "2026-01-01T11:00:00" nil
+              (org-mcp-test--file-link file-1 "*Task One"))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (org-mcp-test--verify-file-matches
+         file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
+        (org-mcp-test--verify-served-matches
+         file-1 org-mcp-test--dirty-clock-closed-regex)
+        (org-mcp-test--assert-unsaved
+         result file-1 on-disk buffer)))))
 
 (ert-deftest org-mcp-test-clock-in-closes-active-explicit-start ()
   "Test clock-in with explicit start closes active clock at that start time."
@@ -7982,27 +7949,22 @@ does when the clock is closed, so both files hold their change."
   (org-mcp-test--with-temp-org-files
       ((file-1 org-mcp-test--clock-task-with-open-clock)
        (file-2 org-mcp-test--clock-task-content))
-    (let ((buffer (find-file-noselect file-1))
-          (org-clock-out-hook (list #'save-buffer)))
-      (unwind-protect
-          (progn
-            (with-current-buffer buffer
-              (goto-char (point-max))
-              (insert "\n* TODO Task Two\n"))
-            (let ((result
-                   (org-mcp-test--call-clock-in
-                    (org-mcp-test--file-link file-2 "*Task One")
-                    "2026-01-01T11:00:00" nil
-                    (org-mcp-test--file-link file-1 "*Task One"))))
-              (should (equal (alist-get 'clocked_in result) t))
-              (should (eq (alist-get 'saved result) t)))
-            (org-mcp-test--verify-file-matches
-             file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
-            (org-mcp-test--verify-file-matches
-             file-1
-             org-mcp-test--clock-closed-in-modified-buffer-expected-regex)
-            (org-mcp-test--verify-no-modified-buffer file-1))
-        (kill-buffer buffer)))))
+    (let ((org-clock-out-hook (list #'save-buffer)))
+      (org-mcp-test--with-dirty-buffer (_buffer _on-disk) file-1
+        (let ((result
+               (org-mcp-test--call-clock-in
+                (org-mcp-test--file-link file-2 "*Task One")
+                "2026-01-01T11:00:00" nil
+                (org-mcp-test--file-link file-1 "*Task One"))))
+          (should (equal (alist-get 'clocked_in result) t))
+          (should (eq (alist-get 'saved result) t)))
+        (org-mcp-test--verify-file-matches
+         file-2 org-mcp-test--clock-in-at-eleven-expected-regex)
+        (org-mcp-test--verify-file-matches
+         file-1 org-mcp-test--dirty-clock-closed-regex)
+        (org-mcp-test--verify-served-matches
+         file-1 org-mcp-test--dirty-clock-closed-regex)
+        (org-mcp-test--verify-no-modified-buffer file-1)))))
 
 ;;; Tests for org-node-set-scheduled
 
