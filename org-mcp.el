@@ -4421,6 +4421,55 @@ MCP Parameters:
 
 ;; org-ql integration
 
+(defun org-mcp--projected-node-at (element fields properties computed)
+  "Return the node ELEMENT stands for, carrying FIELDS.
+ELEMENT is one match `org-ql-select' returned.  Its buffer is read
+widened: a heading outside the user's own narrowing would otherwise
+be read at the wrong place."
+  (with-current-buffer (org-element-property :buffer element)
+    (org-with-wide-buffer
+     (goto-char (org-element-property :begin element))
+     (org-mcp--projected-node-at-point fields properties computed))))
+
+(defun org-mcp--run-query (query-sexp fields properties computed sort)
+  "Return the JSON answer to QUERY-SEXP, each match carrying FIELDS.
+This is the one runner behind org-query and org-view, so the two
+answer in the same envelope by construction: `children', `total' and
+the `files_searched' count.
+
+The files searched are the ones the caller put in force with
+`org-mcp--with-file-set', which is where the two differ: org-query
+may be sent a `files' parameter and a view always runs over the
+allowed files.  SORT is the other difference, passed to
+`org-ql-select' as `:sort': a view sorts by `org-mcp-query-sort-fn'
+and org-query is unsorted.  FIELDS, PROPERTIES and COMPUTED are
+resolved before this runs, so every match is built from names that
+are known to exist.
+
+Matches come back as Org elements and the nodes are built from them
+in a second pass, because `org-ql-select' applies `:action' before
+`:sort': an action returning anything but an element would hand a
+comparator something it cannot compare."
+  (let* ((target-files org-agenda-files)
+         (matches
+          ;; Given no files, `org-ql-select' would search the current
+          ;; buffer, which no call names.
+          (when target-files
+            (condition-case err
+                (mapcar
+                 (lambda (element)
+                   (org-mcp--projected-node-at
+                    element fields properties computed))
+                 (org-ql-select target-files query-sexp :sort sort))
+              (error
+               (org-mcp--tool-validation-error
+                "Org-ql query error: %s"
+                (error-message-string err)))))))
+    (json-encode
+     `((children . ,(vconcat matches))
+       (total . ,(length matches))
+       (files_searched . ,(length target-files))))))
+
 (defun org-mcp--tool-query
     (query &optional fields properties computed files)
   "Search Org files using an org-ql QUERY expression.
@@ -4462,87 +4511,16 @@ MCP Parameters:
       (org-mcp--tool-validation-error "Query must be a list, got: %s"
                                       (type-of query-sexp)))
     (org-mcp--with-file-set files
-      (let* ( ;; Resolved before the query runs, so a misspelled
-             ;; name is refused rather than repeated per match.
-             (node-fields
-              (org-mcp--node-fields-given
-               fields org-mcp--node-query-fields))
-             (node-properties
-              (org-mcp--node-properties-given properties 'all))
-             (node-computed
-              (org-mcp--node-computed-given computed 'all))
-             (target-files org-agenda-files)
-             (action
-              (lambda ()
-                (org-mcp--projected-node-at-point
-                 node-fields node-properties node-computed)))
-             (matches
-              ;; Given no files, `org-ql-select' would search the
-              ;; current buffer, which no call names.
-              (when target-files
-                (condition-case err
-                    (org-ql-select
-                     target-files
-                     query-sexp
-                     :action action)
-                  (error
-                   (org-mcp--tool-validation-error
-                    "Org-ql query error: %s"
-                    (error-message-string err)))))))
-        (json-encode
-         `((children . ,(vconcat matches))
-           (total . ,(length matches))
-           (files_searched . ,(length target-files))))))))
+      ;; The three namespaces are resolved before the query runs, so
+      ;; a misspelled name is refused rather than repeated per match.
+      (org-mcp--run-query
+       query-sexp
+       (org-mcp--node-fields-given fields org-mcp--node-query-fields)
+       (org-mcp--node-properties-given properties 'all)
+       (org-mcp--node-computed-given computed 'all)
+       nil))))
 
 ;; Views
-
-(defun org-mcp--run-view (query-sexp fields properties computed)
-  "Run QUERY-SEXP via `org-ql-select', each match carrying FIELDS.
-A view always runs over the allowed files: org-view takes no
-`files' parameter, and mcp-server-lib refuses a call passing one
-with an \"Unexpected parameter\" error before any handler runs.
-FIELDS, PROPERTIES and COMPUTED are resolved before this runs, so
-every match is built from names that are known to exist.
-Uses `org-mcp-query-sort-fn' for sorting when set.
-Returns JSON-encoded results in the same format as org-query."
-  (org-mcp--with-file-set nil
-    (let*
-        ((target-files org-agenda-files)
-         (matches
-          ;; Given no files, `org-ql-select' would search the
-          ;; current buffer, which is not among the allowed files.
-          (when target-files
-            (condition-case err
-                ;; Collect org-elements with the default action,
-                ;; then sort.  We map the node builder
-                ;; in a second pass because `org-ql-select' applies
-                ;; :action before :sort — custom actions that
-                ;; return non-element data would break sort
-                ;; functions expecting org-elements.
-                (let ((elements
-                       (org-ql-select
-                        target-files
-                        query-sexp
-                        :sort org-mcp-query-sort-fn)))
-                  (mapcar
-                   (lambda (el)
-                     (with-current-buffer (org-element-property
-                                           :buffer el)
-                       ;; Widen: a heading outside the user's
-                       ;; narrowing would be read at the wrong place.
-                       (org-with-wide-buffer
-                        (goto-char (org-element-property :begin el))
-                        (org-mcp--projected-node-at-point
-                         fields properties computed))))
-                   elements))
-              (error
-               (org-mcp--tool-validation-error
-                "Org-ql query error: %s"
-                (error-message-string err)))))))
-      (json-encode
-       `((children . ,(vconcat matches))
-         (total . ,(length matches))
-         (files_searched . ,(length target-files)))))))
 
 (defconst org-mcp--view-parameters '(:filter :range)
   "The parameters a view declares, in the order its query takes them.
@@ -4718,19 +4696,24 @@ MCP Parameters:
   (let* ((declaration (org-mcp--view view))
          (arguments
           (org-mcp--view-arguments view declaration filter range))
-         ;; Resolved before the query runs, so a misspelled field is
-         ;; refused rather than repeated per match.
-         ;; Resolved before the query runs, so a misspelled name is
-         ;; refused rather than repeated per match.
+         ;; The three namespaces are resolved before the query runs,
+         ;; so a misspelled name is refused rather than repeated per
+         ;; match.
          (node-fields
           (org-mcp--node-fields-given
            fields org-mcp--node-query-fields))
          (properties (org-mcp--node-properties-given properties 'all))
          (computed (org-mcp--node-computed-given computed 'all)))
-    (org-mcp--run-view
-     (org-mcp--view-query
-      view declaration arguments)
-     node-fields properties computed)))
+    ;; A view always runs over the allowed files: org-view takes no
+    ;; `files' parameter, and mcp-server-lib refuses a call passing
+    ;; one with an "Unexpected parameter" error before this runs.
+    (org-mcp--with-file-set nil
+      (org-mcp--run-query
+       (org-mcp--view-query view declaration arguments)
+       node-fields
+       properties
+       computed
+       org-mcp-query-sort-fn))))
 
 ;; Read tools
 
