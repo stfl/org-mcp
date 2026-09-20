@@ -1701,8 +1701,8 @@ looks whole and is not."
 
 (defun org-mcp--spend-node (budget file-node)
   "Spend one node of BUDGET, or refuse the walk at the node at point.
-BUDGET is the cell `org-mcp--node-at-point' hands its walk, holding
-the nodes the walk may still return.  When it is empty the walk is
+BUDGET is the cell `org-mcp--projected-node-at-point' hands the
+walk, holding the nodes the walk may still return.  When it is empty the walk is
 refused rather than cut short: a caller handed a subtree that was
 silently shortened believes it has seen the whole thing.
 
@@ -1717,19 +1717,22 @@ a shallower depth, or read that node on its own.  \
 org-mcp-read-max-nodes sets the ceiling"
      org-mcp-read-max-nodes (org-mcp--node-link-at-point file-node))))
 
-(defun org-mcp--node-at-point (fields &optional depth file-node)
-  "Return the node at point as an alist carrying FIELDS.
+(defun org-mcp--node-at-point
+    (fields properties computed depth file-node budget)
+  "Return the node at point as an alist carrying FIELDS, within BUDGET.
 One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
 
 FIELDS is a list of node field names, in the order the node lists
 them; `org-mcp--node-fields' names every one there is.  A field the
 node has no value for -- no TODO state, no tag of its own, an empty
-body -- is left out rather than sent as null.
+body -- is left out rather than sent as null.  PROPERTIES and
+COMPUTED are the node\='s two other namespaces, see
+`org-mcp--projected-node-at-point\='.
 
 DEPTH is how many generations of children the `children' field
-expands in place, and defaults to none.  See
-`org-mcp--child-node-fields' for what each generation carries.
+expands in place; see `org-mcp--child-projection\=' for what each
+generation carries.
 
 FILE-NODE non-nil builds the node of the file the buffer visits: a
 node at level 0, carrying the file's title, a link to the file and
@@ -1737,25 +1740,10 @@ its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
 no position before that heading.
 
-The walk is given `org-mcp-read-max-nodes' nodes to spend and is
-refused when it wants more; every caller gets its own budget, so a
-list of matches is bounded one match at a time."
-  (org-mcp--node-at-point-within
-   fields
-   nil
-   nil
-   (or depth 0)
-   file-node
-   (list org-mcp-read-max-nodes)))
-
-(defun org-mcp--node-at-point-within
-    (fields properties computed depth file-node budget)
-  "Return the node at point carrying FIELDS, within BUDGET.
-FIELDS, DEPTH and FILE-NODE are `org-mcp--node-at-point\='s, which
-holds what a node is.  PROPERTIES and COMPUTED are the node\='s two
-other namespaces, see `org-mcp--projected-node-at-point\='.  BUDGET
-is the walk\='s, which `org-mcp--spend-node\=' spends one node of per
-node built, this one included."
+BUDGET is the walk\='s, which `org-mcp--spend-node\=' spends one node
+of per node built, this one included.  Every caller is given its own,
+`org-mcp-read-max-nodes' nodes to spend, so a list of matches is
+bounded one match at a time."
   (org-mcp--spend-node budget file-node)
   (let* ((meta
           (unless file-node
@@ -1822,7 +1810,7 @@ node built, this one included."
                     (lambda (position)
                       (save-excursion
                         (goto-char position)
-                        (org-mcp--node-at-point-within
+                        (org-mcp--node-at-point
                          child-fields
                          child-properties
                          child-computed
@@ -1869,28 +1857,13 @@ would write this server\='s opinion into the user\='s file.
 All three reach every generation DEPTH expands, so an expanded child
 is the node a read of its link returns; see
 `org-mcp--child-projection\='."
-  (org-mcp--node-at-point-within
+  (org-mcp--node-at-point
    fields
    properties
    computed
    (or depth 0)
    file-node
    (list org-mcp-read-max-nodes)))
-
-(defun org-mcp--generate-outline (file-path)
-  "Return the outline of FILE-PATH: its headings and theirs.
-The file node's `children' alone, each child carrying its own
-children, so the answer is the top-level headings and their direct
-ones.  The generation below those is left out, as are the fields a
-whole read carries: the file node is read one generation deep, and
-the tool answers with that one key of it."
-  (org-mcp--with-org-file file-path
-    (list
-     (assq
-      'children
-      (org-mcp--node-at-point (append
-                               org-mcp--node-child-fields '(children))
-                              1 t)))))
 
 ;; Links
 
@@ -4345,42 +4318,6 @@ MCP Parameters:
                             computed
                             files))
 
-(defun org-mcp--tool-read-outline (file)
-  "Tool handler for org-read-outline.
-FILE is the absolute path to an Org file, or a `file:' link to it with
-no search part, such as file:/path/to/file.org.  Either way the file
-must pass the scope gate, `org-mcp--find-allowed-file', as a file the
-call names.  An `id:' link, even one to a file-level drawer, and a
-`file:' link with a search part are refused without being looked up,
-as parsed.  A string starting with `org://' is refused as no link, the
-way the link tools refuse it.
-
-MCP Parameters:
-  file - Absolute path to an Org file, or a file: link to it with no
-         search part"
-  (json-encode
-   (org-mcp--generate-outline
-    (cond
-     ((and (stringp file)
-           (string-prefix-p "org://" (string-trim file)))
-      (org-mcp--not-a-link-error file))
-     ((org-mcp--link-written-p file)
-      (let ((object (org-mcp--link-parse file)))
-        (when (or (equal (org-element-property :type object) "id")
-                  (org-element-property :search-option object))
-          (org-mcp--tool-validation-error
-           "org-read-outline takes a file's path or file: link, not an \
-id: link or a search: %s"
-           file))
-        (plist-get (org-mcp--link-target file) :file)))
-     (t
-      (unless (and (stringp file) (file-name-absolute-p file))
-        (org-mcp--tool-validation-error "Path must be absolute: %s"
-                                        file))
-      (expand-file-name
-       (or (org-mcp--find-allowed-file file t)
-           (org-mcp--tool-file-access-error file))))))))
-
 (defun org-mcp--tool-node-text (link &optional files)
   "Tool handler for org-node-text.
 LINK is a native Org link to a heading or a whole file.
@@ -5505,28 +5442,6 @@ the call asked for.
      org-mcp--node-description "
 File must be in the allowed files, or permitted by
 org-mcp-file-scope-override.")
-    :read-only t)
-   (list
-    #'org-mcp--tool-read-outline
-    :id "org-read-outline"
-    :description
-    "Get hierarchical structure of Org file as JSON outline. Returns
-   the titles of the top-level headlines and of their direct
-   children; deeper headlines are left out. File must be in the
-   allowed files, or permitted by org-mcp-file-scope-override.
-
-Parameters:
-  file - Absolute path to Org file, or a file: link to it with no
-         search part, bare or bracketed, such as file:/path/to/file.org
-         (string, required)
-         An id: link, even one to a file-level drawer, and a file:
-         link with a search part are refused without being looked
-         up, and so is an org:// resource URI.
-
-Returns: JSON object with hierarchical outline structure:
-  children - Array of top-level headings, each a node carrying title,
-             todo, level, link and its own children, the level-2
-             headings; those carry no children of their own"
     :read-only t)
    (list
     #'org-mcp--tool-node-text

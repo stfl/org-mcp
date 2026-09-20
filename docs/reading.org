@@ -1,7 +1,7 @@
 #+TITLE: Reading Org content
 
 This page answers how a client reads Org files: the =org://{link}= resource,
-the three read tools, and the tools that report what Emacs has configured.
+the two read tools, and the tools that report what Emacs has configured.
 Changing content is [[file:writing.org][Changing Org content]]; the [[file:../README.org][README]] introduces the server
 itself.
 
@@ -469,8 +469,8 @@ These read-only tools let the model read what the resource above serves. The
 the MCP client's @-mention / resource picker UI and requires the user (or
 client heuristics) to select it. Tools, by contrast, are /model-controlled/:
 the LLM can invoke them directly without user mediation. =org-node-read= returns
-the same data as the resource for the same link; =org-read-outline= and
-=org-node-text= are tool-only variants with no resource counterpart.
+the same data as the resource for the same link; =org-node-text= is a
+tool-only variant with no resource counterpart.
 
 ** org-node-read
 - *Description:* Read Org file or headline with structured JSON output
@@ -485,36 +485,6 @@ the same data as the resource for the same link; =org-read-outline= and
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but the two digests when it asked for none, plus what =properties= and =computed= named (see [[*The node][The node]])
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
-
-** org-read-outline
-- *Description:* Get hierarchical structure of an Org file as JSON outline
-- *Parameters:*
-  - =file= (string, required): Absolute path to an Org file, or a =file:=
-    link to it with no search part, bare or bracketed, such as
-    =file:/path/to/file.org=. An =id:= link, even one to a file-level drawer,
-    and a =file:= link with a search part are refused without being looked
-    up, and so is a string starting with =org://=
-- *Returns:* JSON object with a =children= array: the top-level headings, each
-  a node (see [[*The node][The node]]) carrying its own =children=, the level-2 headings.
-  Deeper headings are left out, and so are the fields a whole read carries.
-  A file with more headings in those two levels than
-  =org-mcp-read-max-nodes= is refused, as a read of it that deep is (see
-  [[*The ceiling on one read][The ceiling on one read]])
-- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
-
-Example response:
-#+begin_src json
-{
-  "children": [
-    {"title": "Projects", "level": 1,
-     "link": "file:~/org/projects.org::*Projects",
-     "children": [
-       {"title": "Project Alpha", "todo": "TODO", "level": 2,
-        "link": "id:550e8400-e29b-41d4-a716-446655440000"}
-     ]}
-  ]
-}
-#+end_src
 
 ** org-node-text
 - *Description:* Read Org headline or file as plain text

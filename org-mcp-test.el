@@ -1408,16 +1408,6 @@ LINK is the native Org link sent as the `link' parameter."
   (let ((params `((link . ,link))))
     (mcp-server-lib-ert-call-tool "org-node-read" params)))
 
-;; Helper functions for testing org-read-outline MCP tool
-
-(defun org-mcp-test--call-read-outline (file)
-  "Call org-read-outline tool via JSON-RPC and return the result.
-FILE is the file path to read the outline from."
-  (let* ((params `((file . ,file)))
-         (result-json
-          (mcp-server-lib-ert-call-tool "org-read-outline" params)))
-    (json-parse-string result-json :object-type 'alist)))
-
 ;; Helper functions for testing org-node-text MCP tool
 
 (defun org-mcp-test--call-read-headline (link &optional files)
@@ -2264,8 +2254,6 @@ outline path appended, is no link and refused as such."
              "org-node-set-todo"
              `((link . ,heading-link) (after . "DONE"))
              "names no local file by its full path")
-            (org-mcp-test--call-tool-refused
-             "org-read-outline" `((file . ,remote)) "not in allowed list")
             (org-mcp-test--assert-files-refused
              (vector remote) "not in allowed list")))
         ;; A remote directory is never walked.
@@ -3040,8 +3028,7 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-node-set-title"
     "org-node-set-todo"
     "org-node-text"
-    "org-query"
-    "org-read-outline")
+    "org-query")
   "Every tool id org-mcp registers regardless of configuration, sorted.")
 
 (defun org-mcp-test--registered-tools ()
@@ -3105,63 +3092,6 @@ control."
           (let ((child (aref children 0)))
             (should (equal (alist-get 'title child) "Test Heading"))
             (should (= (alist-get 'level child) 1))))))))
-
-(defconst org-mcp-test--content-outline-depth
-  "* First Section
-Some content here.
-** Subsection 1.1
-More content.
-** Subsection 1.2
-Even more content.
-* Second Section
-Content of second section.
-*** Deep subsection
-Very deep content."
-  "Two top-level sections, one with level-2 children, one with a level 3.")
-
-(ert-deftest org-mcp-test-tool-read-outline-depth ()
-  "org-read-outline returns top-level headings and their level-2 children."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-outline-depth))
-    (let ((headings
-           (alist-get
-            'children (org-mcp-test--call-read-outline test-file))))
-      ;; Check we have the right number of top-level headings
-      (should (= (length headings) 2))
-      ;; Check first heading
-      (let ((first (aref headings 0)))
-        (should (equal (alist-get 'title first) "First Section"))
-        (should (= (alist-get 'level first) 1))
-        ;; Check children of first heading
-        (let ((children (alist-get 'children first)))
-          (should (= (length children) 2))
-          (should
-           (equal (alist-get 'title (aref children 0)) "Subsection 1.1"))
-          (should
-           (equal
-            (alist-get 'title (aref children 1)) "Subsection 1.2"))))
-      ;; Check second heading
-      (let ((second (aref headings 1)))
-        (should (equal (alist-get 'title second) "Second Section"))
-        (should (= (alist-get 'level second) 1))
-        ;; Deep subsection is left out (level 3 under level 1)
-        (should (= (length (alist-get 'children second)) 0))))))
-
-(ert-deftest org-mcp-test-tool-read-outline-ceiling ()
-  "An outline past the node ceiling is refused, as a read of it is.
-The outline is the file read one generation deep, so the same
-setting bounds it and the refusal names the heading it stopped at."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-outline-depth))
-    (let ((org-mcp-read-max-nodes 5))
-      (should (org-mcp-test--call-read-outline test-file)))
-    (let ((org-mcp-read-max-nodes 4))
-      (org-mcp-test--call-tool-refused
-       "org-read-outline" `((file . ,test-file))
-       (concat
-        "\\`Too many nodes: more than 4\\.  The walk stops at "
-        (regexp-quote
-         (org-mcp-test--file-link test-file "*Second Section")))))))
 
 (ert-deftest org-mcp-test-file-not-in-allowed-list-returns-error ()
   "Test that reading a file not in allowed list returns an error."
@@ -5592,87 +5522,6 @@ org-node-set-content, and leaves the file unchanged."
     (let ((result-text
            (org-mcp-test--call-read-headline (concat "file:" test-file))))
       (should (string= result-text org-mcp-test--content-nested-siblings)))))
-
-(ert-deftest org-mcp-test-tool-read-outline ()
-  "Test org-read-outline tool returns valid JSON outline structure."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-nested-siblings))
-    (let* ((result (org-mcp-test--call-read-outline test-file))
-           (headings (alist-get 'children result)))
-      (should (= (length headings) 1))
-      (should (string= (alist-get 'title (aref headings 0)) "Parent Task")))))
-
-(ert-deftest org-mcp-test-tool-read-outline-file-link ()
-  "org-read-outline takes a `file:' link to the file as well as its path.
-A bare and a bracketed link with no search part read the same outline
-as the path.  A link with a search part, a relative path and a file outside
-the allowed files, as a path or a link, are refused with tool errors
-that say why, and the files stay unchanged."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-nested-siblings)
-       (other-file org-mcp-test--content-links))
-    (let ((org-mcp-allowed-files (list test-file))
-          (expected (org-mcp-test--call-read-outline test-file)))
-      (dolist (link (list (concat "file:" test-file)
-                          (format "[[file:%s][Siblings]]" test-file)))
-        (should (equal (org-mcp-test--call-read-outline link) expected)))
-      (pcase-dolist (`(,file ,refusal)
-                     `((,(org-mcp-test--file-link test-file "*Parent Task")
-                        "\\`org-read-outline takes a file's path or file: \
-link, not an id: link or a search: ")
-                       (,(file-name-nondirectory test-file)
-                        "\\`Path must be absolute: ")
-                       (,other-file "not in allowed list\\'")
-                       (,(concat "file:" other-file)
-                        "not in allowed list\\'")))
-        (should
-         (string-match-p
-          refusal
-          (org-mcp-test--call-tool-expecting-error
-           test-file "org-read-outline" `((file . ,file))))))
-      (should
-       (string=
-        (org-mcp-test--read-file other-file) org-mcp-test--content-links))
-      (should-not (find-buffer-visiting other-file)))))
-
-(ert-deftest org-mcp-test-tool-read-outline-refuses-heading-links-unresolved ()
-  "org-read-outline refuses a heading link and an org:// string unresolved.
-An `id:' link, unknown or known, bare or with a search part, and a
-`file:' link with a search part are refused as parsed, and Emacs's ID
-index is never consulted or rescanned.  A string starting
-with org:// is refused as no link, with the hint to drop the prefix,
-as the link tools refuse it.  The file stays unchanged."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-nested-siblings))
-    (let ((parent-id org-mcp-test--content-nested-siblings-parent-id))
-      (org-mcp-test--with-id-tracking
-          (list test-file)
-          `((,parent-id . ,test-file))
-        (org-mcp-test--without-id-index
-          (dolist (link
-                   (list
-                    "id:0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
-                    (concat "id:" parent-id)
-                    (format "[[id:%s::*Second Child][Second]]" parent-id)
-                    (org-mcp-test--file-link test-file "*Parent Task")))
-            (org-mcp-test--call-tool-refused
-             "org-read-outline" `((file . ,link))
-             (concat
-              "\\`org-read-outline takes a file's path or file: link, \
-not an id: link or a search: "
-              (regexp-quote link) "\\'")
-             test-file))
-          (dolist (uri
-                   (list
-                    (concat "org://" test-file)
-                    (concat "org://file:" test-file)
-                    (concat "org://id:" parent-id)))
-            (org-mcp-test--call-tool-refused
-             "org-read-outline" `((file . ,uri))
-             (concat
-              "\\`Not an Org link: " (regexp-quote uri)
-              "\\.  Drop org://, which only a resource URI starts with\\.  ")
-             test-file)))))))
 
 (ert-deftest org-mcp-test-tool-read-headline-single-level ()
   "Test org-node-text with a title holding a slash."
@@ -10442,11 +10291,11 @@ Org parses that line as a heading, which ends the block unclosed.")
 
 (ert-deftest org-mcp-test-read-lists-headings-org-parses ()
   "org-node-read lists a file's top-level headings as Org's parser finds them.
-It agrees with org-read-outline.  A line starting with `* ' is a
-heading even inside a block, as Org parses it, and is listed.  A line
-escaped with a comma, as Org writes one inside a block, is no heading:
-it stays in the preamble, and a title link to it is refused by a read
-and by a write, leaving the file unchanged."
+A line starting with `* ' is a heading even inside a block, as Org
+parses it, and is listed.  A line escaped with a comma, as Org writes
+one inside a block, is no heading: it stays in the preamble, and a
+title link to it is refused by a read and by a write, leaving the file
+unchanged."
   (org-mcp-test--with-temp-org-files
       ((star-file org-mcp-test--content-block-star-line)
        (escaped-file org-mcp-test--content-block-escaped))
@@ -10462,11 +10311,7 @@ and by a write, leaving the file unchanged."
                      `((,star-file ("In block" "Real"))
                        (,escaped-file ("Real"))))
         (should (equal (titles (alist-get 'children (read-file file)))
-                       expected))
-        (should
-         (equal (titles
-                 (alist-get 'children (org-mcp-test--call-read-outline file)))
-                expected)))
+                       expected)))
       (should
        (equal (alist-get 'content (read-file escaped-file))
               (string-trim org-mcp-test--content-block-escaped-preamble)))
@@ -12700,9 +12545,6 @@ org-node-read."
                   (org-mcp-test--file-link test-file "*Gamma")))
                (lambda ()
                  (org-mcp-test--call-read-headline (format "file:%s" test-file)))
-               (lambda ()
-                 (mcp-server-lib-ert-call-tool
-                  "org-read-outline" `((file . ,test-file))))
                (lambda ()
                  (mcp-server-lib-ert-call-tool
                   "org-query"
