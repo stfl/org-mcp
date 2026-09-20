@@ -802,7 +802,7 @@ line of its own below it.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "Regex matching the complete file after org-clock-add adds a closed CLOCK entry.")
@@ -821,7 +821,7 @@ line of its own below it.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "Regex matching the complete file after org-clock-out closes the CLOCK entry.")
@@ -5820,7 +5820,7 @@ Body after everything."))
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\n"
    "\\* TODO Task Two\n"
@@ -5845,7 +5845,7 @@ The buffer also keeps the unsaved Task Two edit made before the call.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\n"
    "\\* TODO Task Two\n"
@@ -6008,7 +6008,7 @@ closed at the new clock's start.")
    "\\`\\* TODO Running Task\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 09:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "Regex matching the Running Task file once clock-in at 10:00 closed it.")
@@ -6195,7 +6195,7 @@ Used for clock-out tests when `org-clock-into-drawer' is nil.")
   (concat
    "\\`\\* TODO Task One\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    "\\'")
   "File contents after clock-add with `org-clock-into-drawer' nil.
 The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
@@ -6211,7 +6211,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
   (concat
    "\\`\\* TODO Task One\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    "\\'")
   "File contents after clock-out with `org-clock-into-drawer' nil.")
 
@@ -6220,7 +6220,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "\\`\\* TODO Task One\n"
    ":WORK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] => 1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "File contents after clock-add with custom `org-clock-into-drawer' name.")
@@ -6264,7 +6264,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
@@ -6278,7 +6278,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "Regex matching file after active clock closed by clock-in to different file.")
@@ -6317,7 +6317,7 @@ The CLOCK line appears bare under the heading -- no LOGBOOK drawer.")
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
@@ -6397,7 +6397,7 @@ on disk stays unchanged and the response reports `saved' as false."
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\n"
    "\\* TODO Task Two\n"
@@ -6481,7 +6481,7 @@ lands in that buffer, so the response covers both edits."
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK:  \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\'")
   "File contents after clock-out closes a CLOCK line spaced that way.")
@@ -6498,6 +6498,77 @@ the close is appended to it."
         (should (equal (alist-get 'clocked_out result) t)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--clock-out-spaced-expected-regex))))
+
+(defconst org-mcp-test--clock-out-zero-time-content
+  (concat
+   "* TODO Task One\n"
+   "* TODO Task Two\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n"
+   "* TODO Task Three\n")
+  "Three headings, the middle one holding an open CLOCK.
+A heading on either side of it, so a response that reads the file from
+its start, or past the drawer, names the wrong one.")
+
+(defconst org-mcp-test--clock-out-zero-time-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   "\\* TODO Task Two\n"
+   "\\* TODO Task Three\n"
+   "\\'")
+  "File contents once Org took away a closed clock of no length.
+The CLOCK line goes, the drawer it empties goes with it, and the
+headings around them stand.")
+
+(ert-deftest org-mcp-test-clock-out-removes-zero-time-clock ()
+  "Test Org's clock-out settings decide what the file holds after a close.
+With `org-clock-out-remove-zero-time-clocks', closing a clock at its
+own start takes its CLOCK line away, and the drawer it empties with
+it, leaving the headings around it alone.  The response reports the
+close all the same, with a duration of 0:00, and links to the heading
+the clock ran on."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-out-zero-time-content))
+    (let ((org-clock-out-remove-zero-time-clocks t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (org-mcp-test--call-clock-out "2026-01-01T10:00:00")))
+          (should (equal (alist-get 'clocked_out result) t))
+          (should (equal (alist-get 'duration result) "0:00"))
+          (should (equal (alist-get 'heading result) "Task Two"))
+          (should
+           (equal (alist-get 'link result)
+                  (org-mcp-test--file-link test-file "*Task Two"))))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-out-zero-time-expected-regex)))))
+
+(defconst org-mcp-test--clock-out-switch-state-expected-regex
+  (concat
+   "\\`\\* DONE Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents once org-clock-out-switch-to-state moved Task One to DONE.")
+
+(ert-deftest org-mcp-test-clock-out-switches-todo-state ()
+  "Test `org-clock-out-switch-to-state' rewrites the heading closed out of.
+The keyword Org sets reaches the file, while the response reports the
+close alone and names the heading by its title."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-clock-out-switch-to-state "DONE"))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
+          (should (equal (alist-get 'clocked_out result) t))
+          (should (equal (alist-get 'heading result) "Task One")))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-out-switch-state-expected-regex)))))
 
 (ert-deftest org-mcp-test-clock-add-custom-drawer ()
   "Test clock-add uses custom drawer name from `org-clock-into-drawer'."
@@ -6703,7 +6774,7 @@ Ask the user to clock out of it in Emacs\\'"
    "\\`\\* TODO Task One\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\] =>  *0:30\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\] =>  0:30\n"
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
@@ -6919,7 +6990,7 @@ is opened, and the Emacs clock no longer runs."
    ":END:\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\* TODO Task Two\n"
    ":LOGBOOK:\n"
@@ -7009,7 +7080,7 @@ before the running clock's start \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\\'"
    "\\*\\* Meeting\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
-   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  *1:00\n"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
    ":END:\n"
    "\\* Review\n"
    ":LOGBOOK:\n"
@@ -9198,7 +9269,7 @@ Line 10 is the Beta heading.")
    "\\* TODO Gamma\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
-   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] =>  *2:15\n"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] =>  2:15\n"
    ":END:\n"
    "Gamma body\\.\n"
    "\\'")
@@ -9248,7 +9319,7 @@ Line 10 is the Beta heading.")
    ":END:\n"
    ":LOGBOOK:\n"
    "CLOCK: \\[2026-03-23 [A-Za-z]\\{2,3\\} 14:30\\]"
-   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] => 2:15\n"
+   "--\\[2026-03-23 [A-Za-z]\\{2,3\\} 16:45\\] =>  2:15\n"
    ":END:\n"
    "Beta body\\.\n"
    "\\*\\* Review\n"

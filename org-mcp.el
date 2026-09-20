@@ -1812,7 +1812,14 @@ and `org-mcp--clock-duration-string', and the `CLOCK:' prefix uses
   (org-clock-find-position nil)
   (if end
       (let* ((duration (float-time (time-subtract end start)))
-             (dur-str (org-mcp--clock-duration-string duration)))
+             ;; `org-clock-out' writes the duration as `%2d:%02d', so
+             ;; an hour count below ten is padded to two columns.  Org
+             ;; exposes no helper for that padding, so mirror it here
+             ;; and keep every closed CLOCK line of a file alike,
+             ;; whichever writer made it.
+             (dur-str
+              (format "%5s"
+                      (org-mcp--clock-duration-string duration))))
         (insert
          (format "%s %s--%s => %s\n"
                  org-clock-string
@@ -3637,7 +3644,12 @@ A clock running in a file outside the allowed files is refused, as
 clocking in refuses it: org-mcp writes no file outside them, and the
 refusal names neither that file nor the heading and start of the clock
 it holds, which `org-mcp--tool-clock-get-active' withholds too.
-The clock is closed through Org, so Emacs's own clock stops with it.
+The clock is closed through Org, so Emacs's own clock stops with it
+and Org's clock-out settings decide what the file ends up holding:
+`org-clock-out-remove-zero-time-clocks' deletes a CLOCK line of no
+length, and the drawer it empties, and `org-clock-out-switch-to-state'
+rewrites the heading's TODO keyword.  The response reports neither; it
+reports the close org-mcp asked for.
 LINK, when not blank, must name a heading or file in the active
 clock's file; see `org-mcp--link-given'.
 END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
@@ -3707,14 +3719,17 @@ the user to clock out of it in Emacs"))
           ;; rather than pointing at a closed clock, which a later
           ;; clock-in would read as a clock still running.
           (let* ((marker (alist-get 'marker active))
+                 ;; Org unsets the clock's marker as it closes it, so
+                 ;; the heading is found while the marker still lives.
+                 ;; It keeps its place: Org writes below it, and takes
+                 ;; away no more than the CLOCK line and its drawer.
                  (heading
-                  (progn
+                  (save-excursion
                     (goto-char (marker-position marker))
                     (org-back-to-heading t)
                     (point))))
             (org-clock-clock-out (cons marker start-time) nil end)
-            ;; The response links to the heading clocked out of, which
-            ;; stays where it is: the close is written below it.
+            ;; The response links to the heading clocked out of.
             (goto-char heading)))))))
 
 (defun org-mcp--tool-clock-add (link start end &optional files)
@@ -4703,9 +4718,15 @@ Returns JSON object:
    "Clock out the currently active clock.
 
 Closing the clock stops the Emacs clock it belongs to, so a clock-in
-after it needs no clock_out.  A clock running outside the allowed
-files is refused: org-mcp writes no file outside them and reports
-nothing about that clock, so ask the user to clock out of it in Emacs.
+after it needs no clock_out.  Org's clock-out settings decide what the
+file holds afterwards: org-clock-out-remove-zero-time-clocks deletes a
+CLOCK line of no length, and the drawer it empties, and
+org-clock-out-switch-to-state rewrites the heading's TODO keyword.
+The response reports neither, so read the heading back when it matters.
+
+A clock running outside the allowed files is refused: org-mcp writes
+no file outside them and reports nothing about that clock, so ask the
+user to clock out of it in Emacs.
 
 Rounding is applied per org-clock-rounding-minutes.
 
