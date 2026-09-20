@@ -53,7 +53,7 @@ strongly advised.
    claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
    #+end_src
 
-A client that then calls =org-read= with
+A client that then calls =org-node-read= with
 ={"link": "id:550e8400-e29b-41d4-a716-446655440000"}= gets the heading, its
 metadata and its children:
 

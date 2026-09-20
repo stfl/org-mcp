@@ -4,7 +4,7 @@ This page answers how org-mcp starts, stops, adds and repairs Org clocks, and
 what the one clock setting does. The [[file:../README.org][README]] introduces the server itself.
 
 * Clock Tracking Tools
-** org-get-clock-config
+** org-config-clock
 - *Description:* Get clock-related configuration from the current Emacs Org-mode settings
 - *Parameters:* None
 - *Returns:* JSON object with clock settings
@@ -21,7 +21,7 @@ Example response:
 
 Use this tool to understand clock settings before clocking in or out.
 
-** org-clock-get-active
+** org-clock-active
 - *Description:* Get the currently active clock, if any. The clock running in the Emacs session takes precedence, including one in a non-allowed file. With no clock running, allowed files are searched for an unclosed CLOCK entry left behind by an earlier session
 - *Parameters:* None
 - *Returns:* JSON object describing the active clock, with the link to the clocked heading as =link= when the clock is in an allowed file
@@ -54,7 +54,7 @@ Example responses:
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies). The running clock closes at this time, so it must not be before that clock's start
   - =resolve= (=true= / =false= or ="true"= / ="false"=, optional): true deletes the dangling (unclosed) CLOCK entries under the heading before clocking in, that is every open one but the running clock. The running clock is never deleted: =clock_out= names it, and it is closed. =false=, ="false"=, =null=, =""= and =[]= mean no; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-  - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-get-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. The link a refusal names for the running clock is accepted as sent, even a title link that finds another heading of the same title first. An =id:= link is looked up in the running clock's file
+  - =clock_out= (string, optional): link to the heading of the running clock, the clock =org-clock-active= reports. Required while a clock runs, and refused while none does; =null=, =false= or a blank string count as none. The link a refusal names for the running clock is accepted as sent, even a title link that finds another heading of the same title first. An =id:= link is looked up in the running clock's file
 - *Returns:* JSON object with success status, =saved= flag, and clock-in details
 - *Refuses with:* =conflict:= when =clock_out= and the running clock disagree — a clock runs and =clock_out= is missing or names another heading, or none runs and =clock_out= is given — unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
@@ -64,7 +64,7 @@ Every check runs before anything changes, so a refused call changes no file, no 
   #+begin_example
   conflict: A clock is running on 'Write the report' (file:~/org/tasks.org::*Write the report) since 2026-03-23 Mon 09:00.  Ask the user whether to clock out of it, then send its link as clock_out
   #+end_example
-- a clock runs in a file outside the allowed files.  =org-clock-get-active= reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.  Reading the active clock again tells the client nothing it does not already know, so this refusal is unmarked.
+- a clock runs in a file outside the allowed files.  =org-clock-active= reports nothing about that clock, so no =clock_out= can name it; the user has to clock out of it.  Reading the active clock again tells the client nothing it does not already know, so this refusal is unmarked.
 - no clock runs and =clock_out= is given.
 - the new clock's start, =start_time= or else the current time, is before the running clock's start, since closing that clock there would give it a negative duration.
 - =start_time= cannot be parsed.
@@ -206,7 +206,7 @@ Example:
 }
 #+end_src
 
-** org-clock-find-dangling
+** org-clock-dangling
 - *Description:* Find all open (unclosed) clock entries in allowed Org files, or in the files named in =files=
 - *Parameters:*
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. See [[file:file-access.org::*Querying other files][Querying other files]]

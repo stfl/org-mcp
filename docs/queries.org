@@ -6,7 +6,7 @@ itself.
 
 * Query tools
 
-** org-ql-query
+** org-query
 - *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
@@ -39,7 +39,7 @@ Example:
 #+end_src
 
 A match's =tags= are the tags in effect on its heading, inherited ones included
-where Org is configured to inherit them, and are the same tags =org-read=
+where Org is configured to inherit them, and are the same tags =org-node-read=
 returns for that heading (see [[file:reading.org::*The two tag fields][The two tag fields]]). A match carries no
 =local_tags=, so a client about to replace a heading's tags reads the heading
 first.
@@ -47,7 +47,7 @@ first.
 ** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
 - *Parameters:* None
-- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -55,7 +55,7 @@ first.
 - *Description:* Query next action items using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
@@ -63,7 +63,7 @@ first.
 - *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
 - *Parameters:*
   - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-ql-query=, sorted by =org-mcp-query-sort-fn= when configured
+- *Returns:* Same as =org-query=, sorted by =org-mcp-query-sort-fn= when configured
 - *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
 - *Scope:* Always runs over the allowed files; a =files= parameter is refused
 
