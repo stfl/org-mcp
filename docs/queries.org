@@ -136,6 +136,9 @@ names the view by:
 | =:filter= | non-nil when the view takes a =filter=                                                                             |
 | =:range=  | the range names the view takes, the first of them the range it runs at unasked; absent, the view takes no =range=   |
 
+A view that takes a single range may name it without the parentheses:
+=:range sprint= and =:range (sprint)= declare the same view.
+
 A view is called with the parameters it declares and no others, in the order
 filter then range. A filter reaches the query as the org-ql sexp
 =org-mcp-filters= holds for it, or =nil= when the call named none; a range

@@ -148,8 +148,8 @@ view by; PLIST declares it:
   :filter Non-nil when the view takes a filter, named from
           `org-mcp-filters'.
   :range  The range names the view takes, the first of them the
-          range it runs at unasked.  Absent, the view takes no
-          range.
+          range it runs at unasked.  A single name may be written
+          without the parentheses.  Absent, the view takes no range.
 
 A view is called with the parameters it declares and no others, in
 the order filter then range, so the declaration is the calling
@@ -3760,6 +3760,13 @@ what lets the refusal name every filter there is to ask for."
        "Unknown filter: %s.  Configured filters: %s"
        name (org-mcp--configured-names org-mcp-filters))))
 
+(defun org-mcp--view-ranges (declaration)
+  "Return the range names the view DECLARATION takes, nil for none.
+A view that takes one range is the common case, so DECLARATION may
+name it as a bare symbol where the list of names would go, and the
+two declare the same view."
+  (ensure-list (plist-get declaration :range)))
+
 (defun org-mcp--view-range (view name ranges)
   "Return the range a call naming NAME asks the view VIEW for.
 RANGES are the range names that view declares, the first of them the
@@ -3813,7 +3820,7 @@ search which in fact returned everything has no way to find out."
         (unless (org-mcp--blank-param-p filter)
           (org-mcp--filter-query filter)))
      (org-mcp--view-refuses view declaration :filter filter))
-   (let ((ranges (plist-get declaration :range)))
+   (let ((ranges (org-mcp--view-ranges declaration)))
      (if ranges
          (list (org-mcp--view-range view range ranges))
        (org-mcp--view-refuses view declaration :range range)))))
@@ -5078,7 +5085,7 @@ reads them."
   (mapconcat (lambda (entry)
                (let* ((declaration (cdr entry))
                       (label (plist-get declaration :name))
-                      (ranges (plist-get declaration :range))
+                      (ranges (org-mcp--view-ranges declaration))
                       (takes
                        (delq
                         nil

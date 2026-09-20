@@ -9452,6 +9452,28 @@ tangling")))
      '((view . "stuck") (filter . "nope"))
      "Unknown filter: nope.  Configured filters: work, private")))
 
+(ert-deftest org-mcp-test-view-declares-one-range-without-parentheses ()
+  "A view taking a single range may name it without the parentheses."
+  (org-mcp-test--with-configured-server
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views
+        '((next
+           :name "Next Actions"
+           :query org-mcp-test--view-query-next
+           :filter t
+           :range sprint)))
+       (org-mcp-filters org-mcp-test--filters)
+       (org-mcp-query-sort-fn nil))
+    (should
+     (equal (org-mcp-test--view-titles '((view . "next"))) '("Alpha")))
+    (should
+     (equal
+      (org-mcp-test--view-titles '((view . "next") (range . "sprint")))
+      '("Alpha")))
+    (org-mcp-test--view-refused
+     '((view . "next") (range . "all"))
+     "Unknown range for the next view: all.  Its ranges: sprint")))
+
 (ert-deftest org-mcp-test-view-refuses-an-unknown-range ()
   "An unknown range is refused, and the refusal lists the view's own."
   (org-mcp-test--with-views
