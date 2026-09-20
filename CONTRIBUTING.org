@@ -116,5 +116,9 @@ The README changes only when what org-mcp /is/ changes, or what it costs to run:
 the tool count, the quickstart, a new limit. Everything else belongs to a page
 above, linked from the README's table.
 
+Decisions that shape the interface are recorded in [[file:docs/adr][docs/adr/]], one numbered
+Markdown file each: what org-mcp does, and what that was chosen over. A change
+that settles such a question adds one.
+
 Terminology is fixed in [[file:CONTEXT.md][CONTEXT.md]]: the words there are the words the docs and the
 error messages use.

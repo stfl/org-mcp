@@ -1,123 +1,80 @@
 # CLAUDE.md
 
-This file provides guidance to you, Claude Code, when working with code in this
-repository. These guidelines build on the common user's guidelines at
-~/.claude/CLAUDE.md locally or
-<https://raw.githubusercontent.com/laurynas-biveinis/dotfiles/refs/heads/master/ai/.claude/CLAUDE.md>
-online.
-
-## Git Commits
-
-Always run `git commit` inside the Nix devshell:
-
-```sh
-nix develop --command git commit …
-```
-
-The pre-commit hooks run `just lint` and `just test`, which require the tools
-provided by the devshell (eask, shellcheck, zizmor, etc.).
-
-## Formatting
-
-Run `just fmt` inside the Nix devshell to auto-format Elisp and shell code:
-
-```sh
-nix develop --command just fmt
-```
-
-This runs `elisp-autofmt` on `org-mcp.el` and `shfmt` on shell scripts. The
-Elisp layout depends on the Emacs and elisp-autofmt versions, which the
-devshell pins; `scripts/format-elisp.el` refuses an Emacs other than 31 or
-one without elisp-autofmt. The pre-commit hook formats too, so commit from
-inside the devshell.
-
-## Project Overview
-
-This repository is for org-mcp, which is an integration between Emacs Org-mode
-and the Model Context Protocol (MCP).
+Guidance for agents changing this repository. It builds on the user's global
+guidelines at `~/.claude/CLAUDE.md`.
 
 org-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful,
-stable mapping between MCP primitives and Org's existing semantics. Do NOT
-reinvent functionality that Org already provides — see "Prefer Org APIs Over
-Manual Parsing" below for the core principle that governs all changes to
-`org-mcp.el` and `org-mcp-test.el`.
+stable mapping between MCP primitives and Org's existing semantics, so the
+default answer to "how do I parse/navigate/clock this?" is an Org function that
+already does it. `CONTRIBUTING.org` holds that rule with the table of APIs to
+reach for, the devshell, the checks and the test conventions. Read it before
+touching `org-mcp.el` or `org-mcp-test.el`, and do not restate it here.
 
-User-facing documentation is in README.org.
+## Commands
 
-In the ERT tests, always use defconst constants for before and after Org file
-images.
+Everything runs inside the Nix devshell, which provides Emacs 31, eask, just,
+shellcheck, shfmt and zizmor:
 
-To verify the changed Org content, use a single regular expression, matching
-the complete Org file.
+```sh
+nix develop --command just check    # fmt + lint + test, the pre-commit gate
+nix develop --command just fmt      # elisp-autofmt and shfmt
+nix develop --command git commit …  # the hook runs `just check`, which needs the shell
+```
 
-When adding, removing, or changing MCP tools, resource templates, or custom
-variables (`defcustom`) in `org-mcp.el`, update `README.org` accordingly:
+A failing lint stage leaves `.lint-output.txt`; the test run always leaves
+`.test-output.txt`. Read those instead of re-running the stage verbosely.
 
-- New tools → add a `***` subsection under the appropriate `**` section in
-  "Available MCP Tools"
-- New `defcustom` → document it in a "Configuring …" section and mention it in
-  the Doom Emacs example if relevant
-- Removed or renamed tools/variables → remove or update their documentation
+## What a change is obliged to keep true
 
-## Prefer Org APIs Over Manual Parsing
+- **An added, removed or renamed MCP tool, resource template or `defcustom`
+  updates its documentation page in the same commit.** `CONTRIBUTING.org`, "What
+  a change owes the documentation", maps each kind of change to its page. The
+  README changes only when what org-mcp *is* or what it costs to run changes.
+- **Human-facing documents never link into this file** or into any `AGENTS.md`,
+  and never into `.claude/`. `README.org`, `CONTRIBUTING.org` and `docs/*.org`
+  link to each other; this file links out to them. A fact a human needs belongs
+  in one of theirs.
+- **`just lint` org-lints `README.org`, `CONTRIBUTING.org` and `docs/*.org`.** A
+  link to a file that does not exist fails the commit, so a renamed or deleted
+  page has to be repaired in the same change.
+- **The directory files below are part of the code.** Changing what one of them
+  describes obliges reconciling it before the work is finished; a directory file
+  that documents a removed behaviour teaches the next agent something false.
 
-org-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful,
-stable mapping between MCP primitives and Org's existing semantics. Do NOT
-reinvent functionality that Org already provides.
+## Directory files
 
-Before adding or changing any parsing, navigation, clock, drawer, tag, or
-TODO-state logic, audit Org's public API first. Prefer:
+Each of these loads when a file in that directory is read or edited with the
+file tools. Reading the same path with `cat` loads none of them, so anything an
+agent must not miss is in this file instead.
 
-- `org-find-olp`, `org-get-outline-path` over manual level-regex walks
-- `org-map-entries`, `org-map-tree`, `org-element-map` over level regex
-- `org-end-of-meta-data` over hand-rolled drawer skipping
-- `org-heading-components`, `org-element-at-point` over chained
-  `org-entry-get`
-- `org-insert-subheading` over manual heading-asterisks insertion
-- `org-clock-in`/`-out`, `org-find-open-clocks`, `org-clock-resolve` over
-  CLOCK regex scanners
-- `org-remove-empty-drawer-at` over custom drawer deletion
-- `org-time-string-to-time`, `org-duration-from-minutes` over custom parsers
-- `org-add-log-setup` + `org-store-log-note` over manual LOGBOOK formatting
-- `org-todo-keywords-1`, `org-done-keywords` over destructuring
-  `org-todo-keywords`
-- `org-tag-alist-to-groups`, `org-tag-re` over custom tag parsing/regex
-- `org-element-parse-buffer` over regex-based block/drawer detection
+| File | Covers |
+|---|---|
+| `scripts/CLAUDE.md` | the quiet-output contract, the formatter's Emacs pin, what a new script owes the Justfile |
+| `docs/CLAUDE.md` | which page owns which facts, Org markup, headings as link targets, the ADRs |
+| `.github/workflows/CLAUDE.md` | pinning and zizmor suppressions, the matrix the README's support claim comes from |
 
-If you believe an Org API is genuinely missing or unsuitable, document the
-reason in a comment adjacent to the workaround so future agents (and humans)
-can re-evaluate when Org evolves.
+`AGENTS.md` beside each one is a symlink to it, for tools that read that name.
+`CLAUDE.md` is always the real file: a missing symlink costs another tool and
+never costs Claude Code.
 
-When touching existing code that duplicates Org functionality, prefer
-replacing it with the Org API rather than extending the duplication.
-
-
-## Planning and spec files
+## Plans and specs
 
 Plans, design reports and specs live in `.omc/plans/`, one Markdown file per
-topic. `.gitignore` excludes `.omc/`, so they stay on this machine; tracked
-files carry their conclusions, not links to them.
+topic. `.gitignore` excludes `.omc/`, so they stay on this machine. Tracked
+files carry their conclusions, never links to them — a reader outside this
+machine cannot follow one.
 
+## Ending a session
 
-## Session Completion
+Work ends committed, never stashed: the stash is shared with every worktree of
+this repository and other sessions pop it.
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+`.git/hooks/pre-push` refuses every ref but `main` while the native-links work
+is unpublished, so a feature branch ends at its commits, and the session says
+plainly that nothing was pushed. When the guard is gone, `git pull --rebase &&
+git push` and confirm with `git status` that the branch tracks its remote.
 
-**MANDATORY WORKFLOW:**
-
-1. **Run quality gates** (if code changed) - Tests, linters, builds
-2. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-3. **Clean up** - Clear stashes, prune remote branches
-4. **Verify** - All changes committed AND pushed
-5. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+Several agents work this repository at once, each in its own worktree under
+`.claude/worktrees/`. Before editing after a resume, check `git status
+--short --branch` and the worktree you are in; before merging, ask the sessions
+named in `.omc/plans/orchestration-*.md` what they have in flight.
