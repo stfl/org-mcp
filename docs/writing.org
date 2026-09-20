@@ -319,6 +319,10 @@ Example:
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =previous_tags= and =new_tags= arrays, plus the headline's link
 
+The tool writes the tags on the headline itself and leaves inherited ones
+where they are, so =previous_tags= and =new_tags= are that headline's own tags
+— the =local_tags= of a read, not its =tags= (see [[file:reading.org::*The two tag fields][The two tag fields]]).
+
 Example:
 #+begin_src json
 # Set tags:

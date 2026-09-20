@@ -1003,29 +1003,53 @@ heading, in %s; advice on org-store-link changes the link"
         (or stored "no link") (buffer-name)))
      link)))
 
-(defun org-mcp--heading-metadata-at-point (&optional inherit-tags)
+(defun org-mcp--tag-sets-at-point ()
+  "Return the tags of the heading at point as (EFFECTIVE . OWN).
+
+EFFECTIVE is `org-get-tags' called without its LOCAL argument, so the
+list follows `org-use-tag-inheritance' and
+`org-tags-exclude-from-inheritance' — including their list and regexp
+forms — rather than a policy fixed here.  OWN is the part of that same
+list written on the heading itself: Org marks every inherited entry
+with the `inherited' text property, so one call yields both sets, and
+there is no second scan and no second notion of what a tag is.
+
+Both lists are plain strings; the text property is an artifact of how
+Org reports inheritance, not something a caller should have to know."
+  (let ((tags (org-get-tags)))
+    (cons
+     (mapcar #'substring-no-properties tags)
+     (mapcar
+      #'substring-no-properties
+      (cl-remove-if
+       (lambda (tag) (get-text-property 0 'inherited tag)) tags)))))
+
+(defun org-mcp--heading-metadata-at-point ()
   "Return canonical heading metadata at point as a plist.
 
-Reads from a single `org-element-at-point' call so callers do not have
-to chain `org-entry-get'/`org-get-tags'/`org-get-todo-state'.
+Reads the heading in one `org-element-at-point' call and one
+`org-get-tags' call, so callers do not have to chain
+`org-entry-get'/`org-get-tags'/`org-get-todo-state' themselves.
 
 Returned plist keys:
-  :title      string, with TODO/priority/tags/comment stripped
-  :todo       string or nil
-  :priority   one-character string or nil
-  :tags       list of strings (heading-local by default)
-  :level      integer
-  :scheduled  Org timestamp string or nil
-  :deadline   Org timestamp string or nil
-  :closed     Org timestamp string or nil
+  :title       string, with TODO/priority/tags/comment stripped
+  :todo        string or nil
+  :priority    one-character string or nil
+  :tags        list of strings, the tags in effect on the heading
+  :local-tags  list of strings, the tags written on the heading itself
+  :level       integer
+  :scheduled   Org timestamp string or nil
+  :deadline    Org timestamp string or nil
+  :closed      Org timestamp string or nil
 
-When INHERIT-TAGS is non-nil, :tags is the inherited tag list from
-`org-get-tags'.  Otherwise it is the heading's own tags from the
-parsed element.  Timestamps are returned as their `:raw-value' so the
+The two tag lists come from `org-mcp--tag-sets-at-point', so every
+caller reports the same tags for the same heading under the same
+configuration.  Timestamps are returned as their `:raw-value' so the
 result matches `org-entry-get' (canonical Org abbreviation, no
 locale-dependent reformatting)."
   (let* ((el (org-element-at-point))
          (priority-char (org-element-property :priority el))
+         (tag-sets (org-mcp--tag-sets-at-point))
          (sched (org-element-property :scheduled el))
          (deadl (org-element-property :deadline el))
          (clsd (org-element-property :closed el)))
@@ -1033,10 +1057,8 @@ locale-dependent reformatting)."
      :title (org-element-property :raw-value el)
      :todo (org-element-property :todo-keyword el)
      :priority (and priority-char (char-to-string priority-char))
-     :tags
-     (if inherit-tags
-         (org-get-tags)
-       (org-element-property :tags el))
+     :tags (car tag-sets)
+     :local-tags (cdr tag-sets)
      :level (org-element-property :level el)
      :scheduled (and sched (org-element-property :raw-value sched))
      :deadline (and deadl (org-element-property :raw-value deadl))
@@ -1096,11 +1118,12 @@ Point should be at the heading. Does not recurse into children."
   "Extract full structured JSON for current heading.
 Point should be at the heading.
 Returns alist with all heading properties and lightweight children."
-  (let* ((meta (org-mcp--heading-metadata-at-point t))
+  (let* ((meta (org-mcp--heading-metadata-at-point))
          (title (plist-get meta :title))
          (todo (plist-get meta :todo))
          (priority (plist-get meta :priority))
          (tags (plist-get meta :tags))
+         (local-tags (plist-get meta :local-tags))
          (level (plist-get meta :level))
          (scheduled (plist-get meta :scheduled))
          (deadline (plist-get meta :deadline))
@@ -1137,6 +1160,9 @@ Returns alist with all heading properties and lightweight children."
       ,@
       (when tags
         `((tags . ,(vconcat tags))))
+      ,@
+      (when local-tags
+        `((local_tags . ,(vconcat local-tags))))
       ,@
       (when scheduled
         `((scheduled . ,scheduled)))
@@ -4436,7 +4462,14 @@ Returns: JSON object with structured data:
     title - Headline text
     todo - TODO state (if present)
     priority - Priority letter (if present)
-    tags - Array of tags (if present)
+    tags - The tags in effect on the heading (array, if present).
+           Which of a parent's or a file's tags reach it is Org's
+           decision, from org-use-tag-inheritance and
+           org-tags-exclude-from-inheritance, both of which
+           org-get-tag-config reports.
+    local_tags - The tags written on the heading itself (array, if
+           present), which is the set org-set-tags replaces.
+           Identical to tags when inheritance is off.
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
     closed - Closed timestamp (if present)
@@ -4524,7 +4557,11 @@ Returns JSON object:
     file - Absolute file path (string)
     todo - TODO state (string, omitted if none)
     priority - Priority letter (string, omitted if none)
-    tags - Local tags (array, omitted if none)
+    tags - The tags in effect on the heading (array, omitted if
+           none), inherited ones included as
+           org-use-tag-inheritance and
+           org-tags-exclude-from-inheritance direct.  The same tags
+           org-read returns for that heading.
     link - Link to the heading (string): id:{id} when it has an ID,
            else file:{path}::#{custom-id} when it has a CUSTOM_ID,
            else file:{path}::*{title}
@@ -4877,7 +4914,14 @@ Returns: JSON object with structured data:
     title - Headline text
     todo - TODO state (if present)
     priority - Priority letter (if present)
-    tags - Array of tags (if present)
+    tags - The tags in effect on the heading (array, if present).
+           Which of a parent's or a file's tags reach it is Org's
+           decision, from org-use-tag-inheritance and
+           org-tags-exclude-from-inheritance, both of which
+           org-get-tag-config reports.
+    local_tags - The tags written on the heading itself (array, if
+           present), which is the set org-set-tags replaces.
+           Identical to tags when inheritance is off.
     scheduled - Scheduled timestamp (if present)
     deadline - Deadline timestamp (if present)
     closed - Closed timestamp (if present)

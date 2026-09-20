@@ -38,6 +38,12 @@ Example:
 }
 #+end_src
 
+A match's =tags= are the tags in effect on its heading, inherited ones included
+where Org is configured to inherit them, and are the same tags =org-read=
+returns for that heading (see [[file:reading.org::*The two tag fields][The two tag fields]]). A match carries no
+=local_tags=, so a client about to replace a heading's tags reads the heading
+first.
+
 ** query-inbox
 - *Description:* Query inbox items using the configured GTD workflow
 - *Parameters:* None
