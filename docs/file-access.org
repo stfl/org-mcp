@@ -124,8 +124,8 @@ it opened once it is done, so your buffer list stays as it was.  A buffer that
 was already open stays open.  Without =files=, a query leaves the buffers it
 opens for the allowed files open, as the agenda does.
 
-The GTD queries (=query-inbox=, =query-next=, =query-backlog=) always run over
-the allowed files and refuse a =files= parameter.
+A view (=org-view=) always runs over the allowed files and refuses a =files=
+parameter.
 
 * Naming the file of an ID
 

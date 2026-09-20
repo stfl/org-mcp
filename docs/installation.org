@@ -33,7 +33,7 @@ The Doom recipe below carries the same =:files= line, for the same reason.
 
 MELPA carries the upstream package, [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], not this fork.
 =M-x package-install RET org-mcp RET= gets you a server without the clock tools
-and the GTD query tools these pages document.
+and the views these pages document.
 
 * Doom Emacs
 

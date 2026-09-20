@@ -132,32 +132,52 @@ in the result alist."
   :type '(alist :key-type symbol :value-type function)
   :group 'org-mcp)
 
-(defcustom org-mcp-query-inbox-fn nil
-  "Function returning an org-ql sexp for inbox items.
-Called with no arguments.  When nil, the query-inbox tool is disabled."
-  :type '(choice (const :tag "Disabled" nil) function)
+(defcustom org-mcp-views nil
+  "Named views the org-view tool runs, one question of the outline each.
+A workflow generates this from the definitions that build its agenda
+commands, so a view and the agenda block beside it cannot answer
+differently.  While it is nil the org-view tool is not registered.
+
+Each entry is (NAME . PLIST).  NAME is the symbol a call names the
+view by; PLIST declares it:
+
+  :name   A label for a reader, carried in the tool description.
+  :query  The org-ql query the view asks: a function returning the
+          sexp, or a literal sexp for a view that takes no
+          parameters.
+  :filter Non-nil when the view takes a filter, named from
+          `org-mcp-filters'.
+  :range  The range names the view takes, the first of them the
+          range it runs at unasked.  Absent, the view takes no
+          range.
+
+A view is called with the parameters it declares and no others, in
+the order filter then range, so the declaration is the calling
+convention as much as it is the vocabulary: a filter reaches the
+query as the sexp `org-mcp-filters' holds for it, and a range as one
+of the symbols :range lists.  A call naming a parameter the view
+does not declare is refused rather than ignored, because a caller
+that believes it narrowed a search which in fact returned everything
+has no way to find out."
+  :type '(alist :key-type symbol :value-type plist)
   :group 'org-mcp)
 
-(defcustom org-mcp-query-backlog-fn nil
-  "Function returning an org-ql sexp for backlog items.
-Called with one optional TAG-FILTER argument, which is either nil
-or an org-ql sexp of the form `(tags TAG)' built from the tag
-string supplied by the MCP caller at call time.
-When nil, the query-backlog tool is disabled."
-  :type '(choice (const :tag "Disabled" nil) function)
-  :group 'org-mcp)
+(defcustom org-mcp-filters nil
+  "Named restrictions a view is asked under, such as one project.
+Each entry is (NAME . SEXP): NAME the symbol a call names the filter
+by, SEXP the org-ql expression the view's query folds into its own.
 
-(defcustom org-mcp-query-next-fn nil
-  "Function returning an org-ql sexp for next action items.
-Called with one optional TAG-FILTER argument, which is either nil
-or an org-ql sexp of the form `(tags TAG)' built from the tag
-string supplied by the MCP caller at call time.
-When nil, the query-next tool is disabled."
-  :type '(choice (const :tag "Disabled" nil) function)
+A call names a filter rather than writing one, and a name that is
+not here is refused with the names that are.  The closed vocabulary
+is the point: a caller handed an expression slot invents predicates
+that do not exist, and org-ql then either errors confusingly or
+matches nothing.  A caller that genuinely wants to write a query has
+the org-query tool."
+  :type '(alist :key-type symbol :value-type sexp)
   :group 'org-mcp)
 
 (defcustom org-mcp-query-sort-fn nil
-  "Sort comparator for GTD query tools.
+  "Sort comparator the org-view tool answers in the order of.
 Passed as the `:sort' argument to `org-ql-select'.
 When nil, no sorting is applied."
   :type '(choice (const :tag "No sorting" nil) function)
@@ -3646,13 +3666,13 @@ MCP Parameters:
 
 ;; GTD query tools
 
-(defun org-mcp--run-gtd-query (query-sexp)
-  "Run QUERY-SEXP via `org-ql-select' with optional sorting.
-A GTD query always runs over the allowed files: its tools take no
+(defun org-mcp--run-gtd-query (query-sexp fields)
+  "Run QUERY-SEXP via `org-ql-select', each match carrying FIELDS.
+A GTD query always runs over the allowed files: org-view takes no
 `files' parameter, and mcp-server-lib refuses a call passing one
 with an \"Unexpected parameter\" error before any handler runs.
-They take no `fields' parameter either, so every match carries
-`org-mcp--node-query-fields', the fields org-query carries unasked.
+FIELDS is resolved before this runs, so every match is built from
+fields that are known to exist.
 Uses `org-mcp-query-sort-fn' for sorting when set.
 Returns JSON-encoded results in the same format as org-query."
   (org-mcp--with-file-set nil
@@ -3682,8 +3702,7 @@ Returns JSON-encoded results in the same format as org-query."
                        ;; narrowing would be read at the wrong place.
                        (org-with-wide-buffer
                         (goto-char (org-element-property :begin el))
-                        (org-mcp--ql-node-at-point
-                         org-mcp--node-query-fields))))
+                        (org-mcp--ql-node-at-point fields))))
                    elements))
               (error
                (org-mcp--tool-validation-error
@@ -3694,42 +3713,169 @@ Returns JSON-encoded results in the same format as org-query."
          (total . ,(length matches))
          (files_searched . ,(length target-files)))))))
 
-(defun org-mcp--tool-query-inbox ()
-  "Query inbox items using the configured query function.
+;; Views
 
-MCP Parameters: None
+(defconst org-mcp--view-parameters '(:filter :range)
+  "The parameters a view declares, in the order its query takes them.
+A view is called with the ones it declares and no others, so this
+list is the calling convention as much as it is the vocabulary.")
 
-Returns: Same format as org-query tool, sorted by
-`org-mcp-query-sort-fn' when configured."
-  (org-mcp--run-gtd-query (funcall org-mcp-query-inbox-fn)))
+(defun org-mcp--view-parameter-name (parameter)
+  "Return PARAMETER, one of `org-mcp--view-parameters', as a call spells it."
+  (substring (symbol-name parameter) 1))
 
-(defun org-mcp--tool-query-next (&optional tag)
-  "Query next action items, optionally filtered by TAG.
+(defun org-mcp--named-entry (name entries)
+  "Return the entry of ENTRIES that NAME names, or nil.
+ENTRIES is an alist the user configured, keyed by symbol, and NAME
+is what a call sent.  The match is by name and never by `intern', so
+nothing a call sends becomes a symbol."
+  (let ((text (format "%s" name)))
+    (cl-find
+     text
+     entries
+     :key (lambda (entry) (format "%s" (car entry)))
+     :test #'string=)))
+
+(defun org-mcp--configured-names (entries)
+  "Return the names ENTRIES are configured under, for a refusal message."
+  (if entries
+      (mapconcat (lambda (entry) (format "%s" (car entry))) entries
+                 ", ")
+    "none"))
+
+(defun org-mcp--view (name)
+  "Return the plist declaring the view NAME names, or refuse NAME.
+The views are `org-mcp-views', which the user owns, so the refusal
+names the views that are configured rather than a set this server
+decided on."
+  (or (cdr (org-mcp--named-entry name org-mcp-views))
+      (org-mcp--tool-validation-error
+       "Unknown view: %s.  Configured views: %s"
+       name (org-mcp--configured-names org-mcp-views))))
+
+(defun org-mcp--filter-query (name)
+  "Return the org-ql sexp the filter NAME names, or refuse NAME.
+The filters are `org-mcp-filters', a closed vocabulary, which is
+what lets the refusal name every filter there is to ask for."
+  (or (cdr (org-mcp--named-entry name org-mcp-filters))
+      (org-mcp--tool-validation-error
+       "Unknown filter: %s.  Configured filters: %s"
+       name (org-mcp--configured-names org-mcp-filters))))
+
+(defun org-mcp--view-range (view name ranges)
+  "Return the range a call naming NAME asks the view VIEW for.
+RANGES are the range names that view declares, the first of them the
+range it runs at when a call names none.  NAME is matched by name,
+so the symbol the view's query receives is one RANGES holds and
+never one made from what the call sent."
+  (if (org-mcp--blank-param-p name)
+      (car ranges)
+    (or (cl-find
+         (format "%s" name)
+         ranges
+         :key #'symbol-name
+         :test #'string=)
+        (org-mcp--tool-validation-error
+         "Unknown range for the %s view: %s.  Its ranges: %s"
+         view name (mapconcat #'symbol-name ranges ", ")))))
+
+(defun org-mcp--view-refuses (view declaration parameter value)
+  "Refuse VALUE, sent for a PARAMETER the view VIEW does not take.
+DECLARATION is the plist declaring the view, and the refusal names
+the parameters it does take, because those are what the caller has
+to choose from.  A call that sent nothing is not refused, so a view
+is simply run without the parameters it does not declare."
+  (unless (org-mcp--blank-param-p value)
+    (let ((taken
+           (cl-remove-if-not
+            (lambda (declared)
+              (plist-get declaration declared))
+            org-mcp--view-parameters)))
+      (org-mcp--tool-validation-error
+       "The %s view takes no %s.  %s"
+       view
+       (org-mcp--view-parameter-name parameter)
+       (if taken
+           (format
+            "It takes: %s"
+            (mapconcat #'org-mcp--view-parameter-name taken ", "))
+         "It takes no parameters")))))
+
+(defun org-mcp--view-arguments (view declaration filter range)
+  "Return the arguments the query of the view VIEW is called with.
+DECLARATION is the plist declaring it; FILTER and RANGE are what the
+call sent for those parameters.  The view is called with the
+parameters it declares and no others, in the order
+`org-mcp--view-parameters' has them.  One it does not declare is
+refused rather than ignored: a caller that believes it narrowed a
+search which in fact returned everything has no way to find out."
+  (append
+   (if (plist-get declaration :filter)
+       (list
+        (unless (org-mcp--blank-param-p filter)
+          (org-mcp--filter-query filter)))
+     (org-mcp--view-refuses view declaration :filter filter))
+   (let ((ranges (plist-get declaration :range)))
+     (if ranges
+         (list (org-mcp--view-range view range ranges))
+       (org-mcp--view-refuses view declaration :range range)))))
+
+(defun org-mcp--view-query (view declaration arguments)
+  "Return the org-ql sexp the view VIEW asks, given ARGUMENTS.
+DECLARATION is the plist declaring it.  Its `:query' is a function,
+which ARGUMENTS are applied to, or a literal sexp, which a view
+taking no parameters may carry instead.  A literal sexp has nowhere
+to put an argument, so a view carrying one beside a parameter it
+declares is refused rather than answered with a query that ignores
+what the call asked."
+  (let ((query (plist-get declaration :query)))
+    (cond
+     ((functionp query)
+      (apply query arguments))
+     ((null query)
+      (org-mcp--tool-validation-error "The %s view declares no query"
+                                      view))
+     (arguments
+      (org-mcp--tool-validation-error
+       "The %s view carries a literal query, which the parameters it \
+declares cannot reach"
+       view))
+     (t
+      query))))
+
+(defun org-mcp--tool-view (view &optional filter range fields)
+  "Run the view named VIEW, restricted by FILTER, at the range RANGE.
+VIEW names an entry of `org-mcp-views', FILTER one of
+`org-mcp-filters', and RANGE one of the ranges that view declares; a
+parameter the view does not declare is refused.  FIELDS says how
+much of each matching node to return; see
+`org-mcp--node-fields-given'.
+
+A view always runs over the allowed files: it takes no `files'
+parameter, and mcp-server-lib refuses a call passing one before this
+runs.
 
 MCP Parameters:
-  tag - Tag string to filter by (string, optional)
-
-Returns: Same format as org-query tool, sorted by
-`org-mcp-query-sort-fn' when configured."
-  (let ((tag-filter
-         (when (and tag (not (string-empty-p tag)))
-           `(tags ,tag))))
+  view - Name of the view to run (string, required)
+  filter - Name of the filter to restrict it by (string, optional)
+  range - Name of the range to run it at (string, optional);
+          defaults to the range the view declares first
+  fields - How much of each matching node to return (array of
+          strings, or a string naming a configured list, optional);
+          defaults to every field but content and children"
+  (when (or (not (stringp view)) (string-empty-p view))
+    (org-mcp--tool-validation-error
+     "View must be a non-empty string"))
+  (let* ((declaration (org-mcp--view view))
+         (arguments
+          (org-mcp--view-arguments view declaration filter range))
+         ;; Resolved before the query runs, so a misspelled field is
+         ;; refused rather than repeated per match.
+         (node-fields
+          (org-mcp--node-fields-given
+           fields org-mcp--node-query-fields)))
     (org-mcp--run-gtd-query
-     (funcall org-mcp-query-next-fn tag-filter))))
-
-(defun org-mcp--tool-query-backlog (&optional tag)
-  "Query backlog items, optionally filtered by TAG.
-
-MCP Parameters:
-  tag - Tag string to filter by (string, optional)
-
-Returns: Same format as org-query tool, sorted by
-`org-mcp-query-sort-fn' when configured."
-  (let ((tag-filter
-         (when (and tag (not (string-empty-p tag)))
-           `(tags ,tag))))
-    (org-mcp--run-gtd-query
-     (funcall org-mcp-query-backlog-fn tag-filter))))
+     (org-mcp--view-query view declaration arguments) node-fields)))
 
 ;; Read tools
 
@@ -4925,60 +5071,91 @@ Each element is a `mcp-server-lib-register-server\=' `:tools\=' spec,
 tools live in `org-mcp--clock-tool-specs\=' and the tools that depend
 on configuration in `org-mcp--gtd-tool-specs\='.")
 
+(defun org-mcp--view-catalogue ()
+  "Return the configured views as lines of the org-view description.
+One line per view: what a call names it, the label it carries for a
+reader, and what it takes — a view that takes a range naming its
+ranges and the one it runs at unasked, since that is where a caller
+reads them."
+  (mapconcat (lambda (entry)
+               (let* ((declaration (cdr entry))
+                      (label (plist-get declaration :name))
+                      (ranges (plist-get declaration :range))
+                      (takes
+                       (delq
+                        nil
+                        (list
+                         (and (plist-get declaration :filter)
+                              "filter")
+                         (and ranges
+                              (format
+                               "range (%s; %s unasked)"
+                               (mapconcat #'symbol-name ranges ", ")
+                               (car ranges)))))))
+                 (format "           %s%s - %s\n"
+                         (car entry)
+                         (if label
+                             (format " (%s)" label)
+                           "")
+                         (if takes
+                             (concat
+                              "takes "
+                              (mapconcat #'identity takes ", "))
+                           "takes no parameters"))))
+             org-mcp-views
+             ""))
+
+(defun org-mcp--view-tool-description ()
+  "Return the description of the org-view tool for what is configured.
+The views and the filters are the user's, and a vocabulary is only
+closed to a client that can see it, so the description names them
+rather than describing a shape a client would have to guess at."
+  (concat
+   "Run a named view: a question the workflow has a name for, asked
+over the allowed files.  Only the names below are accepted, and a
+view refuses a parameter it does not take rather than ignoring it.
+Use org-query to write a query of your own, or to search files
+outside the allowed ones.
+
+Parameters:
+  view - Name of the view to run (string, required)
+         Configured views, each with what it takes:
+"
+   (org-mcp--view-catalogue)
+   "  filter - Name of the filter to restrict the view by (string,
+          optional); a view that takes no filter refuses one.
+          Configured filters: "
+   (org-mcp--configured-names org-mcp-filters) "
+  range - Name of the range to run the view at (string, optional);
+          a view that takes no range refuses one, and one that takes
+          a range runs at the range marked unasked above.
+  fields - How much of each matching node to return (array of
+          strings, or a string, optional)
+          Defaults to every field below but content and children,
+          which a match list would read every matched subtree to
+          fill; naming either asks for exactly that.
+"
+   org-mcp--fields-description "
+Returns JSON object:
+  children - Array of matching nodes, the shape org-node-read
+             returns, each carrying the fields the call asked for.
+  total - Number of matches (number)
+  files_searched - Number of files searched (number)
+"
+   org-mcp--node-description))
+
 (defun org-mcp--gtd-tool-specs ()
-  "Return specs for the GTD query tools that are configured.
-A tool is left out when its query function is nil, so a client
-never sees a GTD tool that cannot answer.  The functions are
-`org-mcp-query-inbox-fn', `org-mcp-query-next-fn' and
-`org-mcp-query-backlog-fn'."
-  (append
-   (when org-mcp-query-inbox-fn
+  "Return the spec for org-view when `org-mcp-views' configures one.
+The tool is left out while no view is configured, so a client never
+sees a tool that has nothing to answer with, and it carries the
+views and the filters of the moment it is registered."
+  (when org-mcp-views
+    (list
      (list
-      (list
-       #'org-mcp--tool-query-inbox
-       :id "query-inbox"
-       :description
-       "Query inbox items using the configured GTD workflow.
-Returns items matching the inbox query, sorted by rank when
-a sort function is configured.  Always runs over the allowed files;
-naming files is an error.  Use org-query to search other files.
-
-Parameters: None
-
-Returns: Same format as org-query tool"
-       :read-only t)))
-   (when org-mcp-query-next-fn
-     (list
-      (list
-       #'org-mcp--tool-query-next
-       :id "query-next"
-       :description
-       "Query next action items using the configured GTD workflow.
-Returns actionable items sorted by rank when a sort function
-is configured.  Always runs over the allowed files; naming files is
-an error.  Use org-query to search other files.
-
-Parameters:
-  tag - Tag string to filter results (string, optional)
-
-Returns: Same format as org-query tool"
-       :read-only t)))
-   (when org-mcp-query-backlog-fn
-     (list
-      (list
-       #'org-mcp--tool-query-backlog
-       :id "query-backlog"
-       :description
-       "Query backlog items (projects and standalone actions) using
-the configured GTD workflow.  Returns items sorted by rank when
-a sort function is configured.  Always runs over the allowed files;
-naming files is an error.  Use org-query to search other files.
-
-Parameters:
-  tag - Tag string to filter results (string, optional)
-
-Returns: Same format as org-query tool"
-       :read-only t)))))
+      #'org-mcp--tool-view
+      :id "org-view"
+      :description (org-mcp--view-tool-description)
+      :read-only t))))
 
 (defconst org-mcp--clock-tool-specs
   (list
@@ -5222,7 +5399,7 @@ Returns JSON object:
            else file:{path}::*{title}
   total - Number of open clocks found (number)")
     :read-only t))
-  "Specs for the clock tools, registered after the GTD query tools.
+  "Specs for the clock tools, registered after org-view.
 Same spec format as `org-mcp--core-tool-specs\='.")
 
 (defconst org-mcp--resource-specs
@@ -5270,8 +5447,9 @@ Each element is a `mcp-server-lib-register-server\=' `:resources\=' spec,
 (defun org-mcp-enable ()
   "Enable the org-mcp server.
 Registers every tool and the org:// resource template under
-`org-mcp--server-id'.  Which GTD query tools are among them depends
-on `org-mcp-query-inbox-fn' and its siblings at the time of the call.
+`org-mcp--server-id'.  Whether org-view is among them depends on
+`org-mcp-views' at the time of the call, and its description carries
+the views and the filters configured then.
 
 Registrations are reference counted: a spec registered twice needs
 two `org-mcp-disable' calls before it goes, and the second
@@ -5292,8 +5470,8 @@ registration keeps the properties of the first."
 Drops one reference to everything registered under
 `org-mcp--server-id', removing whatever reaches zero.  It works on
 what is registered at the time of the call, not on what a particular
-`org-mcp-enable' added: an inner enable that configured fewer GTD
-query tools than an enclosing one takes the enclosing call's away
+`org-mcp-enable' added: an inner enable that configured no views
+where an enclosing one did takes the enclosing call's org-view away
 when it is undone."
   (mcp-server-lib-unregister-server org-mcp--server-id))
 

@@ -2508,36 +2508,29 @@ org-clock-dangling must match the regexp MESSAGE."
   (concat "\\`'" (regexp-quote path)
           "': the referenced file not in allowed list\\'"))
 
-(defmacro org-mcp-test--with-scope-dirs-and-gtd (override &rest body)
+(defmacro org-mcp-test--with-scope-dirs-and-view (override &rest body)
   "Run BODY as `org-mcp-test--with-scope-dirs' does, OVERRIDE included.
-The GTD query tools are registered as well, each matching every
-TODO heading."
+A view matching every TODO heading is configured as well, so that
+org-view is registered and reaches whatever the allowed files are."
   (declare (indent 1) (debug t))
-  `(let ((org-mcp-query-inbox-fn (lambda () '(todo)))
-         (org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
-         (org-mcp-query-backlog-fn
-          (lambda (&optional _tag-filter) '(todo)))
+  `(let ((org-mcp-views '((todo :name "Todo" :query (todo))))
+         (org-mcp-filters nil)
          (org-mcp-query-sort-fn nil))
      (org-mcp-test--with-scope-dirs ,override
        ,@body)))
 
-(defun org-mcp-test--gtd-titles ()
-  "Return the sorted titles each GTD query tool matches.
-The three tools match every TODO heading, so they must agree."
-  (let ((results
-         (mapcar
-          (lambda (tool)
-            (sort (mapcar
-                   (lambda (match) (alist-get 'title match))
-                   (alist-get
-                    'children
-                    (json-read-from-string
-                     (mcp-server-lib-ert-call-tool tool nil))))
-                  #'string<))
-          '("query-inbox" "query-next" "query-backlog"))))
-    (should (equal (nth 1 results) (car results)))
-    (should (equal (nth 2 results) (car results)))
-    (car results)))
+(defun org-mcp-test--view-scope-titles ()
+  "Return the sorted titles the scope-test view matches."
+  (sort
+   (mapcar
+    (lambda (match) (alist-get 'title match))
+    (append
+     (alist-get
+      'children
+      (json-read-from-string
+       (mcp-server-lib-ert-call-tool "org-view" '((view . "todo")))))
+     nil))
+   #'string<))
 
 (ert-deftest org-mcp-test-file-set-narrows-allowed-files ()
   "A named set inside the allowed files narrows each tool to it."
@@ -2738,8 +2731,8 @@ searched but not listed; the refusal names it by the entry alone."
 While the agenda is restricted, as by `C-c a <', the function
 `org-agenda-files' returns the file of the restriction.  No tool
 working on a set of files reaches it, whether the call names files,
-names an empty set or names none, and no GTD query does."
-  (org-mcp-test--with-scope-dirs-and-gtd t
+names an empty set or names none, and no view does."
+  (org-mcp-test--with-scope-dirs-and-view t
     (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
            (beta (org-mcp-test--write-set-file root "beta.org" "beta"))
            (out (org-mcp-test--write-set-file outside "out.org" "out"))
@@ -2754,14 +2747,14 @@ names an empty set or names none, and no GTD query does."
             (should
              (equal (org-mcp-test--scan-files (vector beta)) '("beta")))
             (should (equal (org-mcp-test--scan-files (vector empty)) nil))
-            (should (equal (org-mcp-test--gtd-titles) '("alpha"))))
+            (should (equal (org-mcp-test--view-scope-titles) '("alpha"))))
         (put 'org-agenda-files 'org-restrict restriction)))))
 
 (ert-deftest org-mcp-test-file-set-does-not-carry-over ()
   "A named set lasts for its call only, also when the call fails.
-Later calls naming no files, GTD queries included, run over the
-allowed files, and org-config-allowed-files reports them unchanged."
-  (org-mcp-test--with-scope-dirs-and-gtd t
+Later calls naming no files, a view included, run over the allowed
+files, and org-config-allowed-files reports them unchanged."
+  (org-mcp-test--with-scope-dirs-and-view t
     (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
            (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
            (org-mcp-allowed-files (list alpha))
@@ -2772,7 +2765,7 @@ allowed files, and org-config-allowed-files reports them unchanged."
                (equal
                 (alist-get 'files (org-mcp-test--call-get-allowed-files))
                 (vector alpha)))
-              (should (equal (org-mcp-test--gtd-titles) '("alpha")))
+              (should (equal (org-mcp-test--view-scope-titles) '("alpha")))
               (should (equal (org-mcp-test--scan-files) '("alpha"))))))
       (should (equal (org-mcp-test--scan-files (vector beta)) '("beta")))
       (funcall check)
@@ -2788,26 +2781,27 @@ allowed files, and org-config-allowed-files reports them unchanged."
          (vector beta missing) (org-mcp-test--refused-path-regexp missing)))
       (funcall check))))
 
-(ert-deftest org-mcp-test-gtd-queries-refuse-files ()
-  "The GTD queries and the clock state tool refuse a `files' parameter.
+(ert-deftest org-mcp-test-view-refuses-files-with-the-clock-state ()
+  "A view and the clock state tool refuse a `files' parameter.
 They declare none, and mcp-server-lib refuses a parameter a tool does
 not declare before the tool runs."
-  (org-mcp-test--with-scope-dirs-and-gtd t
+  (org-mcp-test--with-scope-dirs-and-view t
     (let* ((alpha (org-mcp-test--write-set-file root "alpha.org" "alpha"))
            (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
            (org-mcp-allowed-files (list alpha)))
-      (dolist (tool '("query-inbox" "query-next" "query-backlog"
-                      "org-clock-active"))
+      (dolist (call '(("org-view" (view . "todo")) ("org-clock-active")))
         (org-mcp-test--call-tool-refused
-         tool `((files . ,(vector beta))) "Unexpected parameter: files"))
-      (should (equal (org-mcp-test--gtd-titles) '("alpha"))))))
+         (car call)
+         (append (cdr call) `((files . ,(vector beta))))
+         "Unexpected parameter: files"))
+      (should (equal (org-mcp-test--view-scope-titles) '("alpha"))))))
 
 (ert-deftest org-mcp-test-query-tools-never-search-current-buffer ()
   "An empty set of files searches nothing, not the current buffer.
 Given no files, `org-ql-select' searches the current buffer.  This
 covers a named directory holding no Org file, and allowed files of
-which none exists, for the GTD queries too."
-  (org-mcp-test--with-scope-dirs-and-gtd t
+which none exists, for a view too."
+  (org-mcp-test--with-scope-dirs-and-view t
     (let ((buffer (get-buffer-create "org-mcp-test-current")))
       (unwind-protect
           (with-current-buffer buffer
@@ -2817,7 +2811,7 @@ which none exists, for the GTD queries too."
             (let ((org-mcp-allowed-files
                    (list (expand-file-name "missing.org" outside))))
               (should (equal (org-mcp-test--scan-files) nil))
-              (should (equal (org-mcp-test--gtd-titles) nil))))
+              (should (equal (org-mcp-test--view-scope-titles) nil))))
         (kill-buffer buffer)))))
 
 (ert-deftest org-mcp-test-file-set-closes-buffers-it-opens ()
@@ -3050,9 +3044,23 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-read-outline")
   "Every tool id org-mcp registers regardless of configuration, sorted.")
 
-(defconst org-mcp-test--gtd-tool-ids
-  '("query-backlog" "query-inbox" "query-next")
-  "Tool ids org-mcp registers for configured GTD query functions, sorted.")
+(defun org-mcp-test--registered-tools ()
+  "Return the tools of the tools/list response."
+  (append
+   (alist-get
+    'tools
+    (mcp-server-lib-ert-get-success-result
+     "tools/list" (mcp-server-lib-create-tools-list-request)))
+   nil))
+
+(defun org-mcp-test--registered-tool-description (id)
+  "Return the description tools/list gives for the tool ID."
+  (alist-get
+   'description
+   (cl-find
+    id (org-mcp-test--registered-tools)
+    :key (lambda (tool) (alist-get 'name tool))
+    :test #'string=)))
 
 (defun org-mcp-test--registered-tool-ids ()
   "Return the ids in the tools/list response, sorted.
@@ -3062,56 +3070,17 @@ control."
   (sort
    (mapcar
     (lambda (tool) (alist-get 'name tool))
-    (append
-     (alist-get
-      'tools
-      (mcp-server-lib-ert-get-success-result
-       "tools/list" (mcp-server-lib-create-tools-list-request)))
-     nil))
+    (org-mcp-test--registered-tools))
    #'string<))
 
-(ert-deftest org-mcp-test-registered-tool-ids-without-gtd ()
+(ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
-  (let ((org-mcp-query-inbox-fn nil)
-        (org-mcp-query-next-fn nil)
-        (org-mcp-query-backlog-fn nil))
+  (let ((org-mcp-views nil))
     (org-mcp-test--with-enabled
       (should
        (equal
         (org-mcp-test--registered-tool-ids)
         org-mcp-test--non-gtd-tool-ids)))))
-
-(ert-deftest org-mcp-test-registered-tool-ids-with-gtd ()
-  "Configuring every GTD query function adds exactly its three tools."
-  (let ((org-mcp-query-inbox-fn (lambda () '(todo)))
-        (org-mcp-query-next-fn (lambda () '(todo)))
-        (org-mcp-query-backlog-fn (lambda () '(todo))))
-    (org-mcp-test--with-enabled
-      (should
-       (equal
-        (org-mcp-test--registered-tool-ids)
-        (sort
-         (append
-          org-mcp-test--non-gtd-tool-ids org-mcp-test--gtd-tool-ids)
-         #'string<))))))
-
-(ert-deftest org-mcp-test-each-gtd-tool-follows-its-own-function ()
-  "Each GTD tool is registered from its own function, not a shared one."
-  (dolist (pair '((org-mcp-query-inbox-fn . "query-inbox")
-                  (org-mcp-query-next-fn . "query-next")
-                  (org-mcp-query-backlog-fn . "query-backlog")))
-    (let ((org-mcp-query-inbox-fn nil)
-          (org-mcp-query-next-fn nil)
-          (org-mcp-query-backlog-fn nil))
-      ;; `set' writes the binding the `let' above established, so the
-      ;; value is undone with it.
-      (set (car pair) (lambda () '(todo)))
-      (org-mcp-test--with-enabled
-        (let ((ids (org-mcp-test--registered-tool-ids)))
-          (should (member (cdr pair) ids))
-          (dolist (other org-mcp-test--gtd-tool-ids)
-            (unless (string= other (cdr pair))
-              (should-not (member other ids)))))))))
 
 (ert-deftest org-mcp-test-file-resource-read ()
   "Test that reading org:// resource returns structured JSON."
@@ -9303,20 +9272,12 @@ return that effective set."
          (equal (alist-get 'tags result)
                 (alist-get 'local_tags result)))))))
 
-;;; GTD query tool tests
-
-(defconst org-mcp-test--content-gtd-items
-  "* TODO Inbox item :#inbox:
-
-* TODO [#B] Next action
-
-* TODO [#A] High priority next"
-  "Items for GTD query tool tests.")
+;;; View tool tests
 
 (defmacro org-mcp-test--with-gtd-tools (file-specs bindings &rest body)
-  "Create temp org files and enable org-mcp with GTD tool BINDINGS.
+  "Create temp org files and enable org-mcp with BINDINGS in force.
 FILE-SPECS are (VAR CONTENT) pairs.  BINDINGS is a list of let-style
-bindings for GTD customizations that must be set before `org-mcp-enable'."
+bindings for the settings that must be set before `org-mcp-enable'."
   (declare (indent 2))
   (let* ((vars (mapcar #'car file-specs))
          (temp-vars (mapcar (lambda (v) (gensym (symbol-name v))) vars))
@@ -9340,59 +9301,263 @@ bindings for GTD customizations that must be set before `org-mcp-enable'."
                  ,@body)))
          ,@cleanups))))
 
-(ert-deftest org-mcp-test-query-inbox-tool ()
-  "query-inbox tool returns inbox-tagged items."
-  (org-mcp-test--with-gtd-tools
-      ((test-file org-mcp-test--content-gtd-items))
-      ((org-mcp-query-inbox-fn
-        (lambda () '(and (not (done)) (tags "#inbox" "inbox"))))
-       (org-mcp-query-sort-fn nil))
-    (let* ((result-text
-            (mcp-server-lib-ert-call-tool "query-inbox" nil))
-           (result (json-read-from-string result-text))
-           (matches (alist-get 'children result)))
-      (should (equal (alist-get 'total result) 1))
-      (should (equal (alist-get 'title (aref matches 0))
-                     "Inbox item")))))
+(defconst org-mcp-test--content-views
+  "* TODO [#A] Alpha :work:
 
-(ert-deftest org-mcp-test-query-next-tool ()
-  "query-next tool returns next action items."
-  (org-mcp-test--with-gtd-tools
-      ((test-file org-mcp-test--content-gtd-items))
-      ((org-mcp-query-next-fn
-        (lambda (&optional _tag-filter)
-          '(and (todo "TODO") (not (tags "#inbox" "inbox")))))
-       (org-mcp-query-sort-fn nil))
-    (let* ((result-text
-            (mcp-server-lib-ert-call-tool "query-next" nil))
-           (result (json-read-from-string result-text))
-           (matches (alist-get 'children result)))
-      (should (equal (alist-get 'total result) 2)))))
+* TODO [#B] Beta :private:
 
-(ert-deftest org-mcp-test-query-backlog-tool ()
-  "query-backlog tool returns backlog items."
-  (org-mcp-test--with-gtd-tools
-      ((test-file org-mcp-test--content-gtd-items))
-      ((org-mcp-query-backlog-fn
-        (lambda (&optional _tag-filter)
-          '(todo "TODO")))
-       (org-mcp-query-sort-fn nil))
-    (let* ((result-text
-            (mcp-server-lib-ert-call-tool "query-backlog" nil))
-           (result (json-read-from-string result-text))
-           (matches (alist-get 'children result)))
-      (should (equal (alist-get 'total result) 3)))))
+* TODO Gamma :#inbox:
 
-(ert-deftest org-mcp-test-query-tools-not-registered-when-nil ()
-  "GTD query tools are not registered when their fns are nil."
+* TODO Delta :tangling:"
+  "Items the org-view tests run over.")
+
+(defun org-mcp-test--view-query-inbox ()
+  "Return the query of a test view that takes no parameters."
+  '(tags "#inbox"))
+
+(defun org-mcp-test--view-query-stuck (filter)
+  "Return the query of a test view taking FILTER alone."
+  (if filter
+      `(and (todo "TODO") ,filter)
+    '(todo "TODO")))
+
+(defun org-mcp-test--view-query-next (filter range)
+  "Return the query of a test view taking FILTER and RANGE.
+RANGE picks the band, so a test sees which range reached the query:
+`sprint' is the A items, anything else every TODO."
+  (let ((band
+         (if (eq range 'sprint)
+             '(priority "A")
+           '(todo "TODO"))))
+    (if filter
+        `(and ,band ,filter)
+      band)))
+
+(defconst org-mcp-test--views
+  '((inbox :name "Inbox" :query org-mcp-test--view-query-inbox)
+    (stuck
+     :name "Stuck Projects"
+     :query org-mcp-test--view-query-stuck
+     :filter t)
+    (next
+     :name "Next Actions"
+     :query org-mcp-test--view-query-next
+     :filter t
+     :range (sprint all))
+    (tangling :name "Tangling" :query (tags "tangling")))
+  "The views the org-view tests are configured with.
+One view per arity: none, a filter, a filter and a range, and one
+carrying a literal query rather than a function.")
+
+(defconst org-mcp-test--filters
+  '((work . (tags "work")) (private . (tags "private")))
+  "The filters the org-view tests are configured with.")
+
+(defmacro org-mcp-test--with-views (&rest body)
+  "Run BODY over `org-mcp-test--content-views' with the test views."
+  (declare (indent defun) (debug t))
+  `(org-mcp-test--with-gtd-tools
+       ((test-file org-mcp-test--content-views))
+       ((org-mcp-views org-mcp-test--views)
+        (org-mcp-filters org-mcp-test--filters)
+        (org-mcp-query-sort-fn nil))
+     ,@body))
+
+(defun org-mcp-test--view-matches (params)
+  "Return the nodes org-view returns for PARAMS, in its own order."
+  (append
+   (alist-get
+    'children
+    (json-read-from-string
+     (mcp-server-lib-ert-call-tool "org-view" params)))
+   nil))
+
+(defun org-mcp-test--view-titles (params)
+  "Return the titles org-view returns for PARAMS, in its own order."
+  (mapcar
+   (lambda (match) (alist-get 'title match))
+   (org-mcp-test--view-matches params)))
+
+(defun org-mcp-test--view-refused (params message)
+  "Assert org-view refuses PARAMS with exactly MESSAGE."
+  (org-mcp-test--call-tool-refused
+   "org-view" params
+   (concat "\\`" (regexp-quote message) "\\'")))
+
+(ert-deftest org-mcp-test-view-runs-by-name ()
+  "A view runs by name and answers with nodes in the standard shape."
+  (org-mcp-test--with-views
+    (let ((matches (org-mcp-test--view-matches '((view . "inbox")))))
+      (should (= (length matches) 1))
+      (let ((match (car matches)))
+        (should (equal (alist-get 'title match) "Gamma"))
+        (should (equal (alist-get 'todo match) "TODO"))
+        (should (equal (alist-get 'level match) 1))
+        (should (stringp (alist-get 'link match)))))))
+
+(ert-deftest org-mcp-test-view-runs-a-literal-query ()
+  "A view taking no parameters may carry its query rather than a function."
+  (org-mcp-test--with-views
+    (should
+     (equal (org-mcp-test--view-titles '((view . "tangling")))
+            '("Delta")))))
+
+(ert-deftest org-mcp-test-view-filter-restricts-it ()
+  "Naming a filter restricts the view to what the filter matches."
+  (org-mcp-test--with-views
+    (should
+     (equal
+      (sort (org-mcp-test--view-titles '((view . "stuck"))) #'string<)
+      '("Alpha" "Beta" "Delta" "Gamma")))
+    (should
+     (equal
+      (org-mcp-test--view-titles '((view . "stuck") (filter . "work")))
+      '("Alpha")))
+    (should
+     (equal
+      (org-mcp-test--view-titles
+       '((view . "stuck") (filter . "private")))
+      '("Beta")))))
+
+(ert-deftest org-mcp-test-view-range-defaults-to-the-first-declared ()
+  "A view that takes a range runs at the one it declares first."
+  (org-mcp-test--with-views
+    (should
+     (equal (org-mcp-test--view-titles '((view . "next"))) '("Alpha")))
+    (should
+     (equal
+      (sort
+       (org-mcp-test--view-titles '((view . "next") (range . "all")))
+       #'string<)
+      '("Alpha" "Beta" "Delta" "Gamma")))
+    (should
+     (equal
+      (org-mcp-test--view-titles
+       '((view . "next") (range . "all") (filter . "private")))
+      '("Beta")))))
+
+(ert-deftest org-mcp-test-view-refuses-an-unknown-view ()
+  "An unknown view is refused, and the refusal lists the configured ones."
+  (org-mcp-test--with-views
+    (org-mcp-test--view-refused
+     '((view . "nope"))
+     "Unknown view: nope.  Configured views: inbox, stuck, next, \
+tangling")))
+
+(ert-deftest org-mcp-test-view-refuses-an-unknown-filter ()
+  "An unknown filter is refused, and the refusal lists the valid names."
+  (org-mcp-test--with-views
+    (org-mcp-test--view-refused
+     '((view . "stuck") (filter . "nope"))
+     "Unknown filter: nope.  Configured filters: work, private")))
+
+(ert-deftest org-mcp-test-view-refuses-an-unknown-range ()
+  "An unknown range is refused, and the refusal lists the view's own."
+  (org-mcp-test--with-views
+    (org-mcp-test--view-refused
+     '((view . "next") (range . "decade"))
+     "Unknown range for the next view: decade.  Its ranges: sprint, \
+all")))
+
+(ert-deftest org-mcp-test-view-refuses-a-parameter-it-does-not-take ()
+  "A parameter a view does not take is refused, not ignored.
+The refusal names what that view does take, so a caller that
+narrowed nothing learns it rather than reading a full answer as a
+narrow one."
+  (org-mcp-test--with-views
+    (org-mcp-test--view-refused
+     '((view . "stuck") (range . "sprint"))
+     "The stuck view takes no range.  It takes: filter")
+    (org-mcp-test--view-refused
+     '((view . "inbox") (filter . "work"))
+     "The inbox view takes no filter.  It takes no parameters")
+    (org-mcp-test--view-refused
+     '((view . "inbox") (range . "sprint"))
+     "The inbox view takes no range.  It takes no parameters")))
+
+(ert-deftest org-mcp-test-view-refuses-a-literal-query-it-must-feed ()
+  "A view declaring a parameter its literal query cannot take is refused."
   (org-mcp-test--with-gtd-tools
-      ((test-file org-mcp-test--content-bare-todo))
-      ((org-mcp-query-inbox-fn nil)
-       (org-mcp-query-next-fn nil)
-       (org-mcp-query-backlog-fn nil))
-    (dolist (tool '("query-inbox" "query-next" "query-backlog"))
-      (org-mcp-test--call-tool-refused
-       tool nil (concat "\\`Tool not found: " tool "\\'")))))
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views '((broken :query (todo "TODO") :filter t)))
+       (org-mcp-filters org-mcp-test--filters)
+       (org-mcp-query-sort-fn nil))
+    (org-mcp-test--view-refused
+     '((view . "broken"))
+     "The broken view carries a literal query, which the parameters \
+it declares cannot reach")))
+
+(ert-deftest org-mcp-test-view-takes-fields ()
+  "A view takes `fields' as the other node-returning endpoints do."
+  (org-mcp-test--with-views
+    (should
+     (equal
+      (org-mcp-test--view-matches
+       '((view . "inbox") (fields . ["title"])))
+      '(((title . "Gamma")))))
+    (org-mcp-test--call-tool-refused
+     "org-view" '((view . "inbox") (fields . ["nonesuch"]))
+     (concat
+      "\\`"
+      (regexp-quote "Unknown node field: nonesuch.  Valid fields: ")))))
+
+(ert-deftest org-mcp-test-view-refuses-files ()
+  "A view never takes a scope override: it declares no `files'."
+  (org-mcp-test--with-views
+    (org-mcp-test--call-tool-refused
+     "org-view"
+     `((view . "inbox") (files . ,(vector test-file)))
+     "Unexpected parameter: files")))
+
+(ert-deftest org-mcp-test-view-sorts-by-the-configured-comparator ()
+  "A view answers in the order `org-mcp-query-sort-fn' puts matches in."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views org-mcp-test--views)
+       (org-mcp-filters org-mcp-test--filters)
+       (org-mcp-query-sort-fn
+        (lambda (a b)
+          (string>
+           (org-element-property :raw-value a)
+           (org-element-property :raw-value b)))))
+    (should
+     (equal (org-mcp-test--view-titles '((view . "stuck")))
+            '("Gamma" "Delta" "Beta" "Alpha")))))
+
+(ert-deftest org-mcp-test-view-tool-is-the-only-tool-views-add ()
+  "Configuring views adds exactly the org-view tool."
+  (let ((org-mcp-views org-mcp-test--views))
+    (org-mcp-test--with-enabled
+      (should
+       (equal
+        (org-mcp-test--registered-tool-ids)
+        (sort
+         (cons "org-view" (copy-sequence org-mcp-test--non-gtd-tool-ids))
+         #'string<))))))
+
+(ert-deftest org-mcp-test-view-tool-not-registered-without-views ()
+  "The org-view tool stays away while no view is configured."
+  (org-mcp-test--with-gtd-tools
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views nil))
+    (org-mcp-test--call-tool-refused
+     "org-view" '((view . "inbox")) "\\`Tool not found: org-view\\'")))
+
+(ert-deftest org-mcp-test-view-tool-description-names-the-vocabulary ()
+  "The org-view description carries the views, what each takes and the filters.
+A closed vocabulary is only closed to a client that can see it, and
+a view's range default is stated where the caller reads it."
+  (org-mcp-test--with-views
+    (let ((description
+           (org-mcp-test--registered-tool-description "org-view")))
+      (dolist (line
+               '("inbox (Inbox) - takes no parameters"
+                 "stuck (Stuck Projects) - takes filter"
+                 "next (Next Actions) - takes filter, range \
+(sprint, all; sprint unasked)"
+                 "tangling (Tangling) - takes no parameters"
+                 "Configured filters: work, private"))
+        (should (string-match-p (regexp-quote line) description))))))
 
 ;;; Native link tests
 
@@ -12372,12 +12537,12 @@ Gamma's title link, although the edit ends on a CLOCK line."
 
 (ert-deftest org-mcp-test-returned-link-query-in-narrowed-buffer ()
   "Queries read headings outside the user's narrowing where they are.
-The user's buffer is narrowed to Alpha.  org-query and query-next
-both return Gamma with its own title and link, and the narrowing is
+The user's buffer is narrowed to Alpha.  org-query and org-view both
+return Gamma with its own title and link, and the narrowing is
 unchanged afterwards."
   (org-mcp-test--with-gtd-tools
       ((test-file org-mcp-test--content-links))
-      ((org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
+      ((org-mcp-views '((todo :name "Todo" :query (todo))))
        (org-mcp-query-sort-fn nil))
     (let ((buffer (find-file-noselect test-file)))
       (unwind-protect
@@ -12388,7 +12553,7 @@ unchanged afterwards."
                    (org-narrow-to-subtree)
                    (list (point-min) (point-max)))))
             (dolist (call '(("org-query" (query . "(todo)"))
-                            ("query-next")))
+                            ("org-view" (view . "todo"))))
               (let ((matches
                      (alist-get
                       'children
@@ -12443,9 +12608,7 @@ own among them, and each link reads back to itself through
 org-node-read."
   (org-mcp-test--with-gtd-tools
       ((test-file org-mcp-test--content-read-tools))
-      ((org-mcp-query-inbox-fn (lambda () '(tags "#inbox")))
-       (org-mcp-query-next-fn (lambda (&optional _tag-filter) '(todo)))
-       (org-mcp-query-backlog-fn (lambda (&optional _tag-filter) '(todo)))
+      ((org-mcp-views '((todo :name "Todo" :query (todo))))
        (org-mcp-query-sort-fn nil)
        (org-tag-alist nil)
        (org-tag-persistent-alist nil))
@@ -12477,9 +12640,9 @@ org-node-read."
                  (mcp-server-lib-ert-call-tool
                   "org-query"
                   `((query . "(todo)") (files . ,(vector test-file)))))
-               (lambda () (mcp-server-lib-ert-call-tool "query-inbox" nil))
-               (lambda () (mcp-server-lib-ert-call-tool "query-next" nil))
-               (lambda () (mcp-server-lib-ert-call-tool "query-backlog" nil))
+               (lambda ()
+                 (mcp-server-lib-ert-call-tool
+                  "org-view" '((view . "todo"))))
                (lambda ()
                  (mcp-server-lib-ert-call-tool "org-config-tag-candidates" nil))
                (lambda ()

@@ -1,8 +1,8 @@
 #+TITLE: Searching and GTD queries
 
 This page answers how to search Org files with org-ql through org-mcp, and how
-to wire up the three GTD query tools. The [[file:../README.org][README]] introduces the server
-itself.
+to wire up the views a caller reaches by name. The [[file:../README.org][README]] introduces the
+server itself.
 
 * Query tools
 
@@ -50,41 +50,108 @@ Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags works from =local_tags= without reading the heading again (see
 [[file:reading.org::*The two tag fields][The two tag fields]]).
 
-** query-inbox
-- *Description:* Query inbox items using the configured GTD workflow
-- *Parameters:* None
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
-- *Configuration:* Requires =org-mcp-query-inbox-fn= to be set; tool is not registered when =nil=
-- *Scope:* Always runs over the allowed files; a =files= parameter is refused
-
-** query-next
-- *Description:* Query next action items using the configured GTD workflow
+** org-view
+- *Description:* Run a named view — a question the workflow has a name for — restricted by a named filter, at a named range
 - *Parameters:*
-  - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
-- *Configuration:* Requires =org-mcp-query-next-fn= to be set; tool is not registered when =nil=
-- *Scope:* Always runs over the allowed files; a =files= parameter is refused
+  - =view= (string, required): the name of a view in =org-mcp-views=. An unknown name is refused, and the refusal lists the configured views
+  - =filter= (string, optional): the name of a filter in =org-mcp-filters= to restrict the view by. An unknown name is refused, and the refusal lists the configured filters
+  - =range= (string, optional): one of the range names that view declares. A view that takes a range runs at the one it declares first when the call names none
+  - =fields= (array of strings, or a string, optional): how much of each matching node to return; it means here exactly what it means on =org-query=. See [[file:reading.org::*Asking for fields][Asking for fields]]
+- *Returns:* the JSON object =org-query= returns, sorted by =org-mcp-query-sort-fn= when one is configured
+- *Configuration:* requires =org-mcp-views=; the tool is not registered while it is =nil=
+- *Scope:* always runs over the allowed files; a =files= parameter is refused
 
-** query-backlog
-- *Description:* Query backlog items (projects and standalone actions) using the configured GTD workflow
-- *Parameters:*
-  - =tag= (string, optional): Tag string to filter results
-- *Returns:* Same as =org-query=, carrying the fields it carries unasked, sorted by =org-mcp-query-sort-fn= when configured
-- *Configuration:* Requires =org-mcp-query-backlog-fn= to be set; tool is not registered when =nil=
-- *Scope:* Always runs over the allowed files; a =files= parameter is refused
+Example:
+#+begin_src json
+# Request:
+{
+  "view": "next",
+  "filter": "work",
+  "range": "sprint"
+}
 
-* Configuring GTD Query Tools
-
-The GTD query tools are opt-in.  Set the query functions and an optional sort comparator:
-
-#+begin_src emacs-lisp
-(setq org-mcp-query-inbox-fn   #'my-inbox-query
-      org-mcp-query-backlog-fn #'my-backlog-query
-      org-mcp-query-next-fn    #'my-next-actions-query
-      org-mcp-query-sort-fn    #'my-rank-comparator)
+# Response:
+{
+  "children": [
+    {
+      "title": "Draft the migration plan",
+      "todo": "NEXT",
+      "priority": "A",
+      "file": "/home/user/org/work.org",
+      "level": 2,
+      "link": "id:550e8400-e29b-41d4-a716-446655440000"
+    }
+  ],
+  "total": 1,
+  "files_searched": 3
+}
 #+end_src
 
-Each query function should return an org-ql sexp.  =org-mcp-query-backlog-fn= and =org-mcp-query-next-fn= receive an optional tag-filter argument (an org-ql sexp or =nil=).  =org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=.
+Which of the three parameters a view takes is the view's own declaration, and
+naming one it does not take is refused rather than ignored: a caller that
+believes it narrowed a search which in fact returned everything has no way to
+find out. The refusal names what that view does take. Not every view takes
+every parameter for reasons worth keeping — a project is stuck whatever its
+priority, and an unprocessed capture has no priority yet to band.
+
+The views and the filters are the user's, so the tool description a client
+reads names them: one line per view, with what it takes and, for a view that
+takes a range, its ranges and the one it runs at unasked.
+
+* Configuring views and filters
+
+A view is a named question, a filter a named restriction. Both are
+configuration an external package populates — typically from the same
+definitions a workflow builds its agenda commands out of, so a view and the
+agenda block beside it cannot answer differently.
+
+#+begin_src emacs-lisp
+(setq org-mcp-views
+      '((inbox    :name "Inbox"
+                  :query my-inbox-query)
+        (stuck    :name "Stuck Projects"
+                  :query my-stuck-projects-query
+                  :filter t)
+        (next     :name "Next Actions"
+                  :query my-next-actions-query
+                  :filter t
+                  :range (sprint all))
+        (tangling :name "Tangling"
+                  :query (my-tangling-predicate))))
+
+(setq org-mcp-filters
+      '((work    . (tags "work"))
+        (private . (my-private-predicate))))
+
+(setq org-mcp-query-sort-fn #'my-rank-comparator)
+#+end_src
+
+Each entry of =org-mcp-views= is =(NAME . PLIST)=, =NAME= the symbol a call
+names the view by:
+
+| Key       | Holds                                                                                                              |
+|-----------+--------------------------------------------------------------------------------------------------------------------|
+| =:name=   | a label for a reader, carried in the tool description                                                              |
+| =:query=  | the org-ql query the view asks: a function returning the sexp, or a literal sexp for a view that takes no parameters |
+| =:filter= | non-nil when the view takes a =filter=                                                                             |
+| =:range=  | the range names the view takes, the first of them the range it runs at unasked; absent, the view takes no =range=   |
+
+A view is called with the parameters it declares and no others, in the order
+filter then range. A filter reaches the query as the org-ql sexp
+=org-mcp-filters= holds for it, or =nil= when the call named none; a range
+reaches it as one of the symbols =:range= lists. So =next= above is called as
+=(my-next-actions-query nil 'sprint)= for a call that names neither, =stuck= as
+=(my-stuck-projects-query '(tags "work"))= for a call naming the =work= filter,
+and =inbox=, which declares nothing, as =(my-inbox-query)=.
+
+A filter is always a name: a caller cannot send an expression of its own. That
+is the point of the list — a closed vocabulary can be refused with the valid
+names in the message, an open one cannot. =org-query= is where a caller writes
+a query of its own, and the only endpoint that reaches files outside the
+allowed ones.
+
+=org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=, so it decides
+the order =org-view= answers in. =org-query= is unsorted.
 
 * Configuring Extra Query Properties
 

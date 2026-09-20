@@ -21,7 +21,7 @@ owns the question, never to a second page that repeats it:
 | `links.org` | the link forms a call takes, what is refused, the link every response carries |
 | `reading.org` | the `org://{link}` resource, `org-node-read`, `org-read-outline`, `org-node-text`, and the five configuration and discovery tools |
 | `writing.org` | what a write does to buffers and files, and the ten write tools |
-| `queries.org` | `org-query`, the three GTD tools and the settings that define them |
+| `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
 | `clocking.org` | the seven clock tools and `org-mcp-clock-continuous-threshold` |
 
 The README is a primer, not a shorter copy of these pages: a fact earns a place
