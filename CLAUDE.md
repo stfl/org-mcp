@@ -61,12 +61,35 @@ agent must not miss is in this file instead.
 `CLAUDE.md` is always the real file: a missing symlink costs another tool and
 never costs Claude Code.
 
+## Agent skills
+
+The three files below are agent-facing configuration the engineering skills
+read. They are the one thing under `docs/` not addressed to a user, and no
+human-facing page links to them.
+
+### Issue tracker
+
+GitHub issues on `stfl/org-mcp`, driven through `gh`, with an umbrella issue per
+body of work and its children in dependency order. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. A ticket with an
+open blocker carries none of them. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the root, `docs/adr/` beside it. See
+`docs/agents/domain.md`.
+
 ## Plans and specs
 
-Plans, design reports and specs live in `.omc/plans/`, one Markdown file per
-topic. `.gitignore` excludes `.omc/`, so they stay on this machine. Tracked
-files carry their conclusions, never links to them — a reader outside this
-machine cannot follow one.
+Tickets live on the tracker. Design reports and decision records live in
+`.omc/plans/`, one Markdown file per topic; `.gitignore` excludes `.omc/`, so
+they stay on this machine. Tracked files and issue bodies carry their
+conclusions, never links to them — a reader outside this machine cannot follow
+one, so a `.omc/plans/…` path is stripped before anything is published.
 
 ## Ending a session
 
