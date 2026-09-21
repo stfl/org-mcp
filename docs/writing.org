@@ -370,11 +370,16 @@ value/ on every field, because an assertion names a *state the field was in* and
 "empty" is one of those states, while an =after= names a *value to put there*
 and a field with no empty value has none to name. So =before: ""= and
 =after: ""= stop meaning the same thing on those four fields. That is the point:
-only one of the two can name a state the field cannot hold.
+only one of the two can name a state the field cannot hold. The pair differs in
+what it accepts as well as in what it means, and on the two date fields that
+difference has a page of its own (see [[*A date has to be a date]]).
 
-*One condition is spelled three ways, and a client meets all three on its first
-removal.* /This field holds nothing/ is a read's answer, an assertion's claim
-and a write's ask, and each place says it in its own words:
+*A read does not spell /nothing/ the way a write does, and that conversion is
+the one to get right.* A read omits the field altogether — there is no key to
+copy — so a client turning a read into a =before= has to know that /absent/
+becomes =""=, and one turning it into an =after= has to know that /absent/ is
+asked for with =null=. One condition, three spellings, and a client meets all
+three on its first removal:
 
 | Where         | Nothing is spelled | Because                                                                                                                       |
 |---------------+--------------------+-------------------------------------------------------------------------------------------------------------------------------|
@@ -386,18 +391,21 @@ None of the three substitutes for another, so a call that clears a field
 translates as it goes:
 
 #+begin_src json
-# The read: no `scheduled' key at all, because there is no SCHEDULED
+# The read.  There is no `scheduled' key: the headline has no SCHEDULED,
+# and a node carries no key for a field it has no value for
 {"title": "Write the report", "deadline": "<2026-04-15 Wed>", "link": "id:abc-123"}
 
-# Taking that DEADLINE away: null is the ask
+# Taking the DEADLINE away.  It was read, so it is copied into `before';
+# `null' is the ask for the field to hold nothing
 {"link": "id:abc-123", "before": "<2026-04-15 Wed>", "after": null}
 
-# Giving it a SCHEDULED: "" is how you assert it had none
+# Giving it a SCHEDULED.  Nothing was read for that field, and the
+# absence is asserted as ""
 {"link": "id:abc-123", "before": "", "after": "2026-04-20"}
 #+end_src
 
-Read the absence, assert it as =""=, ask for it with =null=. Each spelling says
-exactly one thing where it stands, and the translation between them is yours.
+Each spelling says exactly one thing where it stands, and the translation
+between them is yours to make.
 
 Every one of those removals is a required =before= away from being unguarded.
 You say what you believe the field holds, and the call is refused when the file
