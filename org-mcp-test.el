@@ -3550,10 +3550,11 @@ before any lookup, and the file is left alone."
            org-mcp-test--expected-timestamp-id-done-regex))))))
 
 (ert-deftest org-mcp-test-set-todo-null-after-takes-the-keyword-off ()
-  "An empty `after\=' leaves the headline with no TODO keyword.
+  "A null `after\=' leaves the headline with no TODO keyword.
 The heading stops being a task and keeps its title, and the response
-reports the keyword destroyed under `before\=' — the state a read now
-returns for it is the \"\" the response carries as `after\='."
+reports the keyword destroyed under `before\='.  Its `after\=' is \"\",
+the state the field is now in; a read of the headline carries no
+`todo\=' key at all, which is why \"\" is no keyword to ask for."
   (let ((test-content "* TODO Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
@@ -5020,12 +5021,11 @@ decoded to, and nothing is written."
 (ert-deftest org-mcp-test-node-create-refuses-an-empty-todo ()
   "A create is refused when `todo\=' is empty, and writes nothing.
 A read reports no `todo\=' at all for a heading that carries no
-keyword, so \"\" is no state the surface names; it is what a `before\='
-asserts on org-node-set-todo, the tool that
-owns the field, and there it is null that takes a keyword off.  A
-create asserts nothing and takes nothing away, so it names a
-keyword, and the refusal says where the other one lives and how it
-is spelled."
+keyword, so \"\" is no state the surface names and no state to create
+a node in.  It reaches the field's own validator and is refused
+there, naming the keywords there are, as it is on org-node-set-todo;
+a heading with no keyword is made by creating it with one and taking
+that off with a null `after\='."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (org-mcp-test--call-tool-refused
@@ -5034,10 +5034,8 @@ is spelled."
        (todo . "")
        (parent . ,(concat "file:" test-file)))
      (concat
-      "\\`TODO state cannot be empty: name a keyword to create the "
-      "node with, and take it off afterwards with org-node-set-todo "
-      (regexp-quote "{\"after\": null}")
-      "\\'")
+      "\\`Invalid TODO state: '' - valid states: "
+      "TODO, IN-PROGRESS, DONE\\'")
      test-file)))
 
 (ert-deftest org-mcp-test-node-create-refuses-a-blank-title ()
@@ -10393,7 +10391,7 @@ found '<2026-03-01 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-scheduled-null-after-on-a-headline-without-one ()
-  "An empty `after\=' on a headline carrying no SCHEDULED writes nothing.
+  "A null `after\=' on a headline carrying no SCHEDULED writes nothing.
 The empty `before\=' asserts the headline carries none, which it
 does, so the assertion holds and the call is accepted with nothing
 to do."
@@ -10541,7 +10539,7 @@ found '<2026-03-15 Sun>'\\'"
 ;;; Removing DEADLINE through org-node-set-deadline
 
 (ert-deftest org-mcp-test-set-deadline-null-after-takes-it-off ()
-  "An empty `after\=' takes the DEADLINE timestamp away.
+  "A null `after\=' takes the DEADLINE timestamp away.
 `before\=' is the timestamp destroyed and the response reports it,
 because the response is the only record the call leaves of what was
 there."
@@ -10579,7 +10577,7 @@ found '<2026-03-15 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-deadline-null-after-on-a-headline-without-one ()
-  "An empty `after\=' on a headline carrying no DEADLINE writes nothing.
+  "A null `after\=' on a headline carrying no DEADLINE writes nothing.
 The empty `before\=' asserts the headline carries none, which it
 does, so the assertion holds and the call is accepted with nothing
 to do."
@@ -12135,7 +12133,7 @@ because there it means something."
 ;;; Removing the priority through org-node-set-priority
 
 (ert-deftest org-mcp-test-set-priority-null-after-takes-it-off ()
-  "An empty `after\=' takes the priority away.
+  "A null `after\=' takes the priority away.
 `before\=' is the character destroyed and the response reports it,
 because the response is the only record the call leaves of what was
 there."
@@ -12168,7 +12166,7 @@ there."
      test-file)))
 
 (ert-deftest org-mcp-test-set-priority-null-after-without-a-priority ()
-  "An empty `after\=' on a headline carrying no priority writes nothing."
+  "A null `after\=' on a headline carrying no priority writes nothing."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((result

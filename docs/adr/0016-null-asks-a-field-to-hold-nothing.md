@@ -23,10 +23,15 @@ A `before` keeps `""` for *there was no value*, on every field, and that
 asymmetry with `after` is deliberate rather than tolerated. An assertion names a
 **state the field was in**, and its states are the field's values plus the empty
 one; a value to write names a **value the field will hold**, and a field with no
-empty value has none to name. That distinction carries the decision by itself. A
-`before` is also the guard, so a blank there can never assert anything — but
-that says only that a meaningful blank in `after` is safe, which was as true of
-the spelling this replaced, so it decides nothing between them. The tag set
-is the same rule seen from the other side — it has an empty value, spells it
-`[]`, and a tag delta stays a separate tool for the reason in
+empty value has none to name. That distinction carries the decision by itself,
+and it is the same one the read side already makes: a node omits a key for a
+field it has no value for, and never sends `null`, per
+`0005-a-node-omits-what-it-has-no-value-for`. So one condition is spelled three
+ways across a round trip — absent in a read, `""` in a `before`, `null` in an
+`after` — and each says exactly one thing where it stands. A `before` is also
+the guard, so a blank there can never assert anything — but that says only that
+a meaningful blank in `after` is safe, which was as true of the spelling this
+replaced, so it decides nothing between them. The tag set is the same rule seen
+from the other side — it has an empty value, spells it `[]`, and a tag delta
+stays a separate tool for the reason in
 `0015-a-tag-delta-needs-no-guard-a-replacement-asserts-everything`.

@@ -321,8 +321,8 @@ the property — is a fact about the node, and it is yours to act on.
 * What a blank parameter means
 
 A blank parameter is one the call does not send. Clients fill a parameter they
-are not using with an empty value, so =false=, =[]= and ={}= all read that way,
-and what follows depends only on whether the parameter was required:
+are not using with an empty value, so =null=, =false=, =[]= and ={}= all read
+that way, and what follows depends only on whether the parameter was required:
 
 - *Optional and blank* is how you leave it out. =files=, =depth= and =fields=
   fall back to their defaults, and the optional parameters of
@@ -336,11 +336,12 @@ and what follows depends only on whether the parameter was required:
 Missing required parameter: after
 #+end_example
 
-*=null= in an =after= is the ask for the field to hold nothing.* It is JSON's
-own word for no value, and it is the one spelling that takes a value away. Four
-fields have no value of their own that means nothing — a TODO keyword, a
-SCHEDULED, a DEADLINE and a priority are each a value or an absence, with
-nothing in between — so =null= is how you empty them:
+=null= is blank everywhere but one place: *in an =after=, =null= is the ask for
+the field to hold nothing.* It is JSON's own word for no value, and it is the
+one spelling that takes a value away. Four fields have no value of their own
+that means nothing — a TODO keyword, a SCHEDULED, a DEADLINE and a priority are
+each a value or an absence, with nothing in between — so =null= is how you empty
+them:
 
 | To take away   | The call                  | Spelled                   |
 |----------------+---------------------------+---------------------------|
@@ -370,6 +371,33 @@ value/ on every field, because an assertion names a *state the field was in* and
 and a field with no empty value has none to name. So =before: ""= and
 =after: ""= stop meaning the same thing on those four fields. That is the point:
 only one of the two can name a state the field cannot hold.
+
+*One condition is spelled three ways, and a client meets all three on its first
+removal.* /This field holds nothing/ is a read's answer, an assertion's claim
+and a write's ask, and each place says it in its own words:
+
+| Where         | Nothing is spelled | Because                                                                                                                       |
+|---------------+--------------------+-------------------------------------------------------------------------------------------------------------------------------|
+| a read's node | the key is absent  | a node carries no key for a field it has no value for, and never sends =null= (see [[file:reading.org::*The node][The node]]) |
+| a =before=    | =""=               | an assertion names a state, and /empty/ is one of the states a field can be in                                                |
+| an =after=    | =null=             | a value names what the field will hold, and these four fields have no empty value to name                                     |
+
+None of the three substitutes for another, so a call that clears a field
+translates as it goes:
+
+#+begin_src json
+# The read: no `scheduled' key at all, because there is no SCHEDULED
+{"title": "Write the report", "deadline": "<2026-04-15 Wed>", "link": "id:abc-123"}
+
+# Taking that DEADLINE away: null is the ask
+{"link": "id:abc-123", "before": "<2026-04-15 Wed>", "after": null}
+
+# Giving it a SCHEDULED: "" is how you assert it had none
+{"link": "id:abc-123", "before": "", "after": "2026-04-20"}
+#+end_src
+
+Read the absence, assert it as =""=, ask for it with =null=. Each spelling says
+exactly one thing where it stands, and the translation between them is yours.
 
 Every one of those removals is a required =before= away from being unguarded.
 You say what you believe the field holds, and the call is refused when the file
@@ -576,7 +604,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a whole file is refused: this verb acts on headings
   - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The headline's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to a headline whose body is empty. Every other blank is the parameter left out (see [[*What a blank parameter means]])
-  - =after= (string, required): The replacement text; =""= leaves nothing in the place of what =before= named, which over a =content_digest= empties the body. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =after= (string, required): The replacement text; =""= leaves nothing in the place of what =before= named, which over a =content_digest= empties the body. A body has an empty value of its own, so =""= is how you empty it and =null=, =false= and =[]= are the parameter left out and are refused (see [[*What a blank parameter means]]). A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated headline
 - *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= or an =after= that was never sent, and otherwise (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -843,7 +871,7 @@ Example:
   - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a date (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
 =before= is the date the headline carries today and =after= the date it is to
@@ -914,7 +942,7 @@ Example:
   - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a date (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
 =before= is the date the headline carries today and =after= the date it is to
@@ -1133,7 +1161,7 @@ Example:
   - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. =null= takes the priority away, guarded by =before=. =""= is no character and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a priority character (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
 
 Example:
 #+begin_src json
