@@ -12023,6 +12023,38 @@ nodes are two drawers."
 (absent)\\'"
      test-file)))
 
+(ert-deftest org-mcp-test-set-properties-file-drawer-is-inside-the-body ()
+  "A file's drawer is part of its body, so a property write moves both tokens.
+A file node's body is its whole preamble, drawer and `#+' settings
+alike, so the same bytes carry two addresses: the drawer, guarded
+property by property, and the body, guarded by a digest.  A client
+holding a `content_digest' read before this call holds a stale one
+after it, and the page says so."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-own-drawer))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (before
+            (org-mcp-test--read-fields
+             link ["content" "content_digest" "digest"])))
+      (should
+       (string-prefix-p ":PROPERTIES:" (alist-get 'content before)))
+      (should
+       (string-match-p "#\\+TITLE: A file" (alist-get 'content before)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-properties"
+       `((link . ,link)
+         (before . ((CAT . "inbox")))
+         (after . ((CAT . "next")))))
+      (let ((after
+             (org-mcp-test--read-fields
+              link ["content" "content_digest" "digest"])))
+        (should-not
+         (equal
+          (alist-get 'content_digest before)
+          (alist-get 'content_digest after)))
+        (should-not
+         (equal (alist-get 'digest before) (alist-get 'digest after)))))))
+
 (ert-deftest org-mcp-test-set-properties-file-drawer-goes-under-a-comment ()
   "A leading comment line keeps its place above the drawer Org makes.
 Org's placement rule for a file's drawer steps over the comment lines
@@ -23206,6 +23238,13 @@ verb acts on that has to be a heading."
 
 (ert-deftest org-mcp-test-write-tools-refuse-a-link-naming-a-file ()
   "Every org-node write tool but set-properties refuses a file's link.
+Ten of the thirteen are here; `org-node-delete', `org-node-archive'
+and `org-node-refile' are in
+`org-mcp-test-node-verbs-refuse-a-link-naming-a-file', which asserts
+the same refusal against a digest they have to get past parameter
+validation first.  The two together are the census this docstring
+claims, and neither is it alone.
+
 A file node is written where Org has a file construct to write, and
 that is its property drawer.  A TODO keyword, a priority cookie, a
 planning line, a heading's own tags and a LOGBOOK note are heading

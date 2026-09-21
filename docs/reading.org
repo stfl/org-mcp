@@ -466,6 +466,14 @@ call can name a version that the client's own clocking has left behind. A body
 starts past those lines, so =content_digest= moves for what is written into the
 body itself, a log note Org keeps outside a drawer among it.
 
+*A file node's body is its whole preamble,* so both of its tokens take in that
+file's own property drawer as well as its =#+= settings lines. A property write
+therefore moves a file's =content_digest= and its =digest= although the call
+names no body: the drawer and the settings lines are two halves of one region,
+and each has a guarded write of its own — a property asserted by the value it
+held (see [[file:writing.org::*A file's own property drawer][A file's own property drawer]]), a setting by the lines it stood on
+(see [[file:writing.org::*org-file-set-setting][org-file-set-setting]]). A token read before either is stale after it.
+
 * Available MCP Resources
 
 ** org://{link}
