@@ -10626,7 +10626,7 @@ that tells it the value was wrong rather than the file."
            tool
            `((link . ,link) (before . "") (after . ,sent))
            (format
-            "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+            "\\`Date '%s' does not exist - Org resolves it to '<%s>'\\'"
             (regexp-quote sent) rolled)
            test-file))))))
 
@@ -10643,7 +10643,7 @@ whole value is compared and not the date alone."
          "org-node-set-scheduled"
          `((link . ,link) (before . "") (after . ,sent))
          (format
-          "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+          "\\`Date '%s' does not exist - Org resolves it to '<%s>'\\'"
           (regexp-quote sent) rolled)
          test-file)))))
 
@@ -10683,7 +10683,7 @@ refused write is known to have opened nothing."
      `((link . ,(org-mcp-test--file-link test-file "*No Such Heading"))
        (before . "")
        (after . "2026-02-30"))
-     "\\`Date '2026-02-30' does not exist - Org reads it as '<2026-03-02"
+     "\\`Date '2026-02-30' does not exist - Org resolves it to '<2026-03-02"
      test-file)))
 
 (ert-deftest org-mcp-test-clock-refuses-a-time-that-is-not-one ()
@@ -13478,7 +13478,7 @@ read is a timestamp Org reads back as itself."
           (should (equal (alist-get 'after result) advertised)))))))
 
 (defconst org-mcp-test--dates-read-past-and-faulty-besides
-  '(("<2026-02-30 Fri typo>" "does not exist - Org reads it as")
+  '(("<2026-02-30 Fri typo>" "does not exist - Org resolves it to")
     ("<0050-03-27 Mon +1w typo>" "has a year below 100")
     ("<2026-03-27 Fri +1w --3d typo>"
      "pairs a first-only warning delay with a repeater"))
@@ -13508,6 +13508,45 @@ the text is gone."
                  (regexp-quote date)
                  "' "
                  (regexp-quote expected))
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(defconst org-mcp-test--days-no-month-has-carrying-more
+  '(("<2026-02-30 Fri +1w --3d>" . "<2026-03-02 [^ >]+>")
+    ("<2026-11-31 Mon 09:00 +1w --3d>" . "<2026-12-01 [^ >]+ 09:00>"))
+  "Days no month has, sent carrying a repeater and a first-only delay.
+Each is the value sent and a pattern for the whole of what the
+refusal names.  The pattern ends where the moment ends, so it holds
+only while the repeater and the delay are left out of it.")
+
+(ert-deftest org-mcp-test-set-scheduled-resolves-a-day-to-the-moment-alone ()
+  "The day a value resolves to is named without what it carried.
+A repeater and a first-only warning delay together are refused, so
+naming Org\\='s whole reading of an impossible day would answer one
+refusal with a value the next one rejects.  What the message names
+is the moment — the day and the time on it — which this surface
+takes whatever else the value carried.
+
+Every other refusal over a date names a value too, and
+`org-mcp-test-an-advertised-value-is-accepted' is what asks of all
+of them that the value is taken.  This one pins where that comes
+from here: not the ordering of the checks, which would put the
+repeater back, but a value built to carry nothing the rest are
+about."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,date . ,moment)
+                     org-mcp-test--days-no-month-has-carrying-more)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' does not exist - Org resolves it to '"
+                 moment
+                 "'\\'")
          test-file))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
@@ -26036,29 +26075,30 @@ recommendation was one to follow for the value somebody picked.")
     values))
 
 (defconst org-mcp-test--dates-the-calendar-has-not-got
-  '(("2026-02-30" . accepted)
-    ("<2026-11-31 Mon 09:00>" . accepted)
-    ("<2026-02-30 Fri typo>" . accepted)
-    ("<2026-02-30 Fri +1w --3d>" . refused))
-  "Days no month has, and what becomes of the day Org reads instead.
-The refusal names Org\\='s reading of the call\\='s own value, repeater
-and delay included, so what it recommends is built out of what
-arrived and is a different date on every call.  Three of these
-recommend a date a client can send.  The last recommends one org-mcp
-refuses in its turn, for the first-only delay it carries over from
-the value, and the test below pins it.")
+  '("2026-02-30"
+    "<2026-11-31 Mon 09:00>"
+    "<2026-02-30 Fri typo>"
+    "<2026-02-30 Fri +1w --3d>"
+    "<2026-11-31 Mon 09:00 +1w --3d>")
+  "Days no month has, written so the refusal has to resolve each one.
+What the refusal names is built out of what arrived, so it is a
+different date on every call.  The five here move the day, the time
+of day, and what the value carries beside them: a word Org reads
+past, a repeater with a first-only delay, and both at once on a
+value carrying a time.  The last two are the ones that say the
+refusal names the moment alone — naming the whole of Org\\='s reading
+would carry the delay, which the refusal after this one rejects.")
 
-(defun org-mcp-test--advertisement-date-org-reads-instead ()
+(defun org-mcp-test--advertisement-date-resolved-to ()
   "The date the refusal of a day the calendar has not got names."
   (let ((values nil))
-    (dolist (provocation org-mcp-test--dates-the-calendar-has-not-got)
-      (when (eq (cdr provocation) 'accepted)
-        (let ((named
-               (org-mcp-test--advertised
-                (org-mcp-test--advertised-date-refusal (car provocation))
-                "Org reads it as '\\(.*\\)'\\'")))
-          (mapc #'org-mcp-test--advertised-scheduled-accepted named)
-          (setq values (append values named)))))
+    (dolist (sent org-mcp-test--dates-the-calendar-has-not-got)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-date-refusal sent)
+              "Org resolves it to '\\(.*\\)'\\'")))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
 
 (defconst org-mcp-test--dates-delaying-once-beside-a-repeater
@@ -26649,8 +26689,8 @@ advertisement a client can obey and one it cannot: the line is
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
     ("the date under unread text"
      . org-mcp-test--advertisement-date-without-unread-text)
-    ("the date Org reads instead"
-     . org-mcp-test--advertisement-date-org-reads-instead)
+    ("the date a day no month has resolves to"
+     . org-mcp-test--advertisement-date-resolved-to)
     ("the two dates beside a repeater"
      . org-mcp-test--advertisement-date-warning-delay)
     ("the TODO keywords of a file" . org-mcp-test--advertisement-todo-states)
@@ -26728,30 +26768,6 @@ the call is has to name them twice over."
         (should
          (> (length (delete-dups (org-mcp-test--advertisements-of template)))
             1))))))
-
-(ert-deftest org-mcp-test-a-date-a-refusal-names-is-not-always-one-to-send ()
-  "The refusal of a day the calendar has not got names one org-mcp refuses.
-It recommends Org\\='s reading of the value that arrived, repeater and
-delay and all, and it is written before the check that refuses a
-first-only delay beside a repeater has run.  A value carrying one of
-those is answered with a recommendation carrying it too, which the
-next call is refused for.
-
-This is not the guard passing.  It is the failure the guard exists
-to find, pinned so that it cannot be lost again between one input
-and the next, and it belongs to the refusal rather than to this
-file.  When it is answered, this test fails on the value that now
-goes through: move that value to `accepted' in the table beside it,
-where the guard above will send it, and take it out of here."
-  (let ((org-mcp-test--advertisements-provoked nil))
-    (dolist (provocation org-mcp-test--dates-the-calendar-has-not-got)
-      (when (eq (cdr provocation) 'refused)
-        (ert-info ((car provocation) :prefix "Sent: ")
-          (mapc
-           #'org-mcp-test--advertised-scheduled-refused
-           (org-mcp-test--advertised
-            (org-mcp-test--advertised-date-refusal (car provocation))
-            "Org reads it as '\\(.*\\)'\\'")))))))
 
 ;;; Every refusal, classed
 
@@ -26875,7 +26891,7 @@ array such as [\"title\", \"link\"]"
     "Invalid TODO state: '%s' - valid states: %s, or null for no keyword"
     "Date '%s' carries text that is no part of a timestamp: '%s' - Org would write '%s' \
 without it"
-    "Date '%s' does not exist - Org reads it as '%s'"
+    "Date '%s' does not exist - Org resolves it to '%s'"
     "Date '%s' pairs a first-only warning delay with a repeater - Org's planning writer drops \
 the delay and writes '%s'; '%s' warns before every repeat"
     "Priority '%s' out of range ('%c' to '%c')"

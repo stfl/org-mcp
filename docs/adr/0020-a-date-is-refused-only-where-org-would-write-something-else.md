@@ -22,10 +22,27 @@ all, because the words Org dropped are in no property of it, and
 reading Org's timestamp grammar a second time here would give the check an
 opinion of its own, which this record denies it.
 
-This refusal is asked after every other one, because its message names the
-timestamp Org would have written and a client sends what a message names. Asked
-earlier it would name what the next refusal rejects: for `<2026-02-30 Fri typo>`
-the second of March, which is exactly the rolled date the surface refuses.
+Every timestamp one of these refusals names is one this surface takes. A client
+sends what a message names, so a recommendation the next refusal rejects leaves
+nobody anywhere to go. It is a property of the whole set of refusals rather than
+of any one of them, and each earns it in its own way:
+
+- the refusal of a day no month has names the moment alone — that day and the
+  time on it, without the repeater or the warning period the value carried —
+  because the moment is what it refuses, and a moment standing by itself carries
+  nothing the other refusals are about;
+- the refusal of a first-only warning delay beside a repeater names two
+  renderings that keep the repeater, and is asked once the day has been found
+  real, so the day those carry is a day;
+- the refusal of text Org reads past names the whole of what Org read, and is
+  asked last, so the timestamp it names is one every other refusal has passed.
+
+Ordering alone does not carry the property, which is why the first of those
+names less than Org read. Asking the delay refusal before the impossible-day one
+would have it answer `<2026-02-30 Fri +1w --3d>` with `<2026-03-02 Mon +1w>` —
+a timestamp this surface takes, naming a day nobody asked for, which is the
+silent roll the surface refuses in the first place. A message is honest about a
+value only when the value is built to be one.
 
 The day name is read past and written rather than refused, for the reason the
 rule is what it is: Org writes the day the date falls on, so a call that
