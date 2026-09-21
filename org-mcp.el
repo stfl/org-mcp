@@ -3400,7 +3400,7 @@ caller's to decide."
           target)))))
 
 (defun org-mcp--clock-closed-ends (start)
-  "Return the end times of the heading\='s closed CLOCK lines at START.
+  "Return the end times of the heading's closed CLOCK lines at START.
 Point must be at a heading and is not moved."
   (delq
    nil
@@ -3415,7 +3415,7 @@ write, and one time may appear in either more than once, so they are
 compared as multisets rather than as sets.
 
 Nil when AFTER adds none, and nil when it adds more than one: only
-one clock runs at a time, so a second addition is not this call\='s to
+one clock runs at a time, so a second addition is not this call's to
 claim, and saying nothing is the honest answer where saying which
 would be a guess."
   (let ((unmatched (copy-sequence before))
@@ -3432,15 +3432,15 @@ would be a guess."
 (defun org-mcp--clock-open-reading ()
   "Return what will find again the clock running in the heading at point.
 Nil when no CLOCK line of the heading is open.  Otherwise a cons of
-that line\='s start and the end times of the lines already closed at
+that line's start and the end times of the lines already closed at
 the same start.  Point must be at a heading and is not moved.
 
-A start does not name a CLOCK line.  `org-clock-rounding-minutes\='
+A start does not name a CLOCK line.  `org-clock-rounding-minutes'
 makes two lines of one heading beginning together ordinary, which is
-why `org-clock-delete\=' refuses a start that names two.  So the
+why `org-clock-delete' refuses a start that names two.  So the
 reading carries what was already closed there, and the line this call
 closed is the one that reading cannot account for; see
-`org-mcp--clock-closed-moves\='."
+`org-mcp--clock-closed-moves'."
   (when-let* ((open
                (org-mcp--clock-entries-matching
                 (lambda (clock)
@@ -3451,14 +3451,14 @@ closed is the one that reading cannot account for; see
 
 (defun org-mcp--clock-closed-moves (reading)
   "Return the response field for the clock READING the call closed, or nil.
-READING is `org-mcp--clock-open-reading\=' taken before the write, and
+READING is `org-mcp--clock-open-reading' taken before the write, and
 nil when no clock was running in the heading, which is most calls.
 Point must be at the heading and is not moved.
 
 The field is there only when this call closed that clock, so its
-presence is the statement — the shape `org-mcp--planning-moves\=' uses
+presence is the statement — the shape `org-mcp--planning-moves' uses
 for a planning field a call moved without being asked to.  It reports
-what `org-clock-out\=' reports, because a client that was clocking the
+what `org-clock-out' reports, because a client that was clocking the
 task it has just finished is owed what the call it did not have to
 make would have told it.
 
@@ -3466,7 +3466,7 @@ The line is identified by being closed now and not then, never by its
 start.  Reading the start alone would report a line closed long
 before the call whenever one began at the same minute, and would
 report a close on a keyword that closed nothing at all, which is the
-statement the field\='s absence is supposed to make."
+statement the field's absence is supposed to make."
   (when-let* ((reading)
               (start (car reading))
               (end

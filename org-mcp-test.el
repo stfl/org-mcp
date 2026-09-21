@@ -4795,7 +4795,7 @@ side of a minute boundary do not agree."
 
 (defun org-mcp-test--content-clocked-task-sharing-a-start (stamp)
   "Return a task whose open clock shares STAMP with a line already closed.
-`org-clock-rounding-minutes\=' makes two CLOCK lines of one heading
+`org-clock-rounding-minutes' makes two CLOCK lines of one heading
 beginning at the same minute ordinary, and Org writes a new entry at
 the top of the LOGBOOK, so the running one is the first of the two.
 A start therefore names neither line by itself."
@@ -4863,9 +4863,9 @@ minutes.")
 
 (ert-deftest org-mcp-test-set-todo-reports-the-clock-a-done-keyword-closed ()
   "A clock Org closes on the way to a done keyword is reported.
-`org-clock-out-when-done\=' closes the clock running in a heading that
+`org-clock-out-when-done' closes the clock running in a heading that
 reaches a done keyword, which the call never asked for and the client
-has no other way to learn.  The field carries what `org-clock-out\='
+has no other way to learn.  The field carries what `org-clock-out'
 reports, so a client that was clocking the task it has just finished
 is told what the call it did not have to make would have told it."
   (let ((stamp (org-mcp-test--clock-started-an-hour-ago)))
@@ -4927,7 +4927,7 @@ is still running."
 
 (ert-deftest org-mcp-test-set-todo-reports-the-clock-it-closed-not-an-older ()
   "The clock reported is the one this call closed, not one closed before.
-A start does not name a CLOCK line — `org-clock-rounding-minutes\='
+A start does not name a CLOCK line — `org-clock-rounding-minutes'
 makes two of one heading beginning together ordinary — so a report
 that found its line by start alone would hand back whichever of them
 it picked.  Here the older line ended ten minutes in and the running
@@ -4966,7 +4966,7 @@ one is an hour old, and it is the hour the response has to carry."
   "A keyword that closed nothing reports nothing, older closes and all.
 The heading carries a line closed before the call and one still
 running, both beginning at the same minute.  Nothing here was closed,
-so there is no `clock\=' to report: a field that answered from the
+so there is no `clock' to report: a field that answered from the
 start alone would find the older line and tell the client its clock
 had stopped while it is still running."
   (let ((stamp (org-mcp-test--clock-started-an-hour-ago)))
