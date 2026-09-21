@@ -3838,7 +3838,14 @@ something other than what the call sent into the file:
 - a year below 100, which Org\\='s date reader reads as a two-digit
   year and answers with another century;
 - an inactive timestamp, which a planning line does not carry;
-- a date range, whose second half Org\\='s planning writer drops.
+- a date range — two timestamps joined by `--' — whose second half
+  Org\\='s planning writer drops, however close the two fall.
+
+Two forms carrying a doubled hyphen are not ranges and are written.
+A span of the day, `2026-03-27 09:00-10:00', lives inside the one
+timestamp and Org carries the whole of it, backwards hours and all.
+A first-only warning delay, `--3d' against the `-3d' that warns
+before every repeat, is Org\\='s own spelling and it goes in as sent.
 
 The value returned is Org\\='s own rendering of what it parsed, the
 form `org-schedule' and `org-deadline' carry through whole; see
@@ -3857,32 +3864,39 @@ date"
        "Date '%s' is an inactive timestamp - SCHEDULED and DEADLINE \
 carry an active one, written <...>"
        date-str))
-    ;; A time range within one day — `<2026-03-27 Fri 09:00-10:00>' —
-    ;; is a range Org's planning writer does carry, so what is refused
-    ;; is a range whose halves fall on different days.
-    (unless (equal
-             (org-mcp--timestamp-parts
-              timestamp '(:year-start :month-start :day-start))
-             (org-mcp--timestamp-parts
-              timestamp '(:year-end :month-end :day-end)))
-      (org-mcp--tool-validation-error
-       "Date '%s' is a date range - name the one date the field is \
-to carry"
-       date-str))
-    ;; `org-small-year-to-year' is the reading Org's date reader
-    ;; applies, so the year it leaves alone is the year that reaches
-    ;; the file.
-    (let ((year (org-element-property :year-start timestamp)))
-      (unless (= year (org-small-year-to-year year))
+    (let ((raw (org-element-property :raw-value timestamp))
+          (rendered (org-element-interpret-data timestamp)))
+      ;; A `--' is not a range by itself.  Between two bracketed
+      ;; timestamps it is the range separator `org-tr-regexp-both'
+      ;; reads, and Org's planning writer keeps the first half of
+      ;; such a range however close the halves fall — one inside a
+      ;; single day is cut as surely as one across a month.  After a
+      ;; date it is the first-only warning delay, `--3d' against the
+      ;; `-3d' that warns before every repeat, and Org writes it.
+      ;; Inside one pair of brackets the separator is neither: Org's
+      ;; parser reads up to it and stops, so the rendering comes back
+      ;; without it, and that is what tells the two apart here rather
+      ;; than a second reading of Org's timestamp syntax.
+      (when (or (string-match-p org-tr-regexp-both raw)
+                (and (string-search "--" raw)
+                     (not (string-search "--" rendered))))
         (org-mcp--tool-validation-error
-         "Date '%s' has a year below 100, which Org reads as a \
+         "Date '%s' is a date range - name the one date the field is \
+to carry"
+         date-str))
+      ;; `org-small-year-to-year' is the reading Org's date reader
+      ;; applies, so the year it leaves alone is the year that
+      ;; reaches the file.
+      (let ((year (org-element-property :year-start timestamp)))
+        (unless (= year (org-small-year-to-year year))
+          (org-mcp--tool-validation-error
+           "Date '%s' has a year below 100, which Org reads as a \
 two-digit year"
-         date-str)))
-    ;; Org's parser reads the fields as written; its writer resolves
-    ;; them against the calendar.  A day that does not exist is one
-    ;; the two disagree about, and Org's answer is the day the write
-    ;; would otherwise have landed on.
-    (let ((rendered (org-element-interpret-data timestamp)))
+           date-str)))
+      ;; Org's parser reads the fields as written; its writer
+      ;; resolves them against the calendar.  A day that does not
+      ;; exist is one the two disagree about, and Org's answer is the
+      ;; day the write would otherwise have landed on.
       (unless (equal
                (org-mcp--timestamp-parts
                 timestamp org-mcp--timestamp-moment)
@@ -5429,7 +5443,12 @@ MCP Parameters:
   "Write VALUE on the entry at point through WRITER.
 WRITER is `org-schedule' or `org-deadline', which carry a repeater
 and a warning period through to the file; `org-add-planning-info'
-takes the date alone and would drop both.
+takes the date alone and would drop both.  One pairing they do not
+carry is a repeater beside a first-only warning delay: given
+`<2026-03-27 Fri +1w --3d>' both write `<2026-03-27 Fri +1w>'.  The
+date the call named is the date the file holds, and the response
+reports the timestamp read back from the file, so the client is told
+which warning survived.
 
 VALUE is a timestamp Org itself rendered, by
 `org-mcp--date-normalized', so the date is settled before this runs.

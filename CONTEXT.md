@@ -112,3 +112,15 @@ _Avoid_: URI, resource URI, headline path
 An edit org-mcp applied to an Emacs buffer that already held the user's own
 unsaved edits. It exists in that buffer but not on disk until the user saves.
 _Avoid_: staged change, dirty write
+
+**Date range**:
+Two Org timestamps joined by `--`, naming a stretch from the one to the other.
+A field a write sets holds a single date, so a range is refused there; a field
+a write reads may hold one, and it is asserted by the whole string.
+_Avoid_: timestamp range, date span, period
+
+**Span**:
+The `09:00-10:00` part of a single Org timestamp, naming a stretch of the day
+that timestamp falls on. It belongs to one date rather than joining two, so a
+write carries it whole.
+_Avoid_: time range, duration, interval

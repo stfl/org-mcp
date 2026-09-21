@@ -11869,6 +11869,34 @@ Task body."
    "Task body text\\.\n?\\'")
   "Pattern after a SCHEDULED carrying a warning period is written.")
 
+(defconst org-mcp-test--pattern-scheduled-with-span
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ 09:00-10:00>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a span of the day.")
+
+(defconst org-mcp-test--pattern-scheduled-with-backwards-span
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ 10:00-09:00>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED whose span ends at an earlier hour.")
+
+(defconst org-mcp-test--pattern-scheduled-with-first-only-delay
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ --3d>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a first-only warning delay.")
+
+(defconst org-mcp-test--pattern-scheduled-repeater-alone
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ \\+1w>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a repeater takes a first-only delay down with it.")
+
 (defconst org-mcp-test--pattern-deadline-with-repeater-and-warning
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -12078,6 +12106,147 @@ second, so a range in `after\=' is refused rather than written short."
      "\\`Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - \
 name the one date the field is to carry\\'"
      test-file)))
+
+(defconst org-mcp-test--dates-that-are-ranges-within-a-day
+  '("<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>"
+    "2026-03-27 09:00--2026-03-27 10:00")
+  "Ranges whose two halves name one day, written the two ways Org takes.
+The first joins two bracketed timestamps with Org\='s range separator,
+and Org\='s planning writer keeps the first of them.  The second puts
+the separator inside one pair of brackets, where Org\='s parser reads
+up to it and no further.  Neither reaches the file whole, so how
+close the halves fall decides nothing.")
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-range-within-one-day ()
+  "A range whose halves fall on one day is refused like any other.
+Org keeps the first half whatever the second is, so a range inside
+a single day loses as much as one across a month and is refused by
+the same message."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((link (org-mcp-test--file-link test-file "*Scheduled Task")))
+      (dolist (date org-mcp-test--dates-that-are-ranges-within-a-day)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link)
+           (before . "<2026-03-01 Sun>")
+           (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' is a date range - name the one date the field "
+                 "is to carry\\'")
+         test-file)))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-span-of-the-day ()
+  "A span written inside one timestamp is a date and is written whole.
+`09:00-10:00\=' carries no range separator, and Org\='s planning writer
+puts the whole of it in the file, so it is a value the field holds
+rather than the range that is refused."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 09:00-10:00"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 09:00-10:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-with-span))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-backwards-span ()
+  "A span ending at an earlier hour than it starts is written as sent.
+Org reads it, writes it and reads it back unchanged, so nothing the
+call sent is lost and nothing here refuses it: a date is refused
+only where Org would put something else in the file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 10:00-09:00"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 10:00-09:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-scheduled-with-backwards-span))))
+
+(defconst org-mcp-test--first-only-delays
+  '("<2026-03-27 Fri --3d>" "2026-03-27 --3d")
+  "A first-only warning delay standing alone, in both spellings.
+Org writes a warning that fires before every repeat `-3d\=' and one
+that fires only before the first `--3d\=', so the doubled hyphen after
+a date says which warning it is rather than joining two timestamps.")
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-first-only-delay ()
+  "A `--3d\=' delay is a warning period and is written, not refused.
+It carries the same doubled hyphen a date range is joined by, and
+Org\='s planning writer puts the whole of it in the file, so what a
+range is told apart by cannot be the hyphen alone."
+  (dolist (date org-mcp-test--first-only-delays)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-scheduled"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
+                 (after . ,date))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (string-match-p "\\`<2026-03-27 [^ >]+ --3d>\\'"
+                         (alist-get 'after result)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-scheduled-with-first-only-delay)))))
+
+(defconst org-mcp-test--first-only-delays-with-a-repeater
+  '("<2026-03-27 Fri +1w --3d>" "2026-03-27 +1w --3d")
+  "A first-only warning delay sent beside a repeater, both spellings.")
+
+(ert-deftest org-mcp-test-set-scheduled-repeater-drops-a-first-only-delay ()
+  "A repeater takes a first-only delay down with it, and says so.
+Org\='s planning writer carries a repeater and a `-3d\=' warning
+together, and carries a `--3d\=' delay standing alone, but writes the
+repeater by itself when the two arrive together.  The delay is Org\='s
+to drop rather than this server\='s to refuse, and the response reports
+the timestamp read back from the file, so a client is told what the
+field ended up holding."
+  (dolist (date org-mcp-test--first-only-delays-with-a-repeater)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-scheduled"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
+                 (after . ,date))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (string-match-p "\\`<2026-03-27 [^ >]+ \\+1w>\\'"
+                         (alist-get 'after result)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-scheduled-repeater-alone)))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-an-inactive-timestamp ()
   "An inactive timestamp is refused rather than written as an active one.

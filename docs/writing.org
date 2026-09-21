@@ -102,6 +102,7 @@ speaks:
 | =2026-03-27 09:00-10:00=    | =<2026-03-27 Fri 09:00-10:00>=    | a span of the day              |
 | =2026-03-27 +1w=            | =<2026-03-27 Fri +1w>=            | a repeater                     |
 | =2026-03-27 -3d=            | =<2026-03-27 Fri -3d>=            | a warning period               |
+| =2026-03-27 --3d=           | =<2026-03-27 Fri --3d>=           | a first-only warning           |
 | =2026-03-27 09:00 .+2d -1d= | =<2026-03-27 Fri 09:00 .+2d -1d>= | all three at once              |
 | =<2026-06-20 Sat +1w -3d>=  | =<2026-06-20 Sat +1w -3d>=        | the raw string a read returned |
 
@@ -114,8 +115,25 @@ person at the tenth step; a call has nobody to ask, and the answer taken here
 is the one that carries the repeater out. A warning period is the =-3d= form, and
 it may stand alone or beside a repeater; on a DEADLINE it brings the headline
 into the agenda three days early, and on a SCHEDULED it holds the headline back
-until three days before the date. The day name is Org's to write: send it or
-leave it out, and the file gets the day the date falls on.
+until three days before the date. Doubling the hyphen narrows it to the first
+occurrence: =-3d= warns before every repeat and =--3d= before the first date
+only. The day name is Org's to write: send it or leave it out, and the file
+gets the day the date falls on.
+
+The two warning forms part company beside a repeater. Org writes
+=<2026-03-27 Fri +1w -3d>= whole, and writes =<2026-03-27 Fri +1w --3d>= as
+=<2026-03-27 Fri +1w>=, leaving the delay out. The field holds the date the
+call named either way, and the =after= a response carries is read back from the
+file, so it reports the warning that survived rather than the one that was
+sent. A =--3d= standing alone is written whole.
+
+=09:00-10:00= is a span within the day and not a range: Org writes it inside the
+one timestamp, so the whole of it reaches the file. It goes in as sent even when
+its hours run backwards — =2026-03-27 10:00-09:00= writes
+=<2026-03-27 Fri 10:00-09:00>=, which is what Org itself does with it and what a
+read hands back. Two timestamps joined by =--= are a range, and a range is
+refused (see [[*A date that is not a date is refused]]); the same doubled hyphen
+after a date is a warning rather than a range, and is written.
 
 Seconds are read and not recorded: =2026-03-27 09:00:33= writes
 =<2026-03-27 Fri 09:00>=, because an Org timestamp has no seconds field. The
@@ -153,11 +171,16 @@ Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, an Org time
 =2028-02-29= is a day and is written: the question is whether the year in hand
 has that day, not whether February has twenty-nine of them in general.
 
-The last two refusals are forms Org reads perfectly well and its planning writer
-would not carry whole. An inactive timestamp, =[2026-03-27 Fri]=, would go into
-the file active; a date range would go in as its first half alone. A headline
-can carry a SCHEDULED that is a range and =before= asserts one by the whole
-string, but =after= names the one date the field is to carry.
+An inactive timestamp and a date range are forms Org reads perfectly well and
+its planning writer would not carry whole. =[2026-03-27 Fri]= would go into the
+file active; a range, two timestamps joined by =--=, would go in as its first
+half alone. How close its halves fall changes nothing —
+=<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>= is refused for the reason
+=<2026-06-20 Sat>--<2026-06-21 Sun>= is, and so is a range written inside one
+pair of brackets, =2026-03-27 09:00--2026-03-27 10:00=, which Org reads up to
+the separator and no further. A headline can carry a SCHEDULED that is a range
+and =before= asserts one by the whole string, but =after= names the one date the
+field is to carry.
 
 A date is written out in full, never as a relative expression: =+1w= on its own
 is not next week but a repeater with no date under it, and it is refused.
