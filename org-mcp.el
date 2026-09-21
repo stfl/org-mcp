@@ -7815,7 +7815,7 @@ to; given none, it is the global Emacs Org-mode configuration.
 Parameters:
   link - Link to the file to answer for (string, optional)
 "
-     org-mcp--read-link-formats
+     org-mcp--node-link-formats
      "         A link naming a heading answers for that heading's
          file: the settings are file-wide.
          A file carrying no `#+TODO:', `#+SEQ_TODO:' or
