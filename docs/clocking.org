@@ -28,6 +28,55 @@ second in a CLOCK line for it to be compared against.
 The planning setters take a different format, =YYYY-MM-DD= with an optional
 =HH:MM=, and ask the same question of it (see [[file:writing.org::*A date has to be a date][A date has to be a date]]).
 
+* A clock org-mcp starts is a line in the file
+
+=org-clock-in= writes the CLOCK line itself. The heading ends up with an open
+CLOCK line, which is what a running clock looks like on disk, but the Emacs
+session has no clock running: nothing appears in the mode line, there is no
+clock for =org-clock-idle-time= to time out, and =C-c C-x C-o= in Emacs
+answers =No active clock=.
+
+org-mcp's own tools reach the line where it is, so a client is not missing
+anything. [[*org-clock-active][org-clock-active]] reports it, [[*org-clock-dangling][org-clock-dangling]] lists it while it is
+open, and [[*org-clock-out][org-clock-out]] closes it.
+
+What it costs is the Org settings that need a clock running in the session.
+There is none for them to find, so against a clock org-mcp started they do
+nothing:
+
+- =org-clock-in-switch-to-state= leaves the heading's keyword where it is.
+- =org-clock-in-hook= does not run.
+- Nothing is pushed to =org-clock-history=, so =org-clock-goto= does not lead
+  back to the heading.
+- =org-clock-out-when-done= does not close the line when the heading reaches a
+  done keyword — neither through [[file:writing.org::*org-node-set-todo][org-node-set-todo]] nor through =C-c C-t= in
+  Emacs.
+
+These do act on a clock org-mcp started:
+
+- =org-clock-into-drawer= decides where the CLOCK line goes, so the drawer is
+  made, or the line written bare under the heading, as it says.
+- =org-clock-rounding-minutes= rounds the start that gets written.
+- =org-clock-continuously= decides whether that start is taken from the
+  previous clock's end rather than the current time, within
+  =org-mcp-clock-continuous-threshold= minutes of it.
+- =org-clock-out-switch-to-state= moves the heading's keyword when
+  [[*org-clock-out][org-clock-out]] closes the line.
+- =org-clock-out-remove-zero-time-clocks= takes a closed line of no length
+  away, and the drawer it empties with it.
+- =org-clock-out-hook= runs on that close, and =org-log-note-clock-out= records
+  it, as they do for a clock-out in Emacs.
+
+What sorts the two lists is that org-mcp writes the opening line itself and
+asks Org to write the close. A setting Org consults as it closes a clock
+therefore reaches an org-mcp clock the moment [[*org-clock-out][org-clock-out]] is called, and a
+setting that reaches for the clock Emacs is running finds none.
+
+A clock the user started in Emacs is Emacs's own clock, and every one of these
+settings acts on it as it always has. org-mcp reaches that clock too:
+=org-clock-active= reports it ahead of any open line found in a file, and
+=org-clock-out= closes it.
+
 * Clock Tracking Tools
 ** org-config-clock
 - *Description:* Get clock-related configuration from the current Emacs Org-mode settings
@@ -329,9 +378,20 @@ there, exactly as it does for the =C-c C-t= you would have typed. A repeating
 task is the same, even though it comes back in a not-done keyword.
 
 It is the Emacs session's own clock that stops. An open CLOCK line the session
-is not clocking — one left by an earlier session, say, which
-[[*org-clock-dangling][org-clock-dangling]] is for — is a line in a file rather
-than a clock, and a done keyword leaves it as it is.
+is not clocking is a line in a file rather than a clock, and a done keyword
+leaves it as it is. One left by an earlier session is such a line, which
+[[*org-clock-dangling][org-clock-dangling]] is for, and so is one
+[[*org-clock-in][org-clock-in]] wrote
+(see [[*A clock org-mcp starts is a line in the file][A clock org-mcp starts is a line in the file]]) — which is the case
+a client meets, because clocking a task in and then finishing it is the
+ordinary sequence. The line stays open, and [[*org-clock-out][org-clock-out]]
+is what closes it.
+
+org-mcp does not close it for you. The end it would write is one nobody named,
+where =org-clock-out= takes the =end_time= and the =note= the close is recorded
+with and reports the start, end and duration back; and the condition under
+which a done keyword stops a clock is Org's, read back rather than restated
+here.
 
 That call reports the close in a =clock= field of its own response, so a client
 finishing the task it was clocking learns the =start=, =end= and =duration=

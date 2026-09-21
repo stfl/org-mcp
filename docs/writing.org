@@ -666,7 +666,7 @@ set has an empty value and spells it =[]=, the way a body spells its empty value
   - =before_planning= (object, optional): what the headline's planning fields hold now, as ={"scheduled": "<2026-06-20 Sat +1w>"}=. Name a field the headline carries one for, and leave out a field it carries none for — leaving it out is how the map asserts that it holds nothing, so =""= and =null= are refused. A field holding something else is a conflict and nothing is written. Required for a headline whose state change would move a planning value, and refused there when it is missing (see [[*A repeat redirects the call]])
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, a =clock= report when the transition closed a running clock (see [[*A done keyword can close the clock]]), and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, a =clock= report when the transition closed the Emacs session's own clock (see [[*A done keyword can close the clock]]), and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds or =before_planning= is not what its planning fields hold, =blocked:= when Org vetoes the change, unmarked validation otherwise — a missing =before_planning= on a headline that needs one among them (see [[*How a refusal is classed]])
 
 =before= and =after= both name a TODO state, so the call reads as the
@@ -741,10 +741,10 @@ Example:
 
 *** A done keyword can close the clock
 
-A move to a done keyword closes the clock running in that headline, because
-=org-clock-out-when-done= is on by default. Org does it as it does for the
-=C-c C-t= you would have typed, so the CLOCK line is closed in place and
-Emacs's own clock stops with it.
+A move to a done keyword closes the Emacs session's own clock where it is
+running in that headline, because =org-clock-out-when-done= is on by default.
+Org does it as it does for the =C-c C-t= you would have typed, so the CLOCK
+line is closed in place and Emacs's own clock stops with it.
 
 The response says so. A =clock= report is there only when the call closed one,
 carrying that close's =start=, =end= and =duration=, so a client that was
@@ -773,8 +773,15 @@ No =clock= means this call closed none, which is the whole of what the field
 says. Org closes the clock only where it is the Emacs session's own, running in
 that heading, and the keyword reached is a done one under
 =org-clock-out-when-done=; anything short of that leaves the clock alone and
-the field out. An open CLOCK line the session is not clocking is one such case,
-and so is a clock left open by an earlier session.
+the field out. An open CLOCK line the session is not clocking is one such case:
+a clock left open by an earlier session, and a clock
+[[file:clocking.org::*org-clock-in][org-clock-in]] started, which is a line in
+the file and never Emacs's running clock
+(see [[file:clocking.org::*A clock org-mcp starts is a line in the file][A clock org-mcp starts is a line in the file]]).
+
+That last one is the case to expect, because clocking a task through org-mcp
+and then finishing it is the ordinary sequence: the CLOCK line stays open, this
+call says nothing about it, and [[file:clocking.org::*org-clock-out][org-clock-out]] is what closes it.
 
 A repeat closes the clock all the same, which is the case worth knowing. Org
 closes it while the headline is done and moves the keyword back afterwards, so

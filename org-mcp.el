@@ -7912,13 +7912,17 @@ Returns JSON object:
           CLOSED is reported like the other two and asserted like
           neither: Org writes it on a done transition and clears it
           on a repeat
-  clock - Present only when the transition closed a clock running in
-          the heading, which `org-clock-out-when-done' does on a move
-          to a done keyword (object): the start, end and duration of
-          that close.  Both timestamps are bracketed, as a CLOCK line
-          spells an inactive timestamp and as org-clock-add reports
-          them; org-clock-out spells its own start without brackets,
-          so compare the two as instants, not as strings
+  clock - Present only when the transition closed the Emacs session's
+          own clock running in the heading, which
+          `org-clock-out-when-done' does on a move to a done keyword
+          (object): the start, end and duration of that close.  A
+          clock org-clock-in started is a CLOCK line in the file and
+          not that clock, so a done keyword leaves it open and no
+          field is reported; close it with org-clock-out.  Both
+          timestamps are bracketed, as a CLOCK line spells an
+          inactive timestamp and as org-clock-add reports them;
+          org-clock-out spells its own start without brackets, so
+          compare the two as instants, not as strings
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -8936,6 +8940,12 @@ is given, the new clock may start at the previous clock's end time
 if it is within the continuous threshold.
 
 Rounding is applied per org-clock-rounding-minutes.
+
+The CLOCK line is written into the file and does not become the
+Emacs session's running clock, so Org settings that act on that
+clock do nothing here.  org-clock-out-when-done is the one to know:
+a done keyword leaves the line open and reports no clock, and
+org-clock-out is what closes it.
 
 Parameters:
   link - Link to the headline to clock in (string, required)
