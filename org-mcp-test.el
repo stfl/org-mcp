@@ -24609,6 +24609,22 @@ It joins the settings the file already has rather than going above
 the comment line or the drawer, both of which Org keeps above the
 settings.")
 
+(defconst org-mcp-test--content-settings-comment-only
+  (concat
+   "# -*- mode: org -*-\n"
+   "* TODO Simple Task\n")
+  "A file whose only preamble is the line Emacs reads its locals from.")
+
+(defconst org-mcp-test--pattern-settings-under-the-comment
+  (concat
+   "\\`# -\\*- mode: org -\\*-\n"
+   "#\\+CATEGORY: gtd\n"
+   "\\* TODO Simple Task\n\\'")
+  "Pattern after the first setting of a file with only a comment is written.
+The comment stays on the first line, where Emacs reads a file-local
+variables line and where Org puts a file's own property drawer under
+it rather than over it.")
+
 (defconst org-mcp-test--content-settings-drawer-only
   (concat
    ":PROPERTIES:\n"
@@ -25145,6 +25161,25 @@ there, and a drawer under a `#+' line is read as no drawer at all."
               ["gtd"]))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-settings-joined-the-settings))))
+
+(ert-deftest org-mcp-test-file-set-setting-goes-under-a-lone-comment ()
+  "A file whose only preamble is a comment keeps the comment on line one.
+Emacs reads a file-local variables line there and nowhere else, so a
+setting written above it would take the file's mode with it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-comment-only))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "CATEGORY")
+         (before . [])
+         (after . "gtd")))
+      (should
+       (equal (alist-get 'CATEGORY (org-mcp-test--file-settings link))
+              ["gtd"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-under-the-comment))))
 
 (ert-deftest org-mcp-test-file-set-setting-goes-under-a-lone-drawer ()
   "A file whose only preamble is its drawer keeps the drawer on top.
