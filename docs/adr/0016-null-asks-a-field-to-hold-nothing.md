@@ -1,5 +1,8 @@
 # Null asks a field to hold nothing; an empty string is a value
 
+Each field spells its own emptiness, and that principle stands. What it does
+not license is reading `""` as every field's spelling for it.
+
 In an `after`, JSON `null` is the ask for the field to hold nothing — it is
 JSON's own word for no value — and an empty string is a value, accepted exactly
 where the field has one. A body can be empty and a property line can stand

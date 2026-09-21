@@ -300,6 +300,30 @@ empty value into it."
   (org-mcp--tool-validation-error "Missing required parameter: %s"
                                   name))
 
+(defun org-mcp--json-name (value)
+  "Return the JSON spelling of VALUE, for a refusal to name it by.
+VALUE is what `json-read-from-string' made of a client\='s JSON, and a
+refusal that printed that back would hand the client the spelling of
+its own value in another language: an object reads as an alist,
+false as `:json-false', null as nil.  A string and a number are
+printed as JSON writes them, and a composite is named by its kind,
+since a refusal wants to say what arrived rather than repeat it."
+  (cond
+   ((null value)
+    "null")
+   ((eq value t)
+    "true")
+   ((eq value :json-false)
+    "false")
+   ((stringp value)
+    (format "%S" value))
+   ((numberp value)
+    (format "%s" value))
+   ((vectorp value)
+    "an array")
+   (t
+    "an object")))
+
 (defun org-mcp--text-param-given (value name)
   "Return VALUE, the text the required parameter NAME carries.
 Any string is text, \"\" included: the parameters read this way carry
@@ -313,6 +337,12 @@ otherwise be read as asserting that a field was empty, or as asking
 for a body of no text, and either way go on to destroy what was
 there.  Anything else is a malformed call.
 
+What \"\" then says is the parameter\='s own business and not this
+one\='s: it asserts that a field held nothing in a `before\=', it is a
+body of no text on `org-node-set-content\=', and it is refused as no
+value by the fields that have none, see `org-mcp--value-to-write'.
+So the refusal here says only that text was wanted.
+
 NAME is the parameter as the call spells it, so the refusal names
 what the client sent rather than the field behind it."
   (cond
@@ -321,9 +351,9 @@ what the client sent rather than the field behind it."
    ((org-mcp--blank-param-p value)
     (org-mcp--missing-param-error name))
    (t
-    (org-mcp--tool-validation-error
-     "%s must be a string, \"\" for no value: %S"
-     name value))))
+    (org-mcp--tool-validation-error "%s must be a string, not %s"
+                                    name
+                                    (org-mcp--json-name value)))))
 
 (defun org-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
@@ -353,8 +383,8 @@ being spelled alike exactly where the field stops having one."
     (org-mcp--missing-param-error name))
    (t
     (org-mcp--tool-validation-error
-     "%s must be a string, or null to take the value away"
-     name))))
+     "%s must be a string, or null to take the value away, not %s"
+     name (org-mcp--json-name value)))))
 
 (defun org-mcp--assert-before (before found context)
   "Refuse the call unless FOUND is the value BEFORE asserts.
@@ -4134,7 +4164,8 @@ keyword, so \"\" is no state this surface names: it is what a `before'
 asserts and an `after' takes away on `org-mcp--tool-node-set-todo',
 the tool that owns the field, and a creation asserts nothing and
 takes nothing away.  A heading with no keyword is made by creating
-one with a keyword and taking it off there.
+one with a keyword and taking it off there, which is where null
+means something and here it does not.
 A state Org vetoes for the new heading, such as a done keyword under
 an ordered parent whose earlier siblings are unfinished, is refused
 and no heading is added; see `org-mcp--set-todo-state'.
@@ -4198,7 +4229,8 @@ MCP Parameters:
   (when (string-empty-p todo)
     (org-mcp--tool-validation-error
      "TODO state cannot be empty: name a keyword to create the node \
-with, and take it off afterwards with org-node-set-todo"))
+with, and take it off afterwards with org-node-set-todo \
+{\"after\": null}"))
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
        ;; The body is inserted and checked as text, so a number, an
@@ -6701,9 +6733,10 @@ Parameters:
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo - TODO keyword from org-todo-keywords (string, required)
-         Cannot be empty: a heading with no keyword is made by
-         creating it with one and taking it off with
-         org-node-set-todo
+         It has to name one.  \"\" is no state this surface names
+         and null is the parameter left out, so a heading with no
+         keyword is made by creating it with one and taking it off
+         with org-node-set-todo {\"after\": null}
   tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]

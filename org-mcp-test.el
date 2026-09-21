@@ -4955,9 +4955,11 @@ decoded to, and nothing is written."
   "A create is refused when `todo\=' is empty, and writes nothing.
 A read reports no `todo\=' at all for a heading that carries no
 keyword, so \"\" is no state the surface names; it is what a `before\='
-asserts and an `after\=' takes away on org-node-set-todo, the tool that
-owns the field.  A create asserts nothing and takes nothing away, so
-it names a keyword, and the refusal says where the other one lives."
+asserts on org-node-set-todo, the tool that
+owns the field, and there it is null that takes a keyword off.  A
+create asserts nothing and takes nothing away, so it names a
+keyword, and the refusal says where the other one lives and how it
+is spelled."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
     (org-mcp-test--call-tool-refused
@@ -4967,7 +4969,9 @@ it names a keyword, and the refusal says where the other one lives."
        (parent . ,(concat "file:" test-file)))
      (concat
       "\\`TODO state cannot be empty: name a keyword to create the "
-      "node with, and take it off afterwards with org-node-set-todo\\'")
+      "node with, and take it off afterwards with org-node-set-todo "
+      (regexp-quote "{\"after\": null}")
+      "\\'")
      test-file)))
 
 (ert-deftest org-mcp-test-node-create-refuses-a-blank-title ()
@@ -11690,8 +11694,40 @@ again would not help, because nothing about the file is in question."
      `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
        (before . 3)
        (after . "C"))
-     "\\`before must be a string, \\\"\\\" for no value: 3\\'"
+     "\\`before must be a string, not 3\\'"
      test-file)))
+
+(ert-deftest org-mcp-test-a-refusal-names-json-in-json ()
+  "A refusal names what arrived in the client\='s own language.
+`json-read-from-string\=' is what turns a call into Lisp, so printing
+its result back would answer a client in the spelling of another
+language: an object would read as an alist and true as `t\='.  Both
+readers of a required text parameter name the value by its JSON
+kind instead, and the `after\=' side names null among what it takes,
+because there it means something."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let ((link (org-mcp-test--file-link test-file "*Priority Task")))
+      (dolist (case
+               '((((a . 1)) . "an object")
+                 ([1 2] . "an array")
+                 (t . "true")))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-priority"
+         `((link . ,link) (before . ,(car case)) (after . "C"))
+         (concat "\\`before must be a string, not "
+                 (cdr case)
+                 "\\'")
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-priority"
+         `((link . ,link) (before . "B") (after . ,(car case)))
+         (concat
+          "\\`after must be a string, or null to take the value "
+          "away, not "
+          (cdr case)
+          "\\'")
+         test-file)))))
 
 (ert-deftest org-mcp-test-set-priority-empty-before-asserts-none ()
   "An empty `before\=' asserts the heading carries no priority."
@@ -16317,7 +16353,7 @@ answers a client with an internal error."
       (org-mcp-test--call-tool-refused
        "org-node-set-title"
        `((link . ,link) (before . "Simple Task") (after . 5))
-       "\\`after must be a string, \"\" for no value: 5\\'"
+       "\\`after must be a string, not 5\\'"
        test-file)
       (org-mcp-test--call-tool-refused
        "org-node-set-title"
@@ -16328,7 +16364,7 @@ whitespace\\'"
       (org-mcp-test--call-tool-refused
        "org-node-set-title"
        `((link . ,link) (before . 5) (after . "Renamed"))
-       "\\`before must be a string, \"\" for no value: 5\\'"
+       "\\`before must be a string, not 5\\'"
        test-file))))
 
 (ert-deftest org-mcp-test-blank-before-on-set-content-is-left-out ()
@@ -16396,7 +16432,7 @@ file is in question, so reading the node again would not help."
      `((link . ,(org-mcp-test--set-content-link))
        (before . "Second line of the body.")
        (after . 3))
-     "\\`after must be a string, \\\"\\\" for no value: 3\\'"
+     "\\`after must be a string, not 3\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-every-body-write-reads-its-before ()
