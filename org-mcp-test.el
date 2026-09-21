@@ -1520,6 +1520,33 @@ holds ON-DISK, and BUFFER is still the user's to save."
   (should (string= (org-mcp-test--read-file file) on-disk))
   (should (buffer-modified-p buffer)))
 
+(defun org-mcp-test--write-through-dirty-buffer
+    (content tool params fields served)
+  "Call TOOL over a buffer of CONTENT the user has unsaved edits in.
+CONTENT is what the file holds before the call.  PARAMS is a function
+of that file, called once the buffer is dirty, returning the tool\='s
+parameters; an endpoint asserting a digest reads it there, from the
+buffer, as a client planning the call does.  FIELDS is an alist of
+response fields the call is to answer with, beside the `success' and
+`saved' every write answers.  SERVED is a regexp the whole text the
+server serves for the file matches afterwards.
+
+Every write endpoint is put through this one shape: the response is
+what a client acts on, the served text is what the server believes
+the file holds, and the bytes on disk are what a save would change.
+The three together are what a buffer-blind write cannot fake."
+  (org-mcp-test--with-temp-org-files ((test-file content))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               tool (funcall params test-file)))))
+        (should (eq (alist-get 'success result) t))
+        (pcase-dolist (`(,field . ,value) fields)
+          (should (equal (alist-get field result) value)))
+        (org-mcp-test--verify-served-matches test-file served)
+        (org-mcp-test--assert-unsaved result test-file on-disk buffer)))))
+
 ;; Helper functions for testing clock MCP tools
 
 (defun org-mcp-test--call-clock-add (link start end)
@@ -3555,21 +3582,17 @@ The buffer held the user's own unsaved edit before the call, so the
 change is the user's to save: the response says so, the file on disk
 keeps the state it had, and the server answers from the buffer with
 the new state and the user's edit both in it."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-two-todo-tasks))
-    (let ((org-todo-keywords
-           '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
-      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-        (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-               (result
-                (org-mcp-test--call-update-todo-state
-                 link "IN-PROGRESS" "TODO")))
-          (should (equal (alist-get 'success result) t))
-          (should (equal (alist-get 'after result) "IN-PROGRESS"))
-          (org-mcp-test--verify-served-matches
-           test-file org-mcp-test--dirty-task-one-in-progress-regex)
-          (org-mcp-test--assert-unsaved
-           result test-file on-disk buffer))))))
+  (let ((org-todo-keywords
+         '((sequence "TODO" "IN-PROGRESS" "|" "DONE"))))
+    (org-mcp-test--write-through-dirty-buffer
+     org-mcp-test--content-two-todo-tasks
+     "org-node-set-todo"
+     (lambda (file)
+       `((link . ,(org-mcp-test--file-link file "*Task One"))
+         (before . "TODO")
+         (after . "IN-PROGRESS")))
+     '((before . "TODO") (after . "IN-PROGRESS"))
+     org-mcp-test--dirty-task-one-in-progress-regex)))
 
 (ert-deftest org-mcp-test-update-todo-state-nonexistent-id ()
   "Test TODO state update fails for non-existent ID."
@@ -6456,19 +6479,15 @@ The buffer held the user's own unsaved edit before the call, so the
 CLOCK line is the user's to save: the response says so, the file on
 disk keeps the content it had, and the server answers from the buffer
 with the CLOCK line and the user's edit both in it."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-task-content))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-             (result
-              (org-mcp-test--call-clock-add
-               link "2026-01-01T10:00:00" "2026-01-01T11:00:00")))
-        (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'added result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-clock-add-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--clock-task-content
+   "org-clock-add"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Task One"))
+       (start . "2026-01-01T10:00:00")
+       (end . "2026-01-01T11:00:00")))
+   '((added . t))
+   org-mcp-test--dirty-clock-add-regex))
 
 (ert-deftest org-mcp-test-clock-in-saves-file-to-disk ()
   "Test org-clock-in saves the open CLOCK entry to disk."
@@ -6488,18 +6507,14 @@ The buffer held the user's own unsaved edit before the call, so the
 open CLOCK line is the user's to save: the response says so, the file
 on disk keeps the content it had, and the server answers from the
 buffer with the CLOCK line and the user's edit both in it."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-task-content))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
-             (result
-              (org-mcp-test--call-clock-in link "2026-01-01T10:00:00")))
-        (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'clocked_in result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-clock-in-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--clock-task-content
+   "org-clock-in"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Task One"))
+       (start_time . "2026-01-01T10:00:00")))
+   '((clocked_in . t))
+   org-mcp-test--dirty-clock-in-regex))
 
 ;;; Tests for org-clock-in with resolve=true (dangling clock cleanup)
 
@@ -6715,17 +6730,12 @@ The buffer held the user's own unsaved edit before the call, so the
 closed CLOCK line is the user's to save: the response says so, the
 file on disk keeps the open clock it had, and the server answers from
 the buffer with the close and the user's edit both in it."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-task-with-open-clock))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (org-mcp-test--call-clock-out "2026-01-01T11:00:00")))
-        (should (equal (alist-get 'success result) t))
-        (should (equal (alist-get 'clocked_out result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-clock-out-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--clock-task-with-open-clock
+   "org-clock-out"
+   (lambda (_file) '((end_time . "2026-01-01T11:00:00")))
+   '((clocked_out . t))
+   org-mcp-test--dirty-clock-out-regex))
 
 (ert-deftest org-mcp-test-clock-out-failed-after-save-hook ()
   "Test a save failing after the file holds the close says the close was made.
@@ -17538,25 +17548,16 @@ is the last line of its parent's subtree.")
 
 (ert-deftest org-mcp-test-node-create-through-a-dirty-buffer ()
   "A created node lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-create"
-               `((title . "New Child")
-                 (todo . "TODO")
-                 (content . nil)
-                 (parent
-                  .
-                  ,(org-mcp-test--file-link
-                    test-file "*Simple Task")))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-created-child-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-create"
+   (lambda (file)
+     `((title . "New Child")
+       (todo . "TODO")
+       (content . nil)
+       (parent . ,(org-mcp-test--file-link file "*Simple Task"))))
+   '((title . "New Child"))
+   org-mcp-test--dirty-created-child-regex))
 
 (defconst org-mcp-test--dirty-renamed-regex
   (concat
@@ -17568,23 +17569,15 @@ is the last line of its parent's subtree.")
 
 (ert-deftest org-mcp-test-node-set-title-through-a-dirty-buffer ()
   "A renamed title lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-title"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . "Simple Task")
-                 (after . "Renamed Task"))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-renamed-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-title"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "Simple Task")
+       (after . "Renamed Task")))
+   '((before . "Simple Task") (after . "Renamed Task"))
+   org-mcp-test--dirty-renamed-regex))
 
 (defconst org-mcp-test--dirty-replaced-body-regex
   (concat
@@ -17598,23 +17591,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-content-through-a-dirty-buffer ()
   "A replaced body lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-content"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . "Task body text.")
-                 (after . "Body replaced."))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-replaced-body-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-content"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "Task body text.")
+       (after . "Body replaced.")))
+   nil
+   org-mcp-test--dirty-replaced-body-regex))
 
 (defconst org-mcp-test--dirty-property-regex
   (concat
@@ -17629,23 +17614,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-properties-through-a-dirty-buffer ()
   "A property lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-properties"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . ((FIRST . "")))
-                 (after . ((FIRST . "1"))))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-property-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-properties"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . ((FIRST . "")))
+       (after . ((FIRST . "1")))))
+   '((properties_set . ["FIRST"]))
+   org-mcp-test--dirty-property-regex))
 
 (defconst org-mcp-test--dirty-scheduled-regex
   (concat
@@ -17658,23 +17635,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-scheduled-through-a-dirty-buffer ()
   "A SCHEDULED timestamp lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-scheduled"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . "")
-                 (after . "2026-03-27"))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-scheduled-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-scheduled"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "")
+       (after . "2026-03-27")))
+   '((before . ""))
+   org-mcp-test--dirty-scheduled-regex))
 
 (defconst org-mcp-test--dirty-deadline-regex
   (concat
@@ -17687,23 +17656,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-deadline-through-a-dirty-buffer ()
   "A DEADLINE timestamp lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-deadline"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . "")
-                 (after . "2026-04-01"))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-deadline-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-deadline"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "")
+       (after . "2026-04-01")))
+   '((before . ""))
+   org-mcp-test--dirty-deadline-regex))
 
 (defconst org-mcp-test--dirty-tags-regex
   (concat
@@ -17715,23 +17676,16 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-tags-through-a-dirty-buffer ()
   "Tags land in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-tag-alist '("work" "personal" "urgent")))
-      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-        (let ((result
-               (json-read-from-string
-                (mcp-server-lib-ert-call-tool
-                 "org-node-set-tags"
-                 `((link
-                    .
-                    ,(org-mcp-test--file-link test-file "*Simple Task"))
-                   (before . []) (after . ["work" "urgent"]))))))
-          (should (equal (alist-get 'success result) t))
-          (org-mcp-test--verify-served-matches
-           test-file org-mcp-test--dirty-tags-regex)
-          (org-mcp-test--assert-unsaved
-           result test-file on-disk buffer))))))
+  (let ((org-tag-alist '("work" "personal" "urgent")))
+    (org-mcp-test--write-through-dirty-buffer
+     org-mcp-test--content-bare-todo
+     "org-node-set-tags"
+     (lambda (file)
+       `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+         (before . [])
+         (after . ["work" "urgent"])))
+     '((before . []) (after . ["work" "urgent"]) (inherited . []))
+     org-mcp-test--dirty-tags-regex)))
 
 (defconst org-mcp-test--dirty-priority-regex
   (concat
@@ -17743,23 +17697,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-set-priority-through-a-dirty-buffer ()
   "A priority lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-priority"
-               `((link
-                  .
-                  ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . "")
-                 (after . "A"))))))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-priority-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-bare-todo
+   "org-node-set-priority"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "")
+       (after . "A")))
+   '((before . "") (after . "A"))
+   org-mcp-test--dirty-priority-regex))
 
 (defconst org-mcp-test--dirty-note-regex
   (concat
@@ -17775,23 +17721,15 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-node-add-note-through-a-dirty-buffer ()
   "A LOGBOOK note lands in the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-bare-todo))
-    (let ((org-log-into-drawer t))
-      (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-        (let ((result
-               (json-read-from-string
-                (mcp-server-lib-ert-call-tool
-                 "org-node-add-note"
-                 `((link
-                    .
-                    ,(org-mcp-test--file-link test-file "*Simple Task"))
-                   (note . "A note of my own."))))))
-          (should (equal (alist-get 'success result) t))
-          (org-mcp-test--verify-served-matches
-           test-file org-mcp-test--dirty-note-regex)
-          (org-mcp-test--assert-unsaved
-           result test-file on-disk buffer))))))
+  (let ((org-log-into-drawer t))
+    (org-mcp-test--write-through-dirty-buffer
+     org-mcp-test--content-bare-todo
+     "org-node-add-note"
+     (lambda (file)
+       `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+         (note . "A note of my own.")))
+     nil
+     org-mcp-test--dirty-note-regex)))
 
 (defconst org-mcp-test--dirty-clock-delete-regex
   (concat
@@ -17806,18 +17744,14 @@ a replacement that took the whole body with it shows here.")
 
 (ert-deftest org-mcp-test-clock-delete-through-a-dirty-buffer ()
   "A deleted CLOCK entry leaves the buffer the user is editing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--clock-delete-multi-initial-content))
-    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
-      (let ((result
-             (org-mcp-test--call-clock-delete
-              (org-mcp-test--file-link test-file "*Task One")
-              "2026-01-01T10:00:00")))
-        (should (equal (alist-get 'success result) t))
-        (org-mcp-test--verify-served-matches
-         test-file org-mcp-test--dirty-clock-delete-regex)
-        (org-mcp-test--assert-unsaved
-         result test-file on-disk buffer)))))
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--clock-delete-multi-initial-content
+   "org-clock-delete"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Task One"))
+       (start . "2026-01-01T10:00:00")))
+   '((deleted . t))
+   org-mcp-test--dirty-clock-delete-regex))
 
 ;;; Refusals against a buffer the user is editing
 
