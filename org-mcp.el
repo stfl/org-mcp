@@ -4005,15 +4005,22 @@ RENDERED is `org-element-interpret-data' on TIMESTAMP: what Org
 writes for it, carrying the parts Org read and nothing else.
 
 Org\\='s parser reads a timestamp\\='s parts and reads past whatever else
-stands between the brackets, keeping none of it.  A word the call
-sent and Org dropped is therefore in the raw string and in no
-property of the element, and what Org read has to be asked of the
-raw string: words are cut off its end one at a time, and the
-shortest head that still renders as RENDERED is what Org read.  The
-words after that head are what it read past.  Asking which words
-change the rendering is asking Org\\='s own parser which of them
-carried meaning, rather than reading its timestamp grammar a second
-time here.
+stands between them, keeping none of it.  A word the call sent and
+Org dropped is therefore in the raw string and in no property of the
+element, and which words those are has to be asked of the raw
+string: each word is taken out in turn, and one whose absence leaves
+the rendering as it was is a word Org read nothing from.  A word Org
+did read cannot go without the rendering going with it.  That asks
+Org\\='s own parser which words carried meaning, rather than reading
+its timestamp grammar a second time here.  Each word is asked in its
+own right, because a word Org reads past stands anywhere between the
+brackets: a repeater typed wrong stands before the repeater it was
+meant to be, not after everything.
+
+A word is taken out of what the words before it were found to carry,
+so where Org reads one thing out of two words — the second repeater
+of `<2026-03-27 Fri +1w +2w>', which Org reads past — the one it
+read nothing from is the one named.
 
 The word after the date is exempt.  It stands in the day-name slot
 `org-mcp--timestamp-day-name-re' describes, and Org writes the day
@@ -4026,18 +4033,20 @@ date by putting something else there."
                    (string-match-p
                     org-mcp--timestamp-day-name-re (nth 1 words)))
               2
-            1)))
-    (catch 'read
-      (dolist (n (number-sequence from (length words)))
-        (let ((head
-               (org-mcp--timestamp-parsed
-                (format "<%s>"
-                        (string-join (cl-subseq words 0 n) " ")))))
-          (when (and head
-                     (equal
-                      (org-element-interpret-data head) rendered))
-            (throw 'read (nthcdr n words)))))
-      nil)))
+            1))
+         (kept (cl-subseq words 0 (min from (length words))))
+         (unread nil))
+    (dolist (n (number-sequence from (1- (length words))))
+      (let* ((word (nth n words))
+             (without (append kept (nthcdr (1+ n) words)))
+             (head
+              (org-mcp--timestamp-parsed
+               (format "<%s>" (string-join without " ")))))
+        (if (and head
+                 (equal (org-element-interpret-data head) rendered))
+            (push word unread)
+          (setq kept (append kept (list word))))))
+    (nreverse unread)))
 
 (defun org-mcp--timestamp-warning-retyped (timestamp type)
   "Return TIMESTAMP rendered with its warning period set to TYPE.
@@ -4079,13 +4088,15 @@ something other than what the call sent into the file:
 - an inactive timestamp, which a planning line does not carry;
 - a date range — two timestamps joined by `--' — whose second half
   Org\\='s planning writer drops, however close the two fall;
+- a first-only warning delay standing beside a repeater — the
+  `--3d' of `<2026-03-27 Fri +1w --3d>' — which Org\\='s planning
+  writer takes off, writing the repeater by itself;
 - text Org reads past — the `typo' of
   `<2026-03-27 Fri 09:00 +1w typo>' — which never reaches the file,
   so the call would be answered with the repeater it asked for and
-  none of the word it got wrong;
-- a first-only warning delay standing beside a repeater — the
-  `--3d' of `<2026-03-27 Fri +1w --3d>' — which Org\\='s planning
-  writer takes off, writing the repeater by itself.
+  none of the word it got wrong.  This one is asked last of all, so
+  the timestamp its message names is one every other check has
+  passed.
 
 Two forms carrying a doubled hyphen are not ranges.  A span of the
 day, `2026-03-27 09:00-10:00', lives inside the one timestamp and
@@ -4093,7 +4104,7 @@ Org carries the whole of it, backwards hours and all, so it is
 written.  A first-only warning delay, `--3d' against the `-3d' that
 warns before every repeat, is Org\\='s own spelling and goes in as
 sent while it stands alone; what it costs beside a repeater is the
-sixth refusal above.
+fifth refusal above.
 
 The day name is read past and not refused, because the day Org
 writes is the day the date falls on and no date is lost by whatever
@@ -4137,18 +4148,6 @@ carry an active one, written <...>"
          "Date '%s' is a date range - name the one date the field is \
 to carry"
          date-str))
-      ;; Org's parser reads a timestamp's parts and reads past the
-      ;; rest, so text it read past is text the call sent and the
-      ;; file will not hold.  A repeater with a typo after it is the
-      ;; costly one: the repeater goes in, the typo does not, and the
-      ;; heading comes out repeating on a schedule nobody chose.
-      (when-let* ((unread
-                   (org-mcp--timestamp-unread-words
-                    timestamp rendered)))
-        (org-mcp--tool-validation-error
-         "Date '%s' carries text that is no part of a timestamp: \
-'%s' - Org would write '%s' without it"
-         date-str (string-join unread " ") rendered))
       ;; `org-small-year-to-year' is the reading Org's date reader
       ;; applies, so the year it leaves alone is the year that
       ;; reaches the file.
@@ -4185,9 +4184,10 @@ two-digit year"
       ;; `first' is the doubled hyphen, and a repeater type is any
       ;; of Org's three repeater forms.
       ;;
-      ;; This check runs last so the timestamps it names are ones
-      ;; every check above has passed, leaving a client two values
-      ;; it can send rather than a suggestion refused in its turn.
+      ;; This check runs after every check that asks about the
+      ;; date, so the timestamps it names are ones those have
+      ;; passed, leaving a client two values it can send rather
+      ;; than a suggestion refused in its turn.
       (when (and (eq
                   (org-element-property :warning-type timestamp)
                   'first)
@@ -4199,6 +4199,26 @@ repeater - Org's planning writer drops the delay and writes '%s'; \
          date-str
          (org-mcp--timestamp-warning-retyped timestamp nil)
          (org-mcp--timestamp-warning-retyped timestamp 'all)))
+      ;; Org's parser reads a timestamp's parts and reads past the
+      ;; rest, so text it read past is text the call sent and the
+      ;; file will not hold.  A repeater with a typo beside it is
+      ;; the costly one: the repeater goes in, the typo does not,
+      ;; and the heading comes out repeating on a schedule nobody
+      ;; chose.
+      ;;
+      ;; This check runs last of all, because the value its message
+      ;; names is the rendering, and the rendering is a value to
+      ;; send only once every check above has passed the timestamp
+      ;; it came from.  Named earlier it would hand back the very
+      ;; thing the next check refuses: the rolled date of
+      ;; `2026-02-30', offered as a date to send.
+      (when-let* ((unread
+                   (org-mcp--timestamp-unread-words
+                    timestamp rendered)))
+        (org-mcp--tool-validation-error
+         "Date '%s' carries text that is no part of a timestamp: \
+'%s' - Org would write '%s' without it"
+         date-str (string-join unread " ") rendered))
       rendered)))
 
 (defun org-mcp--validate-body-no-headlines (body level)
