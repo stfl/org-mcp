@@ -1238,6 +1238,17 @@ Example:
 carry instead. Rescheduling a repeating entry keeps its repeater, which is one
 reason =before= is the whole Org string rather than a date.
 
+That inheritance stops where =after= brings a repeater or a warning period of
+its own. An =after= naming a date, a time of day or a span of the day leaves
+the repeater and the warning period where they are and moves the date under
+them; an =after= naming either of them replaces both, and the headline ends up
+carrying exactly what was sent. Against =<2026-06-20 Sat +1w -3d>=, an =after=
+of =2026-07-02= writes =<2026-07-02 Thu +1w -3d>= and an =after= of
+=2026-07-02 -2d= writes =<2026-07-02 Thu -2d>=, the repeater gone. Name the
+repeater alongside the warning — =2026-07-02 +1w -2d= — to move all three at
+once. The response reads the timestamp back from the file, so its =after=
+reports the whole of what the headline ended up with.
+
 A headline whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
 =after= replaces the range with the one date it names. This tool reads and
