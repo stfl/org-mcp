@@ -4242,12 +4242,12 @@ link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
 TODO is the TODO state from `org-todo-keywords', and it has to name
 one.  A read reports no TODO state at all for a heading carrying no
-keyword, so \"\" is no state this surface names: it is what a `before'
-asserts and an `after' takes away on `org-mcp--tool-node-set-todo',
-the tool that owns the field, and a creation asserts nothing and
-takes nothing away.  A heading with no keyword is made by creating
-one with a keyword and taking it off there, which is where null
-means something and here it does not.
+keyword, so \"\" is no state this surface names, and
+`org-mcp--validate-todo-state' refuses it here as it refuses any
+other text that names no keyword.  A heading with no keyword is made
+by creating one with a keyword and taking it off with
+`org-mcp--tool-node-set-todo', whose `after' takes null for that.
+Null here is the parameter left out, never that ask.
 A state Org vetoes for the new heading, such as a done keyword under
 an ordered parent whose earlier siblings are unfinished, is refused
 and no heading is added; see `org-mcp--set-todo-state'.
@@ -4311,11 +4311,6 @@ MCP Parameters:
   (setq title (org-mcp--text-param-given title "title"))
   (org-mcp--validate-headline-title title)
   (setq todo (org-mcp--text-param-given todo "todo"))
-  (when (string-empty-p todo)
-    (org-mcp--tool-validation-error
-     "TODO state cannot be empty: name a keyword to create the node \
-with, and take it off afterwards with org-node-set-todo \
-{\"after\": null}"))
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
        ;; The body is inserted and checked as text, so a number, an
