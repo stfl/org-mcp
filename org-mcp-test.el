@@ -5961,6 +5961,27 @@ read asserts nothing.  The refusal sends the caller back to a read."
         (should-not (string-match-p (regexp-quote fresh) message))
         (should (string-match-p "read the node again" message))))))
 
+(defconst org-mcp-test--content-hex-body
+  "* Target\n1b4f0e9851971998\n"
+  "A node whose whole body reads like a token and is not one.")
+
+(ert-deftest org-mcp-test-set-content-hex-body-is-a-value ()
+  "A body of sixteen hexadecimal characters is a value, not a token.
+The prefix is the whole of what tells the two forms of before apart,
+and this is why a token carries one: told apart by shape alone, the
+shortest bodies would be the ones a client could not assert."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-hex-body))
+    (let ((link (org-mcp-test--file-link test-file "*Target")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       "1b4f0e9851971998"
+       "A plain body."
+       "\\`\\* Target\nA plain body\\.\n\\'"
+       nil
+       link))))
+
 (defconst org-mcp-test--content-set-content-refusals
   (concat
    "* Target\n"
