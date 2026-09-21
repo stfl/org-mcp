@@ -190,13 +190,26 @@ Example:
 #+end_src
 
 ** org-clock-delete
-- *Description:* Delete a clock entry from a heading. Removes the LOGBOOK drawer if it becomes empty after deletion
+- *Description:* Delete a clock entry from a heading. The call reaches the heading =link= names and no further: a CLOCK line under one of its children is that child's, and only a =link= naming the child deletes it. Removes the LOGBOOK drawer if it becomes empty after deletion
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=)
+  - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=). It is the whole of what names the entry, so two entries of the one heading beginning there name neither. Rounded per =org-clock-rounding-minutes=, as clocking in and adding round the starts they write
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* JSON object with success status, =saved= flag, and the deleted entry details
-- *Refuses with:* unmarked validation only (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
+- *Returns:* JSON object with success status, =saved= flag, and the deleted entry details. The =link= it carries is the heading whose CLOCK line went, which is the heading the call named
+- *Refuses with:* =blocked:= when =start= names two entries of the heading; unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
+
+A call is refused when:
+
+- no entry of the heading =link= names begins at =start=. A clock on a child of that heading does not answer for its parent, so a parent whose children are clocked is refused exactly as a heading with no clock at all is:
+  #+begin_example
+  No clock entry starting at [2026-03-23 Mon 14:30] found
+  #+end_example
+- two or more entries of that heading begin at =start=, so it names no one of them and nothing is deleted. The refusal counts them and names each by its end time, which is what tells them apart. Sending the call again gets the same answer and so does reading the heading first, since =start= is all there is to name an entry with; the pair is for whoever can open the file to settle:
+  #+begin_example
+  blocked: 2 clock entries on this heading start at [2026-03-23 Mon 14:30]: one ending [2026-03-23 Mon 15:30] and one ending [2026-03-23 Mon 16:45].  start names no one of them, so delete the one you mean in Emacs
+  #+end_example
+  An entry still running is named as =one still open=. =org-clock-rounding-minutes= is what makes such a pair ordinary: set to 5, it writes a clock added at 14:31 and one added at 14:32 both as beginning 14:30.
+- =start= cannot be parsed, or =link= is no link org-mcp takes, names no heading, or names a file outside the allowed files. These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
 
 Example:
 #+begin_src json
