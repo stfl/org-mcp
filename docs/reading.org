@@ -202,7 +202,12 @@ and they arrive together, under one key of the node:
 #+end_src
 
 A file is a node, so =properties= reaches a file's own top-level drawer the
-same way it reaches a heading's.
+same way it reaches a heading's, and so does a write (see
+[[file:writing.org::*A file's own property drawer][A file's own property drawer]]). That drawer is the one at the top of the file,
+above its =#+= settings and before its first heading, where org-roam keeps the
+=ID= of a file node. A file whose very first line is a heading has no room for
+one and carries no properties of its own: the drawer on that line belongs to
+the heading, and a read of the heading is what returns it.
 
 Property names are matched the way Org matches them, ignoring case, and come
 back under the name Org keeps, which is upper case. A property the node does
@@ -461,6 +466,14 @@ call can name a version that the client's own clocking has left behind. A body
 starts past those lines, so =content_digest= moves for what is written into the
 body itself, a log note Org keeps outside a drawer among it.
 
+*A file node's body is its whole preamble,* so both of its tokens take in that
+file's own property drawer as well as its =#+= settings lines. A property write
+therefore moves a file's =content_digest= and its =digest= although the call
+names no body: the drawer and the settings lines are two halves of one region,
+and each has a guarded write of its own — a property asserted by the value it
+held (see [[file:writing.org::*A file's own property drawer][A file's own property drawer]]), a setting by the lines it stood on
+(see [[file:writing.org::*org-file-set-setting][org-file-set-setting]]). A token read before either is stale after it.
+
 * Available MCP Resources
 
 ** org://{link}
@@ -551,8 +564,15 @@ a tool returns from it (see [[*The two digests][The two digests]]).
 * Configuration and discovery tools
 
 ** org-config-todo
-- *Description:* Get TODO keyword configuration for understanding task states
-- *Parameters:* None
+- *Description:* Get the TODO keyword configuration a file defines, or the
+  global one, for understanding task states
+- *Parameters:*
+  - =link= (string, optional): the file to answer for, in any of the forms a
+    link takes (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Omitted, the answer is the
+    global Emacs configuration
+  - =files= (array of strings, optional): Files and directories to look up an
+    =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]. Refused
+    with no =link=, since there is none to look up
 - *Returns:* JSON object with =sequences= and =semantics=
 
 Example response:
@@ -572,6 +592,104 @@ Example response:
   ]
 }
 #+end_src
+
+Each keyword comes back as the configuration writes it, the fast-access key and
+the logging directives included: =WAIT(w@/!)= is the keyword =WAIT=, fast key
+=w=, a note on entering the state and a timestamp on leaving it. The =semantics=
+array reads the same sequences the other way round, one entry per keyword, and
+=isFinal= is what says a keyword is a done state — which is the question a
+"stuck project" or "what is left" view turns on. The =|= in =keywords= is where
+the sequence puts the boundary; a sequence carrying none has its last keyword as
+the done state, and the answer writes the =|= in front of it.
+
+*** Which file the answer is about
+
+An Org file may define its own workflow, and many do: a GTD file carrying
+
+#+begin_src org
+#+TODO: TODO(t) NEXT(n) WAIT(w@/!) PROJ(p) | DONE(d!) KILL(k@)
+#+end_src
+
+has those six states and no others, whatever =org-todo-keywords= says. A write
+to a heading in it is held to them, so =NEXT= is accepted there and any state
+outside the six is refused.
+
+Send =link= to be answered for one file. The link names that file through any of
+the forms above, and a link naming a /heading/ answers for the heading's own
+file: these settings are file-wide, so the heading decides nothing. The answer is
+the one Org itself reaches there, a =#+SETUPFILE:= followed and =#+SEQ_TODO:=
+and =#+TYP_TODO:= read alongside =#+TODO:=, and it is exactly the set a write to
+that file may use.
+
+A file defining no sequence of its own inherits the global ones, and is answered
+with them.
+
+Sent no link, the tool answers from the global Emacs configuration. That is the
+right question to ask about the session and the wrong one to ask before a write:
+name the file you are writing to.
+
+This tool answers what Org /reached/, which is what a write is held to. What the
+file itself /writes/ is a different question, and [[*org-file-settings]] answers it:
+a file that names no sequence of its own is answered here with the global ones
+and there with an empty array.
+
+** org-file-settings
+- *Description:* Read the in-buffer settings one Org file writes
+- *Parameters:*
+  - =link= (string, required): the file to answer for, or a heading in it, in
+    any of the forms a link takes (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link
+    naming a heading answers for the heading's file: these settings are
+    file-wide
+  - =files= (array of strings, optional): Files and directories to look up an
+    =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* JSON object with the file's =link= and a =settings= object
+
+Example response:
+#+begin_src json
+{
+  "link": "file:/home/you/gtd.org",
+  "settings": {
+    "TITLE": ["Getting things done"],
+    "TODO": ["TODO(t) NEXT(n) | DONE(d)", "WAIT(w) | KILL(k)"],
+    "ARCHIVE": [],
+    "CATEGORY": ["gtd"],
+    "FILETAGS": [":gtd:"],
+    "STARTUP": []
+  }
+}
+#+end_src
+
+An in-buffer setting is a =#+KEY: value= line in the file — what the Org manual
+calls an in-buffer setting, and what =org-element= calls a keyword. It is not a
+property: a property is a line in a drawer, a different syntax Org reaches with
+different accessors, and =#+PROPERTY:= is a third thing again (see
+[[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
+
+*Every setting in scope has an entry, and an empty array is an answer.* The six
+entries are the settings [[file:writing.org::*org-file-set-setting][org-file-set-setting]] writes, and =[]= says the file
+writes that one on no line. That is the question a read of the node cannot
+answer: a file node's =title= is its =#+TITLE:= when it writes one and its own
+file name when it writes none, so a file whose title happens to equal its file
+name reads the same either way (see [[*The node]]).
+
+*A setting is a set of lines, not a value.* Org keeps every line it finds: two
+=#+TODO:= lines are two sequences and two =#+FILETAGS:= lines are both in
+effect, so the array has one entry per line, in the order the file writes them.
+=#+ARCHIVE:= and =#+CATEGORY:= are the exception — Org reads the first line and
+ignores the rest — and the array still carries every line, because the file
+carries them and a write has to assert them.
+
+The values are the text Org reads off each line, with the space around it gone.
+Org honours a settings line wherever it stands, below the first heading
+included, and this answer reports it wherever it stands too; a =#+TODO:= inside
+an example block is part of that block to Org and is not reported here.
+
+*A file node's =content= carries these lines too,* because a file's body is the
+preamble they stand in, and =org-node-read= returns it with a =content_digest=
+over it like any other body. Changing them goes through
+[[file:writing.org::*org-file-set-setting][org-file-set-setting]] all the same: =org-node-set-content= refuses a link naming
+a whole file, so there is one guarded way for a setting to change and the digest
+is not a second one (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
 
 ** org-config-tags
 - *Description:* Get tag configuration as literal Elisp variable values

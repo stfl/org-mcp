@@ -8,19 +8,74 @@ its own to drift from Org's.
 
 That settles the cases the surface has. An inactive timestamp goes into a
 planning line active and a date range goes in as its first half alone, so both
-are refused. A span whose hours run backwards — `2026-03-27 10:00-09:00` — and
-a first-only warning delay — `2026-03-27 --3d`, which carries the doubled
+are refused. So is text Org's parser reads past: it reads a timestamp's parts
+and keeps none of what else stands between the brackets, so
+`<2026-03-27 Fri 09:00 +1w typo>` would reach the file as
+`<2026-03-27 Fri 09:00 +1w>` — the repeater the call asked for and none of the
+word it got wrong. What Org read is asked of the string the call sent, a word at
+a time: a word whose absence leaves the rendering as it was is a word Org read
+nothing from, and a word Org did read cannot go without the rendering going with
+it. Each word is asked in its own right, because a word Org reads past stands
+anywhere between the brackets — a repeater typed wrong stands before the
+repeater it was meant to be. The parsed element cannot answer the question at
+all, because the words Org dropped are in no property of it, and
+reading Org's timestamp grammar a second time here would give the check an
+opinion of its own, which this record denies it.
+
+Every timestamp one of these refusals names is one this surface takes. A client
+sends what a message names, so a recommendation the next refusal rejects leaves
+nobody anywhere to go. It is a property of the whole set of refusals rather than
+of any one of them, and each earns it in its own way:
+
+- the refusal of a day no month has names the moment alone — that day and the
+  time on it, without the repeater or the warning period the value carried —
+  because the moment is what it refuses, and a moment standing by itself carries
+  nothing the other refusals are about;
+- the refusal of a first-only warning delay beside a repeater names two
+  renderings that keep the repeater, and is asked once the day has been found
+  real, so the day those carry is a day;
+- the refusal of text Org reads past names the whole of what Org read, and is
+  asked last, so the timestamp it names is one every other refusal has passed.
+
+Ordering alone does not carry the property, which is why the first of those
+names less than Org read. Asking the delay refusal before the impossible-day one
+would have it answer `<2026-02-30 Fri +1w --3d>` with `<2026-03-02 Mon +1w>` —
+a timestamp this surface takes, naming a day nobody asked for, which is the
+silent roll the surface refuses in the first place. A message is honest about a
+value only when the value is built to be one.
+
+The day name is read past and written rather than refused, for the reason the
+rule is what it is: Org writes the day the date falls on, so a call that
+misspells the day name still gets the date it named and loses nothing by it. A
+span whose hours run backwards — `2026-03-27 10:00-09:00` — and a first-only
+warning delay standing alone — `2026-03-27 --3d`, which carries the doubled
 hyphen a range is joined by — each reach the file exactly as sent, a read hands
 them straight back, and a `before` built from that read matches, so both are
 written.
 
-The rule is about the date, and one loss that is not a date sits outside it.
-Org's planning writer takes a first-only warning delay off a timestamp that
-also carries a repeater, so `<2026-03-27 Fri +1w --3d>` reaches the file as
-`<2026-03-27 Fri +1w>`. The date the call named is the date the field holds —
-what goes is a warning — and the response reports the timestamp read back from
-the file, so the client is told which one survived. Whether that loss earns a
-refusal of its own is open.
+One loss the rule does not reach is refused all the same. Org's planning writer
+takes a first-only warning delay off a timestamp that also carries a repeater,
+so `<2026-03-27 Fri +1w --3d>` would reach the file as `<2026-03-27 Fri +1w>`.
+The date the call named is the date the field would hold, so the question above
+passes it; what goes is a warning. A warning the call asked for, absent from the
+file and answered with a success, is the silent half-write the date range is
+refused for, and it costs a client the same whether the part that went missing
+was a date or a warning. The pairing is refused, and the refusal names the two
+timestamps that go in its place: the repeater by itself, and the `-3d` that
+warns before every repeat.
+
+That makes org-mcp stricter than Org here, which is the cost. Org accepts the
+pairing, and a person typing it in Emacs gets the shortened timestamp and no
+complaint. We pay it because the two readers are not alike: a person watches the
+line they typed collapse in the buffer in front of them, while a client is told
+`success: true` and learns nothing unless it reads `after` back and compares. A
+faithful mapping is to Org's semantics, not to Org's silence.
+
+The check asks the parsed element, not the string, because the element is where
+the evidence survives: the parse keeps the delay and the loss happens later,
+inside the planning writer, so what Org renders for the value still carries it.
+`:warning-type` is `first` and `:repeater-type` is non-nil — one condition, and
+narrow, because either part alone is written as sent.
 
 We chose this over refusing what reads as a mistake. Backwards hours are one,
 but Org accepts them, the agenda shows them, and a person editing the file in

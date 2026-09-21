@@ -137,6 +137,78 @@ result is then verified with a single regular expression matching the complete
 Org file, so a test that passes has pinned the whole file, not the one line it
 was looking at.
 
+** What a test has to quantify over
+
+Most of what a change claims is universal: a docstring, a refusal message or an
+ADR says /every/ position the text can occupy, /every/ input that reaches this
+refusal, /every/ write that rewrites headings. A test that exhibits one case is
+evidence for /some/ and none at all for an /every/ — the suite encodes the
+witness, goes green, and the green gets read as confirming the sentence in the
+docstring.
+
+Asking what fixture would distinguish a right implementation from a subtly
+wrong one does not repair that, and the reason is worth knowing: naming one
+needs a candidate wrong implementation, and the candidates that come to mind
+are neighbours of the implementation just written. Someone cutting a suffix
+asks what a subtly wrong suffix-cutter would do and writes fixtures with the
+junk at the end, because a suffix-cutter is a machine about ends. The fixture
+set portrays the algorithm rather than the claim, and asking harder yields more
+of the same fixtures.
+
+Work from the sentence instead. Write each claim as "for every X, P", name the
+X you tested and the X you did not, and for each untested region say why the
+construction covers it. A construction argument about a different operation
+than the one the code performs covers nothing: =org-collect-keywords= follows a
+=#+SETUPFILE:=, so a setupfile's keywords count when Org /reads/ them, and code
+that subtracts a file's own lines from that reading has changed the operation
+the argument was about.
+
+The same distinction governs a claim about the suite rather than about the
+code. "Nothing covers this" is itself universal — /for every test, it does not
+cover this/ — and reading one test does not establish it. The claim is safe
+when it accompanies a defect that reproduces, because a misbehaviour and a
+green suite together entail that nothing pins the behaviour; there is no absent
+test to go looking for and no way to be wrong about it. It is unsafe when it
+accompanies behaviour that is correct: the suite then looks the same whether
+the test exists or not, so the claim rests entirely on having searched, and a
+docstring, a test name or a diff hunk is not a search. A census invites the
+mistake — a docstring that says every write tool but one, a table that runs ten
+of thirteen, and the remaining three pinned in a test of their own because they
+need a digest and do not fit the table. The behaviour is right, so nothing the
+suite prints says otherwise.
+
+Four shapes carry this hazard, and each is recognisable before any of the code
+is written:
+
+- *A validator that classifies* :: it partitions its inputs into accepted and
+  refused rather than transforming them, so the boundary is a property of the
+  input space and not of the code. State the accept/refuse predicate as a
+  sentence that never mentions how you compute it, and generate inputs from the
+  sentence.
+
+- *A refusal that echoes a value derived from its input* :: a =%s= filled by
+  something computed from the input, rather than by the input itself or by a
+  configured value. The advertised value has to be accepted for every input
+  that can reach the refusal, not for the one picked to demonstrate the
+  message; where checks run in sequence, a refusal echoing a derived value can
+  hand back something a later check rejects. Run the advertised value back
+  through the gate that produced the refusal, or prove it cannot fail one —
+  ordering your own check last protects your own message and nothing else.
+
+- *A set operation on values that can repeat* :: =delete=, =remove=,
+  =cl-remove=, =seq-difference= or =member= over a collection whose elements
+  come from user text rather than a fixed vocabulary, where set and multiset
+  semantics part ways: =delete= removes every equal element. Ask whether the
+  collection can carry duplicates — drawn from a file it always can — and
+  remove one occurrence per subtrahend, which is usually what is meant.
+
+- *A guard with a direction* :: a check firing on a transition A→B where B→A is
+  reachable through the same tool with the same parameters. The inverse
+  usually carries the same hazard and no guard. Write in the ADR, rather than
+  the code, what the inverse does and why it needs none; one sentence. If you
+  cannot write it, the guard is directional for no reason you can state. This
+  one pays at design time, before any code exists.
+
 * What a change owes the documentation
 
 A change to anything a client or an Emacs user can observe updates the page that
