@@ -2210,6 +2210,19 @@ unmodified buffer holds what FILE holds, which the bytes already say."
     (when served-before
       (should (string= (org-mcp-test--served-text file) served-before)))))
 
+(defun org-mcp-test--call-tool-leaving-file (tool-name params file)
+  "Call TOOL-NAME with PARAMS, assert FILE is unchanged, return the result.
+A removal of a field a headline does not carry has nothing to take
+away, so the call is accepted and the file is left byte for byte as
+it was.  The result is the parsed JSON response, which says the same
+thing in the words a client reads."
+  (let* ((before (org-mcp-test--read-file-raw file))
+         (result
+          (json-read-from-string
+           (mcp-server-lib-ert-call-tool tool-name params))))
+    (should (string= (org-mcp-test--read-file-raw file) before))
+    result))
+
 (defun org-mcp-test--assert-scope-refused (file)
   "Assert that reading and writing the Task heading in FILE is refused.
 FILE holds `org-mcp-test--scope-task-content' and stays unchanged."
@@ -3152,6 +3165,10 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-node-delete"
     "org-node-read"
     "org-node-refile"
+    "org-node-remove-deadline"
+    "org-node-remove-priority"
+    "org-node-remove-properties"
+    "org-node-remove-scheduled"
     "org-node-remove-tags"
     "org-node-set-content"
     "org-node-set-deadline"
@@ -4002,6 +4019,15 @@ Org carries the repeater and the delay to the new date.")
    "\\`\\* TODO Priority Task\n"
    "Task body\\.\n?\\'")
   "Pattern after removing priority.")
+
+(defconst org-mcp-test--pattern-bare-todo
+  (concat "\\`\\* TODO Simple Task\n" "Task body text\\.\n?\\'")
+  "The bare task as it stands, nothing added and nothing taken away.")
+
+(defconst org-mcp-test--pattern-remove-properties-both
+  (concat
+   "\\`\\* TODO Task with Two Properties\n" "Some body\\.\n?\\'")
+  "Pattern after both properties are removed and the drawer with them.")
 
 (defconst org-mcp-test--pattern-append-body
   (concat
@@ -8012,25 +8038,10 @@ line as contents, so the drawer stays."
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-update))))
 
-(ert-deftest org-mcp-test-set-properties-delete ()
-  "Test deleting a property via null value."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-with-props))
-    (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
-           (params `((link . ,link)
-                     (before . ((EFFORT . "1:00")))
-                     (after . ((EFFORT)))))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-set-properties-delete))))
-
 (ert-deftest org-mcp-test-set-properties-booleans ()
   "Test booleans set properties to t and nil.
-JSON false overwrites EFFORT with nil and does not delete it, as null
-would.  JSON true writes t, and the strings \"t\" and \"nil\" are
+JSON false overwrites EFFORT with the text nil and keeps the
+property.  JSON true writes t, and the strings \"t\" and \"nil\" are
 written as given."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
@@ -8041,9 +8052,9 @@ written as given."
               (before
                .
                ((EFFORT . "1:00")
-                (ENABLED . nil)
-                (LITERAL_T . nil)
-                (LITERAL_NIL . nil)))
+                (ENABLED . "")
+                (LITERAL_T . "")
+                (LITERAL_NIL . "")))
               (after
                .
                ((EFFORT . :json-false)
@@ -8236,6 +8247,129 @@ can touch."
      "\\`before names the property 'OWNER', which this call does \
 not write\\'"
      test-file)))
+
+;;; Tests for org-node-remove-properties
+
+(ert-deftest org-mcp-test-remove-properties-deletes-the-property ()
+  "org-node-remove-properties takes the property off the headline.
+Its `before\=' names the property and the value that goes with it, so
+the call and its response both say what was destroyed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
+           (params `((link . ,link)
+                     (before . ((EFFORT . "1:00")))))
+           (result-text
+            (mcp-server-lib-ert-call-tool
+             "org-node-remove-properties" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'properties_deleted result) ["EFFORT"]))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-delete))))
+
+(ert-deftest org-mcp-test-remove-properties-takes-two-at-once ()
+  "Both properties named go, and the response lists them in order."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (let* ((link
+            (org-mcp-test--file-link
+             test-file "*Task with Two Properties"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-remove-properties"
+              `((link . ,link)
+                (before . ((EFFORT . "1:00") (OWNER . "ada"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal (alist-get 'properties_deleted result)
+              ["EFFORT" "OWNER"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-remove-properties-both))))
+
+(ert-deftest org-mcp-test-remove-properties-refuses-a-stale-before ()
+  "A value the headline does not hold refuses the removal."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-properties"
+     `((link
+        .
+        ,(org-mcp-test--file-link test-file "*Task with Properties"))
+       (before . ((EFFORT . "3:00"))))
+     "\\`conflict: Property 'EFFORT' mismatch: expected '3:00', \
+found '1:00'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-properties-refuses-when-one-has-moved ()
+  "Two properties named and one moved: neither is removed.
+Every assertion is checked before the first property goes, so a call
+refused over its second has not taken its first away."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-properties"
+     `((link
+        .
+        ,(org-mcp-test--file-link
+          test-file "*Task with Two Properties"))
+       (before . ((EFFORT . "1:00") (OWNER . "bob"))))
+     "\\`conflict: Property 'OWNER' mismatch: expected 'bob', \
+found 'ada'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-properties-of-an-absent-property ()
+  "Removing a property that is not there takes nothing away.
+The empty `before\=' asserts the headline holds none of it, which it
+does, so the assertion holds and the call is accepted."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (org-mcp-test--call-tool-leaving-file
+            "org-node-remove-properties"
+            `((link
+               .
+               ,(org-mcp-test--file-link test-file "*Simple Task"))
+              (before . ((OWNER . ""))))
+            test-file)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'properties_deleted result) ["OWNER"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-remove-properties-forbids-special ()
+  "A special property has its own tool and is refused here too."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-properties"
+     `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+       (before . ((SCHEDULED . "<2026-03-01 Sun>"))))
+     "\\`Cannot set special property 'SCHEDULED' - use the dedicated \
+tool\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-blank-value-takes-nothing-away ()
+  "A blank value in `after\=' is the entry left unfilled, not a deletion.
+The refusal names the tool a client that meant to delete needs, so
+that a call written for the old spelling is told where deletion now
+lives rather than quietly doing nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (dolist (blank '(nil ""))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-properties"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Task with Properties"))
+         (before . ((EFFORT . "1:00")))
+         (after . ((EFFORT . ,blank))))
+       "\\`after gives no value for the property 'EFFORT': use \
+org-node-remove-properties to remove it\\'"
+       test-file))))
 
 ;;; Tests for failed writes and the saved flag
 
@@ -8612,22 +8746,6 @@ does when the clock is closed, so both files hold their change."
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-scheduled-update))))
 
-(ert-deftest org-mcp-test-update-scheduled-remove ()
-  "Test removing SCHEDULED timestamp."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-with-scheduled))
-    (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
-           (params `((link . ,link)
-                     (before . "<2026-03-01 Sun>")
-                     (after . "")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-scheduled" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'after result) ""))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-scheduled-remove))))
-
 (ert-deftest org-mcp-test-update-scheduled-invalid-date ()
   "Test that invalid date format triggers an error."
   (org-mcp-test--with-temp-org-files
@@ -8734,6 +8852,85 @@ out, so a heading that does carry one refuses the write."
 found '<2026-03-01 Sun>'\\'"
      test-file)))
 
+;;; Tests for org-node-remove-scheduled
+
+(ert-deftest org-mcp-test-remove-scheduled-takes-the-timestamp-off ()
+  "org-node-remove-scheduled takes the SCHEDULED timestamp away.
+Its `before\=' is the timestamp destroyed, and the response reports
+it, because the response is the only record the call leaves of what
+was there."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let* ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
+           (params `((link . ,link)
+                     (before . "<2026-03-01 Sun>")))
+           (result-text
+            (mcp-server-lib-ert-call-tool
+             "org-node-remove-scheduled" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+      (should (equal (alist-get 'after result) ""))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-remove))))
+
+(ert-deftest org-mcp-test-remove-scheduled-refuses-a-stale-before ()
+  "A SCHEDULED the headline does not carry refuses the removal.
+The removal names the timestamp it destroys, so a call whose belief
+has gone stale is a conflict: read the headline again and decide
+afresh."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+       (before . "<2026-03-08 Sun>"))
+     "\\`conflict: SCHEDULED mismatch: expected '<2026-03-08 Sun>', \
+found '<2026-03-01 Sun>'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-scheduled-of-a-headline-without-one ()
+  "Removing a SCHEDULED that is not there takes nothing away.
+The empty `before\=' asserts the headline carries none, which it
+does, so the assertion holds and the call is accepted with nothing
+to do."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (org-mcp-test--call-tool-leaving-file
+            "org-node-remove-scheduled"
+            `((link
+               .
+               ,(org-mcp-test--file-link test-file "*Simple Task"))
+              (before . ""))
+            test-file)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'before result) ""))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-set-scheduled-blank-after-takes-nothing-away ()
+  "A blank `after\=' is the parameter left out, never a date taken away.
+Clients fill a parameter they are not using with a blank, so a blank
+that cleared the date would let a well-behaved client destroy one it
+never meant to touch.  org-node-remove-scheduled is where a removal
+says what it destroys."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (dolist (blank '("" nil :json-false))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-scheduled"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+         (before . "<2026-03-01 Sun>")
+         (after . ,blank))
+       "\\`Missing required parameter: after\\'"
+       test-file))))
+
 ;;; Tests for org-node-set-deadline
 
 (ert-deftest org-mcp-test-update-deadline-set ()
@@ -8773,22 +8970,6 @@ found '<2026-03-01 Sun>'\\'"
                               (alist-get 'after result)))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-deadline-update))))
-
-(ert-deftest org-mcp-test-update-deadline-remove ()
-  "Test removing DEADLINE timestamp."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-with-deadline))
-    (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
-           (params `((link . ,link)
-                     (before . "<2026-03-15 Sun>")
-                     (after . "")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-deadline" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'after result) ""))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-deadline-remove))))
 
 (ert-deftest org-mcp-test-update-deadline-invalid-date ()
   "Test that invalid date format triggers an error."
@@ -8849,6 +9030,76 @@ found '<2026-03-15 Sun>'\\'"
      "\\`conflict: DEADLINE mismatch: expected '', \
 found '<2026-03-15 Sun>'\\'"
      test-file)))
+
+;;; Tests for org-node-remove-deadline
+
+(ert-deftest org-mcp-test-remove-deadline-takes-the-timestamp-off ()
+  "org-node-remove-deadline takes the DEADLINE timestamp away.
+Its `before\=' is the timestamp destroyed, and the response reports
+it, because the response is the only record the call leaves of what
+was there."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let* ((link (org-mcp-test--file-link test-file "*Deadline Task"))
+           (params `((link . ,link)
+                     (before . "<2026-03-15 Sun>")))
+           (result-text
+            (mcp-server-lib-ert-call-tool
+             "org-node-remove-deadline" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) "<2026-03-15 Sun>"))
+      (should (equal (alist-get 'after result) ""))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-remove))))
+
+(ert-deftest org-mcp-test-remove-deadline-refuses-a-stale-before ()
+  "A DEADLINE the headline does not carry refuses the removal."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-deadline"
+     `((link . ,(org-mcp-test--file-link test-file "*Deadline Task"))
+       (before . "<2026-03-08 Sun>"))
+     "\\`conflict: DEADLINE mismatch: expected '<2026-03-08 Sun>', \
+found '<2026-03-15 Sun>'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-deadline-of-a-headline-without-one ()
+  "Removing a DEADLINE that is not there takes nothing away."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (org-mcp-test--call-tool-leaving-file
+            "org-node-remove-deadline"
+            `((link
+               .
+               ,(org-mcp-test--file-link test-file "*Simple Task"))
+              (before . ""))
+            test-file)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'before result) ""))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-set-deadline-blank-after-takes-nothing-away ()
+  "A blank `after\=' is the parameter left out, never a date taken away.
+org-node-remove-deadline is where a removal says what it destroys."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (dolist (blank '("" nil :json-false))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-deadline"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Deadline Task"))
+         (before . "<2026-03-15 Sun>")
+         (after . ,blank))
+       "\\`Missing required parameter: after\\'"
+       test-file))))
 
 ;;; Tests for the three tag tools
 ;;
@@ -9495,22 +9746,6 @@ and a call that only takes tags away cannot break it."
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-priority-change))))
 
-(ert-deftest org-mcp-test-set-priority-remove ()
-  "Test removing priority."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-with-priority))
-    (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
-           (params `((link . ,link)
-                     (before . "B")
-                     (after . "")))
-           (result-text
-            (mcp-server-lib-ert-call-tool "org-node-set-priority" params))
-           (result (json-read-from-string result-text)))
-      (should (equal (alist-get 'success result) t))
-      (should (equal (alist-get 'after result) ""))
-      (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-priority-remove))))
-
 (ert-deftest org-mcp-test-set-priority-out-of-range ()
   "Test that out-of-range priority is rejected."
   (org-mcp-test--with-temp-org-files
@@ -9586,7 +9821,7 @@ again would not help, because nothing about the file is in question."
      `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
        (before . 3)
        (after . "C"))
-     "\\`before must be a string, or null for no value: 3\\'"
+     "\\`before must be a string, \\\"\\\" for no value: 3\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-priority-empty-before-asserts-none ()
@@ -9600,6 +9835,74 @@ again would not help, because nothing about the file is in question."
        (after . "C"))
      "\\`conflict: Priority mismatch: expected '', found 'B'\\'"
      test-file)))
+
+;;; Tests for org-node-remove-priority
+
+(ert-deftest org-mcp-test-remove-priority-takes-the-priority-off ()
+  "org-node-remove-priority takes the priority away.
+Its `before\=' is the character destroyed, and the response reports
+it, because the response is the only record the call leaves of what
+was there."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let* ((link (org-mcp-test--file-link test-file "*Priority Task"))
+           (params `((link . ,link) (before . "B")))
+           (result-text
+            (mcp-server-lib-ert-call-tool
+             "org-node-remove-priority" params))
+           (result (json-read-from-string result-text)))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) "B"))
+      (should (equal (alist-get 'after result) ""))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-priority-remove))))
+
+(ert-deftest org-mcp-test-remove-priority-refuses-a-stale-before ()
+  "A priority the headline does not carry refuses the removal."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (org-mcp-test--call-tool-refused
+     "org-node-remove-priority"
+     `((link . ,(org-mcp-test--file-link test-file "*Priority Task"))
+       (before . "C"))
+     "\\`conflict: Priority mismatch: expected 'C', found 'B'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-remove-priority-of-a-headline-without-one ()
+  "Removing a priority that is not there takes nothing away."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (org-mcp-test--call-tool-leaving-file
+            "org-node-remove-priority"
+            `((link
+               .
+               ,(org-mcp-test--file-link test-file "*Simple Task"))
+              (before . ""))
+            test-file)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'before result) ""))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-set-priority-blank-after-takes-nothing-away ()
+  "A blank `after\=' is the parameter left out, never a priority removed.
+org-node-remove-priority is where a removal says what it destroys."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (dolist (blank '("" nil :json-false))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-priority"
+       `((link
+          .
+          ,(org-mcp-test--file-link test-file "*Priority Task"))
+         (before . "B")
+         (after . ,blank))
+       "\\`Missing required parameter: after\\'"
+       test-file))))
 
 ;;; Tests for org-node-set-content append mode
 
@@ -13984,6 +14287,135 @@ org-node-read."
          (string= (org-mcp-test--read-file test-file)
                   org-mcp-test--content-read-tools))
         (should-not (buffer-modified-p (find-buffer-visiting test-file)))))))
+
+;;; No blank parameter destroys anything
+
+(ert-deftest org-mcp-test-null-before-is-a-parameter-left-out ()
+  "A blank `before\=' asserts nothing; it is the parameter left out.
+Clients fill a parameter they are not using with a blank, so reading
+null as \"the field held nothing\" would let such a client vouch for
+an emptiness it never saw and go on to destroy what was there.  The
+assertion of absence is the empty string, which a call has to type."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((link (org-mcp-test--file-link test-file "*Scheduled Task"))
+          (missing "\\`Missing required parameter: before\\'"))
+      (dolist (blank '(nil :json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-todo"
+         `((link . ,link) (before . ,blank) (after . "DONE"))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-title"
+         `((link . ,link) (before . ,blank) (after . "Renamed"))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . ,blank) (after . "2026-04-15"))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-remove-scheduled"
+         `((link . ,link) (before . ,blank))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-delete"
+         `((link . ,link) (before . ,blank))
+         missing test-file)))))
+
+(ert-deftest org-mcp-test-null-before-left-out-on-deadline-and-priority ()
+  "The same rule on the two fields whose headings live elsewhere."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let ((link (org-mcp-test--file-link test-file "*Deadline Task"))
+          (missing "\\`Missing required parameter: before\\'"))
+      (dolist (blank '(nil :json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-deadline"
+         `((link . ,link) (before . ,blank) (after . "2026-04-15"))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-remove-deadline"
+         `((link . ,link) (before . ,blank))
+         missing test-file))))
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let ((link (org-mcp-test--file-link test-file "*Priority Task"))
+          (missing "\\`Missing required parameter: before\\'"))
+      (dolist (blank '(nil :json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-priority"
+         `((link . ,link) (before . ,blank) (after . "A"))
+         missing test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-remove-priority"
+         `((link . ,link) (before . ,blank))
+         missing test-file)))))
+
+(ert-deftest org-mcp-test-blank-property-map-is-a-parameter-left-out ()
+  "A blank property map is the parameter left out, on both tools."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let ((link
+           (org-mcp-test--file-link test-file "*Task with Properties")))
+      (dolist (blank '(nil :json-false "" []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-properties"
+         `((link . ,link)
+           (before . ,blank)
+           (after . ((EFFORT . "2:00"))))
+         "\\`Missing required parameter: before\\'"
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-properties"
+         `((link . ,link)
+           (before . ((EFFORT . "1:00")))
+           (after . ,blank))
+         "\\`Missing required parameter: after\\'"
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-remove-properties"
+         `((link . ,link) (before . ,blank))
+         "\\`Missing required parameter: before\\'"
+         test-file)))))
+
+(ert-deftest org-mcp-test-null-property-value-asserts-nothing ()
+  "A null value inside a `before\=' map asserts nothing about that property.
+An entry a client left unfilled must not vouch for absence, so the
+refusal says which spelling does."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let ((link
+           (org-mcp-test--file-link test-file "*Task with Properties"))
+          (message
+           "\\`before gives no value for the property 'EFFORT': send \
+\"\" to assert it holds none\\'"))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-properties"
+       `((link . ,link)
+         (before . ((EFFORT)))
+         (after . ((EFFORT . "2:00"))))
+       message test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-remove-properties"
+       `((link . ,link) (before . ((EFFORT))))
+       message test-file))))
+
+(ert-deftest org-mcp-test-removals-publish-before-as-required ()
+  "Every named removal publishes `before\=' as required and takes no after.
+A client discovers the guard from the schema and never from the
+handler, and the removal is the verb: what it destroys is what
+before names."
+  (org-mcp-test--with-enabled
+    (dolist (id
+             '("org-node-remove-deadline"
+               "org-node-remove-priority"
+               "org-node-remove-properties"
+               "org-node-remove-scheduled"))
+      (let ((required (org-mcp-test--registered-tool-required id)))
+        (should (member "link" required))
+        (should (member "before" required))
+        (should-not (member "after" required))
+        (should-not (member "files" required))))))
 
 ;;; Refusal class tests
 
