@@ -2901,8 +2901,11 @@ buffer guarantees the markers we operate on."
     count))
 
 (defun org-mcp--clock-remove-empty-logbook ()
-  "Remove the clock drawer at current heading if it is empty.
-Point must be at a heading.  The drawer name comes from
+  "Remove the clock drawer of the entry at point if it is empty.
+Point must be at a heading.  The heading's own entry is swept and its
+subtree is not, so a descendant's drawer is left to the call that
+names that descendant; `org-mcp--clock-entries-starting-at' bounds
+the clocks themselves the same way.  The drawer name comes from
 `org-clock-drawer-name', which respects `org-clock-into-drawer'
 (returns nil when clocks are not placed in a drawer; in that case
 there is nothing to clean up).  When a custom drawer name is
@@ -2913,16 +2916,13 @@ any contents (additional CLOCK entries, state notes, plain notes,
 etc.)."
   (save-excursion
     (org-back-to-heading t)
-    (let* ((subtree-begin (point))
-           (subtree-end
-            (save-excursion
-              (org-end-of-subtree t t)
-              (point)))
+    (let* ((entry-begin (point))
+           (entry-end (org-entry-end-position))
            (configured (org-clock-drawer-name))
            (names
             (delete-dups (delq nil (list configured "LOGBOOK")))))
       (save-restriction
-        (narrow-to-region subtree-begin subtree-end)
+        (narrow-to-region entry-begin entry-end)
         (dolist (name names)
           (let ((drawer-pos
                  (org-element-map
@@ -2937,57 +2937,97 @@ etc.)."
             (when drawer-pos
               (org-remove-empty-drawer-at drawer-pos))))))))
 
+(defun org-mcp--clock-entries-starting-at (start-time)
+  "Return the CLOCK elements of the heading at point starting at START-TIME.
+Point must be at a heading and is not moved.  START-TIME is an Emacs
+time value.
+
+The search is bounded by `org-entry-end-position', so it covers that
+heading's own entry and not its subtree.  A CLOCK line under a
+descendant is that descendant's, named by a link of its own, and a
+call naming an ancestor is not the one entitled to destroy it.
+
+Several CLOCK lines may share a start, so every match comes back, in
+the order they are written; what an ambiguous START-TIME means is the
+caller's to decide."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((entry-begin (point))
+          (entry-end (org-entry-end-position))
+          (target (float-time start-time)))
+      (save-restriction
+        (narrow-to-region entry-begin entry-end)
+        (org-element-map
+         (org-element-parse-buffer 'element) 'clock
+         (lambda (clock)
+           (when (= (float-time
+                     (org-mcp--clock-element-start-time clock))
+                    target)
+             clock)))))))
+
+(defun org-mcp--clock-describe-ends (clocks)
+  "Describe CLOCKS by the ends that tell entries of one start apart.
+CLOCKS is the ambiguous set, so it holds two or more.  Each becomes
+\"one ending TIMESTAMP\", or \"one still open\" where it has no end
+yet, and the clauses are joined as an English list, so whoever opens
+the file can pick out the entry meant."
+  (let ((clauses
+         (mapcar
+          (lambda (clock)
+            (let ((end (org-mcp--clock-element-end-time clock)))
+              (if end
+                  (format "one ending %s"
+                          (org-mcp--clock-format-timestamp end))
+                "one still open")))
+          clocks)))
+    (format "%s and %s"
+            (mapconcat #'identity (butlast clauses) ", ")
+            (car (last clauses)))))
+
 (defun org-mcp--clock-delete-entry (start-time)
-  "Delete CLOCK entry whose start matches START-TIME under current heading.
-Point must be at a heading.  START-TIME is an Emacs time value.
-Walks clock elements via `org-element-map' and deletes by :begin / :end
-positions.  Removes the LOGBOOK drawer if it becomes empty.
-Returns an alist with deleted entry info, or nil if not found."
+  "Delete the CLOCK entry starting at START-TIME from the heading at point.
+Point must be at a heading and is left there, so the response links
+the heading whose CLOCK line went.  START-TIME is an Emacs time
+value.  Only that heading's own entry is searched, see
+`org-mcp--clock-entries-starting-at'; the LOGBOOK drawer goes if the
+deletion empties it.  Returns an alist describing the entry deleted,
+or nil when the entry holds none starting there.
+
+Two entries of one start are refused rather than resolved.  START-TIME
+is the whole of what names the entry, so neither reading the heading
+again nor sending the call again picks one of them out, and deleting
+whichever comes first destroys a clock the caller may never have
+seen.  `org-clock-rounding-minutes' makes that ordinary rather than
+exotic: it writes two distinct starts as one time.  The refusal names
+both entries by their ends, for whoever can open the file and delete
+the one meant, which is the `blocked:' class."
   (org-back-to-heading t)
-  (let* ((subtree-begin (point))
-         (subtree-end
-          (save-excursion
-            (org-end-of-subtree t t)
-            (point)))
-         (target (float-time start-time))
-         (found nil))
-    (save-restriction
-      (narrow-to-region subtree-begin subtree-end)
-      (let* ((tree (org-element-parse-buffer 'element))
-             (match
-              (catch 'match
-                (org-element-map
-                 tree 'clock
-                 (lambda (clock)
-                   (let ((s
-                          (float-time
-                           (org-mcp--clock-element-start-time
-                            clock))))
-                     (when (= s target)
-                       (throw 'match clock)))))
-                nil)))
-        (when match
-          (let* ((begin (org-element-property :begin match))
-                 (end (org-element-property :end match))
-                 (end-time (org-mcp--clock-element-end-time match))
-                 (duration (org-element-property :duration match))
-                 (start-str
-                  (org-mcp--clock-format-timestamp start-time))
-                 (end-str
-                  (when end-time
-                    (org-mcp--clock-format-timestamp end-time))))
-            (setq found
-                  `((start . ,start-str)
-                    ,@
-                    (when end-str
-                      `((end . ,end-str)))
-                    ,@
-                    (when duration
-                      `((duration . ,duration)))))
-            (delete-region begin end)))))
-    (when found
-      (org-mcp--clock-remove-empty-logbook))
-    found))
+  (pcase (org-mcp--clock-entries-starting-at start-time)
+    ('nil nil)
+    (`(,match)
+     (let* ((begin (org-element-property :begin match))
+            (end (org-element-property :end match))
+            (end-time (org-mcp--clock-element-end-time match))
+            (duration (org-element-property :duration match))
+            (found
+             `((start . ,(org-mcp--clock-format-timestamp start-time))
+               ,@
+               (when end-time
+                 `((end
+                    . ,(org-mcp--clock-format-timestamp end-time))))
+               ,@
+               (when duration
+                 `((duration . ,duration))))))
+       (delete-region begin end)
+       (org-mcp--clock-remove-empty-logbook)
+       found))
+    (matches
+     (org-mcp--tool-blocked-error
+      "%d clock entries on this heading start at %s: %s.  start \
+names no one of them, so delete the one you mean in Emacs"
+      (length matches)
+      (org-mcp--clock-format-timestamp start-time)
+      (org-mcp--clock-describe-ends matches)))))
 
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword, or \"\" for none.
@@ -5960,7 +6000,13 @@ MCP Parameters:
 (defun org-mcp--tool-clock-delete (link start &optional files)
   "Delete a clock entry from the heading LINK names.
 START is the ISO 8601 start time of the clock entry to delete
-\\(e.g., 2026-03-23T14:30:00).
+\\(e.g., 2026-03-23T14:30:00).  It is the whole of what names the
+entry, which is why the call reaches no further than the heading LINK
+names: a CLOCK line under a descendant is that heading's, and
+destroying it on an ancestor's word would report the ancestor as the
+heading changed.  Where START names two entries of the one heading it
+names neither, and the call is refused with both of them described;
+see `org-mcp--clock-delete-entry'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -7428,7 +7474,17 @@ Returns JSON object:
      "Delete a clock entry from a heading.  Removes the LOGBOOK
 drawer if it becomes empty after deletion.
 
-Rounding is applied per org-clock-rounding-minutes.
+Only the heading link names is touched: a CLOCK line on one of its
+children belongs to that child, and a call naming the parent is
+refused as no entry found.
+
+start is the whole of what names the entry.  Where two entries of the
+heading start at the same time it names neither, and the call is
+refused with both described by their end times; delete the one you
+mean in Emacs.
+
+Rounding is applied per org-clock-rounding-minutes, so two starts a
+few minutes apart can be written as one time and become such a pair.
 
 Parameters:
   link - Link to the headline (string, required)

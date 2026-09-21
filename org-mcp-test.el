@@ -8378,6 +8378,174 @@ line as contents, so the drawer stays."
            org-mcp-test--clock-delete-keeps-blank-line-expected-regex
          org-mcp-test--clock-delete-drops-blank-line-expected-regex)))))
 
+(defconst org-mcp-test--clock-delete-child-only-content
+  (concat
+   "* TODO Parent\n"
+   "** TODO Child\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "A parent carrying no clock, over a child that carries one.")
+
+(ert-deftest org-mcp-test-clock-delete-leaves-a-descendant-alone ()
+  "A clock on a child is not the parent's to delete.
+The call names the parent, whose own entry holds no CLOCK line, so
+it is refused as no entry found and the child keeps its clock."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-child-only-content))
+    (org-mcp-test--call-tool-refused
+     "org-clock-delete"
+     `((link . ,(org-mcp-test--file-link test-file "*Parent"))
+       (start . "2026-01-01T10:00:00"))
+     "\\`No clock entry starting at \\[2026-01-01 [^]]+ 10:00\\] found\\'"
+     test-file)))
+
+(defconst org-mcp-test--clock-delete-both-levels-content
+  (concat
+   "* TODO Parent\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n"
+   "** TODO Child\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 12:00] =>  2:00\n"
+   ":END:\n")
+  "A parent and its child each clocked, both entries starting alike.")
+
+(defconst org-mcp-test--clock-delete-child-kept-expected-regex
+  (concat
+   "\\`\\* TODO Parent\n"
+   "\\*\\* TODO Child\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\] =>  2:00\n"
+   ":END:\n"
+   "\\'")
+  "The parent's CLOCK line and its emptied drawer go; the child's stays.")
+
+(ert-deftest org-mcp-test-clock-delete-takes-the-heading-it-names ()
+  "The entry deleted is the named heading's, and the response says so.
+Parent and child hold entries of the same start, and the call names
+the parent: the parent's one-hour entry goes, the child's two-hour
+entry stays, and the response reports the parent's entry and links
+the parent.  The shared start is also what pins the ambiguity check
+to the entry: two such entries on one heading are refused, and these
+two sit on headings of their own."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-both-levels-content))
+    (let* ((link (org-mcp-test--file-link test-file "*Parent"))
+           (result
+            (org-mcp-test--call-clock-delete
+             link "2026-01-01T10:00:00")))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'deleted result) t))
+      (should
+       (string-match-p
+        "\\`\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\\'"
+        (alist-get 'start result)))
+      (should
+       (string-match-p
+        "\\`\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\\'"
+        (alist-get 'end result)))
+      (should (equal (alist-get 'duration result) "1:00"))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--clock-delete-child-kept-expected-regex))))
+
+(defconst org-mcp-test--clock-delete-same-start-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 12:00] =>  2:00\n"
+   ":END:\n")
+  "Two closed CLOCK entries on one heading, starting at the same time.")
+
+(defconst org-mcp-test--clock-delete-ambiguous-regex
+  (concat
+   "\\`blocked: 2 clock entries on this heading start at "
+   "\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]: "
+   "one ending \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] and "
+   "one ending \\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\]\\.  "
+   "start names no one of them, so delete the one you mean in Emacs\\'")
+  "The refusal names both entries and what tells them apart.")
+
+(ert-deftest org-mcp-test-clock-delete-same-start-is-ambiguous ()
+  "Two entries sharing a start name no one entry, so nothing goes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-same-start-content))
+    (org-mcp-test--call-tool-refused
+     "org-clock-delete"
+     `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+       (start . "2026-01-01T10:00:00"))
+     org-mcp-test--clock-delete-ambiguous-regex
+     test-file)))
+
+(defconst org-mcp-test--clock-delete-same-start-open-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n")
+  "An unclosed CLOCK entry sharing a start with a closed one.")
+
+(ert-deftest org-mcp-test-clock-delete-same-start-names-an-open-clock ()
+  "An unclosed entry among the ambiguous ones is named as still open."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-delete-same-start-open-content))
+    (org-mcp-test--call-tool-refused
+     "org-clock-delete"
+     `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+       (start . "2026-01-01T10:00:00"))
+     (concat
+      "\\`blocked: 2 clock entries on this heading start at "
+      "\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]: "
+      "one still open and "
+      "one ending \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\\.  ")
+     test-file)))
+
+(defconst org-mcp-test--clock-delete-rounded-pair-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\] =>  2:00\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\'")
+  "Two adds of distinct starts that rounding wrote as one time.")
+
+(defconst org-mcp-test--clock-delete-rounded-ambiguous-regex
+  (concat
+   "\\`blocked: 2 clock entries on this heading start at "
+   "\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]: "
+   "one ending \\[2026-01-01 [A-Za-z]\\{2,3\\} 12:00\\] and "
+   "one ending \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\\.  "
+   "start names no one of them, so delete the one you mean in Emacs\\'")
+  "The refusal names the pair in the order the LOGBOOK holds them.
+A new entry goes to the top of the drawer, so the entry added second
+is described first.")
+
+(ert-deftest org-mcp-test-clock-delete-rounding-collapses-two-starts ()
+  "Rounding can write two distinct starts as one, and start names neither.
+`org-clock-rounding-minutes' of 5 rounds 10:01 and 10:02 to the same
+10:00, so two adds leave two entries beginning there.  A delete
+naming that start is refused and the file keeps both."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\n"))
+    (let ((org-clock-rounding-minutes 5)
+          (link (org-mcp-test--file-link test-file "*Task One")))
+      (org-mcp-test--call-clock-add
+       link "2026-01-01T10:01:00" "2026-01-01T11:00:00")
+      (org-mcp-test--call-clock-add
+       link "2026-01-01T10:02:00" "2026-01-01T12:00:00")
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--clock-delete-rounded-pair-regex)
+      (org-mcp-test--call-tool-refused
+       "org-clock-delete"
+       `((link . ,link) (start . "2026-01-01T10:01:00"))
+       org-mcp-test--clock-delete-rounded-ambiguous-regex
+       test-file))))
+
 ;;; Tests for org-node-set-properties
 
 (ert-deftest org-mcp-test-set-properties-new ()
