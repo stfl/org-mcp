@@ -10217,10 +10217,194 @@ Returns the tool's parsed response."
       (before . ,before)
       (after . ,after)))))
 
+;;; A note the user is typing is none of a write's business
+
+;; Org's own note prompt is one buffer, `*Org Note*', and one set of
+;; `org-log-note-*' variables: the marker saying where the entry goes,
+;; the purpose saying what it is, the states it names.  They belong to
+;; whoever is typing.  A write here writes an entry of its own, so
+;; every one of them is this call's own, and what the user has in
+;; flight comes through a write untouched — the text they typed, the
+;; place their entry is going, and the hook that will ask them for it.
+
+(defconst org-mcp-test--users-note-text
+  "Half a sentence the user is still"
+  "Text a user has typed into Org's note prompt and not finished.")
+
+(defun org-mcp-test--arm-users-log-note (file heading)
+  "Open Org's note prompt on HEADING of FILE, as Org opens it.
+Leaves `*Org Note*' holding `org-mcp-test--users-note-text', the
+`org-log-note-*' variables pointing at that heading, and
+`org-add-log-note' on `post-command-hook' — the state a user is in
+between typing into the prompt and finishing it.
+
+Returns what their entry is: the buffer and position it is going to,
+and the purpose saying what it says."
+  (with-current-buffer (find-file-noselect file)
+    (goto-char (point-min))
+    (search-forward heading)
+    (org-back-to-heading t)
+    (org-add-log-setup 'note nil nil 'note))
+  (with-current-buffer (get-buffer-create "*Org Note*")
+    (erase-buffer)
+    (insert org-mcp-test--users-note-text))
+  (list (marker-buffer org-log-note-marker)
+        (marker-position org-log-note-marker)
+        org-log-note-purpose))
+
+(defun org-mcp-test--disarm-users-log-note ()
+  "Put the global log-note state back, whatever a test left in it.
+These are Org's own globals, shared with every other test in the
+process, so a test that arms a note puts it away again."
+  (remove-hook 'post-command-hook #'org-add-log-note)
+  (setq org-log-setup nil
+        org-log-note-purpose nil
+        org-log-note-state nil
+        org-log-note-previous-state nil)
+  (set-marker org-log-note-marker nil)
+  (when-let* ((buffer (get-buffer "*Org Note*")))
+    (kill-buffer buffer)))
+
+(defun org-mcp-test--should-keep-users-log-note (armed)
+  "Assert the note the user had in flight came through the call intact.
+ARMED is what `org-mcp-test--arm-users-log-note' returned."
+  (let ((buffer (get-buffer "*Org Note*")))
+    (should buffer)
+    (should
+     (equal
+      (with-current-buffer buffer (buffer-string))
+      org-mcp-test--users-note-text)))
+  ;; The entry is still theirs: where it goes and what it says.
+  (should
+   (equal
+    (list (marker-buffer org-log-note-marker)
+          (marker-position org-log-note-marker)
+          org-log-note-purpose)
+    armed))
+  ;; And the hook that will ask them for it when they next act.
+  (should org-log-setup)
+  (should (memq 'org-add-log-note post-command-hook)))
+
+(ert-deftest org-mcp-test-a-logged-write-keeps-the-note-being-typed ()
+  "A write that records an entry leaves the user's half-typed one alone.
+Org's note prompt is one buffer and one set of variables; a write
+that took them over would erase what the user typed, and their
+finishing key would write the server's entry instead of theirs.  The
+write still records what `org-log-done' asked for."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done 'note)
+          (org-log-into-drawer t))
+      (let ((marker
+             (org-mcp-test--arm-users-log-note test-file "Task One")))
+        (unwind-protect
+            (progn
+              (let ((result
+                     (org-mcp-test--call-update-todo-state
+                      (org-mcp-test--file-link test-file "*Task One")
+                      "DONE" "TODO")))
+                (should (equal (alist-get 'success result) t))
+                (should (equal (alist-get 'before result) "TODO"))
+                (should (equal (alist-get 'after result) "DONE")))
+              (org-mcp-test--should-keep-users-log-note marker)
+              (org-mcp-test--verify-file-matches
+               test-file
+               org-mcp-test--pattern-task-one-closing-note))
+          (org-mcp-test--disarm-users-log-note))))))
+
+(ert-deftest org-mcp-test-a-note-of-ones-own-keeps-the-note-being-typed ()
+  "org-node-add-note leaves a note the user is typing alone as well.
+It is the tool that reached Org's note machinery before any other,
+and it writes its entry the same way every write now does."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((org-log-into-drawer t))
+      (let ((marker
+             (org-mcp-test--arm-users-log-note test-file "Task One")))
+        (unwind-protect
+            (progn
+              (let ((result
+                     (json-read-from-string
+                      (mcp-server-lib-ert-call-tool
+                       "org-node-add-note"
+                       `((link
+                          .
+                          ,(org-mcp-test--file-link
+                            test-file "*Task One"))
+                         (note . "The server's own note."))))))
+                (should (equal (alist-get 'success result) t))
+                (should (eq (alist-get 'saved result) t)))
+              (org-mcp-test--should-keep-users-log-note marker)
+              (should
+               (string-match-p
+                "The server's own note\\."
+                (org-mcp-test--read-file test-file))))
+          (org-mcp-test--disarm-users-log-note))))))
+
+(ert-deftest org-mcp-test-a-clock-out-note-keeps-the-note-being-typed ()
+  "A clock-out carrying prose leaves a note the user is typing alone.
+It is the write that puts the most of its own into Org's note
+machinery -- prose, purpose and place -- so it is the one that would
+take the user's over."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((marker
+               (org-mcp-test--arm-users-log-note test-file "Task One")))
+          (unwind-protect
+              (let ((link
+                     (org-mcp-test--file-link test-file "*Task One")))
+                (org-mcp-test--should-report-the-closed-hour
+                 (org-mcp-test--call-clock-out
+                  link "2026-01-01T11:00:00"
+                  org-mcp-test--clock-out-prose)
+                 link)
+                (org-mcp-test--should-keep-users-log-note marker)
+                (org-mcp-test--verify-file-matches
+                 test-file org-mcp-test--clock-out-with-note-regex))
+            (org-mcp-test--disarm-users-log-note)))))))
+
+(ert-deftest org-mcp-test-a-planning-write-keeps-the-note-being-typed ()
+  "The planning setters leave a note the user is typing alone too.
+`org-log-reschedule' takes a write through the same machinery, on a
+removal as much as on a move."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((org-log-reschedule 'note)
+          (org-log-into-drawer t))
+      (let ((marker
+             (org-mcp-test--arm-users-log-note
+              test-file "Scheduled Task")))
+        (unwind-protect
+            (progn
+              (let ((result
+                     (org-mcp-test--call-set-scheduled
+                      test-file "<2026-03-01 Sun>" "")))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+                (should (equal (alist-get 'after result) "")))
+              (org-mcp-test--should-keep-users-log-note marker)
+              (org-mcp-test--verify-file-matches
+               test-file
+               org-mcp-test--pattern-scheduled-remove-logged))
+          (org-mcp-test--disarm-users-log-note))))))
+
 (defun org-mcp-test--should-leave-no-log-prompt ()
-  "Assert no log note is left waiting for a command loop that will not come."
+  "Assert no log note is left waiting for a command loop that will not come.
+`*Org Note*' is Org's own prompt buffer, which a write never opens
+and never borrows; the other is the buffer a write puts its own prose
+in, which `org-store-log-note' kills as it reads it."
   (should-not (memq 'org-add-log-note post-command-hook))
-  (should-not (get-buffer "*Org Note*")))
+  (should-not (get-buffer "*Org Note*"))
+  (should-not
+   (seq-find
+    (lambda (buffer)
+      (string-prefix-p " *org-mcp-log-note*" (buffer-name buffer)))
+    (buffer-list))))
 
 (ert-deftest org-mcp-test-set-scheduled-logs-the-move-without-asking ()
   "`org-log-reschedule' set to `note' records the move and waits for no one.

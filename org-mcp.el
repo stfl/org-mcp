@@ -2827,17 +2827,68 @@ clocks exist."
                    (setq latest end-time)))))))))
     latest))
 
+(defmacro org-mcp--with-own-log-note (&rest body)
+  "Run BODY with the log-note state bound to this call's own.
+Org keeps one note in flight at a time, in one buffer and one set of
+`org-log-note-*' variables: the marker saying where the entry goes,
+the purpose saying what it is, the states it names.  They belong to
+whoever is typing.  A user who has Org's note prompt open — from a
+keyword logged with `note', or a clock-out under
+`org-log-note-clock-out' — has their half-typed entry in exactly
+those, and a write that set them would erase the text, send their
+finishing key to the server's entry, and leave the marker nil so
+that key errors instead.
+
+Every one of them is therefore bound here, so what BODY sets up is
+BODY's and the user's survives the call.  The two markers are bound
+to fresh ones rather than to nil, because `org-add-log-setup' and
+`org-mcp--insert-log-note' move them rather than assigning them, and
+moving the global one is what would take the user's entry over.  They
+are released on the way out: a marker left pointing into a buffer
+slows every edit to it until it is collected.
+
+`org-log-note-this-command' and `org-log-note-recursion-depth' are
+among them because `org-add-log-note' compares against both before it
+opens the prompt, so a write that set them would leave the user's
+next command finding no note to take."
+  (declare (indent 0) (debug t))
+  `(let ((org-log-note-marker (make-marker))
+         (org-log-note-return-to (make-marker))
+         (org-log-note-purpose nil)
+         (org-log-note-state nil)
+         (org-log-note-previous-state nil)
+         (org-log-note-extra nil)
+         (org-log-note-how nil)
+         (org-log-note-effective-time nil)
+         (org-log-note-this-command this-command)
+         (org-log-note-recursion-depth (recursion-depth))
+         (org-log-note-window-configuration nil)
+         (org-log-post-message nil)
+         (org-note-abort nil)
+         (org-log-setup nil))
+     (unwind-protect
+         (progn
+           ,@body)
+       (set-marker org-log-note-marker nil)
+       (set-marker org-log-note-return-to nil))))
+
 (defun org-mcp--store-log-note (note)
-  "Write the log entry Org has set up, with NOTE as its prose.
+  "Write the log entry set up at point, with NOTE as its prose.
 The `org-log-note-*' variables say what the entry is — its purpose,
 the states it records, the time it happened — and
 `org-store-log-note' formats and places it, honouring
 `org-log-note-headings', `org-log-into-drawer' and a heading's own
-`LOG_INTO_DRAWER'.  It takes the prose from the *Org Note* buffer,
-which is filled here instead of by the interactive
-`org-add-log-note'.  An empty NOTE writes the entry's heading line
+`LOG_INTO_DRAWER'.  An empty NOTE writes the entry's heading line
 alone, which is the entry Org writes for a setting that takes no
 prose.
+
+`org-store-log-note' takes the prose from whichever buffer is
+current and kills it, so the prose goes in a buffer of this call's
+own.  The interactive `org-add-log-note' uses `*Org Note*' for it,
+and that one is the user's: it is where a note they are typing
+lives, and erasing it to borrow it is how the text they had typed
+would be lost.  Callers run inside `org-mcp--with-own-log-note',
+which keeps the variables apart the same way.
 
 The window configuration and the return marker are set because
 `org-store-log-note' restores them when it is done and only
@@ -2845,11 +2896,15 @@ The window configuration and the return marker are set because
   (move-marker org-log-note-return-to (point))
   (setq org-log-note-window-configuration
         (current-window-configuration))
-  (save-current-buffer
-    (set-buffer (get-buffer-create "*Org Note*"))
-    (erase-buffer)
-    (insert note)
-    (org-store-log-note)))
+  (let ((buffer (generate-new-buffer " *org-mcp-log-note*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (insert note)
+          (org-store-log-note))
+      ;; `org-store-log-note' kills it itself; this is for the path
+      ;; where it fails before reaching that.
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (defun org-mcp--insert-log-note
     (note purpose &optional state prev-state)
@@ -2864,15 +2919,18 @@ when PURPOSE is `state'.
 
 This is the entry org-mcp decides on itself, where no Org command set
 one up; `org-mcp--logging-note' is how an entry a command did set up
-is written."
-  (move-marker org-log-note-marker (point))
-  (setq
-   org-log-note-purpose purpose
-   org-log-note-state state
-   org-log-note-previous-state prev-state
-   org-log-note-extra nil
-   org-log-note-effective-time (org-current-effective-time))
-  (org-mcp--store-log-note note))
+is written.  Both describe their entry inside
+`org-mcp--with-own-log-note', so a note the user has in flight is not
+what gets described."
+  (org-mcp--with-own-log-note
+    (move-marker org-log-note-marker (point))
+    (setq
+     org-log-note-purpose purpose
+     org-log-note-state state
+     org-log-note-previous-state prev-state
+     org-log-note-extra nil
+     org-log-note-effective-time (org-current-effective-time))
+    (org-mcp--store-log-note note)))
 
 (defmacro org-mcp--logging-note (note &rest body)
   "Run BODY, and write as NOTE the log entry BODY leaves Org waiting for.
@@ -2889,15 +2947,22 @@ change the server made.  Every Org command org-mcp calls that can
 reach `org-add-log-setup' runs inside this macro, which is what keeps
 that prompt out of the user's session.
 
-`org-log-setup' is Org's own flag for an entry set up and not yet
-written, and it is bound to nil around BODY so that what is taken off
-the hook here is what BODY put there — an entry the user armed before
-the call is left for the user's own command loop.  Taking the entry
-off the hook and writing it, rather than only unhooking it, is what
-keeps the record the setting asked for: `org-store-log-note' places
-it where Org would have.
+Taking the entry off the hook and writing it, rather than only
+unhooking it, is what keeps the record the setting asked for:
+`org-store-log-note' places it where Org would have.
 
-What that amounts to differs by caller, because it is
+A note the user has in flight comes through untouched, and it takes
+all three of these to say so.  `org-mcp--with-own-log-note' binds the
+buffer and variables their half-typed entry lives in, so BODY
+describes this call's entry and not theirs.  `org-log-setup' is Org's
+own flag for an entry set up and not yet written, bound to nil there
+too, so what is taken off the hook is what BODY put on it.  And the
+hook is left alone when `org-add-log-note' was on it before BODY ran:
+Org's `add-hook' does nothing when it is already there, so removing
+it would take away the user's entry rather than this call's, and
+their next command would never be asked for the note they typed.
+
+What the writing amounts to differs by caller, because it is
 `org-log-note-headings' that decides whether there is an entry to
 write.  `org-todo', `org-schedule', `org-deadline' and
 `org-archive-subtree' set up purposes it gives a heading line to, so
@@ -2907,20 +2972,23 @@ does is take the prompt off the hook; a NOTE under that empty heading
 is the whole of the entry, and a user who gives the purpose a heading
 gets the prose under it, as they would from a clock-out by hand."
   (declare (indent 1) (debug (form body)))
-  (let ((prose (gensym "prose")))
+  (let ((prose (gensym "prose"))
+        (theirs (gensym "theirs")))
     `(let ((,prose (or ,note ""))
-           (org-log-setup nil))
-       (unwind-protect
-           (progn
-             ,@body)
-         ;; Take it off the hook even when BODY fails: the hook is the
-         ;; user's, and a refused write that leaves it armed pops the
-         ;; same prompt at their next command as one that went through.
+           (,theirs (memq 'org-add-log-note post-command-hook)))
+       (org-mcp--with-own-log-note
+         (unwind-protect
+             (progn
+               ,@body)
+           ;; Take it off the hook even when BODY fails: the hook is
+           ;; the user's, and a refused write that leaves it armed
+           ;; pops the same prompt at their next command as one that
+           ;; went through.
+           (when (and org-log-setup (not ,theirs))
+             (remove-hook 'post-command-hook #'org-add-log-note)))
          (when org-log-setup
-           (remove-hook 'post-command-hook #'org-add-log-note)))
-       (when org-log-setup
-         (org-mcp--store-log-note ,prose)
-         t))))
+           (org-mcp--store-log-note ,prose)
+           t)))))
 
 (defun org-mcp--clock-insert-entry (start &optional end)
   "Insert CLOCK line at current heading.

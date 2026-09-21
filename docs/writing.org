@@ -132,6 +132,13 @@ no log entry — the title, property, tag, priority and content tools, and
 =org-node-delete= — have no setting that asks them to. Taking a priority off
 records nothing, because Org records nothing for it.
 
+A note you are part-way through typing in Emacs is not one of these. Org keeps
+one note in flight at a time, in one buffer and one set of variables, and a
+write keeps its own apart from them: the text you have typed is still there
+afterwards, the entry still goes where Org meant it to, and the key that
+finishes it still writes yours. A write's entry and yours are two records, and
+you can be asked for yours after the write has left.
+
 * How a refusal is classed
 
 A refusal arrives as a message and never as an error code: the protocol org-mcp
