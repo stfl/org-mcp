@@ -294,7 +294,9 @@ One accessor per field serves the read surface and the assertion, so a value a
 read handed you is a value an assertion accepts. It holds in the corners too:
 a SCHEDULED that is a date range is read whole and asserted whole, and a
 property written =:FLAGGED: nil= holds the value ="nil"=, which is what
-asserts it — the empty string says the drawer has no such property at all.
+asserts it. A drawer line has one state more than a field, so it takes one
+spelling more: =""= asserts a line carrying nothing and =null= asserts no line
+at all (see [[*The three states of a drawer line]]).
 
 A change that destroys nothing asserts nothing, and that is a fact about the
 call rather than a concession: adding a tag and removing one name what they
@@ -346,7 +348,7 @@ nothing in between — so =null= is how you empty them:
 | a SCHEDULED    | =org-node-set-scheduled=  | =after: null=             |
 | a DEADLINE     | =org-node-set-deadline=   | =after: null=             |
 | a priority     | =org-node-set-priority=   | =after: null=             |
-| a property     | =org-node-set-properties= | that name's value =""=    |
+| a property     | =org-node-set-properties= | that name's value =null=  |
 | the body       | =org-node-set-content=    | =after: ""=               |
 | a tag          | =org-node-remove-tags=    | the tags named in =after= |
 | every own tag  | =org-node-set-tags=       | =after: []=               |
@@ -524,7 +526,7 @@ Example:
   - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
   - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent= in, instead of the ID index; it applies to =parent= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. A boolean value writes the text =t= for =true= and =nil= for =false=, so =false= writes the property while =null= skips it. =null= or empty values are skipped. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new headline has no line for it to take away, so the state it asks for is the one the headline is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
 - *Refuses with:* =blocked:= when Org vetoes =todo= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
@@ -673,37 +675,68 @@ Example:
 - *Description:* Set or remove properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. An empty string asserts the property is absent. Names are matched without regard to case, as Org reads them
-  - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= takes the property away, guarded by what =before= says it holds. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead — and so is a name ending in =+=
+  - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. =null= asserts the drawer carries no such line, =""= asserts a line carrying no value, and any other string asserts the line holds that text (see [[*The three states of a drawer line]]). Names are matched without regard to case, as Org reads them
+  - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= writes a line carrying no value, and =null= takes the line away, guarded by what =before= says it holds (see [[*The three states of a drawer line]]). =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead — and so is a name ending in =+=
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =properties_set= and =properties_deleted= — the names written and the names removed — =before=, the values they held, plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, a name ending in =+=, and an entry carrying =null= (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when the drawer does not hold for a property what =before= says it holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and a name ending in =+= (see [[*How a refusal is classed]])
 
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
 
-=null= in a value is the entry left unfilled, on either side, and is refused
-rather than read as emptiness — a client that fills an entry it is not using
-would otherwise vouch for an absence it never saw, or delete a property it
-never named (see [[*What a blank parameter means]]). Each side's refusal names
-the spelling that side wanted instead:
+*** The three states of a drawer line
+
+A drawer line is in one of three states, and a property map spells all three,
+on either side of the call:
+
+| Value          | =after= writes                  | =before= asserts             |
+|----------------+---------------------------------+------------------------------|
+| =null=         | the line goes                   | there is no such line        |
+| =""=           | =:FOO:=, a line with no value   | a line carrying no value     |
+| =false=, ="nil"= | =:FOO: nil=, the text =nil=   | the line holds the text =nil= |
+| any other string | =:FOO: that text=             | the line holds that text     |
+
+A field is a value or nothing; a drawer line has a third state between the two,
+because =:FOO:= with nothing after the name is a line that is there, and a read
+returns it as =""= (see [[file:reading.org::*Asking for properties][Asking for properties]]). So a property map needs
+one spelling more than a field does. =""= is the middle state, a value in the
+property's own vocabulary, and =null= asks for the state a line cannot be in —
+not being there at all, which is what =null= asks of any field (see [[*What a
+blank parameter means]]).
+
+A =null= that destroys is guarded like every other removal: =before= has to
+name every property =after= writes, so a deletion still asserts what it
+destroys. It is also confined to a map, whose keys are the call's own statement
+of what it means to touch — a client that sends =null= for a property named an
+entry to send it in, which filling an unused parameter never does.
+
+Taking away a property the drawer does not carry is a no-op success. =before= of
+=null= on it is an honest assertion, so the call is neither a conflict nor a
+write, and the name appears in neither =properties_set= nor
+=properties_deleted=: nothing was set and nothing was deleted. A line carrying
+no value is carried, so taking that one away is a write and the name comes back
+under =properties_deleted=.
+
+A refusal names the state it expected rather than showing it as a value,
+because two of the three would otherwise read alike:
 
 #+begin_example
-before gives no value for the property 'EFFORT': send "" to assert it holds none
-after gives no value for the property 'EFFORT': send "" to remove it
+conflict: Property 'EFFORT' mismatch: expected (absent), found '1:00'
+conflict: Property 'EFFORT' mismatch: expected '', found '1:00'
 #+end_example
 
-Removing a property the headline does not hold is a no-op success. =before= of
-=""= on it is an honest assertion, so the call is neither a conflict nor a
-write, and the name appears in neither =properties_set= nor
-=properties_deleted=: nothing was set and nothing was deleted.
+Both arrays are always there. A call that only sets carries an empty
+=properties_deleted=, one that only removes an empty =properties_set=, and the
+no-op above carries both empty, so a client reads a length without first
+testing whether the field arrived.
 
 A drawer may spread one property over several lines, a =NAME+= line adding to
 what =NAME= holds (see [[file:reading.org::*Asking for properties][Asking for properties]]). The joined value is what
 =before= asserts and what =after= replaces, so a set writes the value you asked
 for and nothing else: the lines it supersedes go with the old value, and =FOO=
-afterwards holds exactly what =after= said. =""= takes the property away whole,
-those lines included. =FOO+= is not a name a call may send, on either side:
+afterwards holds exactly what =after= said. =null= takes the property away
+whole, those lines included. =FOO+= is not a name a call may send, on either
+side:
 
 #+begin_example
 Not a property name: FOO+.  A trailing `+' makes a drawer line add to the property named without it, so it names none of its own
@@ -738,21 +771,37 @@ Example:
   "success": true,
   "saved": true,
   "properties_set": ["EFFORT", "OWNER"],
+  "properties_deleted": [],
+  "before": { "EFFORT": "1:00", "OWNER": "ada" },
   "link": "id:abc-123"
 }
 
 # Add a property no heading carried before:
 {
   "link": "id:abc-123",
-  "before": { "OWNER": "" },
+  "before": { "OWNER": null },
   "after": { "OWNER": "ada" }
+}
+
+# Write a line that carries no value:
+{
+  "link": "id:abc-123",
+  "before": { "FLAG": null },
+  "after": { "FLAG": "" }
+}
+
+# Assert that line as a read returned it, and take it away:
+{
+  "link": "id:abc-123",
+  "before": { "FLAG": "" },
+  "after": { "FLAG": null }
 }
 
 # Remove one property and set another:
 {
   "link": "id:abc-123",
   "before": { "EFFORT": "1:00", "OWNER": "ada" },
-  "after": { "EFFORT": "2:00", "OWNER": "" }
+  "after": { "EFFORT": "2:00", "OWNER": null }
 }
 
 # Success response for that call:
@@ -768,6 +817,11 @@ Example:
 # A property has moved on since the read:
 {
   "error": "conflict: Property 'EFFORT' mismatch: expected '1:00', found '3:00'"
+}
+
+# before said there was no such line, and there is one:
+{
+  "error": "conflict: Property 'EFFORT' mismatch: expected (absent), found '1:00'"
 }
 
 # The call writes a property it did not assert:

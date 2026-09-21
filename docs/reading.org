@@ -227,8 +227,21 @@ A value is the drawer's own text. =:FLAGGED: nil= is a property the node
 carries whose value is the string ="nil"= — the spelling
 =org-node-set-properties= writes for JSON =false= — and not a property the
 node lacks. That string is what asserts it when you write; the empty string
-asserts the node has no such property at all (see [[file:writing.org::*Knowing what you are about to change][Knowing what you are about
-to change]]).
+asserts the property holds nothing (see [[file:writing.org::*Knowing what you are about to change][Knowing what you are about to
+change]]).
+
+Holding nothing and not being there are two states, and =properties= tells
+them apart. A line written =:EMPTY:=, with nothing after the name, comes back
+under that name as =""=; a property the drawer does not carry is left out, even
+when the call named it. A key missing from the object therefore says the drawer
+has no such line, the way a field with no value is left out of the node, and it
+never means a line that carries nothing.
+
+A write says the same three states back (see [[file:writing.org::*The three states of a drawer line][The three states of a drawer
+line]]): =""= for the line a read returned as =""=, =null= for the property that
+was not there, and the text otherwise. So a value a read handed you is a value
+an assertion accepts, and a property that carries nothing survives the round
+trip rather than being written away.
 
 Two group names, sent as a string rather than an array, stand for the whole
 drawer and for none of it:

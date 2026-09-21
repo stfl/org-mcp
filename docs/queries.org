@@ -29,9 +29,9 @@ Example:
     {
       "title": "Urgent task",
       "todo": "TODO",
-      "priority": "C",
+      "priority": "A",
       "file": "/home/user/org/tasks.org",
-      "level": 1,
+      "level": 2,
       "link": "file:~/org/tasks.org::*Urgent task",
       "properties": {"EFFORT": "2:00"},
       "computed": {"parent-priority": "A"}
