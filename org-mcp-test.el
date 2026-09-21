@@ -12343,6 +12343,13 @@ DEADLINE: <2026-06-20 Sat ++1m -2d>
 Task body."
   "TODO task whose DEADLINE carries a repeater and a warning period.")
 
+(defconst org-mcp-test--pattern-scheduled-day-only
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED naming a day and no time of day.")
+
 (defconst org-mcp-test--pattern-scheduled-with-repeater
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -12751,6 +12758,111 @@ call sent."
      "\\`Date '\\[2026-03-27 Fri\\]' is an inactive timestamp - \
 SCHEDULED and DEADLINE carry an active one, written <\\.\\.\\.>\\'"
      test-file)))
+
+(defconst org-mcp-test--dates-carrying-text-org-reads-past
+  '(("<2026-03-27 Fri hello>" "hello" "<2026-03-27 [^ >]+>")
+    ("<2026-03-27 Fri 09:00 +1w garbage>"
+     "garbage"
+     "<2026-03-27 [^ >]+ 09:00 \\+1w>")
+    ("2026-03-27 09:00 blah blah"
+     "blah blah"
+     "<2026-03-27 [^ >]+ 09:00>")
+    ("2026-03-27 25h" "25h" "<2026-03-27 [^ >]+>"))
+  "Dates carrying text between the brackets that Org reads past.
+Each row is the value sent, the words Org would drop, and a pattern
+for what the file would have held instead.  The third row sends the
+text without brackets of its own, where the value is offered to Org
+wrapped in them; the fourth is a repeater missing its sign, which
+Org reads past rather than reading as a repeater.")
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-text-inside-the-timestamp ()
+  "Text Org reads past inside the brackets refuses the call.
+Org\\='s parser reads a timestamp\\='s parts and reads past whatever
+else stands between them, keeping none of it, so the field would end up
+holding less than the call sent while the call was answered with a
+success.  A repeater with a typo after it is the costly one: the
+repeater goes in and the typo does not.
+
+The refusal names the words that would have gone missing, which the
+date-range message could not: none of these is a range, and a client
+told to name one date would be fixing the wrong thing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,date ,unread ,written)
+                     org-mcp-test--dates-carrying-text-org-reads-past)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' carries text that is no part of a timestamp: '"
+                 (regexp-quote unread)
+                 "' - Org would write '"
+                 written
+                 "' without it\\'")
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(defconst org-mcp-test--dates-whose-day-name-org-rewrites
+  '("2026-03-27 zzz" "<2026-03-27 Mon>")
+  "Dates whose day name is not the day the date falls on.
+The first names no day of the week at all and the second names the
+wrong one.  Org reads neither: it writes the day the date falls on.")
+
+(ert-deftest org-mcp-test-set-scheduled-writes-the-day-the-date-falls-on ()
+  "A day name is Org\\='s to write, whatever the call spelled there.
+Org derives the day of the week from the date and reads nothing out
+of the slot the day name stands in, so the date the call named is
+the date the file holds and no part of the value is lost.  That is
+what parts a day name from a word Org reads past and refuses: the
+day name costs the call nothing."
+  (dolist (date org-mcp-test--dates-whose-day-name-org-rewrites)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-scheduled"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
+                 (after . ,date))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (string-match-p "\\`<2026-03-27 [^ >]+>\\'"
+                         (alist-get 'after result)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-scheduled-day-only)))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-one-digit-hour ()
+  "An hour written with one digit is written padded, not refused.
+Org reads `9:00' and writes `09:00', the same minute spelled the way
+Org spells it, so nothing the call sent goes missing and the value
+is not text Org read past."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "<2026-03-27 Fri 9:00>"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 09:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat
+        "\\`\\* TODO Simple Task\n"
+        "SCHEDULED: <2026-03-27 [^ >]+ 09:00>\n"
+        "Task body text\\.\n?\\'")))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-text-after-the-timestamp ()
   "Text Org does not read as part of the timestamp refuses the call.

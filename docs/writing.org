@@ -117,8 +117,8 @@ it may stand alone or beside a repeater; on a DEADLINE it brings the headline
 into the agenda three days early, and on a SCHEDULED it holds the headline back
 until three days before the date. Doubling the hyphen narrows it to the first
 occurrence: =-3d= warns before every repeat and =--3d= before the first date
-only. The day name is Org's to write: send it or leave it out, and the file
-gets the day the date falls on.
+only. The day name is Org's to write: send it, misspell it or leave it out, and
+the file gets the day the date falls on.
 
 The two warning forms part company beside a repeater. Org writes
 =<2026-03-27 Fri +1w -3d>= whole, and writes =<2026-03-27 Fri +1w --3d>= as
@@ -165,6 +165,7 @@ Date '2026-02-29' does not exist - Org reads it as '<2026-03-01 Sun>'
 Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
 Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
 Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
+Date '<2026-03-27 Fri 09:00 +1w typo>' carries text that is no part of a timestamp: 'typo' - Org would write '<2026-03-27 Fri 09:00 +1w>' without it
 Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
 #+end_example
 
@@ -181,6 +182,20 @@ pair of brackets, =2026-03-27 09:00--2026-03-27 10:00=, which Org reads up to
 the separator and no further. A headline can carry a SCHEDULED that is a range
 and =before= asserts one by the whole string, but =after= names the one date the
 field is to carry.
+
+Org's parser reads a timestamp's parts and reads past whatever else stands
+between the brackets, keeping none of it. =<2026-03-27 Fri 09:00 +1w typo>=
+parses, and the file would get the repeater and none of the typo, so the call
+would be answered with a success and a heading repeating on a schedule nobody
+chose. Text Org reads past is refused, and the refusal names it, so the word to
+fix is the word the message quotes. The same goes for a repeater missing its
+sign: =2026-03-27 25h= is not a repeater to Org but a word it reads past, and
+it is refused rather than written as a bare day.
+
+The day name is read past and not refused. Org writes the day the date falls on
+and reads nothing out of the slot the day name stands in, so =2026-03-27 zzz=
+reaches the file as =<2026-03-27 Fri>= — the day the call named, with nothing of
+it lost.
 
 A date is written out in full, never as a relative expression: =+1w= on its own
 is not next week but a repeater with no date under it, and it is refused.
