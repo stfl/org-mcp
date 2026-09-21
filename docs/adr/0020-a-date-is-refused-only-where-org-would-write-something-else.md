@@ -12,11 +12,20 @@ are refused. So is text Org's parser reads past: it reads a timestamp's parts
 and keeps none of what else stands between the brackets, so
 `<2026-03-27 Fri 09:00 +1w typo>` would reach the file as
 `<2026-03-27 Fri 09:00 +1w>` — the repeater the call asked for and none of the
-word it got wrong. What Org read is asked of the string the call sent, by
-cutting words off its end and rendering what is left until the rendering
-changes; the parsed element cannot answer it, because the words Org dropped are
-in no property of it, and reading Org's timestamp grammar a second time here
-would give the check an opinion of its own, which this record denies it.
+word it got wrong. What Org read is asked of the string the call sent, a word at
+a time: a word whose absence leaves the rendering as it was is a word Org read
+nothing from, and a word Org did read cannot go without the rendering going with
+it. Each word is asked in its own right, because a word Org reads past stands
+anywhere between the brackets — a repeater typed wrong stands before the
+repeater it was meant to be. The parsed element cannot answer the question at
+all, because the words Org dropped are in no property of it, and
+reading Org's timestamp grammar a second time here would give the check an
+opinion of its own, which this record denies it.
+
+This refusal is asked after every other one, because its message names the
+timestamp Org would have written and a client sends what a message names. Asked
+earlier it would name what the next refusal rejects: for `<2026-02-30 Fri typo>`
+the second of March, which is exactly the rolled date the surface refuses.
 
 The day name is read past and written rather than refused, for the reason the
 rule is what it is: Org writes the day the date falls on, so a call that
