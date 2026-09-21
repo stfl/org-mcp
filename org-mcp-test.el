@@ -12435,13 +12435,6 @@ Task body."
    "Task body text\\.\n?\\'")
   "Pattern after a SCHEDULED carrying a first-only warning delay.")
 
-(defconst org-mcp-test--pattern-scheduled-repeater-alone
-  (concat
-   "\\`\\* TODO Simple Task\n"
-   "SCHEDULED: <2026-03-27 [^ >]+ \\+1w>\n"
-   "Task body text\\.\n?\\'")
-  "Pattern after a repeater takes a first-only delay down with it.")
-
 (defconst org-mcp-test--pattern-deadline-with-repeater-and-warning
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -12762,18 +12755,81 @@ range is told apart by cannot be the hyphen alone."
          org-mcp-test--pattern-scheduled-with-first-only-delay)))))
 
 (defconst org-mcp-test--first-only-delays-with-a-repeater
-  '("<2026-03-27 Fri +1w --3d>" "2026-03-27 +1w --3d")
-  "A first-only warning delay sent beside a repeater, both spellings.")
+  '(("<2026-03-27 Fri +1w --3d>"
+     "<2026-03-27 [^ >]+ \\+1w>"
+     "<2026-03-27 [^ >]+ \\+1w -3d>")
+    ("2026-03-27 +1w --3d"
+     "<2026-03-27 [^ >]+ \\+1w>"
+     "<2026-03-27 [^ >]+ \\+1w -3d>")
+    ("<2026-03-27 Fri .+2d --3d>"
+     "<2026-03-27 [^ >]+ \\.\\+2d>"
+     "<2026-03-27 [^ >]+ \\.\\+2d -3d>")
+    ("<2026-03-27 Fri ++1m --3d>"
+     "<2026-03-27 [^ >]+ \\+\\+1m>"
+     "<2026-03-27 [^ >]+ \\+\\+1m -3d>")
+    ("<2026-03-27 Fri 09:00 +1w --3d>"
+     "<2026-03-27 [^ >]+ 09:00 \\+1w>"
+     "<2026-03-27 [^ >]+ 09:00 \\+1w -3d>"))
+  "A first-only warning delay sent beside a repeater.
+Each row is the value sent, a pattern for what the file would have
+held instead, and a pattern for the every-repeat warning the refusal
+offers in its place.  All three of Org\\='s repeater forms are here,
+because the pairing is refused by a repeater being there at all and
+not by how it steps, and the last row carries a time of day, so the
+delay is not the only thing standing after the date.")
 
-(ert-deftest org-mcp-test-set-scheduled-repeater-drops-a-first-only-delay ()
-  "A repeater takes a first-only delay down with it, and says so.
-Org\='s planning writer carries a repeater and a `-3d\=' warning
-together, and carries a `--3d\=' delay standing alone, but writes the
-repeater by itself when the two arrive together.  The delay is Org\='s
-to drop rather than this server\='s to refuse, and the response reports
-the timestamp read back from the file, so a client is told what the
-field ended up holding."
-  (dolist (date org-mcp-test--first-only-delays-with-a-repeater)
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-delay-with-a-repeater ()
+  "A first-only delay beside a repeater refuses the call.
+Org\\='s planning writer carries a repeater and a `-3d\\=' warning
+together, and carries a `--3d\\=' delay standing alone, but writes the
+repeater by itself when the two arrive together — so the field would
+hold a heading repeating with the warning the call asked for gone,
+under a success.
+
+The refusal names both timestamps a client can send instead: what
+Org would have written, and the same timestamp warning before every
+repeat rather than before the first date only.  Neither of them is
+the delay, because Org has nowhere to put one beside a repeater."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,date ,dropped ,every)
+                     org-mcp-test--first-only-delays-with-a-repeater)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' pairs a first-only warning delay with a repeater"
+                 " - Org's planning writer drops the delay and writes '"
+                 dropped
+                 "'; '"
+                 every
+                 "' warns before every repeat\\'")
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(defconst org-mcp-test--every-repeat-warnings-with-a-repeater
+  '(("2026-03-27 +1w -3d" "<2026-03-27 [^ >]+ \\+1w -3d>")
+    ("2026-03-27 .+2d -3d" "<2026-03-27 [^ >]+ \\.\\+2d -3d>")
+    ("2026-03-27 ++1m -3d" "<2026-03-27 [^ >]+ \\+\\+1m -3d>")
+    ("2026-03-27 09:00 +1w -3d"
+     "<2026-03-27 [^ >]+ 09:00 \\+1w -3d>"))
+  "The every-repeat warnings a refused first-only delay is offered.
+Each row is the value sent and a pattern for the timestamp the file
+holds.  The day name is left out because Org writes the day the date
+falls on whatever stands there, so these are the timestamps the
+refusal names, spelled the way a call spells them.")
+
+(ert-deftest org-mcp-test-set-scheduled-writes-the-warning-it-offers ()
+  "The every-repeat warning a refusal offers is written whole.
+A refusal is worth nothing if the value it tells a client to send is
+refused in its turn, and this pairing is the one a client arrives at
+by fixing the refused one.  Org carries a repeater and a `-3d\\='
+warning together whichever way the repeater steps."
+  (pcase-dolist (`(,date ,written)
+                 org-mcp-test--every-repeat-warnings-with-a-repeater)
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-bare-todo))
       (let ((result
@@ -12787,11 +12843,16 @@ field ended up holding."
                  (after . ,date))))))
         (should (equal (alist-get 'success result) t))
         (should
-         (string-match-p "\\`<2026-03-27 [^ >]+ \\+1w>\\'"
+         (string-match-p (concat "\\`" written "\\'")
                          (alist-get 'after result)))
         (org-mcp-test--verify-file-matches
          test-file
-         org-mcp-test--pattern-scheduled-repeater-alone)))))
+         (concat
+          "\\`\\* TODO Simple Task\n"
+          "SCHEDULED: "
+          written
+          "\n"
+          "Task body text\\.\n?\\'"))))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-an-inactive-timestamp ()
   "An inactive timestamp is refused rather than written as an active one.
