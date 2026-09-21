@@ -96,6 +96,27 @@ Second line of body.
 Third line of body."
   "Simple TODO task with three-line body.")
 
+(defconst org-mcp-test--content-gtd-keywords
+  "#+TITLE: Agile GTD
+#+TODO: TODO(t) NEXT(n) WAIT(w@/!) PROJ(p) | DONE(d!) KILL(k@)
+
+* PROJ Ship the thing
+** NEXT Draft the plan"
+  "A file defining its own workflow, as an Agile-GTD setup does.
+Its sequence differs from Org's default in every part of the answer
+org-config-todo carries: the keywords, their fast-access keys, the
+logging directives and which keywords are done.")
+
+(defconst org-mcp-test--content-two-sequences
+  "#+TODO: BUG(b) | FIXED(f) WONTFIX(w)
+#+TYP_TODO: Fred Sara Lucy | DONE
+
+* BUG Something broke"
+  "A file defining a sequence and a type sequence of its own.
+The type sequence is written second and comes back first: Org reads
+every `#+TYP_TODO:' before any `#+TODO:', whatever order the file
+writes them in.")
+
 (defconst org-mcp-test--content-with-id-todo
   (format
    "* TODO Task with ID
@@ -1097,6 +1118,29 @@ and binds `sequences' and `semantics' from the result for use in BODY."
               (semantics (cdr (assoc 'semantics result))))
           ,@body)))))
 
+(defmacro org-mcp-test--with-file-todo-config-result
+    (file-var content link &rest body)
+  "Call org-config-todo for a temp Org file holding CONTENT, then run BODY.
+FILE-VAR is bound to the temp file's path, which is the only allowed
+file, and LINK is evaluated with it bound and sent as the `link'
+parameter.  BODY runs with `sequences' and `semantics' bound from the
+decoded response, as `org-mcp-test--with-get-todo-config-result' binds
+them.
+
+`org-todo-keywords' holds Org's own default throughout, so an answer
+carrying anything else can only have come from the file."
+  (declare (indent 3) (debug t))
+  `(let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+     (org-mcp-test--with-temp-org-files ((,file-var ,content))
+       (let ((result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-config-todo" `((link . ,,link))))))
+         (should (= (length result) 2))
+         (let ((sequences (cdr (assoc 'sequences result)))
+               (semantics (cdr (assoc 'semantics result))))
+           ,@body)))))
+
 ;; Helper functions for testing org-config-tags MCP tool
 
 (defmacro org-mcp-test--get-tag-config-and-check
@@ -1792,6 +1836,136 @@ done tests the wire text against false, which is what this pins."
      (let ((text (mcp-server-lib-ert-call-tool "org-config-todo" nil)))
        (should (string-match-p "\"isFinal\":false" text))
        (should-not (string-match-p ":null" text))))))
+
+(ert-deftest org-mcp-test-todo-config-file-own-sequence ()
+  "org-config-todo answers with the workflow the linked file defines.
+The keywords come back in the raw form the file wrote them in, so a
+client reads each one's fast-access key and logging directives, and
+`isFinal' follows the file's own bar rather than the global one."
+  (org-mcp-test--with-file-todo-config-result
+      file org-mcp-test--content-gtd-keywords (format "file:%s" file)
+    (should (= (length sequences) 1))
+    (org-mcp-test--check-todo-config-sequence
+     (aref sequences 0)
+     "sequence"
+     ["TODO(t)"
+      "NEXT(n)"
+      "WAIT(w@/!)"
+      "PROJ(p)"
+      "|"
+      "DONE(d!)"
+      "KILL(k@)"])
+    (should (= (length semantics) 6))
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 0) "TODO" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 1) "NEXT" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 2) "WAIT" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 3) "PROJ" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 4) "DONE" t "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 5) "KILL" t "sequence")))
+
+(ert-deftest org-mcp-test-todo-config-file-heading-link ()
+  "A link naming a heading answers for that heading's file.
+The settings are file-wide, so the heading decides nothing and the
+answer is the one the file link gives."
+  (org-mcp-test--with-file-todo-config-result
+      file
+      org-mcp-test--content-gtd-keywords
+      (format "file:%s::*Draft the plan" file)
+    (should (= (length sequences) 1))
+    (org-mcp-test--check-todo-config-sequence
+     (aref sequences 0)
+     "sequence"
+     ["TODO(t)"
+      "NEXT(n)"
+      "WAIT(w@/!)"
+      "PROJ(p)"
+      "|"
+      "DONE(d!)"
+      "KILL(k@)"])
+    (should (= (length semantics) 6))))
+
+(ert-deftest org-mcp-test-todo-config-file-two-sequences ()
+  "A file defining several sequences answers with each of them.
+Every keyword carries the type of the sequence it belongs to, and the
+type sequence comes first however the file orders its settings."
+  (org-mcp-test--with-file-todo-config-result
+      file org-mcp-test--content-two-sequences (format "file:%s" file)
+    (should (= (length sequences) 2))
+    (org-mcp-test--check-todo-config-sequence
+     (aref sequences 0) "type" ["Fred" "Sara" "Lucy" "|" "DONE"])
+    (org-mcp-test--check-todo-config-sequence
+     (aref sequences 1)
+     "sequence"
+     ["BUG(b)" "|" "FIXED(f)" "WONTFIX(w)"])
+    (should (= (length semantics) 7))
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 0) "Fred" :json-false "type")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 3) "DONE" t "type")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 4) "BUG" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 5) "FIXED" t "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 6) "WONTFIX" t "sequence")))
+
+(ert-deftest org-mcp-test-todo-config-file-inherits-global ()
+  "A file defining no sequence of its own answers with the global ones.
+That is the keyword set Org gives such a file, so the answer says
+which states may be written there rather than saying nothing."
+  (org-mcp-test--with-file-todo-config-result
+      file org-mcp-test--content-simple-todo (format "file:%s" file)
+    (should (= (length sequences) 1))
+    (org-mcp-test--check-todo-config-sequence
+     (aref sequences 0) "sequence" ["TODO" "|" "DONE"])
+    (should (= (length semantics) 2))
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 0) "TODO" :json-false "sequence")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 1) "DONE" t "sequence")))
+
+(ert-deftest org-mcp-test-todo-config-file-is-what-a-write-is-held-to ()
+  "The states reported for a file are the states a write to it may use.
+A write validates against the buffer-local `org-todo-keywords-1' and
+reads a keyword as done through `org-done-keywords', so a client told
+anything else picks a state and is refused with a list it was never
+shown.  This pins the two answering alike."
+  (org-mcp-test--with-file-todo-config-result
+      file org-mcp-test--content-gtd-keywords (format "file:%s" file)
+    (let ((reported
+           (mapcar (lambda (sem) (alist-get 'state sem))
+                   (append semantics nil)))
+          (final
+           (mapcar
+            (lambda (sem) (alist-get 'state sem))
+            (seq-filter
+             (lambda (sem) (eq (alist-get 'isFinal sem) t))
+             (append semantics nil)))))
+      (with-current-buffer (find-file-noselect file)
+        (should (equal reported org-todo-keywords-1))
+        (should (equal final org-done-keywords))))))
+
+(ert-deftest org-mcp-test-todo-config-no-link-ignores-files ()
+  "Sent no link, org-config-todo answers from the global configuration.
+A file defining its own workflow is among the allowed files, and the
+answer is the global sequence all the same: the question a client asks
+without naming a file is about the configuration, not about a file."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((_file org-mcp-test--content-gtd-keywords))
+      (let* ((result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool "org-config-todo" nil)))
+             (sequences (cdr (assoc 'sequences result))))
+        (should (= (length sequences) 1))
+        (org-mcp-test--check-todo-config-sequence
+         (aref sequences 0) "sequence" ["TODO" "|" "DONE"])))))
 
 (ert-deftest org-mcp-test-tool-get-tag-config-empty ()
   "Test org-config-tags with empty `org-tag-alist'."
