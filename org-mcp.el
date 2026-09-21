@@ -1278,9 +1278,15 @@ Returned plist keys:
 
 The two tag lists come from `org-mcp--tag-sets-at-point', so every
 caller reports the same tags for the same heading under the same
-configuration.  Timestamps are returned as their `:raw-value' so the
-result matches `org-entry-get' (canonical Org abbreviation, no
-locale-dependent reformatting)."
+configuration.
+
+Two fields are read from the parsed heading because `org-entry-get'
+cannot say what they hold.  It answers with the default priority for
+a heading that carries no cookie, so it could never report the field
+as empty; and it stops a planning timestamp at the first `>', so a
+date range comes back as its first half.  The `:raw-value' of the
+parsed timestamp is the whole Org string, in canonical Org
+abbreviation and with no locale-dependent reformatting."
   (let* ((el (org-element-at-point))
          (priority-char (org-element-property :priority el))
          (tag-sets (org-mcp--tag-sets-at-point))
@@ -1297,6 +1303,26 @@ locale-dependent reformatting)."
      :scheduled (and sched (org-element-property :raw-value sched))
      :deadline (and deadl (org-element-property :raw-value deadl))
      :closed (and clsd (org-element-property :raw-value clsd)))))
+
+(defun org-mcp--asserted-value (field)
+  "Return FIELD of the heading at point as a `before' asserts it.
+FIELD is a key of `org-mcp--heading-metadata-at-point', and the
+value is that plist's, with \"\" for a field the heading does not
+carry — the string a `before' asserts absence with, see
+`org-mcp--assert-before'.
+
+This is the one accessor per field that the read surface and the
+assertion path share, and it is the metadata the read surface is
+built from, so a value compared against a `before' is the value the
+client was handed.  Two accessors let the guard refuse a true belief
+for good and admit a stale one on the same field: `org-entry-get'
+stops a SCHEDULED at the first `>', so a date range read whole could
+never be asserted, and reports a property whose text is `nil' as no
+property at all, so \"\" destroyed a value it never named.
+
+A field gains an assertion by appearing here, which is why the
+plist and not a per-field reader is what a field record names."
+  (or (plist-get (org-mcp--heading-metadata-at-point) field) ""))
 
 (defun org-mcp--subtree-bounds ()
   "Return the subtree of the heading at point as (BEGIN . END).
@@ -1843,6 +1869,66 @@ that declines."
     (org-mcp--tool-validation-error
      "The clock is running in this node: close it with org-clock-out first; nothing was deleted")))
 
+(defun org-mcp--drawer-at-point ()
+  "Return the Org property drawer of the node at point as an alist.
+Names are upcased, as `org-entry-properties' returns them, and a
+value is the drawer's own text: a property written `:FOO: nil' holds
+the string \"nil\" and is a property the node has, not an absent one.
+
+`org-mcp--special-properties' are left out: Org computes them rather
+than storing them, and each is a node field in its own right.
+
+This is the one accessor per property that the read surface and the
+assertion path share, the counterpart of `org-mcp--asserted-value'
+for the drawer.  `org-entry-get' is the other reader Org offers and
+it answers differently on the two drawers a guard most needs to be
+right about — it reports `:FOO: nil' as no property, which made \"\"
+an accepted assertion that then destroyed the value, and it reports
+the last of two lines writing one name where a scan reports the
+first."
+  (cl-remove-if
+   (lambda (pair)
+     (member (car pair) org-mcp--special-properties))
+   (org-entry-properties nil 'standard)))
+
+(defun org-mcp--doubled-drawer-names ()
+  "Return the names the drawer at point writes on more than one line.
+`org-get-property-block' says where the drawer is and
+`org-property-re' what a property line is, so the lines counted here
+are the lines Org counts.
+
+A `NAME+' line adds to what NAME holds rather than writing NAME a
+second time: every reader Org has joins such a line in, and however
+many of them a drawer carries they agree on one value.  So only the
+plain name is counted, and only it can be written twice.
+
+Org has no one answer for a name that is: a scan of the drawer
+reports the first line, a lookup the last, `org-set-property' writes
+the first and leaves the second standing, and `org-delete-property'
+takes both away.  Such a name has no value to assert and no value to
+replace, so `org-mcp--write-properties' refuses a call that names
+one instead of reporting a mismatch no re-read can resolve."
+  (save-excursion
+    (when-let* ((block (org-get-property-block)))
+      (goto-char (car block))
+      (let ((seen nil)
+            (doubled nil))
+        (while (re-search-forward org-property-re (cdr block) t)
+          (let ((name (upcase (match-string-no-properties 2))))
+            (unless (string-suffix-p "+" name)
+              (if (member name seen)
+                  (cl-pushnew name doubled :test #'string=)
+                (push name seen)))))
+        (nreverse doubled)))))
+
+(defun org-mcp--drawer-value (drawer name)
+  "Return the value DRAWER holds for the property NAME, or \"\".
+DRAWER is what `org-mcp--drawer-at-point' returned.  NAME is
+compared without regard to case, as Org reads property names, and a
+property the drawer does not hold is \"\", which is how a `before'
+asserts absence."
+  (or (cdr (assoc (upcase name) drawer)) ""))
+
 (defun org-mcp--node-properties (names)
   "Return the Org property drawer of the node at point, or nil.
 NAMES is `all' for the whole drawer or the upcased names to take
@@ -1850,15 +1936,13 @@ from it, as `org-mcp--node-properties-given' resolved them; nil
 takes nothing, and a name the drawer does not hold contributes
 nothing, the way a field with no value does.
 
-`org-mcp--special-properties' are left out whichever it is: Org
-computes them rather than storing them, and each is a node field in
-its own right."
+The drawer itself comes from `org-mcp--drawer-at-point', which the
+assertion path reads too."
   (when names
     (cl-remove-if-not
      (lambda (pair)
-       (and (not (member (car pair) org-mcp--special-properties))
-            (or (eq names 'all) (member (car pair) names))))
-     (org-entry-properties nil 'standard))))
+       (or (eq names 'all) (member (car pair) names)))
+     (org-mcp--drawer-at-point))))
 
 (defun org-mcp--node-computed (names)
   "Return the computed fields of the node at point, or nil.
@@ -2965,7 +3049,10 @@ refusal carries Org's own reason for it where Org names one."
     ;; through `org-mcp--insert-log-note'.
     (let ((post-command-hook nil))
       (org-todo state))
-    (or (org-get-todo-state) "")))
+    ;; Read back through the accessor an assertion compares against,
+    ;; so the state this response reports is one the client can send
+    ;; straight back as the next call's `before'.
+    (org-mcp--asserted-value :todo)))
 
 (defun org-mcp--mutex-tag-groups (alist)
   "Return mutex tag groups from ALIST as a list of lists of tag strings.
@@ -3705,8 +3792,7 @@ MCP Parameters:
       (org-mcp--goto-heading target)
 
       ;; Capture actual previous state
-      (beginning-of-line)
-      (setq actual-prev (or (org-get-todo-state) ""))
+      (setq actual-prev (org-mcp--asserted-value :todo))
 
       ;; Check current state matches
       (unless (string= actual-prev before)
@@ -3975,8 +4061,7 @@ MCP Parameters:
       (org-mcp--goto-heading target)
 
       ;; Verify current title matches
-      (beginning-of-line)
-      (let ((actual-title (org-mcp--title-at-point)))
+      (let ((actual-title (org-mcp--asserted-value :title)))
         (unless (org-mcp--titles-equal-p actual-title before)
           (org-mcp--state-mismatch-error
            before actual-title "Title")))
@@ -4298,8 +4383,9 @@ ASSERTED is the (NAME . VALUE) pairs the call vouches for, VALUE the
 string the property is asserted to hold and \"\" for none.  Every one
 is checked before APPLY runs, so that a property named later in the
 call cannot be refused after an earlier one has already been
-changed.  APPLY is then called at the heading, inside the change,
-and writes the properties.
+changed.  A name the drawer writes twice is refused before any of
+them, see `org-mcp--doubled-drawer-names'.  APPLY is then called at
+the heading, inside the change, and writes the properties.
 ACTION names what the call does, for the call site to read.
 RESPONSE is the fields the call adds to its own response, which each
 tool builds from ASSERTED: the names it touched, and, for a removal,
@@ -4315,11 +4401,18 @@ share, and they differ only in what APPLY does."
     (org-mcp--modify-and-save file-path action response
       (org-mcp--goto-heading target)
 
-      (pcase-dolist (`(,key . ,val) asserted)
-        (org-mcp--assert-before
-         val
-         (or (org-entry-get (point) key) "")
-         (format "Property '%s'" key)))
+      (let ((drawer (org-mcp--drawer-at-point))
+            (doubled (org-mcp--doubled-drawer-names)))
+        (pcase-dolist (`(,key . ,val) asserted)
+          (when (member (upcase key) doubled)
+            (org-mcp--tool-blocked-error
+             "Property '%s' is written twice in this drawer, so it \
+holds no one value; repair the drawer in Emacs"
+             key))
+          (org-mcp--assert-before
+           val
+           (org-mcp--drawer-value drawer key)
+           (format "Property '%s'" key))))
 
       (funcall apply))))
 
@@ -4419,42 +4512,49 @@ MCP Parameters:
 (defconst org-mcp--field-scheduled
   (list
    :label "SCHEDULED"
-   :read (lambda () (or (org-entry-get (point) "SCHEDULED") ""))
-   :remove (lambda () (org-schedule '(4))))
+   :key
+   :scheduled
+   ;; `org-schedule' with a `(4)' prefix removes a planning entry by
+   ;; matching one timestamp, so it leaves the second half of a date
+   ;; range behind as body text, and it arms `org-add-log-note' on
+   ;; `post-command-hook' where the user's next command would run it.
+   ;; `org-add-planning-info' is the function it removes through, and
+   ;; it clears the whole entry up to the next planning keyword.
+   :remove (lambda () (org-add-planning-info nil nil 'scheduled)))
   "The SCHEDULED field, for `org-mcp--write-field'.
-`:label' names it in a refusal, `:read' returns what the heading at
-point carries, \"\" for none, in the form a read hands back, and
-`:remove' takes that value away.")
+`:label' names it in a refusal, `:key' is the field of
+`org-mcp--heading-metadata-at-point' that holds it, which
+`org-mcp--asserted-value' reads it through, and `:remove' takes that
+value away.
+
+A field record names its metadata key rather than carrying a reader
+of its own, so the value a write asserts is the value a read
+returns, with no second accessor to drift from it.")
 
 (defconst org-mcp--field-deadline
   (list
    :label "DEADLINE"
-   :read (lambda () (or (org-entry-get (point) "DEADLINE") ""))
-   :remove (lambda () (org-deadline '(4))))
+   :key
+   :deadline
+   ;; See `org-mcp--field-scheduled' for why not `org-deadline'.
+   :remove (lambda () (org-add-planning-info nil nil 'deadline)))
   "The DEADLINE field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
 
 (defconst org-mcp--field-priority
   (list
    :label "Priority"
-   :read
-   (lambda ()
-     (let ((priority
-            (org-element-property :priority (org-element-at-point))))
-       (if priority
-           (char-to-string priority)
-         "")))
+   :key
+   :priority
    :remove (lambda () (org-priority 'remove)))
   "The priority field, for `org-mcp--write-field'.
-Shaped like `org-mcp--field-scheduled'.  Priority is read from the
-parsed heading rather than with `org-entry-get', which answers with
-the default priority for a heading that carries none and so could
-not say that the field is empty.")
+Shaped like `org-mcp--field-scheduled'.")
 
 (defun org-mcp--write-field (link files field before action change)
   "Change FIELD of the heading LINK names, asserting BEFORE first.
 FIELD is a field record — `org-mcp--field-scheduled' and its two
-siblings — naming the field and saying how to read and remove it.
+siblings — naming the field, the metadata key it is read through and
+how to remove it.
 BEFORE is what the call believes the field holds, checked before
 CHANGE runs, so a refused call leaves the file as it was.  CHANGE is
 called at the heading, inside the change, with the value the field
@@ -4464,14 +4564,15 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 The response reports the value the field held as `before' and the
-value it holds afterwards as `after', both read through FIELD.  This
+value it holds afterwards as `after', both read through the one
+accessor a client's next `before' will be compared against.  This
 is the whole of what a setter and a removal of one field share, and
 they differ only in what CHANGE does: the setter writes a value, the
 removal takes one away and leaves `after' empty.  Either way the
 response is the record of what the call destroyed."
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
-         (read-field (plist-get field :read))
+         (key (plist-get field :key))
          (previous nil)
          (current nil))
 
@@ -4480,12 +4581,12 @@ response is the record of what the call destroyed."
                                 (after . ,current))
       (org-mcp--goto-heading target)
 
-      (setq previous (funcall read-field))
+      (setq previous (org-mcp--asserted-value key))
       (org-mcp--assert-before
        before previous (plist-get field :label))
 
       (funcall change previous)
-      (setq current (funcall read-field)))))
+      (setq current (org-mcp--asserted-value key)))))
 
 (defun org-mcp--remove-field (link files field before action)
   "Take FIELD off the heading LINK names, asserting BEFORE first.

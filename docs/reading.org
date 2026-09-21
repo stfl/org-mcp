@@ -205,6 +205,13 @@ back under the name Org keeps, which is upper case. A property the node does
 not carry is left out, exactly as a field with no value is, so an answer says
 what the node has rather than what you asked about.
 
+A value is the drawer's own text. =:FLAGGED: nil= is a property the node
+carries whose value is the string ="nil"= — the spelling
+=org-node-set-properties= writes for JSON =false= — and not a property the
+node lacks. That string is what asserts it when you write; the empty string
+asserts the node has no such property at all (see [[file:writing.org::*Knowing what you are about to change][Knowing what you are about
+to change]]).
+
 Two group names, sent as a string rather than an array, stand for the whole
 drawer and for none of it:
 
