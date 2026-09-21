@@ -551,8 +551,12 @@ a tool returns from it (see [[*The two digests][The two digests]]).
 * Configuration and discovery tools
 
 ** org-config-todo
-- *Description:* Get TODO keyword configuration for understanding task states
-- *Parameters:* None
+- *Description:* Get the TODO keyword configuration a file defines, or the
+  global one, for understanding task states
+- *Parameters:*
+  - =link= (string, optional): the file to answer for, in any of the forms a
+    link takes (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Omitted, the answer is the
+    global Emacs configuration
 - *Returns:* JSON object with =sequences= and =semantics=
 
 Example response:
@@ -572,6 +576,41 @@ Example response:
   ]
 }
 #+end_src
+
+Each keyword comes back as the configuration writes it, the fast-access key and
+the logging directives included: =WAIT(w@/!)= is the keyword =WAIT=, fast key
+=w=, a note on entering the state and a timestamp on leaving it. The =semantics=
+array reads the same sequences the other way round, one entry per keyword, and
+=isFinal= is what says a keyword is a done state — which is the question a
+"stuck project" or "what is left" view turns on. The =|= in =keywords= is where
+the sequence puts the boundary; a sequence carrying none has its last keyword as
+the done state, and the answer writes the =|= in front of it.
+
+*** Which file the answer is about
+
+An Org file may define its own workflow, and many do: a GTD file carrying
+
+#+begin_src org
+#+TODO: TODO(t) NEXT(n) WAIT(w@/!) PROJ(p) | DONE(d!) KILL(k@)
+#+end_src
+
+has those six states and no others, whatever =org-todo-keywords= says. A write
+to a heading in it is held to them, so =NEXT= is accepted there and any state
+outside the six is refused.
+
+Send =link= to be answered for one file. The link names that file through any of
+the forms above, and a link naming a /heading/ answers for the heading's own
+file: these settings are file-wide, so the heading decides nothing. The answer is
+the one Org itself reaches there, a =#+SETUPFILE:= followed and =#+SEQ_TODO:=
+and =#+TYP_TODO:= read alongside =#+TODO:=, and it is exactly the set a write to
+that file may use.
+
+A file defining no sequence of its own inherits the global ones, and is answered
+with them.
+
+Sent no link, the tool answers from the global Emacs configuration. That is the
+right question to ask about the session and the wrong one to ask before a write:
+name the file you are writing to.
 
 ** org-config-tags
 - *Description:* Get tag configuration as literal Elisp variable values

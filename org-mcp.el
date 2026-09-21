@@ -3553,6 +3553,38 @@ names no one of them, so delete the one you mean in Emacs"
       (org-mcp--clock-format-timestamp start-time)
       (org-mcp--clock-describe-ends matches)))))
 
+(defun org-mcp--file-todo-sequences ()
+  "Return the TODO sequences the current buffer's own settings name.
+The value has the shape of `org-todo-keywords': each element pairs a
+sequence type with that sequence's keywords, every keyword in the raw
+form the file wrote it in, and the `\"|\"' where the file put one.  A
+file naming no sequence of its own answers nil, and its keywords are
+the global ones.
+
+The settings are read with `org-collect-keywords' and assembled the
+way `org-set-regexps-and-options' assembles them, which is what makes
+the answer the one Org itself reached: that call follows a
+`#+SETUPFILE:', and `#+TYP_TODO:' comes before `#+TODO:' and
+`#+SEQ_TODO:' there as it does here.
+
+The settings are read rather than the buffer-local variables Org
+derives from them because those variables answer a different
+question.  `org-todo-keywords-1' drops each keyword's fast-access key
+and logging directives, and `org-todo-key-alist' carries a key for
+every keyword, the ones `org-assign-fast-keys' invented for a
+sequence that named none included.  The lines carry what the file
+says, which is what this tool reports."
+  (let ((alist
+         (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO"))))
+    (append
+     (mapcar
+      (lambda (value) (cons 'type (split-string value)))
+      (cdr (assoc "TYP_TODO" alist)))
+     (mapcar
+      (lambda (value) (cons 'sequence (split-string value)))
+      (append
+       (cdr (assoc "TODO" alist)) (cdr (assoc "SEQ_TODO" alist)))))))
+
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword.
 Reads the buffer-local `org-todo-keywords-1', which Org populates
@@ -4482,18 +4514,22 @@ and is not looked for here, where only this buffer can be searched."
 
 ;; Tool handlers
 
-(defun org-mcp--tool-config-todo ()
-  "Return the TODO keyword configuration.
-Walks `org-todo-keywords' directly rather than the parsed
-`org-todo-keywords-1' / `org-done-keywords' so the response can
-preserve each keyword's raw form (the fast-access key plus
-state-logging directives, e.g. \"TODO(t!)\" = fast key `t' and
-log a timestamp on entry) along with the explicit `\"|\"'
-separator position.  Clients of this tool depend on those
-fields, and the parsed siblings discard them."
+(defun org-mcp--todo-config (sequences)
+  "Return the TODO keyword configuration SEQUENCES describes.
+SEQUENCES has the shape of `org-todo-keywords', and is walked
+directly rather than through the parsed `org-todo-keywords-1' /
+`org-done-keywords' so the response can preserve each keyword's raw
+form (the fast-access key plus state-logging directives, e.g.
+\"TODO(t!)\" = fast key `t' and log a timestamp on entry) along with
+the explicit `\"|\"' separator position.  Clients of this tool depend
+on those fields, and the parsed siblings discard them.
+
+One walk serves the global sequences and a file's own, so the two
+answer in the same shape by construction; `org-mcp--tool-config-todo'
+is where they are chosen between."
   (let ((seq-list '())
         (sem-list '()))
-    (dolist (seq org-todo-keywords)
+    (dolist (seq sequences)
       (let* ((type (car seq))
              (keywords (cdr seq))
              (type-str (symbol-name type))
@@ -4523,6 +4559,31 @@ fields, and the parsed siblings discard them."
     (json-encode
      `((sequences . ,(vconcat (nreverse seq-list)))
        (semantics . ,(vconcat (nreverse sem-list)))))))
+
+(defun org-mcp--tool-config-todo (&optional link)
+  "Return the TODO keyword configuration, LINK's file's or the global one.
+LINK, when the call sends one, names the file to answer for: the
+keywords a write to a heading in it is held to, which are the ones
+Org reached there from its `#+TODO:', `#+SEQ_TODO:' and
+`#+TYP_TODO:' settings.  Those settings are file-wide, so a link
+naming a heading answers for the heading's file rather than being
+refused, and the heading itself is never looked up.  A file naming no
+sequence of its own inherits the global ones and is answered with
+them, which is what Org does with it; see
+`org-mcp--file-todo-sequences'.
+
+Without a link the answer is the global `org-todo-keywords', which is
+what a client asking nothing about a file gets.
+
+MCP Parameters:
+  link - Link to the file to answer for, or to a heading in it
+         (string, optional)"
+  (org-mcp--todo-config
+   (or (when-let* ((link (org-mcp--optional-link-given link))
+                   (target (org-mcp--link-target link "link")))
+         (org-mcp--with-org-file (plist-get target :file)
+           (org-mcp--file-todo-sequences)))
+       org-todo-keywords)))
 
 (defun org-mcp--tool-config-tags ()
   "Return the tag configuration as literal Elisp strings."
@@ -7535,11 +7596,22 @@ describing the same thing differently.")
     #'org-mcp--tool-config-todo
     :id "org-config-todo"
     :description
-    "Get the TODO keyword configuration from the current Emacs
-Org-mode settings.  Returns information about task state sequences
-and their semantics.
+    (concat
+     "Get the TODO keyword configuration: the task state sequences and
+their semantics.  Given a link, the answer is the one Org reaches in
+that link's file, which is the set a write to a heading in it is held
+to; given none, it is the global Emacs Org-mode configuration.
 
-Parameters: None
+Parameters:
+  link - Link to the file to answer for (string, optional)
+"
+     org-mcp--read-link-formats
+     "         A link naming a heading answers for that heading's
+         file: the settings are file-wide.
+         A file carrying no `#+TODO:', `#+SEQ_TODO:' or
+         `#+TYP_TODO:' setting of its own inherits the global
+         sequences and is answered with them.
+         Omitted, the answer is the global configuration.
 
 Returns JSON object with two arrays:
   sequences - Array of TODO keyword sequences, each containing:
@@ -7555,8 +7627,10 @@ The \"|\" separator in sequences marks the boundary between active
 states (before) and done states (after).  If no \"|\" is present,
 the last keyword is treated as the done state.
 
-Use this tool to understand the available task states in the Org
-configuration before creating or updating TODO items."
+Use this tool to understand the available task states before
+creating or updating TODO items, and name the file you are writing
+to: a file defining its own workflow is held to that workflow, and
+the global configuration says nothing about it.")
     :read-only t)
    (list
     #'org-mcp--tool-config-tags
