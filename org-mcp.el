@@ -2779,6 +2779,30 @@ clocks exist."
                    (setq latest end-time)))))))))
     latest))
 
+(defun org-mcp--store-log-note (note)
+  "Write the log entry Org has set up, with NOTE as its prose.
+The `org-log-note-*' variables say what the entry is — its purpose,
+the states it records, the time it happened — and
+`org-store-log-note' formats and places it, honouring
+`org-log-note-headings', `org-log-into-drawer' and a heading's own
+`LOG_INTO_DRAWER'.  It takes the prose from the *Org Note* buffer,
+which is filled here instead of by the interactive
+`org-add-log-note'.  An empty NOTE writes the entry's heading line
+alone, which is the entry Org writes for a setting that takes no
+prose.
+
+The window configuration and the return marker are set because
+`org-store-log-note' restores them when it is done and only
+`org-add-log-note' would otherwise have set them."
+  (move-marker org-log-note-return-to (point))
+  (setq org-log-note-window-configuration
+        (current-window-configuration))
+  (save-current-buffer
+    (set-buffer (get-buffer-create "*Org Note*"))
+    (erase-buffer)
+    (insert note)
+    (org-store-log-note)))
+
 (defun org-mcp--insert-log-note
     (note purpose &optional state prev-state)
   "Insert NOTE at current heading via Org's log-note machinery.
@@ -2790,11 +2814,9 @@ PURPOSE is a symbol from `org-log-note-headings' (e.g. `note', `state').
 STATE and PREV-STATE are the new and previous TODO state strings used
 when PURPOSE is `state'.
 
-Honors `org-log-note-headings' for the entry template and
-`org-log-into-drawer' for placement.  The interactive
-`org-add-log-note' post-command-hook is bypassed by populating the
-*Org Note* buffer directly and calling `org-store-log-note', which
-already does the formatting and insertion."
+This is the entry org-mcp decides on itself, where no Org command set
+one up; `org-mcp--logging-note' is how an entry a command did set up
+is written."
   (move-marker org-log-note-marker (point))
   (setq
    org-log-note-purpose purpose
@@ -2802,14 +2824,45 @@ already does the formatting and insertion."
    org-log-note-previous-state prev-state
    org-log-note-extra nil
    org-log-note-effective-time (org-current-effective-time))
-  (move-marker org-log-note-return-to (point))
-  (setq org-log-note-window-configuration
-        (current-window-configuration))
-  (save-current-buffer
-    (set-buffer (get-buffer-create "*Org Note*"))
-    (erase-buffer)
-    (insert note)
-    (org-store-log-note)))
+  (org-mcp--store-log-note note))
+
+(defmacro org-mcp--logging-note (note &rest body)
+  "Run BODY, and write as NOTE the log entry BODY leaves Org waiting for.
+Returns non-nil when BODY set such an entry up, so a caller holding a
+note of its own can tell whether this entry took it.  NOTE may be nil,
+which writes the entry's heading line alone.
+
+An Org command records what a log setting asks it to record through
+`org-add-log-setup', which pushes `org-add-log-note' onto the global
+`post-command-hook' and returns.  Inside an MCP call there is no
+command loop to run it: the entry is never written, the hook stays
+armed, and the user's next unrelated command pops a note prompt for a
+change the server made.  Every Org command org-mcp calls that can
+reach `org-add-log-setup' runs inside this macro, which is what keeps
+that prompt out of the user's session.
+
+`org-log-setup' is Org's own flag for an entry set up and not yet
+written, and it is bound to nil around BODY so that what is taken off
+the hook here is what BODY put there — an entry the user armed before
+the call is left for the user's own command loop.  Taking the entry
+off the hook and writing it, rather than only unhooking it, is what
+keeps the record the setting asked for: `org-store-log-note' places
+it where Org would have."
+  (declare (indent 1) (debug (form body)))
+  (let ((prose (gensym "prose")))
+    `(let ((,prose (or ,note ""))
+           (org-log-setup nil))
+       (unwind-protect
+           (progn
+             ,@body)
+         ;; Take it off the hook even when BODY fails: the hook is the
+         ;; user's, and a refused write that leaves it armed pops the
+         ;; same prompt at their next command as one that went through.
+         (when org-log-setup
+           (remove-hook 'post-command-hook #'org-add-log-note)))
+       (when org-log-setup
+         (org-mcp--store-log-note ,prose)
+         t))))
 
 (defun org-mcp--clock-insert-entry (start &optional end)
   "Insert CLOCK line at current heading.
@@ -3089,8 +3142,8 @@ and not a place for side effects."
          (t
           t))))))
 
-(defun org-mcp--set-todo-state (state)
-  "Set the TODO state of the heading at point to STATE.
+(defun org-mcp--set-todo-state (state &optional note)
+  "Set the TODO state of the heading at point to STATE, recording NOTE.
 Returns the state Org left the heading in, which is read back rather
 than assumed: `org-auto-repeat-maybe' resets a repeating entry moved
 to a done keyword to its not-done keyword, and `REPEAT_TO_STATE'
@@ -3099,7 +3152,15 @@ picks which one.
 A change Org vetoes -- a TODO dependency, an unchecked checkbox, an
 ordered subtree -- is refused before anything is written, so the
 heading keeps the state it had and the caller saves nothing.  The
-refusal carries Org's own reason for it where Org names one."
+refusal carries Org's own reason for it where Org names one.
+
+NOTE is prose to record with the change, or nil for none.  `org-todo'
+reaches a log entry two ways -- `org-log-done' and
+`org-todo-log-states' directly, `org-log-repeat' through
+`org-auto-repeat-maybe' -- and where it does, NOTE becomes that
+entry's prose, so one transition leaves one record under the heading
+line Org chose for it.  Where no setting asks for an entry, a NOTE is
+still recorded, as the state change org-mcp writes of its own accord."
   (let ((previous (org-get-todo-state)))
     (when-let* ((blocker (org-mcp--todo-block-reason previous state)))
       (org-mcp--tool-blocked-error
@@ -3109,12 +3170,12 @@ refusal carries Org's own reason for it where Org names one."
        (if (stringp blocker)
            (format " (by %s)" blocker)
          "")))
-    ;; Bind `post-command-hook' to nil so that any interactive log-note
-    ;; hook `org-todo' may schedule (e.g. when `org-log-done' is set)
-    ;; cannot fire later -- org-mcp attaches its own note explicitly
-    ;; through `org-mcp--insert-log-note'.
-    (let ((post-command-hook nil))
-      (org-todo state))
+    (unless (org-mcp--logging-note note
+              (org-todo state))
+      (when (org-string-nw-p note)
+        (org-mcp--insert-log-note note 'state
+                                  state
+                                  (or previous ""))))
     ;; Read back through the accessor an assertion compares against,
     ;; so the state this response reports is one the client can send
     ;; straight back as the next call's `before'.
@@ -3646,8 +3707,14 @@ response's `saved' answers for the archive file too."
     (org-mcp--with-private-kill-ring
       ;; Org saves the archive file itself, without asking whether the
       ;; buffer it saves was the user's to save.
+      ;;
+      ;; `org-archive-mark-done' makes Org mark the archived subtree
+      ;; done through `org-todo', which reaches a log entry through
+      ;; `org-auto-repeat-maybe' on a repeating entry; Org marks it in
+      ;; the archive buffer, so that is where the entry goes.
       (let ((org-archive-subtree-save-file-p nil))
-        (org-archive-subtree)))
+        (org-mcp--logging-note nil
+          (org-archive-subtree))))
     (when elsewhere
       (let ((buffer (plist-get context :buffer)))
         (org-mcp--maybe-save-buffer
@@ -3874,12 +3941,10 @@ MCP Parameters:
          "State"))
 
       ;; Update the state, refusing a change Org vetoes and reading
-      ;; back what Org made of the one it took.
-      (setq actual-new (org-mcp--set-todo-state after))
-
-      ;; Add note to state transition if provided
-      (when (and note (not (string-empty-p (string-trim note))))
-        (org-mcp--insert-log-note note 'state after actual-prev)))))
+      ;; back what Org made of the one it took.  The note rides the
+      ;; change, so the transition leaves one entry however the log
+      ;; settings stand.
+      (setq actual-new (org-mcp--set-todo-state after note)))))
 
 (defun org-mcp--tool-node-create
     (title
@@ -4581,17 +4646,22 @@ MCP Parameters:
    :scheduled
    ;; `org-schedule' with a `(4)' prefix removes a planning entry by
    ;; matching one timestamp, so it leaves the second half of a date
-   ;; range behind as body text, and it arms `org-add-log-note' on
-   ;; `post-command-hook' where the user's next command would run it.
-   ;; `org-add-planning-info' is the function it removes through, and
-   ;; it clears the whole entry up to the next planning keyword.
-   :remove (lambda () (org-add-planning-info nil nil 'scheduled))
+   ;; range behind as body text.  `org-add-planning-info' is the
+   ;; function it removes through, and it clears the whole entry up to
+   ;; the next planning keyword.  It records nothing, so the entry
+   ;; `org-log-reschedule' asks for is written here, the one
+   ;; `org-schedule' would have set up for the same removal.
+   :remove
+   (lambda (previous)
+     (org-add-planning-info nil nil 'scheduled)
+     (when org-log-reschedule
+       (org-mcp--insert-log-note "" 'delschedule nil previous)))
    :write (lambda (value) (org-schedule nil value)))
   "The SCHEDULED field, for `org-mcp--write-field'.
 `:label' names it in a refusal, `:key' is the field of
 `org-mcp--heading-metadata-at-point' that holds it, which
 `org-mcp--asserted-value' reads it through, `:write' puts a value
-there and `:remove' takes one away.
+there and `:remove' takes away the value passed to it.
 
 A field record names its metadata key rather than carrying a reader
 of its own, so the value a write asserts is the value a read
@@ -4603,7 +4673,11 @@ returns, with no second accessor to drift from it.")
    :key
    :deadline
    ;; See `org-mcp--field-scheduled' for why not `org-deadline'.
-   :remove (lambda () (org-add-planning-info nil nil 'deadline))
+   :remove
+   (lambda (previous)
+     (org-add-planning-info nil nil 'deadline)
+     (when org-log-redeadline
+       (org-mcp--insert-log-note "" 'deldeadline nil previous)))
    :write (lambda (value) (org-deadline nil value)))
   "The DEADLINE field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
@@ -4613,7 +4687,9 @@ Shaped like `org-mcp--field-scheduled'.")
    :label "Priority"
    :key
    :priority
-   :remove (lambda () (org-priority 'remove))
+   ;; `org-priority' has no log setting and records nothing, so the
+   ;; value it takes away is of no use to it.
+   :remove (lambda (_previous) (org-priority 'remove))
    :write (lambda (value) (org-priority (string-to-char value))))
   "The priority field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
@@ -4654,10 +4730,14 @@ heading with no cookie to take off."
       (org-mcp--assert-before
        before previous (plist-get field :label))
 
-      (if (string-empty-p after)
-          (unless (string-empty-p previous)
-            (funcall (plist-get field :remove)))
-        (funcall (plist-get field :write) after))
+      ;; `org-schedule' and `org-deadline' set up the entry
+      ;; `org-log-reschedule' and `org-log-redeadline' ask for; it is
+      ;; written here rather than left waiting on `post-command-hook'.
+      (org-mcp--logging-note nil
+        (if (string-empty-p after)
+            (unless (string-empty-p previous)
+              (funcall (plist-get field :remove) previous))
+          (funcall (plist-get field :write) after)))
       (setq current (org-mcp--asserted-value key)))))
 
 (defun org-mcp--date-to-write (value name)

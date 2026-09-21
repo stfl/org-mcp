@@ -10,6 +10,7 @@
                                                  (org-mcp--with-uri-prefix-dispatch . 1)
                                                  (org-mcp--with-org-file . 1)
                                                  (org-mcp--with-private-kill-ring . 0)
+                                                 (org-mcp--logging-note . 1)
                                                  (org-mcp-test--assert-error-and-file . 1)
                                                  (org-mcp-test--with-enabled . defun)
                                                  (org-mcp-test--with-config . 1)

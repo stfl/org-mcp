@@ -89,6 +89,44 @@ The running clock was closed and saved, but a function run by the save failed: .
 The running clock was closed but not saved: ...
 #+end_example
 
+* What a write records in the LOGBOOK
+
+Your Org log settings decide what a change writes down, and a write through
+org-mcp records the entry your own command would have. Placement is Org's: the
+entry goes into the drawer =org-log-into-drawer= names, or into the one a
+=LOG_INTO_DRAWER= property on the heading names instead, under the heading line
+your =org-log-note-headings= holds for that kind of change.
+
+| Setting                        | Records                                    | Written by                             |
+|--------------------------------+--------------------------------------------+----------------------------------------|
+| =org-log-done= set to =note=   | a closing note on a heading reaching a done keyword | =org-node-set-todo=, =org-node-create= |
+| =org-todo-log-states=          | a move into or out of the keyword it names | =org-node-set-todo=, =org-node-create= |
+| =org-log-repeat=               | the repeat a done keyword triggers         | =org-node-set-todo=                    |
+| =org-log-reschedule=           | a SCHEDULED moved, and one taken away      | =org-node-set-scheduled=               |
+| =org-log-redeadline=           | a DEADLINE moved, and one taken away       | =org-node-set-deadline=                |
+| =org-log-refile=               | the move                                   | =org-node-refile=                      |
+| =org-log-note-clock-out=       | a note on a clock closing                  | nothing — the clock tools leave this one unrecorded |
+
+=org-todo-log-states= is what a =!= or an =@= in =org-todo-keywords= fills, so
+keywords written as =TODO(t!)= record their own transitions. =org-log-done= set
+to =time= writes a =CLOSED= timestamp on the heading instead of an entry in the
+drawer. =org-node-archive= reaches the same TODO machinery, when
+=org-archive-mark-done= has it mark the subtree done, and records what
+=org-log-repeat= asks for; Org turns the other two off for an archive itself.
+
+An entry carries its heading line and no prose under it, whether the setting is
+=time= or =note=. =note= asks for prose a person types into a buffer, and a
+tool call has no person to ask; Org makes the same substitution itself when it
+acts in bulk from the agenda. The one exception is =org-node-set-todo=, whose
+=note= parameter is prose you supply, and it becomes the prose of that entry,
+so one transition leaves one record. Anything else to say about a change is a
+call to [[*org-node-add-note][org-node-add-note]].
+
+Every other Org setting is honoured as Org honours it, and the tools that write
+no log entry — the title, property, tag, priority and content tools, and
+=org-node-delete= — have no setting that asks them to. Taking a priority off
+records nothing, because Org records nothing for it.
+
 * How a refusal is classed
 
 A refusal arrives as a message and never as an error code: the protocol org-mcp
@@ -294,7 +332,7 @@ and for the same reason.
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
   - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =""= takes the keyword off, so the headline stops being a task; =null= and =false= are the parameter left out and are refused
-  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
+  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
@@ -310,6 +348,12 @@ always the one asked for. Moving a repeating entry to a done keyword makes Org r
 repeat: the timestamp advances and the entry comes back in its not-done
 keyword, =TODO= or whatever =REPEAT_TO_STATE= names, and that is what the
 response carries.
+
+=org-log-done=, =org-todo-log-states= and =org-log-repeat= each record a
+transition they cover, and =note= is the prose of that one entry, so a
+transition the settings record and the call annotates leaves one record and not
+two. A =note= on a transition no setting records is written as a state change
+of its own. See [[*What a write records in the LOGBOOK]].
 
 Example:
 #+begin_src json
@@ -671,6 +715,9 @@ A headline whose SCHEDULED is itself a date range —
 and has no spelling for a range, so this tool reads and replaces one but never
 writes one. An =after= of =""= takes a range away whole.
 
+=org-log-reschedule= records both the move and the removal, as it does for a
+reschedule you make by hand; see [[*What a write records in the LOGBOOK]].
+
 Example:
 #+begin_src json
 # Move a task from Sunday the 20th to Sunday the 27th:
@@ -731,6 +778,9 @@ Example:
 =before= and =after= are the two ends of a move, not the two ends of a range:
 =before= is the date the headline carries today and =after= the date it is to
 carry instead.
+
+=org-log-redeadline= records both the move and the removal, as it does for a
+deadline you change by hand; see [[*What a write records in the LOGBOOK]].
 
 Example:
 #+begin_src json
@@ -1130,18 +1180,10 @@ under it, keeps working across files: Org registers the IDs in the subtree
 against the file they land in.
 
 =org-log-refile= governs the record of the move, as it does for a refile you
-make by hand. Set to =time= or =note=, it puts a =Refiled on [timestamp]= entry
-on the node, in the file the node landed in — the one where you will next read
-the node, and where Org writes it too. Unset, nothing is written. Placement is
-Org's: the entry goes into the drawer =org-log-into-drawer= names, or into the
-one a =LOG_INTO_DRAWER= property on the node names instead, and the template is
-whatever your =org-log-note-headings= holds for =refile=.
-
-The entry carries a timestamp and no note text under it, whichever of the two
-settings you use. =note= asks for prose a person types into a buffer, and a
-tool call has no person to ask — Org makes the same substitution itself when it
-refiles in bulk from the agenda, where there is nobody to ask either. Anything
-more to say about the move is a second call to [[*org-node-add-note][org-node-add-note]].
+make by hand: a =Refiled on [timestamp]= entry on the node, in the file the
+node landed in — the one where you will next read the node, and where Org
+writes it too. See [[*What a write records in the LOGBOOK]] for where the entry
+goes and why it carries no prose.
 
 Refiling here is not Org's own =org-refile= command, and one thing that command
 does is not done: =org-after-refile-insert-hook= does not run. It is your own

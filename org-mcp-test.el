@@ -443,8 +443,12 @@ The title and the body stay; only the keyword goes.")
    ":END:\n"
    "Second child content\\.\n"
    "\\*\\* Third Child #3\n"
-   "\\*\\* TODO Child via ID +:work:\n\\'")
-  "Pattern for TODO added via the parent's `id:' link.")
+   "\\*\\* TODO Child via ID +:work:\n"
+   "- State \"TODO\" +from +\\[[^]]+\\]\n\\'")
+  "Pattern for TODO added via the parent's `id:' link.
+The keywords carry `!', so entering TODO is a transition Org records;
+the entry names no state to have come from because the heading is
+new.")
 
 (defconst org-mcp-test--client-id
   "client-set-id-001"
@@ -9714,6 +9718,422 @@ and a call has to type it."
          (after . ,blank))
        "\\`Missing required parameter: after\\'"
        test-file))))
+
+;;; The log entry a planning write means to leave
+;;
+;; `org-log-reschedule' and `org-log-redeadline' ask Org to record a
+;; planning change.  Org's own route to that record arms
+;; `org-add-log-note' on the global `post-command-hook' and returns;
+;; an MCP call has no command loop to run it, so the entry would reach
+;; the user as a prompt at their next unrelated command.  Each test
+;; here pins the entry in the file, the tool's own response, and a
+;; hook with nothing left on it.
+
+(defconst org-mcp-test--pattern-scheduled-update-logged
+  (concat
+   "\\`\\* TODO Scheduled Task\n"
+   "SCHEDULED: <2026-04-15 [^>]+>\n"
+   ":LOGBOOK:\n"
+   "- Rescheduled from \"\\[2026-03-01 [^]]+\\]\" on \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after a SCHEDULED move `org-log-reschedule' records.")
+
+(defconst org-mcp-test--pattern-scheduled-remove-logged
+  (concat
+   "\\`\\* TODO Scheduled Task\n"
+   ":LOGBOOK:\n"
+   "- Not scheduled, was \"\\[2026-03-01 [^]]+\\]\" on \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after a SCHEDULED removal `org-log-reschedule' records.")
+
+(defconst org-mcp-test--pattern-deadline-update-logged
+  (concat
+   "\\`\\* TODO Deadline Task\n"
+   "DEADLINE: <2026-04-15 [^>]+>\n"
+   ":LOGBOOK:\n"
+   "- New deadline from \"\\[2026-03-15 [^]]+\\]\" on \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after a DEADLINE move `org-log-redeadline' records.")
+
+(defconst org-mcp-test--pattern-deadline-remove-logged
+  (concat
+   "\\`\\* TODO Deadline Task\n"
+   ":LOGBOOK:\n"
+   "- Removed deadline, was \"\\[2026-03-15 [^]]+\\]\" on \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task body\\.\n?\\'")
+  "Pattern after a DEADLINE removal `org-log-redeadline' records.")
+
+(defun org-mcp-test--call-set-scheduled (file before after)
+  "Move the SCHEDULED of the Scheduled Task in FILE from BEFORE to AFTER.
+Returns the tool's parsed response."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-set-scheduled"
+    `((link . ,(org-mcp-test--file-link file "*Scheduled Task"))
+      (before . ,before)
+      (after . ,after)))))
+
+(defun org-mcp-test--call-set-deadline (file before after)
+  "Move the DEADLINE of the Deadline Task in FILE from BEFORE to AFTER.
+Returns the tool's parsed response."
+  (json-read-from-string
+   (mcp-server-lib-ert-call-tool
+    "org-node-set-deadline"
+    `((link . ,(org-mcp-test--file-link file "*Deadline Task"))
+      (before . ,before)
+      (after . ,after)))))
+
+(defun org-mcp-test--should-leave-no-log-prompt ()
+  "Assert no log note is left waiting for a command loop that will not come."
+  (should-not (memq 'org-add-log-note post-command-hook))
+  (should-not (get-buffer "*Org Note*")))
+
+(ert-deftest org-mcp-test-set-scheduled-logs-the-move-without-asking ()
+  "`org-log-reschedule' set to `note' records the move and waits for no one.
+Org's own route to the entry arms `post-command-hook' and opens an
+`*Org Note*' buffer for a person to type in, which an MCP call has
+nobody to finish.  The call returns, the hook is not armed, no note
+buffer is left behind, and the entry written is the one the `time'
+setting writes: a heading line with no note body under it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((org-log-reschedule 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-scheduled
+              test-file "<2026-03-01 Sun>" "2026-04-15")))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+        (should
+         (string-match-p "\\`<2026-04-15 " (alist-get 'after result))))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-update-logged))))
+
+(ert-deftest org-mcp-test-set-scheduled-logs-nothing-when-unset ()
+  "`org-log-reschedule' unset leaves the move unrecorded.
+A user who does not log reschedules gets no entry from org-mcp
+either: the setting is the whole decision."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((org-log-reschedule nil)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-scheduled
+              test-file "<2026-03-01 Sun>" "2026-04-15")))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+        (should
+         (string-match-p "\\`<2026-04-15 " (alist-get 'after result))))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-update))))
+
+(ert-deftest org-mcp-test-set-scheduled-blank-after-logs-the-removal ()
+  "`org-log-reschedule' records the removal a blank `after\=' makes.
+The entry names the timestamp destroyed, which is the record Org
+writes when a person takes a SCHEDULED off by hand."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((org-log-reschedule 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-scheduled
+              test-file "<2026-03-01 Sun>" "")))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+        (should (equal (alist-get 'after result) "")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-remove-logged))))
+
+(ert-deftest org-mcp-test-set-scheduled-blank-after-logs-nothing-when-unset ()
+  "`org-log-reschedule' unset leaves the removal unrecorded."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((org-log-reschedule nil)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-scheduled
+              test-file "<2026-03-01 Sun>" "")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "<2026-03-01 Sun>"))
+        (should (equal (alist-get 'after result) "")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-remove))))
+
+(ert-deftest org-mcp-test-set-deadline-logs-the-move-without-asking ()
+  "`org-log-redeadline' set to `note' records the move and waits for no one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let ((org-log-redeadline 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-deadline
+              test-file "<2026-03-15 Sun>" "2026-04-15")))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "<2026-03-15 Sun>"))
+        (should
+         (string-match-p "\\`<2026-04-15 " (alist-get 'after result))))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-update-logged))))
+
+(ert-deftest org-mcp-test-set-deadline-logs-nothing-when-unset ()
+  "`org-log-redeadline' unset leaves the move unrecorded."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let ((org-log-redeadline nil)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-deadline
+              test-file "<2026-03-15 Sun>" "2026-04-15")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "<2026-03-15 Sun>"))
+        (should
+         (string-match-p "\\`<2026-04-15 " (alist-get 'after result))))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-update))))
+
+(ert-deftest org-mcp-test-set-deadline-blank-after-logs-the-removal ()
+  "`org-log-redeadline' records the removal a blank `after\=' makes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let ((org-log-redeadline 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-deadline
+              test-file "<2026-03-15 Sun>" "")))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "<2026-03-15 Sun>"))
+        (should (equal (alist-get 'after result) "")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-remove-logged))))
+
+(ert-deftest org-mcp-test-set-deadline-blank-after-logs-nothing-when-unset ()
+  "`org-log-redeadline' unset leaves the removal unrecorded."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-deadline))
+    (let ((org-log-redeadline nil)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-set-deadline
+              test-file "<2026-03-15 Sun>" "")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "<2026-03-15 Sun>"))
+        (should (equal (alist-get 'after result) "")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-deadline-remove))))
+
+(ert-deftest org-mcp-test-set-priority-arms-no-log-prompt ()
+  "Writing and taking off a priority leaves nothing on the hook.
+`org-priority' has no log setting and reaches no log note, under any
+of the settings that make the other planning writes record one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-priority))
+    (let ((org-log-reschedule 'note)
+          (org-log-redeadline 'note)
+          (org-log-into-drawer t)
+          (link (org-mcp-test--file-link test-file "*Priority Task")))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-priority"
+               `((link . ,link) (before . "B") (after . "A"))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "B"))
+        (should (equal (alist-get 'after result) "A")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-priority"
+               `((link . ,link) (before . "A") (after . ""))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "A"))
+        (should (equal (alist-get 'after result) "")))
+      (org-mcp-test--should-leave-no-log-prompt))))
+
+;;; The log entry a TODO state change means to leave
+
+(defconst org-mcp-test--pattern-task-one-closing-note
+  (concat
+   "\\`\\* DONE Task One\n"
+   "CLOSED: \\[[^]]+\\]\n"
+   ":LOGBOOK:\n"
+   "- CLOSING NOTE \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after a DONE that `org-log-done' set to `note' records.")
+
+(defconst org-mcp-test--pattern-task-one-closing-note-with-prose
+  (concat
+   "\\`\\* DONE Task One\n"
+   "CLOSED: \\[[^]]+\\]\n"
+   ":LOGBOOK:\n"
+   "- CLOSING NOTE \\[[^]]+\\] \\\\\\\\\n"
+   "  Shipped it\\.\n"
+   ":END:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after a DONE with a note, recorded as one entry.")
+
+(ert-deftest org-mcp-test-set-todo-logs-the-state-change-without-asking ()
+  "`org-log-done' set to `note' records the change and waits for no one.
+The entry Org sets up is written here rather than left on
+`post-command-hook' for the user's next command to run."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Task One")
+              "DONE" "TODO")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "DONE")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-task-one-closing-note))))
+
+(ert-deftest org-mcp-test-set-todo-note-rides-the-entry-org-sets-up ()
+  "A `note\=' becomes the prose of the entry Org set up, not a second entry.
+The client asked for one record of one transition, so the note goes
+under the heading line Org chose for it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Task One")
+              "DONE" "TODO" "Shipped it.")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "DONE")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-task-one-closing-note-with-prose))))
+
+(defconst org-mcp-test--pattern-weekly-task-repeat-logged
+  (concat
+   "\\`\\* TODO Weekly Task\n"
+   "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
+   ":PROPERTIES:\n"
+   ":LAST_REPEAT:[ \t]+\\[[^]]+\\]\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "- State \"DONE\"[ \t]+from \"TODO\"[ \t]+\\[[^]]+\\]\n"
+   ":END:\n?\\'")
+  "Pattern after a repeat that `org-log-repeat' records.")
+
+(ert-deftest org-mcp-test-set-todo-repeat-logs-without-asking ()
+  "`org-log-repeat' records the repeat and waits for no one.
+`org-auto-repeat-maybe' is the second way `org-todo' reaches a log
+note, and a repeating entry moved to a done keyword takes it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-repeat))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-repeat 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              "DONE" "TODO")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "TODO")))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-weekly-task-repeat-logged))))
+
+(ert-deftest org-mcp-test-node-create-done-logs-without-asking ()
+  "A node created straight into a done keyword leaves no prompt behind.
+`org-node-create' reaches `org-todo' the same way the setter does."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (let ((org-log-done 'note)
+          (org-log-into-drawer t))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . "Done on arrival")
+                 (todo . "DONE")
+                 (parent . ,(concat "file:" test-file))
+                 (content . "Body."))))))
+        (should (equal (alist-get 'success result) t)))
+      (org-mcp-test--should-leave-no-log-prompt))))
+
+(defconst org-mcp-test--pattern-weekly-task-archived-logged
+  (concat
+   "\\`\\* Archived\n"
+   "\n"
+   "\\*\\* TODO Weekly Task\n"
+   "SCHEDULED: <[0-9-]+ [^>]*\\+1w>\n"
+   ":PROPERTIES:\n"
+   ":LAST_REPEAT: \\[[^]]+\\]\n"
+   ":ARCHIVE_TIME: [^\n]+\n"
+   ":ARCHIVE_FILE: [^\n]+\n"
+   ":ARCHIVE_CATEGORY: [^\n]+\n"
+   ":ARCHIVE_TODO: TODO\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "- State \"DONE\" +from \"TODO\" +\\[[^]]+\\]\n"
+   ":END:\n\\'")
+  "Pattern after a repeating task is archived and marked done.
+The repeat fires, so the heading arrives in its not-done keyword with
+the date advanced, and the entry `org-log-repeat' asks for is in the
+archived copy rather than waiting on a hook.")
+
+(ert-deftest org-mcp-test-node-archive-logs-the-repeat-without-asking ()
+  "Archiving a repeating task records the repeat and waits for no one.
+`org-archive-mark-done' makes Org mark the archived subtree done
+through `org-todo', which reaches a log entry through
+`org-auto-repeat-maybe'.  Org marks it in the archive, so that is
+where the entry goes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat org-mcp-test--content-task-scheduled-repeat "\n")))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-repeat 'note)
+          (org-log-done 'note)
+          (org-archive-mark-done t)
+          (org-log-into-drawer t)
+          (org-archive-location "::* Archived"))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (before
+              (alist-get
+               'digest (org-mcp-test--read-fields link ["digest"])))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-archive"
+                `((link . ,link) (before . ,before))))))
+        (should (eq (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'link result) link)))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-weekly-task-archived-logged))))
 
 ;;; Tests for the three tag tools
 ;;
