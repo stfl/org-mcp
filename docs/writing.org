@@ -160,8 +160,8 @@ becomes the second of March. org-mcp asks both and refuses where the two
 disagree, so a day nobody can keep never reaches the file:
 
 #+begin_example
-Date '2026-13-45' does not exist - Org reads it as '<2027-02-14 Sun>'
-Date '2026-02-29' does not exist - Org reads it as '<2026-03-01 Sun>'
+Date '2026-13-45' does not exist - Org resolves it to '<2027-02-14 Sun>'
+Date '2026-02-29' does not exist - Org resolves it to '<2026-03-01 Sun>'
 Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
 Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
 Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
@@ -194,11 +194,12 @@ same goes for a repeater missing its sign: =2026-03-27 25h= is not a repeater to
 Org but a word it reads past, and it is refused rather than written as a bare
 day.
 
-Because that message names the timestamp Org would have written, it is the last
-question asked of a date. A value that is faulty underneath the text it carries
-answers with the fault instead: =<2026-02-30 Fri typo>= is refused for the day
-that does not exist, so the timestamp a message offers is always one the field
-would take.
+A value faulty underneath the text it carries answers with the fault instead:
+=<2026-02-30 Fri typo>= is refused for the day that does not exist. Every
+timestamp one of these refusals names is one the field takes, so a message can
+be read as advice and not only as evidence — the day-that-does-not-exist message
+names the day and the time on it and leaves out a repeater the value carried,
+because a repeater is not what it is refusing.
 
 The day name is read past and not refused. Org writes the day the date falls on
 and reads nothing out of the slot the day name stands in, so =2026-03-27 zzz=

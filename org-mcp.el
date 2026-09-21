@@ -4034,6 +4034,32 @@ date by putting something else there."
           (setq kept (append kept (list word))))))
     (nreverse unread)))
 
+(defun org-mcp--timestamp-moment-rendered (timestamp)
+  "Return TIMESTAMP rendered as the moment it names and nothing else.
+The date and the time of day are TIMESTAMP\\='s own; a repeater and a
+warning period are left out.  TIMESTAMP is left as it was found.
+
+This is the value a refusal names when what it is refusing is the
+moment, and it is a timestamp this surface takes whatever TIMESTAMP
+carried: it is Org\\='s own reading, so the day exists; its year is
+TIMESTAMP\\='s, which a refusal about the moment is only reached with
+once the year has been found readable; it is one active timestamp,
+so it is neither inactive nor a range; Org rendered it, so there is
+no word in it Org reads past; and it carries neither of the two
+things whose pairing is refused.  Naming the whole of what Org read
+instead would hand back a repeater and a delay the next refusal
+rejects, on a date the call did not ask for."
+  (let ((copy (org-element-copy timestamp)))
+    (dolist (property
+             '(:repeater-type
+               :repeater-value
+               :repeater-unit
+               :warning-type
+               :warning-value
+               :warning-unit))
+      (org-element-put-property copy property nil))
+    (org-element-interpret-data copy)))
+
 (defun org-mcp--timestamp-warning-retyped (timestamp type)
   "Return TIMESTAMP rendered with its warning period set to TYPE.
 TYPE is `all', the warning that fires before every repeat, or nil
@@ -4147,6 +4173,13 @@ two-digit year"
       ;; resolves them against the calendar.  A day that does not
       ;; exist is one the two disagree about, and Org's answer is the
       ;; day the write would otherwise have landed on.
+      ;;
+      ;; What the message names is that day and the time on it, not
+      ;; the whole of what Org read: this refusal is about the
+      ;; moment, and a moment on its own is a timestamp this surface
+      ;; takes, while the whole would carry a repeater and a delay
+      ;; whose pairing the refusal below rejects.  See
+      ;; `org-mcp--timestamp-moment-rendered'.
       (unless (equal
                (org-mcp--timestamp-parts
                 timestamp org-mcp--timestamp-moment)
@@ -4154,8 +4187,8 @@ two-digit year"
                 (org-mcp--timestamp-parsed rendered)
                 org-mcp--timestamp-moment))
         (org-mcp--tool-validation-error
-         "Date '%s' does not exist - Org reads it as '%s'"
-         date-str rendered))
+         "Date '%s' does not exist - Org resolves it to '%s'"
+         date-str (org-mcp--timestamp-moment-rendered timestamp)))
       ;; Org's planning writer carries a repeater and a warning
       ;; period together, and carries a first-only delay standing
       ;; alone, but writes the repeater by itself when the two

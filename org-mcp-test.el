@@ -3525,6 +3525,36 @@ NEW-TITLE is the invalid new title that should be rejected."
   "Return the description tools/list gives for the tool ID."
   (alist-get 'description (org-mcp-test--registered-tool id)))
 
+(defun org-mcp-test--node-write-tools-taking-a-link ()
+  "Return the org-node write tools whose `link' names the node, sorted.
+A tool qualifies when tools/list publishes it as not read-only and
+its schema carries a `link' parameter, which together are what it
+means for a call to name the node it changes.  `org-node-create' is
+therefore out: it takes a `parent' and no `link'.
+
+The set is read from the published schema so that a census over it
+stays a census.  A test listing the tools by hand states what its
+author knew, and the tool somebody adds afterwards is the one the
+list does not mention."
+  (sort
+   (delq
+    nil
+    (mapcar
+     (lambda (tool)
+       (let ((name (alist-get 'name tool)))
+         (and (string-prefix-p "org-node-" name)
+              (eq
+               (alist-get
+                'readOnlyHint (alist-get 'annotations tool))
+               :json-false)
+              (assq
+               'link
+               (alist-get
+                'properties (alist-get 'inputSchema tool)))
+              name)))
+     (org-mcp-test--registered-tools)))
+   #'string<))
+
 (defun org-mcp-test--registered-tool-required (id)
   "Return the required parameter names tools/list publishes for tool ID."
   (append
@@ -10626,7 +10656,7 @@ that tells it the value was wrong rather than the file."
            tool
            `((link . ,link) (before . "") (after . ,sent))
            (format
-            "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+            "\\`Date '%s' does not exist - Org resolves it to '<%s>'\\'"
             (regexp-quote sent) rolled)
            test-file))))))
 
@@ -10643,7 +10673,7 @@ whole value is compared and not the date alone."
          "org-node-set-scheduled"
          `((link . ,link) (before . "") (after . ,sent))
          (format
-          "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+          "\\`Date '%s' does not exist - Org resolves it to '<%s>'\\'"
           (regexp-quote sent) rolled)
          test-file)))))
 
@@ -10683,7 +10713,7 @@ refused write is known to have opened nothing."
      `((link . ,(org-mcp-test--file-link test-file "*No Such Heading"))
        (before . "")
        (after . "2026-02-30"))
-     "\\`Date '2026-02-30' does not exist - Org reads it as '<2026-03-02"
+     "\\`Date '2026-02-30' does not exist - Org resolves it to '<2026-03-02"
      test-file)))
 
 (ert-deftest org-mcp-test-clock-refuses-a-time-that-is-not-one ()
@@ -13478,7 +13508,7 @@ read is a timestamp Org reads back as itself."
           (should (equal (alist-get 'after result) advertised)))))))
 
 (defconst org-mcp-test--dates-read-past-and-faulty-besides
-  '(("<2026-02-30 Fri typo>" "does not exist - Org reads it as")
+  '(("<2026-02-30 Fri typo>" "does not exist - Org resolves it to")
     ("<0050-03-27 Mon +1w typo>" "has a year below 100")
     ("<2026-03-27 Fri +1w --3d typo>"
      "pairs a first-only warning delay with a repeater"))
@@ -13508,6 +13538,45 @@ the text is gone."
                  (regexp-quote date)
                  "' "
                  (regexp-quote expected))
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(defconst org-mcp-test--days-no-month-has-carrying-more
+  '(("<2026-02-30 Fri +1w --3d>" . "<2026-03-02 [^ >]+>")
+    ("<2026-11-31 Mon 09:00 +1w --3d>" . "<2026-12-01 [^ >]+ 09:00>"))
+  "Days no month has, sent carrying a repeater and a first-only delay.
+Each is the value sent and a pattern for the whole of what the
+refusal names.  The pattern ends where the moment ends, so it holds
+only while the repeater and the delay are left out of it.")
+
+(ert-deftest org-mcp-test-set-scheduled-resolves-a-day-to-the-moment-alone ()
+  "The day a value resolves to is named without what it carried.
+A repeater and a first-only warning delay together are refused, so
+naming Org\\='s whole reading of an impossible day would answer one
+refusal with a value the next one rejects.  What the message names
+is the moment — the day and the time on it — which this surface
+takes whatever else the value carried.
+
+Every other refusal over a date names a value too, and
+`org-mcp-test-an-advertised-value-is-accepted' is what asks of all
+of them that the value is taken.  This one pins where that comes
+from here: not the ordering of the checks, which would put the
+repeater back, but a value built to carry nothing the rest are
+about."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,date . ,moment)
+                     org-mcp-test--days-no-month-has-carrying-more)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' does not exist - Org resolves it to '"
+                 moment
+                 "'\\'")
          test-file))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
@@ -23238,12 +23307,22 @@ verb acts on that has to be a heading."
 
 (ert-deftest org-mcp-test-write-tools-refuse-a-link-naming-a-file ()
   "Every org-node write tool but set-properties refuses a file's link.
-Ten of the thirteen are here; `org-node-delete', `org-node-archive'
-and `org-node-refile' are in
-`org-mcp-test-node-verbs-refuse-a-link-naming-a-file', which asserts
-the same refusal against a digest they have to get past parameter
-validation first.  The two together are the census this docstring
-claims, and neither is it alone.
+The claim is over every org-node write tool whose `link' parameter
+names the node it acts on, and that set is read from the published
+schema rather than written down here, so a write tool added later
+fails this test until somebody decides what a file's link does to
+it.  `org-node-create' is outside the set: its `parent' takes a
+file's link and means that file's top level, and it has no `link'.
+
+`org-node-delete', `org-node-archive' and `org-node-refile' need a
+digest to get past parameter validation, so each is sent the one a
+read of the file node returned; a row without it would be refused
+for the wrong reason and prove nothing about the link.  They are
+covered again, as a family, in
+`org-mcp-test-node-verbs-refuse-a-link-naming-a-file', which is
+where their own guard is pinned; the overlap is deliberate, because
+a census that sends the reader elsewhere for a third of itself is
+one nobody checks.
 
 A file node is written where Org has a file construct to write, and
 that is its property drawer.  A TODO keyword, a priority cookie, a
@@ -23258,21 +23337,34 @@ headline, and a file's body is the preamble those keywords stand in,
 so replacing it against a digest would rewrite the settings of a file
 with nothing in the call naming one."
   (org-mcp-test--with-verbs-file test-file
-    (let ((file-link (concat "file:" test-file)))
-      (pcase-dolist
-          (`(,tool . ,params)
-           '(("org-node-set-todo" (before . "") (after . "TODO"))
-             ("org-node-set-title" (before . "x") (after . "y"))
-             ("org-node-set-content" (before . "") (after . "x"))
-             ("org-node-set-scheduled"
-              (before . "") (after . "2026-03-27"))
-             ("org-node-set-deadline"
-              (before . "") (after . "2026-03-27"))
-             ("org-node-set-priority" (before . "") (after . "A"))
-             ("org-node-add-tags" (after . "work"))
-             ("org-node-remove-tags" (after . "work"))
-             ("org-node-set-tags" (before . []) (after . ["work"]))
-             ("org-node-add-note" (note . "a note"))))
+    (let* ((file-link (concat "file:" test-file))
+           (digest (org-mcp-test--verbs-digest file-link))
+           (rows
+            `(("org-node-set-todo" (before . "") (after . "TODO"))
+              ("org-node-set-title" (before . "x") (after . "y"))
+              ("org-node-set-content" (before . "") (after . "x"))
+              ("org-node-set-scheduled"
+               (before . "") (after . "2026-03-27"))
+              ("org-node-set-deadline"
+               (before . "") (after . "2026-03-27"))
+              ("org-node-set-priority" (before . "") (after . "A"))
+              ("org-node-add-tags" (after . "work"))
+              ("org-node-remove-tags" (after . "work"))
+              ("org-node-set-tags" (before . []) (after . ["work"]))
+              ("org-node-add-note" (note . "a note"))
+              ("org-node-delete" (before . ,digest))
+              ("org-node-archive" (before . ,digest))
+              ("org-node-refile"
+               (before . ,digest)
+               (parent
+                . ,(org-mcp-test--file-link test-file "*Home"))))))
+      (should
+       (equal
+        (sort (mapcar #'car rows) #'string<)
+        (remove
+         "org-node-set-properties"
+         (org-mcp-test--node-write-tools-taking-a-link))))
+      (pcase-dolist (`(,tool . ,params) rows)
         (org-mcp-test--call-tool-refused
          tool
          (cons (cons 'link file-link) params)
@@ -26038,9 +26130,11 @@ read back the way it was sent."
 
 (defvar org-mcp-test--advertisements-provoked nil
   "The advertisements the guard has provoked, while it is running.
-Every text the guard reads a value out of is recorded here, so that
-the refusals classed as advertising a value can be checked to have
-been provoked rather than merely listed.")
+Each entry is (TEXT . VALUES): the advertisement the server produced
+and what the guard read out of it.  The refusals classed as
+advertising a value are checked against this, both for having been
+provoked at all and for having been provoked across calls that make
+a derived advertisement come out differently.")
 
 (defun org-mcp-test--advertised (text regexp)
   "Return the values TEXT advertises, as the groups of REGEXP catch them.
@@ -26049,7 +26143,6 @@ a tool description -- and REGEXP says where in it the values stand.
 A REGEXP that does not match fails the test rather than answering
 with nothing: the advertisement has been reworded, and what it now
 promises is unasserted until the regexp is brought back to it."
-  (push text org-mcp-test--advertisements-provoked)
   (should (string-match regexp text))
   (let ((values nil)
         (group 1)
@@ -26060,7 +26153,15 @@ promises is unasserted until the regexp is brought back to it."
         (push value values))
       (setq group (1+ group)))
     (should values)
-    (nreverse values)))
+    (setq values (nreverse values))
+    (let ((entry (assoc text org-mcp-test--advertisements-provoked)))
+      ;; One advertisement may name values in more than one place, and
+      ;; a caller reads each place on its own; what the text named is
+      ;; all of them together.
+      (if entry
+          (setcdr entry (append (cdr entry) values))
+        (push (cons text values) org-mcp-test--advertisements-provoked)))
+    values))
 
 (defun org-mcp-test--advertised-list (text regexp)
   "Return the values TEXT advertises as one comma-separated list.
@@ -26125,6 +26226,25 @@ built here, so the day name Org wrote is the day name asserted."
             "SCHEDULED: " (regexp-quote written) "\n"
             "Task body text\\.\n?\\'")))))))
 
+(defun org-mcp-test--advertised-scheduled-refused (value)
+  "Assert VALUE, a date a refusal advertised, is refused as a date.
+An advertisement built out of what the call sent carries whatever
+that call put in it, and the checks a date is put through do not all
+run over what an earlier one recommends.  Where that leaves a
+refusal recommending a date org-mcp refuses, the recommendation is
+pinned here rather than left to the one input somebody happened to
+pick, and this stops holding -- loudly -- the day the recommendation
+becomes one a client can obey."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (before . "")
+       (after . ,value))
+     (concat "\\`Date '" (regexp-quote value) "' ")
+     test-file)))
+
 (defun org-mcp-test--advertised-date-refusal (sent)
   "Return the refusal a scheduled date of SENT is met with."
   (org-mcp-test--with-temp-org-files
@@ -26135,69 +26255,125 @@ built here, so the day name Org wrote is the day name asserted."
        (before . "")
        (after . ,sent)))))
 
+(defconst org-mcp-test--dates-read-as-no-date
+  '("next tuesday" "<2026-03-27 Fri>--<2026-03-28 Sat> typo")
+  "Two values Org reads no timestamp at all in.
+The refusal they raise spells its dates out rather than deriving
+them, so what the two are for is to show that: a refusal naming the
+same dates whatever was sent is asserted to name the same dates.")
+
 (defun org-mcp-test--advertisement-date-forms ()
   "The dates the refusal of a date it cannot read names."
-  (let* ((message (org-mcp-test--advertised-date-refusal "next tuesday"))
-         (values
-          (append
-           (org-mcp-test--advertised-list
-            message "expected \\(.*\\), or null for no date\\'")
-           (org-mcp-test--advertised
-            message ", or \\(null\\) for no date\\'"))))
-    (mapc #'org-mcp-test--advertised-scheduled-accepted values)
+  (let ((values nil))
+    (dolist (sent org-mcp-test--dates-read-as-no-date)
+      (let* ((message (org-mcp-test--advertised-date-refusal sent))
+             (named
+              (append
+               (org-mcp-test--advertised-list
+                message "expected \\(.*\\), or null for no date\\'")
+               (org-mcp-test--advertised
+                message ", or \\(null\\) for no date\\'"))))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
+
+(defconst org-mcp-test--dates-carrying-unread-text
+  '("<2026-03-27 Fri 09:00 +1w typo>" "<2050-06-15 Wed nonsense>")
+  "Dates carrying text Org reads past, one per date the refusal names.
+The refusal names Org\\='s rendering of what it did read, so the date
+it recommends is built out of the call\\='s own value and is a
+different date on every call.  One of these would show only that the
+recommendation was one to follow for the value somebody picked.")
 
 (defun org-mcp-test--advertisement-date-without-unread-text ()
   "The date the refusal of a timestamp carrying unread text names."
-  (let ((values
-         (org-mcp-test--advertised
-          (org-mcp-test--advertised-date-refusal
-           "<2026-03-27 Fri 09:00 +1w typo>")
-          "Org would write '\\(.*\\)' without it\\'")))
-    (mapc #'org-mcp-test--advertised-scheduled-accepted values)
+  (let ((values nil))
+    (dolist (sent org-mcp-test--dates-carrying-unread-text)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-date-refusal sent)
+              "Org would write '\\(.*\\)' without it\\'")))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
 
-(defun org-mcp-test--advertisement-date-org-reads-instead ()
+(defconst org-mcp-test--dates-the-calendar-has-not-got
+  '("2026-02-30"
+    "<2026-11-31 Mon 09:00>"
+    "<2026-02-30 Fri typo>"
+    "<2026-02-30 Fri +1w --3d>"
+    "<2026-11-31 Mon 09:00 +1w --3d>")
+  "Days no month has, written so the refusal has to resolve each one.
+What the refusal names is built out of what arrived, so it is a
+different date on every call.  The five here move the day, the time
+of day, and what the value carries beside them: a word Org reads
+past, a repeater with a first-only delay, and both at once on a
+value carrying a time.  The last two are the ones that say the
+refusal names the moment alone — naming the whole of Org\\='s reading
+would carry the delay, which the refusal after this one rejects.")
+
+(defun org-mcp-test--advertisement-date-resolved-to ()
   "The date the refusal of a day the calendar has not got names."
-  (let ((values
-         (org-mcp-test--advertised
-          (org-mcp-test--advertised-date-refusal "2026-02-30")
-          "Org reads it as '\\(.*\\)'\\'")))
-    (mapc #'org-mcp-test--advertised-scheduled-accepted values)
+  (let ((values nil))
+    (dolist (sent org-mcp-test--dates-the-calendar-has-not-got)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-date-refusal sent)
+              "Org resolves it to '\\(.*\\)'\\'")))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
+
+(defconst org-mcp-test--dates-delaying-once-beside-a-repeater
+  '("<2026-03-27 Fri +1w --3d>"
+    "<2026-03-27 Fri 09:00 .+2d --1m>"
+    "<2050-06-15 Wed ++1m --2w>")
+  "Dates pairing a first-only delay with a repeater, one per repeater form.
+Both dates the refusal names are built from the element Org parsed,
+so they carry the repeater form and the time of day the call sent
+and differ with each of these.")
 
 (defun org-mcp-test--advertisement-date-warning-delay ()
   "The two dates the refusal of a first-only delay beside a repeater names."
-  (let ((values
-         (org-mcp-test--advertised
-          (org-mcp-test--advertised-date-refusal "<2026-03-27 Fri +1w --3d>")
-          "writes '\\(.*\\)'; '\\(.*\\)' warns before every repeat\\'")))
-    (should (= (length values) 2))
-    (mapc #'org-mcp-test--advertised-scheduled-accepted values)
+  (let ((values nil))
+    (dolist (sent org-mcp-test--dates-delaying-once-beside-a-repeater)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-date-refusal sent)
+              "writes '\\(.*\\)'; '\\(.*\\)' warns before every repeat\\'")))
+        (should (= (length named) 2))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
 
-(defconst org-mcp-test--content-advertised-keywords
-  "#+TODO: TODO NEXT WAIT | DONE KILL\n* TODO Task\nBody.\n"
-  "A file whose workflow is its own, for a TODO refusal to name.
+(defconst org-mcp-test--contents-advertised-keywords
+  '("#+TODO: TODO NEXT WAIT | DONE KILL\n* Task\nBody.\n"
+    "#+SEQ_TODO: BACKLOG READY | SHIPPED\n* Task\nBody.\n")
+  "Two files whose workflows are their own, for a TODO refusal to name.
 The keywords such a refusal advertises are the file's rather than
-the session's, so the guard over them reads a file that sets some.")
+the session's, so the guard over them reads files that set some --
+two of them, setting different ones, because a refusal whose advice
+is the file's is no better guarded by one file than by none.")
 
-(defun org-mcp-test--advertisement-todo-states ()
-  "The keywords the refusal of a state no file defines names."
+(defun org-mcp-test--advertised-keywords-of-file (content)
+  "Assert every keyword the refusal names in a file holding CONTENT is taken.
+Each is written onto the headline in that same file, since a
+keyword is only a keyword where the file that defines it is."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-advertised-keywords))
+      ((test-file content))
     (let* ((link (org-mcp-test--file-link test-file "*Task"))
+           (header (car (split-string content "\n")))
            (message
             (org-mcp-test--refusal-message
              "org-node-set-todo"
-             `((link . ,link) (before . "TODO") (after . "NOSUCH"))))
+             `((link . ,link) (before . "") (after . "NOSUCH"))))
            (values
             (append
              (org-mcp-test--advertised-list
               message "valid states: \\(.*\\), or null for no keyword\\'")
              (org-mcp-test--advertised
               message ", or \\(null\\) for no keyword\\'")))
-           (held "TODO"))
+           (held ""))
       (dolist (state values)
         (let* ((null-p (equal state "null"))
                (result
@@ -26212,33 +26388,45 @@ the session's, so the guard over them reads a file that sets some.")
           (org-mcp-test--verify-file-matches
            test-file
            (concat
-            "\\`#\\+TODO: TODO NEXT WAIT | DONE KILL\n"
+            "\\`" (regexp-quote header) "\n"
             "\\* "
             (if (equal held "") "" (concat (regexp-quote held) " "))
             "Task\nBody\\.\n\\'"))))
       values)))
 
-(defconst org-mcp-test--content-advertised-priorities
-  "#+PRIORITIES: A E C\n* TODO Task\n"
-  "A file whose priority range is its own, for a refusal to name.
-The bounds a refusal advertises are read where the file's own
-#+PRIORITIES: line is in force, so the guard reads a file with one.")
+(defun org-mcp-test--advertisement-todo-states ()
+  "The keywords the refusal of a state no file defines names."
+  (let ((values nil))
+    (dolist (content org-mcp-test--contents-advertised-keywords)
+      (setq values
+            (append
+             values (org-mcp-test--advertised-keywords-of-file content))))
+    values))
 
-(defun org-mcp-test--advertised-priority-refusal (sent)
-  "Return the refusal a priority of SENT is met with, in a file with a range."
+(defconst org-mcp-test--contents-advertised-priorities
+  '("#+PRIORITIES: A E C\n* TODO Task\n" "#+PRIORITIES: A C B\n* TODO Task\n")
+  "Two files whose priority ranges are their own, for a refusal to name.
+The bounds a refusal advertises are read where the file's own
+#+PRIORITIES: line is in force, and they are the file's, so two
+files with different bounds are what shows a guard reading them
+rather than a pair somebody wrote down.")
+
+(defun org-mcp-test--advertised-priority-refusal (content sent)
+  "Return the refusal a priority of SENT meets in a file holding CONTENT."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-advertised-priorities))
+      ((test-file content))
     (org-mcp-test--refusal-message
      "org-node-set-priority"
      `((link . ,(org-mcp-test--file-link test-file "*Task"))
        (before . "")
        (after . ,sent)))))
 
-(defun org-mcp-test--advertised-priority-accepted (value)
-  "Assert a call may send VALUE as a priority, and the file carries it."
+(defun org-mcp-test--advertised-priority-accepted (content value)
+  "Assert VALUE is taken as a priority in a file holding CONTENT."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-advertised-priorities))
+      ((test-file content))
     (let* ((link (org-mcp-test--file-link test-file "*Task"))
+           (header (car (split-string content "\n")))
            (null-p (equal value "null"))
            (result
             (json-read-from-string
@@ -26251,36 +26439,55 @@ The bounds a refusal advertises are read where the file's own
       (org-mcp-test--verify-file-matches
        test-file
        (concat
-        "\\`#\\+PRIORITIES: A E C\n\\* TODO "
+        "\\`" (regexp-quote header) "\n\\* TODO "
         (if null-p "" (concat "\\[#" (regexp-quote value) "\\] "))
         "Task\n\\'")))))
 
 (defun org-mcp-test--advertisement-priority-none ()
   "The null the refusal of a priority that is no one character names."
-  (let ((values
-         (org-mcp-test--advertised
-          (org-mcp-test--advertised-priority-refusal "AB")
-          ", or \\(null\\) for no priority\\'")))
-    (mapc #'org-mcp-test--advertised-priority-accepted values)
+  (let ((content (car org-mcp-test--contents-advertised-priorities))
+        (values nil))
+    (dolist (sent '("AB" ""))
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-priority-refusal content sent)
+              ", or \\(null\\) for no priority\\'")))
+        (dolist (value named)
+          (org-mcp-test--advertised-priority-accepted content value))
+        (setq values (append values named))))
     values))
 
 (defun org-mcp-test--advertisement-priority-bounds ()
   "The two bounds the refusal of a priority outside the range names."
-  (let ((values
-         (org-mcp-test--advertised
-          (org-mcp-test--advertised-priority-refusal "Z")
-          "out of range ('\\(.\\)' to '\\(.\\)')\\'")))
-    (should (= (length values) 2))
-    (mapc #'org-mcp-test--advertised-priority-accepted values)
+  (let ((values nil))
+    (dolist (content org-mcp-test--contents-advertised-priorities)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-priority-refusal content "Z")
+              "out of range ('\\(.\\)' to '\\(.\\)')\\'")))
+        (should (= (length named) 2))
+        (dolist (value named)
+          (org-mcp-test--advertised-priority-accepted content value))
+        (setq values (append values named))))
     values))
 
 (defun org-mcp-test--advertisement-write-takes-null ()
-  "The null the refusal of a value that is no value names."
+  "The null the refusal of a value that is no value names.
+Two fields raise it, and the null it names is the same null on
+either, since what it says belongs to the grammar every write shares
+rather than to the field."
   (let ((values
          (org-mcp-test--advertised
           (org-mcp-test--advertised-date-refusal 5)
-          ", or \\(null\\) to take the value away")))
+          ", or \\(null\\) to take the value away"))
+        (content (car org-mcp-test--contents-advertised-priorities)))
     (mapc #'org-mcp-test--advertised-scheduled-accepted values)
+    (dolist (value
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-priority-refusal content ["x"])
+              ", or \\(null\\) to take the value away"))
+      (org-mcp-test--advertised-priority-accepted content value)
+      (setq values (append values (list value))))
     values))
 
 (defconst org-mcp-test--content-advertised-fields
@@ -26318,6 +26525,15 @@ that has something to say in each of them.")
              (org-mcp-test--refusal-message
               "org-node-read" `((link . ,link) (fields . ["nosuch"])))
              "Valid fields: \\(.*\\)\\'")))
+      ;; The fields are this server's own, so a second call naming a
+      ;; different one is answered with the same list.
+      (should
+       (equal
+        (org-mcp-test--advertised-list
+         (org-mcp-test--refusal-message
+          "org-node-read" `((link . ,link) (fields . ["another"])))
+         "Valid fields: \\(.*\\)\\'")
+        values))
       ;; The heading has a value for every one of them, so a field
       ;; that is advertised and never built comes back as a key the
       ;; answer is missing rather than as one left out for having
@@ -26331,13 +26547,24 @@ that has something to say in each of them.")
 (defun org-mcp-test--advertisement-field-lists ()
   "The field lists the refusal of a list nobody configured names.
 The lists are the user's rather than this server's, so the guard
-runs with one of its own beside the two org-mcp starts with: what
-the refusal names is what the setting holds at the time of the call,
-and a list added to the setting is asserted without being written
-down here."
-  (let ((org-mcp-node-field-lists
-         (append
-          org-mcp-node-field-lists '((planning title scheduled deadline)))))
+runs under two settings: the one org-mcp starts with, and that one
+with a list of its own added.  What the refusal names is what the
+setting holds at the time of the call, and a list added to the
+setting is asserted without being written down here."
+  (let ((values nil))
+    (dolist (lists
+             (list
+              org-mcp-node-field-lists
+              (append
+               org-mcp-node-field-lists
+               '((planning title scheduled deadline)))))
+      (setq values
+            (append values (org-mcp-test--advertised-lists-configured lists))))
+    values))
+
+(defun org-mcp-test--advertised-lists-configured (lists)
+  "Assert every field list the refusal names under LISTS answers as LISTS says."
+  (let ((org-mcp-node-field-lists lists))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-advertised-fields))
       (let* ((link (org-mcp-test--file-link test-file "*Rich Task"))
@@ -26394,11 +26621,24 @@ that a call may send them at all."
       asserted)))
 
 (defun org-mcp-test--advertisement-computed-fields ()
-  "The computed fields the refusal of one nobody configured names."
-  (let ((org-mcp-computed-fields
-         (list
-          (cons 'rank (lambda () "1"))
-          (cons 'parent_priority (lambda () "A")))))
+  "The computed fields the refusal of one nobody configured names.
+Nothing is configured out of the box, so the names are entirely the
+user's and the guard runs under two configurations of them."
+  (let ((values nil))
+    (dolist (fields
+             (list
+              (list (cons 'rank (lambda () "1")))
+              (list
+               (cons 'rank (lambda () "1"))
+               (cons 'parent_priority (lambda () "A")))))
+      (setq values
+            (append
+             values (org-mcp-test--advertised-computed-configured fields))))
+    values))
+
+(defun org-mcp-test--advertised-computed-configured (fields)
+  "Assert every computed field the refusal names under FIELDS is answered."
+  (let ((org-mcp-computed-fields fields))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-advertised-fields))
       (let* ((link (org-mcp-test--file-link test-file "*Rich Task"))
@@ -26416,42 +26656,106 @@ that a call may send them at all."
             (should (assq (intern name) (alist-get 'computed node)))))
         values))))
 
-(defun org-mcp-test--advertisement-views ()
-  "The views the refusal of a view nobody configured names."
-  (org-mcp-test--with-views
-    (let ((values
+(defconst org-mcp-test--views-quarterly
+  '((inbox :name "Inbox" :query org-mcp-test--view-query-inbox)
+    (stuck
+     :name "Stuck Projects"
+     :query org-mcp-test--view-query-stuck
+     :filter t)
+    (next
+     :name "Next Actions"
+     :query org-mcp-test--view-query-next
+     :filter t
+     :range (quarter all)))
+  "A second configuration of views, beside `org-mcp-test--views'.
+It drops one view and gives the one taking ranges different ones, so
+that a refusal naming the configured views, or the ranges a view
+takes, names something different here than it does there.")
+
+(defconst org-mcp-test--filters-one
+  '((private . (tags "private")))
+  "A second configuration of filters, beside `org-mcp-test--filters'.
+It holds one of the two that one holds, so a refusal naming the
+configured filters names something different here, and the one it
+names still narrows the fixture to a match.")
+
+(defun org-mcp-test--advertised-views-configured (views filters)
+  "Assert every view the refusal names under VIEWS and FILTERS runs."
+  (org-mcp-test--with-configured-server
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views views)
+       (org-mcp-filters filters)
+       (org-mcp-query-sort-fn nil))
+    (let ((names
            (org-mcp-test--advertised-list
             (org-mcp-test--refusal-message "org-view" '((view . "nosuch")))
             "Configured views: \\(.*\\)\\'")))
-      (dolist (name values)
+      (dolist (name names)
         (should (org-mcp-test--view-matches `((view . ,name)))))
-      values)))
+      names)))
 
-(defun org-mcp-test--advertisement-view-filters ()
-  "The filters the refusal of a filter nobody configured names."
-  (org-mcp-test--with-views
-    (let ((values
+(defun org-mcp-test--advertisement-views ()
+  "The views the refusal of a view nobody configured names.
+The views are the workflow's, so the guard runs under two
+configurations of them rather than under the one the view tests
+share."
+  (append
+   (org-mcp-test--advertised-views-configured
+    org-mcp-test--views org-mcp-test--filters)
+   (org-mcp-test--advertised-views-configured
+    org-mcp-test--views-quarterly org-mcp-test--filters-one)))
+
+(defun org-mcp-test--advertised-filters-configured (views filters)
+  "Assert every filter the refusal names under VIEWS and FILTERS narrows."
+  (org-mcp-test--with-configured-server
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views views)
+       (org-mcp-filters filters)
+       (org-mcp-query-sort-fn nil))
+    (let ((names
            (org-mcp-test--advertised-list
             (org-mcp-test--refusal-message
              "org-view" '((view . "stuck") (filter . "nosuch")))
             "Configured filters: \\(.*\\)\\'")))
-      (dolist (name values)
+      (dolist (name names)
         (should
          (org-mcp-test--view-matches `((view . "stuck") (filter . ,name)))))
-      values)))
+      names)))
 
-(defun org-mcp-test--advertisement-view-ranges ()
-  "The ranges the refusal of a range a view does not take names."
-  (org-mcp-test--with-views
-    (let ((values
+(defun org-mcp-test--advertisement-view-filters ()
+  "The filters the refusal of a filter nobody configured names."
+  (append
+   (org-mcp-test--advertised-filters-configured
+    org-mcp-test--views org-mcp-test--filters)
+   (org-mcp-test--advertised-filters-configured
+    org-mcp-test--views-quarterly org-mcp-test--filters-one)))
+
+(defun org-mcp-test--advertised-ranges-configured (views filters)
+  "Assert every range the refusal names for a view under VIEWS is taken."
+  (org-mcp-test--with-configured-server
+      ((test-file org-mcp-test--content-views))
+      ((org-mcp-views views)
+       (org-mcp-filters filters)
+       (org-mcp-query-sort-fn nil))
+    (let ((names
            (org-mcp-test--advertised-list
             (org-mcp-test--refusal-message
              "org-view" '((view . "next") (range . "nosuch")))
             "Its ranges: \\(.*\\)\\'")))
-      (dolist (name values)
+      (dolist (name names)
         (should
          (org-mcp-test--view-matches `((view . "next") (range . ,name)))))
-      values)))
+      names)))
+
+(defun org-mcp-test--advertisement-view-ranges ()
+  "The ranges the refusal of a range a view does not take names.
+A view declares the ranges it takes, so the guard asks two views
+that declare different ones."
+  (append
+   (org-mcp-test--advertised-ranges-configured
+    org-mcp-test--views org-mcp-test--filters)
+   (org-mcp-test--advertised-ranges-configured
+    org-mcp-test--views-quarterly org-mcp-test--filters-one)))
 
 (defun org-mcp-test--advertisement-array-as-json-text ()
   "The array a parameter description spells out for a client sending text.
@@ -26576,6 +26880,19 @@ advertisement a client can obey and one it cannot: the line is
            (values
             (org-mcp-test--advertised-list
              message " - this tool writes \\(.*\\)\\'")))
+      ;; The settings are the tool's own, so a second call naming a
+      ;; different one outside them is answered with the same list.
+      (should
+       (equal
+        (org-mcp-test--advertised-list
+         (org-mcp-test--refusal-message
+          "org-file-set-setting"
+          `((link . ,link)
+            (setting . "NOSUCH")
+            (before . [])
+            (after . [])))
+         " - this tool writes \\(.*\\)\\'")
+        values))
       (dolist (setting values)
         (let ((result
                (json-read-from-string
@@ -26595,8 +26912,8 @@ advertisement a client can obey and one it cannot: the line is
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
     ("the date under unread text"
      . org-mcp-test--advertisement-date-without-unread-text)
-    ("the date Org reads instead"
-     . org-mcp-test--advertisement-date-org-reads-instead)
+    ("the date a day no month has resolves to"
+     . org-mcp-test--advertisement-date-resolved-to)
     ("the two dates beside a repeater"
      . org-mcp-test--advertisement-date-warning-delay)
     ("the TODO keywords of a file" . org-mcp-test--advertisement-todo-states)
@@ -26622,28 +26939,58 @@ advertisement a client can obey and one it cannot: the line is
 Each entry is (WHAT . FUNCTION).  FUNCTION provokes the
 advertisement from the running server, reads the values out of the
 text it produced, asserts each of them is accepted, and answers with
-the values it asserted.")
+the values it asserted.
+
+A FUNCTION provokes its advertisement more than once, with calls
+that differ in whatever the message reads its values from -- the
+value sent, the file it is read in, the setting that holds the
+names.  One call only ever shows that the message was honest for
+the one value somebody picked.")
+
+(defun org-mcp-test--advertisements-of (template)
+  "Return what TEMPLATE was provoked into naming, one entry per wording.
+Each entry is the values one provoking call read out of it, so the
+list says both how many calls reached this refusal and whether they
+were answered alike."
+  (let ((regexp (org-mcp-test--refusal-regexp template)))
+    (mapcar
+     #'cdr
+     (seq-filter
+      (lambda (entry) (string-match-p regexp (car entry)))
+      org-mcp-test--advertisements-provoked))))
 
 (ert-deftest org-mcp-test-an-advertised-value-is-accepted ()
   "A value the server names in a refusal or a description is one it takes.
 The promise a message makes by naming a value is that sending it
 works, and nothing else in the suite sends one back: the tests over
 a refusal send values that are refused, and the tests over a
-validator send values those tests chose."
+validator send values those tests chose.
+
+One provoking call is no guard over a refusal whose advice is built
+out of what arrived, since it shows only that the message was honest
+for the value somebody picked.  So a refusal naming values that come
+from the call, the file or the configuration is provoked until it
+names different ones, and a refusal naming the same values whatever
+the call is has to name them twice over."
   (let ((org-mcp-test--advertisements-provoked nil))
     (dolist (entry org-mcp-test--advertisements)
       (ert-info ((car entry) :prefix "Advertisement: ")
         (should (funcall (cdr entry)))))
-    ;; Every refusal classed as advertising a value was provoked by
-    ;; one of those rows, so the classification cannot claim a guard
-    ;; that nothing runs.
-    (dolist (template org-mcp-test--refusals-advertising-a-value)
-      (ert-info (template :prefix "Refusal: ")
-        (let ((regexp (org-mcp-test--refusal-regexp template)))
-          (should
-           (seq-some
-            (lambda (text) (string-match-p regexp text))
-            org-mcp-test--advertisements-provoked)))))))
+    ;; A refusal whose advice is fixed was reached by two calls that
+    ;; were worded differently and answered the same.
+    (dolist (template org-mcp-test--refusals-advertising-a-fixed-value)
+      (ert-info (template :prefix "Fixed: ")
+        (let ((named (org-mcp-test--advertisements-of template)))
+          (should (> (length named) 1))
+          (should (= (length (delete-dups named)) 1)))))
+    ;; A refusal whose advice is derived was reached by calls that
+    ;; made it come out differently, which is what shows the guard
+    ;; following the value rather than one instance of it.
+    (dolist (template org-mcp-test--refusals-advertising-a-derived-value)
+      (ert-info (template :prefix "Derived: ")
+        (should
+         (> (length (delete-dups (org-mcp-test--advertisements-of template)))
+            1))))))
 
 ;;; Every refusal, classed
 
@@ -26742,34 +27089,45 @@ to the line that wrote it."
    (mapconcat #'regexp-quote (split-string template "%[scdSX%]") ".*")
    "\\'"))
 
-(defconst org-mcp-test--refusals-advertising-a-value
+(defconst org-mcp-test--refusals-advertising-a-fixed-value
   '(
     "%s must be a string, or null to take the value away, not %s"
     "Unknown node field: %s.  Valid fields: %s"
-    "Unknown field list: %s.  Configured lists: %s.  Fields are also named directly, as an \
-array such as [\"title\", \"link\"]"
     "%s takes an array of names, or \"all\" or \"none\" as a string, not: %s"
-    "Unknown computed field: %s.  Configured computed fields: %s"
-    "Invalid TODO state: '%s' - valid states: %s, or null for no keyword"
     "Invalid date '%s' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as \
 <2026-06-20 Sat +1w -3d>, or null for no date"
+    "Invalid priority '%s' - expected a single character, or null for no priority"
+    "No such setting: '%s' - this tool writes %s"
+   )
+  "Every refusal naming the same values whatever the call was.
+The values are written into the message, or read from something no
+call can move, so two calls worded differently are answered alike --
+which is what `org-mcp-test-an-advertised-value-is-accepted' asks of
+them, since a refusal classed here and derived after all would
+otherwise be guarded by whichever call somebody wrote first.")
+
+(defconst org-mcp-test--refusals-advertising-a-derived-value
+  '(
+    "Unknown field list: %s.  Configured lists: %s.  Fields are also named directly, as an \
+array such as [\"title\", \"link\"]"
+    "Unknown computed field: %s.  Configured computed fields: %s"
+    "Invalid TODO state: '%s' - valid states: %s, or null for no keyword"
     "Date '%s' carries text that is no part of a timestamp: '%s' - Org would write '%s' \
 without it"
-    "Date '%s' does not exist - Org reads it as '%s'"
+    "Date '%s' does not exist - Org resolves it to '%s'"
     "Date '%s' pairs a first-only warning delay with a repeater - Org's planning writer drops \
 the delay and writes '%s'; '%s' warns before every repeat"
-    "Invalid priority '%s' - expected a single character, or null for no priority"
     "Priority '%s' out of range ('%c' to '%c')"
     "Unknown view: %s.  Configured views: %s"
     "Unknown filter: %s.  Configured filters: %s"
     "Unknown range for the %s view: %s.  Its ranges: %s"
-    "No such setting: '%s' - this tool writes %s"
    )
-  "Every refusal that hands a client a value to send instead.
-Each of these is provoked by a row of `org-mcp-test--advertisements',
-which reads the values out of the message and asserts that each one
-is accepted; the guard fails when one of them is not provoked.  A
-refusal joins this list by having such a row written for it.")
+  "Every refusal whose values come from the call, the file or the settings.
+What such a refusal recommends differs from one call to the next, so
+the value it named for the call somebody picked says nothing about
+the value it names for the next one.  Each of these is provoked
+until it has named two different things, and every value it named is
+sent back.")
 
 (defconst org-mcp-test--refusals-advertising-nothing
   '(
@@ -26918,7 +27276,7 @@ with -- and the example in them is an example, refused as readily as
 what was sent.  Some name a JSON type, a string or a number or
 true or false, which the tool schema already publishes; null is a
 value rather than a type, because it asks a field to hold nothing,
-and the refusals naming it are in the list above.
+and the refusals naming it are in the two lists above.
 
 The last kind names a course to take rather than a value to send.
 The `#+TODO:' rewrite that would rewrite headings is the one: the
@@ -26941,7 +27299,8 @@ hands a client a value and whether a row of
   (let* ((written (org-mcp-test--refusals-in-source))
          (classed
           (append
-           org-mcp-test--refusals-advertising-a-value
+           org-mcp-test--refusals-advertising-a-fixed-value
+           org-mcp-test--refusals-advertising-a-derived-value
            org-mcp-test--refusals-advertising-nothing)))
     (should (equal (seq-difference written classed) nil))
     (should (equal (seq-difference classed written) nil))))
