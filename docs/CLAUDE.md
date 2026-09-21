@@ -46,10 +46,11 @@ grep -rnE '\[\[file:[^]]*((CLAUDE|AGENTS)\.md|\.claude/)' ../README.org ../CONTR
 ## Headings are link targets
 
 Cross-page links carry the heading text: `[[file:links.org::*Addressing headings
-with links][Addressing headings with links]]`. Renaming a heading breaks every
-inbound link silently — org-lint checks that the *file* exists, not the search
-part. Grep for the old heading across `../README.org`, `../CONTRIBUTING.org` and
-`docs/` before renaming one.
+with links][Addressing headings with links]]`. org-lint checks the search part
+as well as the file, so a link to a heading that is not there fails the commit
+with `Unknown fuzzy location "…"`. That catches a rename you have not finished;
+it does not tell you which pages to fix, so grep for the old heading across
+`../README.org`, `../CONTRIBUTING.org` and `docs/` before renaming one.
 
 `just lint` org-lints these pages, `README.org` and `CONTRIBUTING.org`, each from
 its own directory, so a relative link resolves the way a reader follows it. A
