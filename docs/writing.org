@@ -1412,6 +1412,10 @@ one and =file:<path>= otherwise (see [[file:links.org::*Links org-mcp returns][L
 into a file's drawer therefore changes the link the next response reports, and
 taking it away changes it back.
 
+A file's body is the preamble this drawer stands in, so a property written here
+moves that file's =content_digest= and =digest= although the call names no body
+(see [[file:reading.org::*The two digests][The two digests]]).
+
 ** org-file-set-setting
 - *Description:* Write one of a file's in-buffer settings
 - *Parameters:*
