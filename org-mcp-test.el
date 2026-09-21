@@ -11863,6 +11863,20 @@ Task body."
    "Task body text\\.\n?\\'")
   "Pattern after a SCHEDULED carrying a warning period is written.")
 
+(defconst org-mcp-test--pattern-scheduled-with-span
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ 09:00-10:00>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a span of the day.")
+
+(defconst org-mcp-test--pattern-scheduled-with-backwards-span
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ 10:00-09:00>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED whose span ends at an earlier hour.")
+
 (defconst org-mcp-test--pattern-deadline-with-repeater-and-warning
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -12072,6 +12086,83 @@ second, so a range in `after\=' is refused rather than written short."
      "\\`Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - \
 name the one date the field is to carry\\'"
      test-file)))
+
+(defconst org-mcp-test--dates-that-are-ranges-within-a-day
+  '("<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>"
+    "2026-03-27 09:00--2026-03-27 10:00")
+  "Ranges whose two halves name one day, written the two ways Org takes.
+The first joins two bracketed timestamps with Org\='s range separator,
+and Org\='s planning writer keeps the first of them.  The second puts
+the separator inside one pair of brackets, where Org\='s parser reads
+up to it and no further.  Neither reaches the file whole, so how
+close the halves fall decides nothing.")
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-range-within-one-day ()
+  "A range whose halves fall on one day is refused like any other.
+Org keeps the first half whatever the second is, so a range inside
+a single day loses as much as one across a month and is refused by
+the same message."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (let ((link (org-mcp-test--file-link test-file "*Scheduled Task")))
+      (dolist (date org-mcp-test--dates-that-are-ranges-within-a-day)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link)
+           (before . "<2026-03-01 Sun>")
+           (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' is a date range - name the one date the field "
+                 "is to carry\\'")
+         test-file)))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-span-of-the-day ()
+  "A span written inside one timestamp is a date and is written whole.
+`09:00-10:00\=' carries no range separator, and Org\='s planning writer
+puts the whole of it in the file, so it is a value the field holds
+rather than the range that is refused."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 09:00-10:00"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 09:00-10:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-with-span))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-backwards-span ()
+  "A span ending at an earlier hour than it starts is written as sent.
+Org reads it, writes it and reads it back unchanged, so nothing the
+call sent is lost and nothing here refuses it: a date is refused
+only where Org would put something else in the file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 10:00-09:00"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 10:00-09:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-scheduled-with-backwards-span))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-an-inactive-timestamp ()
   "An inactive timestamp is refused rather than written as an active one.

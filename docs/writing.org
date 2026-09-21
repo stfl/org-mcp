@@ -117,6 +117,13 @@ into the agenda three days early, and on a SCHEDULED it holds the headline back
 until three days before the date. The day name is Org's to write: send it or
 leave it out, and the file gets the day the date falls on.
 
+=09:00-10:00= is a span within the day and not a range: Org writes it inside the
+one timestamp, so the whole of it reaches the file. It goes in as sent even when
+its hours run backwards — =2026-03-27 10:00-09:00= writes
+=<2026-03-27 Fri 10:00-09:00>=, which is what Org itself does with it and what a
+read hands back. Two timestamps joined by =--= are a range, and a range is
+refused (see [[*A date that is not a date is refused]]).
+
 Seconds are read and not recorded: =2026-03-27 09:00:33= writes
 =<2026-03-27 Fri 09:00>=, because an Org timestamp has no seconds field. The
 clock tools answer the same way. The =T= separator belongs to their ISO 8601
@@ -155,9 +162,14 @@ has that day, not whether February has twenty-nine of them in general.
 
 The last two refusals are forms Org reads perfectly well and its planning writer
 would not carry whole. An inactive timestamp, =[2026-03-27 Fri]=, would go into
-the file active; a date range would go in as its first half alone. A headline
-can carry a SCHEDULED that is a range and =before= asserts one by the whole
-string, but =after= names the one date the field is to carry.
+the file active; a date range would go in as its first half alone. A range is
+two timestamps joined by =--=, and how close its halves fall changes nothing —
+=<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>= is refused for the reason
+=<2026-06-20 Sat>--<2026-06-21 Sun>= is, and so is a range written inside one
+pair of brackets, =2026-03-27 09:00--2026-03-27 10:00=, which Org reads up to
+the separator and no further. A headline can carry a SCHEDULED that is a range
+and =before= asserts one by the whole string, but =after= names the one date the
+field is to carry.
 
 A date is written out in full, never as a relative expression: =+1w= on its own
 is not next week but a repeater with no date under it, and it is refused.

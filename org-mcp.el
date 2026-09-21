@@ -3797,7 +3797,13 @@ something other than what the call sent into the file:
 - a year below 100, which Org\\='s date reader reads as a two-digit
   year and answers with another century;
 - an inactive timestamp, which a planning line does not carry;
-- a date range, whose second half Org\\='s planning writer drops.
+- a date range — two timestamps joined by `--' — whose second half
+  Org\\='s planning writer drops, however close the two fall.
+
+A span of the day, `2026-03-27 09:00-10:00', is not a range: Org
+writes it inside the one timestamp and carries the whole of it.  It
+is written as sent even when its hours run backwards, which is what
+Org itself does with it.
 
 The value returned is Org\\='s own rendering of what it parsed, the
 form `org-schedule' and `org-deadline' carry through whole; see
@@ -3815,14 +3821,21 @@ or an Org timestamp such as <2026-06-20 Sat +1w -3d>"
        "Date '%s' is an inactive timestamp - SCHEDULED and DEADLINE \
 carry an active one, written <...>"
        date-str))
-    ;; A time range within one day — `<2026-03-27 Fri 09:00-10:00>' —
-    ;; is a range Org's planning writer does carry, so what is refused
-    ;; is a range whose halves fall on different days.
-    (unless (equal
-             (org-mcp--timestamp-parts
-              timestamp '(:year-start :month-start :day-start))
-             (org-mcp--timestamp-parts
-              timestamp '(:year-end :month-end :day-end)))
+    ;; `--' is Org's range separator, and the only doubled hyphen
+    ;; the timestamp syntax has: the repeater `+1w', the warning
+    ;; period `-3d' and the day's own span `09:00-10:00' each carry
+    ;; a single one.  Between two bracketed timestamps it makes the
+    ;; date range `org-tr-regexp-both' reads, and Org's planning
+    ;; writer keeps the first half of one however close the halves
+    ;; fall — a range inside one day is cut as surely as one across
+    ;; a month.  Inside a single pair of brackets that regexp finds
+    ;; no range, but Org's parser still reads up to the separator
+    ;; and stops.  Both leave the file a shorter date than the call
+    ;; sent, so the separator itself is what is asked for rather
+    ;; than the regexp.  The span `<2026-03-27 Fri 09:00-10:00>'
+    ;; carries none, and is written whole.
+    (when (string-search
+           "--" (org-element-property :raw-value timestamp))
       (org-mcp--tool-validation-error
        "Date '%s' is a date range - name the one date the field is \
 to carry"
