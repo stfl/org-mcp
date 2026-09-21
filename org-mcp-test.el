@@ -16881,73 +16881,102 @@ Body line.
 writes for JSON false.")
 
 (defconst org-mcp-test--regex-property-text-nil-replaced
-  "\\`\\* TODO Flagged Task\n:PROPERTIES:\n:FOO: +bar\n:END:\nBody line\\.\n\\'"
-  "Regex matching the file once FOO holds bar instead of the text nil.")
+  "\\`\\* TODO Simple Task\n:PROPERTIES:\n:FOO: +bar\n:END:\nTask body text\\.\n\\'"
+  "Regex matching the bare file once FOO holds bar, not the text nil.
+The property arrives there by org-node-set-properties writing JSON
+false and is replaced by the same tool, so the file is the one a
+round trip through the two calls leaves.")
 
 (defconst org-mcp-test--regex-property-text-nil-removed
   "\\`\\* TODO Flagged Task\nBody line\\.\n\\'"
   "Regex matching the file once FOO is gone, drawer and all.")
 
 (ert-deftest org-mcp-test-a-property-whose-text-is-nil-asserts-as-nil ()
-  "The text `nil' is asserted as itself and never as an absent property.
-org-node-set-properties writes `nil' for JSON false, so the text is
-one this server creates, and a read hands it back.  Sending it back
-holds; asserting the property absent is the stale belief the guard
-exists to refuse, and it takes nothing away."
+  "The text `nil\=' is asserted as itself and never as an absent property.
+The whole way round in one test: org-node-set-properties writes the
+text `nil\=' for JSON false, so the value is one this server creates
+rather than one the file was seeded with; a read hands it back; and
+that value, exactly as the read returned it, is the `before\=' the
+next write asserts with.
+
+Asserting the property absent is the stale belief the guard exists
+to refuse, and it takes nothing away."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-property-text-nil))
-    (let ((link (org-mcp-test--file-link test-file "*Flagged Task")))
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
       (should
        (equal
         (alist-get
-         'properties
+         'properties_set
          (json-read-from-string
           (mcp-server-lib-ert-call-tool
-           "org-node-read"
-           `((link . ,link) (properties . ["FOO"])))))
-        '((FOO . "nil"))))
-      (org-mcp-test--call-tool-refused
-       "org-node-set-properties"
-       `((link . ,link) (before . ((FOO . ""))) (after . ((FOO . "bar"))))
-       "\\`conflict: Property 'FOO' mismatch: expected '', \
+           "org-node-set-properties"
+           `((link . ,link)
+             (before . ((FOO . "")))
+             (after . ((FOO . :json-false)))))))
+        ["FOO"]))
+      (let ((read-back
+             (alist-get
+              'properties
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-read"
+                `((link . ,link) (properties . ["FOO"])))))))
+        (should (equal read-back '((FOO . "nil"))))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-properties"
+         `((link . ,link)
+           (before . ((FOO . "")))
+           (after . ((FOO . "bar"))))
+         "\\`conflict: Property 'FOO' mismatch: expected '', \
 found 'nil'\\'"
-       test-file)
-      (org-mcp-test--call-tool-refused
-       "org-node-remove-properties"
-       `((link . ,link) (before . ((FOO . ""))))
-       "\\`conflict: Property 'FOO' mismatch: expected '', \
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-remove-properties"
+         `((link . ,link) (before . ((FOO . ""))))
+         "\\`conflict: Property 'FOO' mismatch: expected '', \
 found 'nil'\\'"
-       test-file)
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-set-properties"
-               `((link . ,link)
-                 (before . ((FOO . "nil")))
-                 (after . ((FOO . "bar"))))))))
-        (should (equal (alist-get 'success result) t))
-        (should (eq (alist-get 'saved result) t))
-        (should (equal (alist-get 'properties_set result) ["FOO"]))
-        (org-mcp-test--verify-file-matches
-         test-file org-mcp-test--regex-property-text-nil-replaced)))))
+         test-file)
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-set-properties"
+                 `((link . ,link)
+                   (before . ,read-back)
+                   (after . ((FOO . "bar"))))))))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'properties_set result) ["FOO"]))
+          (org-mcp-test--verify-file-matches
+           test-file
+           org-mcp-test--regex-property-text-nil-replaced))))))
 
 (ert-deftest org-mcp-test-removing-a-property-whose-text-is-nil ()
-  "A removal names the text `nil' it destroys and records it.
-The response is the only record left once the property is gone, so
-it carries the value under `before' rather than the empty string a
-second accessor reported."
+  "A removal names the text `nil\=' it destroys and records it.
+Its `before\=' is the map a read returned, sent back unchanged.  The
+response is the only record left once the property is gone, so it
+carries that value rather than the empty string a second accessor
+reported for it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-property-text-nil))
     (let* ((link (org-mcp-test--file-link test-file "*Flagged Task"))
+           (read-back
+            (alist-get
+             'properties
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-read"
+               `((link . ,link) (properties . ["FOO"]))))))
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
               "org-node-remove-properties"
-              `((link . ,link) (before . ((FOO . "nil"))))))))
+              `((link . ,link) (before . ,read-back))))))
+      (should (equal read-back '((FOO . "nil"))))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'properties_deleted result) ["FOO"]))
-      (should (equal (alist-get 'before result) '((FOO . "nil"))))
+      (should (equal (alist-get 'before result) read-back))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--regex-property-text-nil-removed))))
 
@@ -16983,19 +17012,31 @@ Body line.
   "\\`\\* TODO Ranged Task\nDEADLINE: <2026-07-01 Wed>--<2026-07-03 Fri>\nBody line\\.\n\\'"
   "Regex matching the file once the ranged SCHEDULED alone is gone.")
 
+(defun org-mcp-test--planning-read-back (link field)
+  "Return FIELD of the node LINK names, as org-node-read returns it.
+FIELD is `scheduled\=' or `deadline\='.  A test asserts with what this
+returned rather than with a string of its own, so it fails if the
+read and the assertion are ever pointed at different accessors."
+  (alist-get
+   field
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool "org-node-read" `((link . ,link))))))
+
 (ert-deftest org-mcp-test-remove-scheduled-takes-a-whole-range-off ()
-  "A ranged SCHEDULED is asserted whole and removed whole.
-The timestamp a read returns is the range, so that is what `before'
-carries, and the removal leaves no half of it behind."
+  "A ranged SCHEDULED is read whole, asserted whole and removed whole.
+`before\=' is the string the read returned, not one the test composed,
+and the removal leaves no half of the range behind as body text."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-scheduled-range))
     (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
-           (before "<2026-06-20 Sat>--<2026-06-21 Sun>")
+           (before
+            (org-mcp-test--planning-read-back link 'scheduled))
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
               "org-node-remove-scheduled"
               `((link . ,link) (before . ,before))))))
+      (should (equal before "<2026-06-20 Sat>--<2026-06-21 Sun>"))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'before result) before))
@@ -17004,17 +17045,18 @@ carries, and the removal leaves no half of it behind."
        test-file org-mcp-test--regex-range-removed))))
 
 (ert-deftest org-mcp-test-remove-deadline-takes-a-whole-range-off ()
-  "A ranged DEADLINE is asserted whole and removed whole.
+  "A ranged DEADLINE is read whole, asserted whole and removed whole.
 Shaped like the SCHEDULED case, over the other planning keyword."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-deadline-range))
     (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
-           (before "<2026-07-01 Wed>--<2026-07-03 Fri>")
+           (before (org-mcp-test--planning-read-back link 'deadline))
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
               "org-node-remove-deadline"
               `((link . ,link) (before . ,before))))))
+      (should (equal before "<2026-07-01 Wed>--<2026-07-03 Fri>"))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'before result) before))
@@ -17024,18 +17066,20 @@ Shaped like the SCHEDULED case, over the other planning keyword."
 
 (ert-deftest org-mcp-test-remove-scheduled-leaves-the-deadline-alone ()
   "Removing one ranged planning entry leaves the other where it was.
-Both keywords share a line, so a removal that ran past its own entry
-would take the neighbour with it."
+Both keywords share a line, so a removal that ran past the end of
+its own entry would take the neighbour with it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-both-ranges))
     (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
+           (before
+            (org-mcp-test--planning-read-back link 'scheduled))
            (result
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
               "org-node-remove-scheduled"
-              `((link . ,link)
-                (before . "<2026-06-20 Sat>--<2026-06-21 Sun>"))))))
+              `((link . ,link) (before . ,before))))))
       (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'before result) before))
       (should (equal (alist-get 'after result) ""))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--regex-deadline-range-kept))))
