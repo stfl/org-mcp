@@ -928,9 +928,16 @@ returns the file of the restriction, not the binding."
   "Return non-nil when VALUE, a parameter of a call, is blank.
 A blank parameter is one the call does not send.  Clients fill a
 parameter they are not using with an empty value, so JSON null,
-false, \"\", [] and {}, which decodes to nil, all read that way: an
-optional parameter that is blank takes its default and a required
-one is refused with `org-mcp--missing-param-error'.
+false, \"\" and [] all read that way: an optional parameter that is
+blank takes its default and a required one is refused with
+`org-mcp--missing-param-error'.
+
+`{}' decodes to nil, which is what null decodes to, so nothing after
+the decoder tells the two apart: `{}' means wherever it stands what
+null means there.  It is blank here, as null is; in an `after' that
+reads null as the ask to hold nothing it asks that, see
+`org-mcp--value-to-write', and in a `before' map it asserts the line
+is absent, see `org-mcp--assert-property'.
 
 A required parameter never means \"not sent\", which leaves the
 spellings that do mean something free to be read before this is
@@ -939,7 +946,9 @@ nothing, see `org-mcp--text-param-given'.  An `after' takes null for
 \"make this nothing\", see `org-mcp--value-to-write', and \"\" only
 where the field has an empty value of its own — a body, a property
 line, and the tag set, which spells its empty value [], see
-`org-mcp--tag-set-given'."
+`org-mcp--tag-set-given'.  A property map reads `false' as the text
+`nil' Org stores, on either side of the call, see
+`org-mcp--validate-properties'."
   (member value '(nil "" [] :json-false)))
 
 (defun org-mcp--array-param (value what)
@@ -2123,14 +2132,6 @@ the drawer."
            (match-beginning 0) (line-beginning-position 2)))
         (set-marker end nil))))
   (org-set-property name value))
-
-(defun org-mcp--drawer-value (drawer name)
-  "Return the value DRAWER holds for the property NAME, or \"\".
-DRAWER is what `org-mcp--drawer-at-point' returned.  NAME is
-compared without regard to case, as Org reads property names, and a
-property the drawer does not hold is \"\", which is how a `before'
-asserts absence."
-  (or (cdr (assoc (upcase name) drawer)) ""))
 
 (defun org-mcp--node-properties (names)
   "Return the Org property drawer of the node at point, or nil.
@@ -5190,32 +5191,31 @@ here."
 (defun org-mcp--property-map-given (map what)
   "Return MAP, the required property-map parameter WHAT, as pairs.
 The result is (NAME . VALUE) pairs, VALUE nil where the entry is JSON
-null and the string the entry carries otherwise, "
-  " among them.
+null and the string the entry carries otherwise, \"\" among them.
 
 A drawer entry has three states where a field has two, and the map
 spells all three, on either side of the call.  Null is the property
-absent: as an `after\=' it takes the line away, as a `before\=' it
-asserts there is none.  "
-  " is a line carrying nothing, `:FOO:' with
-nothing after the name, which `org-entry-properties' reads back as "
-  "
-and which a call can therefore assert as readily as write.  Any other
-string is the text the line holds.
+absent: as an `after' it takes the line away, as a `before' it
+asserts there is none.  \"\" is a line carrying nothing, `:FOO:' with
+nothing after the name, which `org-entry-properties' reads back as
+\"\" and which a call can therefore assert as readily as write.  Any
+other string is the text the line holds, so long as it is one line.
 
 Each field spells its own emptiness, and a property has one more
 state to spell than a deadline has; see `org-mcp--text-param-given'
 for the two-state form the fields take.  A property value\\='s
 vocabulary is wider still, so `false' is not blank here: with `true'
 it writes the text Org stores, `nil', which is a value like any
-other.  An array or an object is refused by
-`org-mcp--validate-properties', which no property value may be.
+other.  `org-mcp--validate-properties' refuses what no property
+value may be: an array, an object with anything in it, and a string
+spanning several lines.  `{}' is none of those, decoding to the nil
+that takes the line away.
 
 The map is itself the call\\='s statement of what it means to touch,
 which is what makes a destructive null safe here where an unfilled
 parameter would not be: a key carrying null is a key the call chose
-to send, and `org-mcp--asserted-property-values' requires `before\='
-to name every property `after\=' writes, so the deletion still asserts
+to send, and `org-mcp--asserted-property-values' requires `before'
+to name every property `after' writes, so the deletion still asserts
 what it destroys.  A blank MAP, see `org-mcp--blank-param-p', is the
 parameter left out."
   (when (org-mcp--blank-param-p map)
@@ -5230,15 +5230,14 @@ read before the change.  The result is (SET . REMOVED), each the
 names in the order the call gave them, which is what the response
 reports.
 
-A name carrying a string is set, "
-  " among them: writing `:FOO:' puts
-a line in the drawer as surely as writing a value does.  A name
+A name carrying a string is set, \"\" among them: writing `:FOO:'
+puts a line in the drawer as surely as writing a value does.  A name
 carrying nil takes its line away, and is removed when the drawer
 carried one, in neither list when it did not — the call is accepted,
 an honest assertion of absence being no conflict, and it takes
 nothing away.
 
-The drawer decides that last part, not the value `before\=' asserted,
+The drawer decides that last part, not the value `before' asserted,
 because what a write took away is a fact about the file rather than
 about the call."
   (let ((set nil)
@@ -5290,10 +5289,9 @@ write"
   "Return VALUE, one state of a drawer entry, as a refusal names it.
 VALUE is nil for a property the drawer does not carry and the text
 the line holds otherwise.  An absent property is named rather than
-shown as an empty value, because "
-  " is the neighbouring state: a line
-carrying nothing.  A refusal that showed both as '' would tell a
-client its assertion failed without telling it what it read."
+shown as an empty value, because \"\" is the neighbouring state: a
+line carrying nothing.  A refusal that showed both as '' would tell
+a client its assertion failed without telling it what it read."
   (if value
       (format "'%s'" value)
     "(absent)"))
@@ -5301,16 +5299,14 @@ client its assertion failed without telling it what it read."
 (defun org-mcp--assert-property (asserted drawer name)
   "Refuse the call unless DRAWER holds for NAME what ASSERTED says.
 ASSERTED is one of the three states `org-mcp--property-map-given'
-reads: nil for the property absent, "
-  " for a line carrying nothing,
+reads: nil for the property absent, \"\" for a line carrying nothing,
 and the text the line holds otherwise.  DRAWER is what
 `org-mcp--drawer-at-point' read.
 
 Absence is compared by whether the drawer carries the name at all,
-not through `org-mcp--drawer-value', which answers "
-  " for a name it
-lacks and for a line carrying nothing alike: the two are the states
-this assertion exists to keep apart.
+and not by the value read for it: a name the drawer lacks and a line
+carrying nothing read alike, and those are the two states this
+assertion exists to keep apart.
 
 A disagreement is a conflict, the drawer not being as the client
 believed, so the recovery is to read the node again.  A digest in
@@ -5331,7 +5327,8 @@ that names one value."
     (link files action response asserted apply)
   "Change the properties ASSERTED names on the heading LINK names.
 ASSERTED is the (NAME . VALUE) pairs the call vouches for, VALUE the
-string the property is asserted to hold and \"\" for none.  Every one
+three states a drawer line has: nil for no line, \"\" for a line
+carrying nothing, and the text the line holds otherwise.  Every one
 is checked before APPLY runs, so that a property named later in the
 call cannot be refused after an earlier one has already been
 changed.  A name the drawer writes twice is refused before any of
@@ -5373,9 +5370,10 @@ holds no one value; repair the drawer in Emacs"
 (defun org-mcp--tool-node-set-properties
     (link before after &optional files)
   "Set or remove properties on the headline LINK names.
-BEFORE is an alist naming each property AFTER writes and the value it
-held, \"\" for none.
-AFTER is an alist of property name-value pairs; \"\" takes that
+BEFORE is an alist naming each property AFTER writes and the state it
+was in: null for no line, \"\" for a line carrying nothing, and the
+text the line holds otherwise.
+AFTER is an alist of property name-value pairs; null takes that
 property away, guarded by what BEFORE says it holds.  The response
 carries the asserted map back under `before', because once the call
 returns nothing in the file records what a removed property held,
@@ -7916,9 +7914,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   properties_set - Array of property names that were set
   properties_deleted - Array of property names that were removed;
-          a property an empty after names but the drawer did not
-          carry is in neither array.  A line carrying nothing is
-          carried: taking it away is a removal and is named here
+          a property that a null after names but the drawer did
+          not carry is in neither array.  A line carrying nothing
+          is carried: taking it away is a removal and is named here
   before - JSON object of the values these properties held, one
            entry per name before asserted; nothing in the file
            records a removed value once the call returns

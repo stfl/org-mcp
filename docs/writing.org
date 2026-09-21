@@ -461,8 +461,9 @@ leaves it byte for byte as it was.
 * What a blank parameter means
 
 A blank parameter is one the call does not send. Clients fill a parameter they
-are not using with an empty value, so =null=, =false=, =[]= and ={}= all read
-that way, and what follows depends only on whether the parameter was required:
+are not using with an empty value, so =null=, =false=, =[]= and ={}= read that
+way in every position that takes no meaning of its own from them, and what
+follows then depends only on whether the parameter was required:
 
 - *Optional and blank* is how you leave it out. =files=, =depth= and =fields=
   fall back to their defaults, and the optional parameters of
@@ -494,6 +495,23 @@ them:
 | the body       | =org-node-set-content=    | =after: ""=               |
 | a tag          | =org-node-remove-tags=    | the tags named in =after= |
 | every own tag  | =org-node-set-tags=       | =after: []=               |
+
+*={}= is =null= written another way.* The JSON decoder reads an empty object
+as nothing at all, which is what it reads =null= as, so nothing past it can
+tell the two apart: ={}= means, wherever it stands, what =null= means there. In
+an =after= on the four fields above it empties the field exactly as the table
+says, and in a property map's =after= it takes that line away. Everywhere else
+it is likewise what =null= is there: in a =before= map, the assertion that the
+drawer carries no such line; in any other required parameter, the parameter
+left out, and refused as one; in an optional one, the default.
+
+*=false= and =[]= are read by position too.* A property map takes =false= for
+the text =nil= Org stores, on either side of the call — as an =after= it writes
+that text, as a =before= it asserts the line holds it
+(see [[*The three states of a drawer line]]) — and refuses =[]= outright, because a
+property holds a line of text and an array is not one. =org-node-set-tags= takes
+=[]= for the tag set's own empty value, on either side. In every other position
+both are blank.
 
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
