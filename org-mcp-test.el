@@ -24885,6 +24885,84 @@ plain apostrophes."
                   (car property)
                   (or (alist-get 'description (cdr property)) ""))))))))
 
+;;; Where a file's workflow comes from besides its own #+TODO: lines
+
+(defconst org-mcp-test--content-settings-setup-duplicate
+  "#+TODO: TODO WAIT | DONE\n"
+  "A setup file writing the very sequence the file pulling it in writes.")
+
+(defconst org-mcp-test--content-settings-duplicating-a-setupfile
+  (concat
+   "#+SETUPFILE: %s\n"
+   "#+TODO: TODO WAIT | DONE\n"
+   "\n"
+   "* WAIT ship it\n")
+  "A file writing its setup file's `#+TODO:' line a second time.
+Org reads the sequence twice and reaches the same keywords, so
+taking the file's own line away changes nothing about what its
+headings are.  The setup file's path exists only once the file does,
+so this is a format string rather than the content itself.")
+
+(defun org-mcp-test--pattern-settings-setupfile-alone (setup-file)
+  "Return the pattern for a file left with its `#+SETUPFILE:' and no workflow.
+SETUP-FILE is the path the `#+SETUPFILE:' line names, which exists
+only at run time, so the whole-file pattern is built here."
+  (concat
+   "\\`#\\+SETUPFILE: "
+   (regexp-quote setup-file)
+   "\n"
+   "\n"
+   "\\* WAIT ship it\n\\'"))
+
+(defun org-mcp-test--settings-file-pulling (main setup template)
+  "Write TEMPLATE into MAIN with SETUP filled in, and return MAIN's link.
+The file is written rather than created with its content because the
+path it names is the path of a file created beside it."
+  (with-temp-file main
+    (insert (format template setup)))
+  (concat "file:" (abbreviate-file-name main)))
+
+(defun org-mcp-test--settings-todo-of (file title)
+  "Return the TODO state a read gives the heading TITLE in FILE."
+  (alist-get
+   'todo
+   (json-read-from-string
+    (org-mcp-test--call-read (org-mcp-test--file-link file title)))))
+
+(ert-deftest org-mcp-test-file-set-setting-counts-a-setupfile-line-once ()
+  "A setup file writing the same line as the file is not taken for it.
+`org-collect-keywords' answers with both copies, and only the file's
+own line is being replaced, so exactly one copy comes out of that
+answer.  Taking both would report the setup file's keywords as about
+to go and refuse a call that changes nothing about what the headings
+are: the file here keeps WAIT through its setup file, and the write
+that empties its own line is accepted."
+  (org-mcp-test--with-temp-org-files
+      ((setup-file org-mcp-test--content-settings-setup-duplicate)
+       (test-file ""))
+    (let ((link
+           (org-mcp-test--settings-file-pulling
+            test-file setup-file
+            org-mcp-test--content-settings-duplicating-a-setupfile)))
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-file-set-setting"
+           `((link . ,link)
+             (setting . "TODO")
+             (before . ["TODO WAIT | DONE"])
+             (after . [])))))
+        t))
+      (should
+       (equal (org-mcp-test--settings-todo-of test-file "*ship it")
+              "WAIT"))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (org-mcp-test--pattern-settings-setupfile-alone setup-file)))))
+
 (defconst org-mcp-test--content-settings-two-waits
   (concat
    "#+TODO: TODO | DONE\n"
