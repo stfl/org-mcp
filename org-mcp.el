@@ -355,6 +355,37 @@ what the client sent rather than the field behind it."
                                     name
                                     (org-mcp--json-name value)))))
 
+(defun org-mcp--optional-text-given (value name)
+  "Return the text the optional parameter NAME carries, or nil for none.
+A string with something in it is text.  Every blank is the parameter
+the call did not send — `org-mcp--blank-param-p' names them — and so
+is a string of whitespace, because prose with nothing in it is
+nothing to record.  Anything else is a malformed call and is refused
+naming NAME.
+
+This is the optional member of the family `org-mcp--text-param-given'
+and `org-mcp--value-to-write' belong to, and it differs from both in
+what a blank costs.  Those read a required parameter, where a blank
+is the call failing to say something it had to say, so they refuse
+it.  Here the parameter has a default — no text — so a blank asks
+for that default and the call goes on without it.
+
+Which matters more than it reads: an optional parameter is the one a
+client fills with false or [] when it is not using it, and the text
+it carries is written inside the change the rest of the call makes.
+A blank refused here, or worse crashed on, would take that change
+down with it."
+  (cond
+   ((org-string-nw-p value))
+   ((stringp value)
+    nil)
+   ((org-mcp--blank-param-p value)
+    nil)
+   (t
+    (org-mcp--tool-validation-error "%s must be a string, not %s"
+                                    name
+                                    (org-mcp--json-name value)))))
+
 (defun org-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
 A string is the value to write.  JSON null is nil here, and asks for
@@ -4186,14 +4217,22 @@ MCP Parameters:
           task; \"\" names no keyword and is refused, and false is
           the parameter left out
   note - Optional note to attach to this state transition (string, optional)
-         When provided, stored in LOGBOOK as part of the state change entry
-         Empty or whitespace-only values are ignored
+         When provided, stored in LOGBOOK as the prose of the state
+         change entry
+         Every blank -- \"\", whitespace, null, false and [] -- is
+         the parameter left out: the state change is made and no
+         prose recorded
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
   (org-mcp--assert-field-value before "State")
   (setq after (org-mcp--value-to-write after "after"))
+  ;; Before the link is resolved and before the change group opens:
+  ;; the note is written inside the change the state change is made
+  ;; in, so a note this call cannot write is refused while there is
+  ;; still nothing to take back.
+  (setq note (org-mcp--optional-text-given note "note"))
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
@@ -5547,9 +5586,12 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (when (or (null note)
-            (string-empty-p note)
-            (string-match-p "\\`[[:space:]]*\\'" note))
+  ;; The note is what this call is for, so a blank is the call with
+  ;; nothing in it rather than a note it does without: `note' is read
+  ;; as the required parameter it is, and "" then says the note
+  ;; itself was empty.
+  (setq note (org-mcp--text-param-given note "note"))
+  (when (string-match-p "\\`[[:space:]]*\\'" note)
     (org-mcp--tool-validation-error
      "Note cannot be empty or whitespace-only"))
 

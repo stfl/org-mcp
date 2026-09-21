@@ -12494,6 +12494,130 @@ where the sibling's own text begins and not a line earlier."
      (should (equal (alist-get 'success result) t))
      (should (equal (alist-get 'link result) link)))))
 
+;;; A note nobody sent does not cost the change it rode on
+
+;; `note' is optional, and a client fills an optional parameter it is
+;; not using with a blank.  Every spelling of one therefore means the
+;; same thing — no note — and the state change goes through without
+;; one.  Getting this wrong cost more than a refusal: the note was
+;; written inside the change the state change was made in, so failing
+;; to write it took the state change down with it.
+
+(defconst org-mcp-test--note-blanks
+  (list :json-false [] nil "" "   ")
+  "Every spelling of a `note' the call is not sending.
+JSON false and [] are what a client fills an unused parameter with,
+null is JSON's own word for nothing, and a string of whitespace is
+prose with nothing in it.")
+
+(defconst org-mcp-test--pattern-task-one-done-unlogged
+  (concat
+   "\\`\\* DONE Task One\n"
+   "CLOSED: \\[[^]]+\\]\n"
+   ":LOGBOOK:\n"
+   "- CLOSING NOTE \\[[^]]+\\]\n"
+   ":END:\n"
+   "Task description\\.\n?\\'")
+  "Pattern after a DONE that a blank `note' left the prose out of.
+`org-log-done' still records the transition; what the blank leaves
+out is prose under that entry's heading line.")
+
+(ert-deftest org-mcp-test-set-todo-blank-note-still-moves-the-state ()
+  "Every blank `note' moves the TODO state and records no prose.
+A blank is the parameter the call did not send, so it asks for
+nothing and costs nothing — least of all the state change it was
+sent alongside."
+  (dolist (blank org-mcp-test--note-blanks)
+    (org-mcp-test--with-temp-org-files
+        ((test-file "* TODO Task One\nTask description."))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-log-done 'note)
+            (org-log-into-drawer t))
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-set-todo"
+                 `((link
+                    .
+                    ,(org-mcp-test--file-link test-file "*Task One"))
+                   (before . "TODO")
+                   (after . "DONE")
+                   (note . ,blank))))))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'before result) "TODO"))
+          (should (equal (alist-get 'after result) "DONE")))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-task-one-done-unlogged)))))
+
+(ert-deftest org-mcp-test-set-todo-blank-note-moves-the-state-unlogged ()
+  "A blank `note' moves the state where no log setting records it either.
+With nothing arming an entry there is no entry for prose to go
+under, and the blank asked for none, so the transition is the whole
+of what the call does."
+  (dolist (blank org-mcp-test--note-blanks)
+    (org-mcp-test--with-temp-org-files
+        ((test-file "* TODO Task One\nTask description."))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-log-done nil)
+            (org-log-into-drawer t))
+        (let ((result
+               (org-mcp-test--call-update-todo-state
+                (org-mcp-test--file-link test-file "*Task One")
+                "DONE" "TODO" blank)))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) "DONE")))
+        (org-mcp-test--verify-file-matches
+         test-file
+         "\\`\\* DONE Task One\nTask description\\.\n?\\'")))))
+
+(ert-deftest org-mcp-test-set-todo-refuses-a-note-that-is-no-text ()
+  "A `note' that is neither text nor blank is a malformed call.
+It names the parameter the client sent rather than the machinery
+behind it, and nothing is written."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done 'note)
+          (org-log-into-drawer t))
+      (dolist (value '(42 t))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-todo"
+         `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+           (before . "TODO")
+           (after . "DONE")
+           (note . ,value))
+         "\\`note must be a string, not "
+         test-file)))))
+
+(ert-deftest org-mcp-test-add-note-refuses-a-blank-note-legibly ()
+  "org-node-add-note refuses a blank `note' as the missing parameter.
+Its `note' is what the call is for, so a blank is not a note it does
+without — it is the call with nothing in it.  The refusal says which
+parameter, and an empty string says instead that the note itself was
+empty, which is the same refusal Org would give it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Task One\nTask description."))
+    (let ((link (org-mcp-test--file-link test-file "*Task One")))
+      (dolist (blank '(:json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-add-note"
+         `((link . ,link) (note . ,blank))
+         "\\`Missing required parameter: note\\'"
+         test-file))
+      (dolist (empty '("" "   "))
+        (org-mcp-test--call-tool-refused
+         "org-node-add-note"
+         `((link . ,link) (note . ,empty))
+         "\\`Note cannot be empty or whitespace-only\\'"
+         test-file))
+      (org-mcp-test--call-tool-refused
+       "org-node-add-note"
+       `((link . ,link) (note . 42))
+       "\\`note must be a string, not "
+       test-file))))
+
 ;;; Tests for org-node-add-note
 
 (ert-deftest org-mcp-test-add-logbook-note-new ()

@@ -468,7 +468,7 @@ set has an empty value and spells it =[]=, the way a body spells its empty value
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
   - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out
-  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry
+  - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
@@ -490,6 +490,12 @@ transition they cover, and =note= is the prose of that one entry, so a
 transition the settings record and the call annotates leaves one record and not
 two. A =note= on a transition no setting records is written as a state change
 of its own. See [[*What a write records in the LOGBOOK]].
+
+The note is written inside the same change as the state move, so a note that
+could not be written would take the move down with it. That is why every blank
+spelling of =note= is read before anything is opened and simply means no prose:
+a client filling an unused parameter with =false= gets the state change it
+asked for, not a refusal, and least of all a lost one.
 
 Example:
 #+begin_src json
@@ -1251,7 +1257,7 @@ Example:
 - *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =note= (string, required): Note text to add. Cannot be empty or whitespace-only. Multi-line notes are properly indented
+  - =note= (string, required): Note text to add. Cannot be empty or whitespace-only, and a blank is refused as the parameter left out — the note is what this call is for. Multi-line notes are properly indented
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the headline's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
