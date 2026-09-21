@@ -394,7 +394,7 @@ the field to hold nothing: null is JSON\='s word for no value, and
 these fields have none of their own.  \"\" is not a timestamp, a
 priority character or a TODO keyword, so it passes through as the
 string it is and the field\='s own validator refuses it, naming what
-the field does accept.
+the field does accept and the null that asks for none.
 
 Every other blank, see `org-mcp--blank-param-p', is a parameter the
 client filled but did not send, and is refused as one: false is a
