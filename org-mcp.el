@@ -4872,6 +4872,15 @@ effect on it: `org-set-tags' writes local tags only, so asserting
 the effective set would assert values this call cannot change and
 would refuse because an ancestor was edited.
 
+A digest is refused wherever it turns up in BEFORE, by the same rule
+and in the same words as on every other setter.  One tag arrives as
+a string and several as an array, and `org-mcp--tag-set-given' has
+made both a list by the time the check runs, so a token sent as the
+whole value and a token sent among real tags are one mistake with
+one refusal.  The reason is the one that keeps the assertion local:
+a token covers a region, and a region takes in what this call
+cannot write — a descendant, an ancestor's tags, a clock line.
+
 AFTER is the tags to write, `[]' to leave the headline carrying none
 of its own.  Inherited tags are untouched either way.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -4888,7 +4897,8 @@ MCP Parameters:
            array, required); the `local_tags' of a read, not its
            `tags'.  Send [] to assert that it carries none.  Order
            makes no difference; any other set is refused as a
-           conflict and nothing is written
+           conflict and nothing is written.  A digest is no tag and
+           is refused wherever it appears in the set
   after - Tags to write (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
@@ -4901,6 +4911,8 @@ MCP Parameters:
         (wanted
          (org-mcp--validate-and-normalize-tags
           (org-mcp--tag-set-given after "after"))))
+    (dolist (tag asserted)
+      (org-mcp--assert-field-value tag "Tags"))
     (org-mcp--write-own-tags
      link files
      (lambda (own _effective)
@@ -6783,6 +6795,8 @@ Parameters:
            Send [] to assert that it carries none of its own
            Order makes no difference; any other set is refused as a
            conflict and nothing is written
+           Send the tags themselves and never a digest: a token
+           covers a region, and this call writes one field
   after - Tags to write (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]

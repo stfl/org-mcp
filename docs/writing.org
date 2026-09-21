@@ -181,6 +181,12 @@ the value the field holds. It reads:
 Priority is asserted with the value it holds, not with a digest: 'sha256:…' covers a region and this call changes one field
 #+end_example
 
+=org-node-set-tags= asserts a set rather than a single value, and a token is
+refused wherever in that set it appears: alone, or among tags that are real.
+There is no position in a tag set where a token belongs, because a token is
+not a tag — the field it would guard is the heading's own tags, and a region
+takes in what this call cannot write.
+
 Every such =before= is required, and an empty one is a value rather than a
 parameter left out: it asserts the field held nothing (see
 [[*What a blank parameter means]]). That is how you say "this heading has no
@@ -872,7 +878,7 @@ Example:
 - *Description:* Replace the tags written on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here
+  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here. A digest is no tag and is refused wherever in the set it appears (see [[*Knowing what you are about to change][Knowing what you are about to change]])
   - =after= (string or array, required): Single tag ="work"= or array =["work", "urgent"]=. =[]= leaves the headline carrying no tags of its own. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link

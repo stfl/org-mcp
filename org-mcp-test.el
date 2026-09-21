@@ -6062,7 +6062,12 @@ a clock line moved or a descendant was edited, which is the
 over-sensitivity the field-scoped assertion exists to avoid.  The
 refusal is unmarked, the validation class, because no version of the
 file makes a token the value of a field — reading the node again and
-sending the token back refuses the call again."
+sending the token back refuses the call again.
+
+org-node-set-tags asserts a set rather than a single value, and it
+refuses a token wherever in that set the token arrives: as the whole
+parameter, as the one member of it, or beside tags that are real.
+There is no position in a tag set where a token belongs."
   (org-mcp-test--with-set-content-file test-file
     (let* ((link (org-mcp-test--set-content-link))
            (node
@@ -6091,7 +6096,16 @@ sending the token back refuses the call again."
                ("org-node-set-properties"
                 ((before . ((Effort . ,token)))
                  (after . ((Effort . "3:00"))))
-                "Property 'Effort'")))
+                "Property 'Effort'")
+               ("org-node-set-tags"
+                ((before . ,token) (after . ["later"]))
+                "Tags")
+               ("org-node-set-tags"
+                ((before . [,token]) (after . ["later"]))
+                "Tags")
+               ("org-node-set-tags"
+                ((before . ["work" ,token]) (after . ["later"]))
+                "Tags")))
           (org-mcp-test--call-tool-refused
            tool
            (cons `(link . ,link) params)
