@@ -34,6 +34,10 @@ A failing lint stage leaves `.lint-output.txt`; the test run always leaves
   `CONTRIBUTING.org`, "What a change owes the documentation", maps each to its
   page. The README changes only when what org-mcp *is* or what it costs to run
   changes.
+- **A claim your change makes in a docstring, a refusal message or an ADR is
+  almost always universal, and a test that exhibits one case does not check
+  it.** `CONTRIBUTING.org`, "What a test has to quantify over", names the four
+  shapes where that gap hides and what to ask of each.
 - **Human-facing documents never link into this file** or into any `AGENTS.md`,
   and never into `.claude/`. `README.org`, `CONTRIBUTING.org` and `docs/*.org`
   link to each other; this file links out to them. A fact a human needs belongs
