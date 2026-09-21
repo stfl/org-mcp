@@ -362,26 +362,12 @@ Priority must be a single character, got ''
 Invalid TODO state: '' - valid states: TODO, IN-PROGRESS, DONE
 #+end_example
 
-So the question to ask of a field you have not read about here is whether it
-has a value that means /nothing/. If it has, that value is how you empty it, in
-the field's own spelling — =""= for text, =[]= for a set — and the call is
-writing a value like any other. If it has not, =null= is the ask, and =""= is
-refused as the invalid input it is.
-
 A =before= is different, and deliberately so. It keeps =""= for /there was no
 value/ on every field, because an assertion names a *state the field was in* and
 "empty" is one of those states, while an =after= names a *value to put there*
 and a field with no empty value has none to name. So =before: ""= and
-=after: ""= stop meaning the same thing on those four fields, which is the
-point: only one of the two can name a state the field cannot hold.
-
-The two also differ in what a careless blank costs, which is why only one of
-them can afford to carry a meaning. =before= is the guard: a blank there must
-never assert anything, or a client that filled a parameter it was not using
-would vouch for an emptiness it never saw and the write would go through. A
-blank =after= is safe to mean something precisely because =before= guarded the
-call — a removal that goes through has named what was there, which no careless
-value can do by accident.
+=after: ""= stop meaning the same thing on those four fields. That is the point:
+only one of the two can name a state the field cannot hold.
 
 Every one of those removals is a required =before= away from being unguarded.
 You say what you believe the field holds, and the call is refused when the file
@@ -532,7 +518,7 @@ Example:
 - *Description:* Add a new TODO item to an Org file
 - *Parameters:*
   - =title= (string, required): The headline text
-  - =todo= (string, required): TODO state from =org-todo-keywords=. It has to name one. Neither =""= nor =null= makes a heading without a keyword here: =""= is no state this surface names, and =null= is the parameter left out, as it is on every required parameter that is not an =after=. A node is created as a task and stops being one with =org-node-set-todo=, =after: null= — the one place a heading moves into that state, and the only one where there is a prior state to assert
+  - =todo= (string, required): TODO state from =org-todo-keywords=. It has to name one: neither =""= nor =null= creates a heading without a keyword. A node is created as a task and stops being one with =org-node-set-todo=, =after: null= — the one place a heading moves into that state, and the only one with a prior state to assert
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =content= (string, optional): Body text to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file

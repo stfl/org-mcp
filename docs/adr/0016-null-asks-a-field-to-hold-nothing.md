@@ -23,9 +23,10 @@ A `before` keeps `""` for *there was no value*, on every field, and that
 asymmetry with `after` is deliberate rather than tolerated. An assertion names a
 **state the field was in**, and its states are the field's values plus the empty
 one; a value to write names a **value the field will hold**, and a field with no
-empty value has none to name. The two also differ in role: `before` is the
-guard, so a blank there must never assert anything, while a blank in `after` is
-safe to carry meaning precisely because `before` guarded the call. The tag set
+empty value has none to name. That distinction carries the decision by itself. A
+`before` is also the guard, so a blank there can never assert anything — but
+that says only that a meaningful blank in `after` is safe, which was as true of
+the spelling this replaced, so it decides nothing between them. The tag set
 is the same rule seen from the other side — it has an empty value, spells it
 `[]`, and a tag delta stays a separate tool for the reason in
 `0015-a-tag-delta-needs-no-guard-a-replacement-asserts-everything`.
