@@ -356,6 +356,37 @@ what the client sent rather than the field behind it."
                                     name
                                     (org-mcp--json-name value)))))
 
+(defun org-mcp--optional-text-given (value name)
+  "Return the text the optional parameter NAME carries, or nil for none.
+A string with something in it is text.  Every blank is the parameter
+the call did not send — `org-mcp--blank-param-p' names them — and so
+is a string of whitespace, because prose with nothing in it is
+nothing to record.  Anything else is a malformed call and is refused
+naming NAME.
+
+This is the optional member of the family `org-mcp--text-param-given'
+and `org-mcp--value-to-write' belong to, and it differs from both in
+what a blank costs.  Those read a required parameter, where a blank
+is the call failing to say something it had to say, so they refuse
+it.  Here the parameter has a default — no text — so a blank asks
+for that default and the call goes on without it.
+
+Which matters more than it reads: an optional parameter is the one a
+client fills with false or [] when it is not using it, and the text
+it carries is written inside the change the rest of the call makes.
+A blank refused here, or worse crashed on, would take that change
+down with it."
+  (cond
+   ((org-string-nw-p value))
+   ((stringp value)
+    nil)
+   ((org-mcp--blank-param-p value)
+    nil)
+   (t
+    (org-mcp--tool-validation-error "%s must be a string, not %s"
+                                    name
+                                    (org-mcp--json-name value)))))
+
 (defun org-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
 A string is the value to write.  JSON null is nil here, and asks for
@@ -3501,9 +3532,74 @@ Errors if multiple tags from same mutex group."
          (mapconcat (lambda (tag) (format "'%s'" tag)) conflict
                     ", "))))))
 
+(defun org-mcp--title-claimed-by-org (title)
+  "Return what Org's headline grammar claims of TITLE, or nil.
+The result is a clause naming what the heading would carry instead of
+the title, for a refusal to finish.
+
+A title is written raw into the headline line, and that line has a
+grammar: a trailing `:word:' is tags, a leading `org-comment-string'
+comments the heading out of export and the agenda, a leading keyword
+is the TODO state and a leading `[#A]' is the priority.  Each of them
+takes its part of the title away, and `org-heading-components' then
+reports a title the call never asked for while the response says the
+write succeeded.
+
+So the line is built and Org is asked what it made of it, rather than
+a regexp being written for each shape.  That is the whole of the
+check: `org-tag-line-re' and `org-comment-string' are not restated
+here because the parser that uses them answers directly, and a shape
+nobody has named yet is caught by the last clause, which asks only
+whether the title came back whole.
+
+The line is built without a TODO keyword or a priority of its own, so
+what claims those positions is the title's own text.  A keyword a
+per-file `#+TODO:' adds is not known here, because this runs before
+any file is opened \u2014 which is what keeps a refusal from touching
+anything."
+  (with-temp-buffer
+    (let ((org-inhibit-startup t))
+      (delay-mode-hooks
+        (org-mode)))
+    (insert "* " title "\n")
+    (goto-char (point-min))
+    (let* ((components (org-heading-components))
+           (keyword (nth 2 components))
+           (priority (nth 3 components))
+           (parsed (nth 4 components)))
+      (cond
+       ((org-in-commented-heading-p)
+        "would comment the heading out of export and the agenda")
+       ((org-get-tags)
+        (format "would become tags, leaving the title %S" parsed))
+       (keyword
+        (format
+         "would become the TODO keyword %s, leaving the title %S"
+         keyword parsed))
+       (priority
+        (format "would become the priority %c, leaving the title %S"
+                priority
+                parsed))
+       ((not (equal parsed title))
+        (format "would be read as the title %S" parsed))))))
+
 (defun org-mcp--validate-headline-title (title)
-  "Validate that TITLE is not empty or whitespace-only.
-Throws an MCP tool error if validation fails."
+  "Validate that TITLE is a title and not a line of Org grammar.
+Throws an MCP tool error if validation fails.
+
+A title has to be non-empty, hold no newline \u2014 one would make a
+second line, and the headline is one line \u2014 and survive being written
+into a headline, which `org-mcp--title-claimed-by-org' decides.
+
+A title Org would claim is refused rather than escaped.  Escaping
+would let a call name a heading anything, at the cost of the file
+holding something other than what was sent and a read handing back
+something other than what was asked for, which is the failure this
+refusal exists to prevent.  The refusal names what Org would make of
+the title instead, so the client can spell that part another way: a
+tag belongs in `org-node-add-tags', a TODO keyword in the call's own
+`todo' or in `org-node-set-todo', a priority in
+`org-node-set-priority', and the rest is reworded."
   (when (or (string-empty-p title)
             (string-match-p "^[[:space:]]*$" title)
             ;; Explicitly match NBSP for Emacs 27.2 compatibility
@@ -3513,7 +3609,11 @@ Throws an MCP tool error if validation fails."
      "Headline title cannot be empty or contain only whitespace"))
   (when (string-match-p "[\n\r]" title)
     (org-mcp--tool-validation-error
-     "Headline title cannot contain newlines")))
+     "Headline title cannot contain newlines"))
+  (when-let* ((claimed (org-mcp--title-claimed-by-org title)))
+    (org-mcp--tool-validation-error "Not a title: '%s'.  It %s"
+                                    title
+                                    claimed)))
 
 (defun org-mcp--timestamp-parsed (date-str)
   "Return DATE-STR parsed by Org as a timestamp element, or nil.
@@ -4245,14 +4345,22 @@ MCP Parameters:
           task; \"\" names no keyword and is refused, and false is
           the parameter left out
   note - Optional note to attach to this state transition (string, optional)
-         When provided, stored in LOGBOOK as part of the state change entry
-         Empty or whitespace-only values are ignored
+         When provided, stored in LOGBOOK as the prose of the state
+         change entry
+         Every blank -- \"\", whitespace, null, false and [] -- is
+         the parameter left out: the state change is made and no
+         prose recorded
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
   (org-mcp--assert-field-value before "State")
   (setq after (org-mcp--value-to-write after "after"))
+  ;; Before the link is resolved and before the change group opens:
+  ;; the note is written inside the change the state change is made
+  ;; in, so a note this call cannot write is refused while there is
+  ;; still nothing to take back.
+  (setq note (org-mcp--optional-text-given note "note"))
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
@@ -4328,7 +4436,10 @@ FILES, when not blank, names the files an `id:' PARENT is looked
 up in; see `org-mcp--link-target'.  It applies to PARENT only.
 
 MCP Parameters:
-  title - The headline text
+  title - The headline text, and text Org reads as a title: a
+          trailing :tag:, a leading COMMENT, a leading TODO
+          keyword and a leading [#A] are each refused, because
+          Org would take them out of the title
   todo - TODO state from `org-todo-keywords'; it cannot be empty
   parent - Link to the parent item
            Formats:
@@ -4543,11 +4654,14 @@ MCP Parameters:
            compares titles: letter case, runs of whitespace and
            statistics cookies make no difference, so the title a
            read returned is always accepted
-  after - New title without TODO state or tags (required).  A
-          statistics cookie on the headline is kept unless after
-          names one of its own.  Null, false and [] are the
-          parameter left out; a headline always has a title, so
-          there is nothing a blank could ask for
+  after - New title without TODO state or tags (required), and
+          text Org reads as a title: a trailing :tag:, a leading
+          COMMENT, a leading TODO keyword and a leading [#A] are
+          each refused, because Org would take them out of the
+          title.  A statistics cookie on the headline is kept
+          unless after names one of its own.  Null, false and []
+          are the parameter left out; a headline always has a
+          title, so there is nothing a blank could ask for
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -5625,9 +5739,12 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (when (or (null note)
-            (string-empty-p note)
-            (string-match-p "\\`[[:space:]]*\\'" note))
+  ;; The note is what this call is for, so a blank is the call with
+  ;; nothing in it rather than a note it does without: `note' is read
+  ;; as the required parameter it is, and "" then says the note
+  ;; itself was empty.
+  (setq note (org-mcp--text-param-given note "note"))
+  (when (string-match-p "\\`[[:space:]]*\\'" note)
     (org-mcp--tool-validation-error
      "Note cannot be empty or whitespace-only"))
 
@@ -7054,6 +7171,9 @@ Parameters:
   after - New title without TODO state or tags (string, required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
+          Cannot be text Org reads as something else: a trailing
+          :tag:, a leading COMMENT, a leading TODO keyword or a
+          leading [#A]
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
