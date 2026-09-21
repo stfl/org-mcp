@@ -12,19 +12,16 @@ link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Li
 A write that replaces one value answers with =before= and =after=: the value the
 tool found and the value it left, under the same two words the call sends. A
 call that takes a field away answers the same way, with an empty =after=, so the
-response says what it destroyed — and =org-node-remove-properties= reports the
-values it removed under =before= too, as a map. The property tools also name
-what they touched: =properties_set= on =org-node-set-properties=,
-=properties_deleted= on =org-node-remove-properties=. The clock tools report
-fields of their own.
+response says what it destroyed. =org-node-set-properties= answers with a map
+under =before= for the same reason, and names what it touched beside it, in
+=properties_set= and =properties_deleted=. The clock tools report fields of
+their own.
 
 Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
 =org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-add-tags=,
 =org-node-remove-tags=, =org-node-set-tags=,
-=org-node-set-priority=, =org-node-remove-priority=,
-=org-node-set-properties=, =org-node-remove-properties=,
-=org-node-set-scheduled=, =org-node-remove-scheduled=,
-=org-node-set-deadline=, =org-node-remove-deadline=,
+=org-node-set-priority=, =org-node-set-properties=,
+=org-node-set-scheduled=, =org-node-set-deadline=,
 =org-node-create=, =org-node-set-title=,
 =org-node-add-note=, =org-node-delete=, =org-node-archive=,
 =org-node-refile=) operate on the canonical Emacs buffer visiting the
@@ -178,7 +175,8 @@ can build a token of its own.
 
 Which token to ask for follows what you are about to change, because what you
 assert is what you would destroy. A tool that changes one field carries that
-field's own value in =before= — every setter and every named removal below: a
+field's own value in =before= — every setter below, whether it writes a value
+or takes one away: a
 heading that has grown a clock line since you read it is still the heading
 whose state you meant to change, and a token over its subtree would refuse that
 write for nothing. A body rewritten whole is the =content_digest= region, the
@@ -240,14 +238,15 @@ the property — is a fact about the node, and it is yours to act on.
 
 * What a blank parameter means
 
-A blank parameter — =null=, =false=, =""=, =[]= or ={}= — is one the call does
-not send. Clients fill a parameter they are not using with an empty value, so
-every one of those spellings reads that way, and what follows depends only on
-whether the parameter was required:
+A blank parameter is one the call does not send. Clients fill a parameter they
+are not using with an empty value, so =null=, =false=, =[]= and ={}= all read
+that way, and what follows depends only on whether the parameter was required:
 
 - *Optional and blank* is how you leave it out. =files=, =depth= and =fields=
   fall back to their defaults, and the optional parameters of
   =org-node-create= to "none of these" — no tags, no content, no properties.
+  An empty string counts as blank on those: they take a list or a number, and
+  there is nothing for an empty one of those to say.
 - *Required and blank* is a malformed call. It is refused with the message a
   parameter left out gets, and nothing is written:
 
@@ -255,34 +254,46 @@ whether the parameter was required:
 Missing required parameter: after
 #+end_example
 
-*No blank takes anything away.* A field is removed by a call that names the
-removal and asserts the value it destroys, so a client that filled a parameter
-absent-mindedly cannot wipe a date, a priority, a property or a tag, and the
-response of the call that does remove one is a record of what was there:
+*On a required parameter that carries text, =""= is not blank.* It is the value
+the field takes for /nothing/, in the field's own vocabulary, and a call has to
+type it. A required parameter never means "not sent", which is what leaves =""=
+free to mean something: it is how a =before= asserts that a headline has no
+deadline, and it is how an =after= takes a value away.
 
-| To take away | The call                     | =before= asserts                     |
-|--------------+------------------------------+--------------------------------------|
-| a SCHEDULED  | =org-node-remove-scheduled=  | the timestamp removed                |
-| a DEADLINE   | =org-node-remove-deadline=   | the timestamp removed                |
-| a priority   | =org-node-remove-priority=   | the character removed                |
-| properties   | =org-node-remove-properties= | each property it names               |
-| tags         | =org-node-remove-tags=       | nothing — it destroys nothing unseen |
+| To take away   | The call                  | Spelled                   |
+|----------------+---------------------------+---------------------------|
+| a TODO keyword | =org-node-set-todo=       | =after: ""=               |
+| a SCHEDULED    | =org-node-set-scheduled=  | =after: ""=               |
+| a DEADLINE     | =org-node-set-deadline=   | =after: ""=               |
+| a priority     | =org-node-set-priority=   | =after: ""=               |
+| a property     | =org-node-set-properties= | that name's value =""=    |
+| the body       | =org-node-set-content=    | =after: ""=               |
+| a tag          | =org-node-remove-tags=    | the tags named in =after= |
+| every own tag  | =org-node-set-tags=       | =after: []=               |
 
-Two spellings are values rather than blanks, and each is documented where it is
-taken. A =before= over a field that holds text takes =""= for /no value/, which
-is how you assert that a headline has no deadline; a tag set takes =[]= for the
-empty set. Both are values in the field's own vocabulary, and a call has to type
-them: they are the reason those parameters are required, since an optional
-parameter has no way to tell "I expect nothing here" from "I sent nothing".
+Every one of those removals is a required =before= away from being unguarded.
+You say what you believe the field holds, and the call is refused when the file
+disagrees, so nothing is destroyed that you had not read — the rule the whole of
+[[*Knowing what you are about to change]] is about, arriving at the one parameter
+value that empties a field. The response carries the destroyed value back under
+=before=, because once the call returns nothing in the file records what was
+there.
+
+The tag delta is not on that list by accident. =org-node-remove-tags= names the
+tags it takes and leaves every other tag alone, so it destroys nothing unseen
+and asserts nothing (see [[*Three tools for one tag set]]); emptying the field is
+=org-node-set-tags= with =after: []=, which asserts the whole prior set. A tag
+set takes =[]= for the empty set the way a text field takes =""= for no value,
+and for the same reason.
 
 * Write tools
 
 ** org-node-set-todo
-- *Description:* Update the TODO state of a specific headline
+- *Description:* Move the TODO state of a headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
-  - =after= (string, required): New TODO state (must be valid in org-todo-keywords)
+  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =""= takes the keyword off, so the headline stops being a task; =null= and =false= are the parameter left out and are refused
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as part of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline
@@ -332,6 +343,13 @@ Example:
   "link": "file:/home/user/org/projects.org::*Project Beta",
   "before": "",
   "after": "TODO"
+}
+
+# Take the keyword off, so the heading stops being a task:
+{
+  "link": "file:/home/user/org/projects.org::*Project Alpha",
+  "before": "IN-PROGRESS",
+  "after": ""
 }
 
 # State mismatch error:
@@ -448,11 +466,11 @@ Example:
 #+end_src
 
 ** org-node-set-content
-- *Description:* Replace the body content of an Org node, either a unique substring of the body or the body entire, whichever =before= names
+- *Description:* Replace or empty the body content of an Org node, either a unique substring of the body or the body entire, whichever =before= names
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Every other blank is the parameter left out (see [[*What a blank parameter means]])
-  - =after= (string, required): The replacement text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =after= (string, required): The replacement text; =""= leaves nothing in the place of what =before= named, which over a =content_digest= empties the body. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= or an =after= that was never sent, and otherwise (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -548,25 +566,31 @@ Example:
 #+end_src
 
 ** org-node-set-properties
-- *Description:* Set properties on an Org headline's PROPERTIES drawer
+- *Description:* Set or remove properties on an Org headline's PROPERTIES drawer
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. An empty string asserts the property is absent. Names are matched without regard to case, as Org reads them
-  - =after= (object, required): JSON object of property name-value pairs, each a value to write. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= takes the property away, guarded by what =before= says it holds. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =properties_set= — the names written — plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and an =after= entry carrying no value (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =properties_set= and =properties_deleted= — the names written and the names removed — =before=, the values they held, plus the headline's link
+- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and an entry carrying =null= (see [[*How a refusal is classed]])
 
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
 
-This tool writes values and takes none away. An =after= entry left empty —
-=null= or =""= — names no value to write, and the refusal says where removal
-lives (see [[*What a blank parameter means]]):
+=null= in a value is the entry left unfilled, on either side, and is refused
+rather than read as emptiness — a client that fills an entry it is not using
+would otherwise delete a property it never named (see [[*What a blank parameter
+means]]):
 
 #+begin_example
-after gives no value for the property 'EFFORT': use org-node-remove-properties to remove it
+after gives no value for the property 'EFFORT': send "" to remove it
 #+end_example
+
+Removing a property the headline does not hold is a no-op success. =before= of
+=""= on it is an honest assertion, so the call is neither a conflict nor a
+write, and the name appears in neither =properties_set= nor
+=properties_deleted=: nothing was set and nothing was deleted.
 
 Example:
 #+begin_src json
@@ -598,6 +622,23 @@ Example:
   "after": { "OWNER": "ada" }
 }
 
+# Remove one property and set another:
+{
+  "link": "id:abc-123",
+  "before": { "EFFORT": "1:00", "OWNER": "ada" },
+  "after": { "EFFORT": "2:00", "OWNER": "" }
+}
+
+# Success response for that call:
+{
+  "success": true,
+  "saved": true,
+  "properties_set": ["EFFORT"],
+  "properties_deleted": ["OWNER"],
+  "before": { "EFFORT": "1:00", "OWNER": "ada" },
+  "link": "id:abc-123"
+}
+
 # A property has moved on since the read:
 {
   "error": "conflict: Property 'EFFORT' mismatch: expected '1:00', found '3:00'"
@@ -609,63 +650,12 @@ Example:
 }
 #+end_src
 
-** org-node-remove-properties
-- *Description:* Remove properties from an Org headline's PROPERTIES drawer
-- *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (object, required): JSON object whose names are the properties this call removes and whose values are what each of them holds now. There is no second parameter naming them: what =before= names is what goes. An empty string asserts the property is absent, and the call then takes nothing away. Names are matched without regard to case, as Org reads them, and special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use the dedicated tools
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =properties_deleted= — the names removed, in the order =before= gave them — =before=, the values removed under those names, plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines; nothing is removed either way; unmarked validation otherwise (see [[*How a refusal is classed]])
-
-One parameter carries both halves of the call: the names say what goes and the
-values say what you believed was there. Every assertion is checked before the
-first property is removed, so a call refused over its second has not taken its
-first away. A headline that never held the property is left byte for byte as it
-was — the empty =before= such a call sends is an honest assertion, so the call
-is accepted with nothing to do.
-
-The response carries those values back under =before=, the key the removals of
-one field report what they destroyed under. Once the call returns, nothing in
-the file records what the properties held, and the response is read by more
-than the client that sent the request — a log, a transcript, a second client —
-none of which has the request to read instead.
-
-Example:
-#+begin_src json
-# Remove two properties:
-{
-  "link": "id:abc-123",
-  "before": {
-    "EFFORT": "1:00",
-    "OWNER": "ada"
-  }
-}
-
-# Success response:
-{
-  "success": true,
-  "saved": true,
-  "properties_deleted": ["EFFORT", "OWNER"],
-  "before": {
-    "EFFORT": "1:00",
-    "OWNER": "ada"
-  },
-  "link": "id:abc-123"
-}
-
-# One of the two has moved on since the read, so neither is removed:
-{
-  "error": "conflict: Property 'OWNER' mismatch: expected 'ada', found 'grace'"
-}
-#+end_src
-
 ** org-node-set-scheduled
-- *Description:* Move the SCHEDULED timestamp of an Org headline from one date to another
+- *Description:* Move the SCHEDULED timestamp of an Org headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). A blank names no date and is refused; [[*org-node-remove-scheduled][org-node-remove-scheduled]] takes a date away
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =""= takes the timestamp away, guarded by =before=; =null= and =false= are the parameter left out and are refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -679,7 +669,7 @@ A headline whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
 =after= replaces the range with the one date it names. =after= is an ISO date
 and has no spelling for a range, so this tool reads and replaces one but never
-writes one; [[*org-node-remove-scheduled][org-node-remove-scheduled]] takes a range away whole.
+writes one. An =after= of =""= takes a range away whole.
 
 Example:
 #+begin_src json
@@ -706,34 +696,14 @@ Example:
   "after": "2026-03-27"
 }
 
-# The date has moved on since the read:
-{
-  "error": "conflict: SCHEDULED mismatch: expected '<2026-09-20 Sun>', found '<2026-09-21 Mon>'"
-}
-#+end_src
-
-** org-node-remove-scheduled
-- *Description:* Take the SCHEDULED timestamp off an Org headline
-- *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the SCHEDULED timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. An empty string asserts the headline has no SCHEDULED, and the call then takes nothing away
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= — the timestamp removed — =after=, always empty, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
-
-The response is what records the removal: nothing in the file says the date was
-ever there, so =before= carries it back to you. A headline that carries no
-SCHEDULED is left byte for byte as it was.
-
-Example:
-#+begin_src json
 # Take a date off:
 {
   "link": "id:abc-123",
-  "before": "<2026-03-27 Fri>"
+  "before": "<2026-03-27 Fri>",
+  "after": ""
 }
 
-# Success response:
+# Success response for that call:
 {
   "success": true,
   "saved": true,
@@ -742,18 +712,18 @@ Example:
   "link": "id:abc-123"
 }
 
-# The date has moved on since the read, so nothing is removed:
+# The date has moved on since the read:
 {
-  "error": "conflict: SCHEDULED mismatch: expected '<2026-03-27 Fri>', found '<2026-04-03 Fri>'"
+  "error": "conflict: SCHEDULED mismatch: expected '<2026-09-20 Sun>', found '<2026-09-21 Mon>'"
 }
 #+end_src
 
 ** org-node-set-deadline
-- *Description:* Move the DEADLINE timestamp of an Org headline from one date to another
+- *Description:* Move the DEADLINE timestamp of an Org headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). A blank names no date and is refused; [[*org-node-remove-deadline][org-node-remove-deadline]] takes a date away
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =""= takes the timestamp away, guarded by =before=; =null= and =false= are the parameter left out and are refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -787,36 +757,13 @@ Example:
   "after": "2026-04-15"
 }
 
-#+end_src
-
-** org-node-remove-deadline
-- *Description:* Take the DEADLINE timestamp off an Org headline
-- *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the DEADLINE timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater, delay and date range included. An empty string asserts the headline has no DEADLINE, and the call then takes nothing away
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= — the timestamp removed — =after=, always empty, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
-
-As for [[*org-node-remove-scheduled][org-node-remove-scheduled]]: the response carries the timestamp the call
-destroyed, and a headline that carries no DEADLINE is left as it was.
-
-Example:
-#+begin_src json
 # Take a deadline off:
 {
   "link": "id:abc-123",
-  "before": "<2026-04-15 Wed>"
+  "before": "<2026-04-15 Wed>",
+  "after": ""
 }
 
-# Success response:
-{
-  "success": true,
-  "saved": true,
-  "before": "<2026-04-15 Wed>",
-  "after": "",
-  "link": "id:abc-123"
-}
 #+end_src
 
 ** Three tools for one tag set
@@ -851,7 +798,8 @@ Clearing a headline's tags has two spellings and neither is a blank parameter:
 name the tags a read returned as its own to =org-node-remove-tags=, or send
 =after: []= to =org-node-set-tags= with the full prior own set in =before=. A
 blank tag set is a required parameter left out and is refused on all three,
-while =[]= is the empty set and a value like any other
+while =[]= is the empty set and a value like any other — the tag field's
+spelling of the =""= a field holding text takes
 (see [[*What a blank parameter means]]).
 
 ** org-node-add-tags
@@ -987,11 +935,11 @@ Example:
 #+end_src
 
 ** org-node-set-priority
-- *Description:* Set or remove priority on an Org headline
+- *Description:* Set the priority of an Org headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the priority character the headline carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority
-  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. A blank names no priority and is refused; [[*org-node-remove-priority][org-node-remove-priority]] takes a priority away
+  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. =""= takes the priority away, guarded by =before=; =null= and =false= are the parameter left out and are refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -1021,41 +969,16 @@ Example:
   "after": "A"
 }
 
-# The priority has moved on since the read:
-{
-  "error": "conflict: Priority mismatch: expected 'B', found 'C'"
-}
-#+end_src
-
-** org-node-remove-priority
-- *Description:* Take the priority off an Org headline
-- *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the priority character this call destroys, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority, and the call then takes nothing away
-  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= — the priority removed — =after=, always empty, and the headline's link
-- *Refuses with:* =conflict:= when =before= is not the priority the headline carries, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
-
-Example:
-#+begin_src json
 # Take a priority off:
 {
   "link": "id:abc-123",
-  "before": "A"
-}
-
-# Success response:
-{
-  "success": true,
-  "saved": true,
   "before": "A",
-  "after": "",
-  "link": "id:abc-123"
+  "after": ""
 }
 
-# The priority has moved on since the read, so nothing is removed:
+# The priority has moved on since the read:
 {
-  "error": "conflict: Priority mismatch: expected 'A', found 'B'"
+  "error": "conflict: Priority mismatch: expected 'B', found 'C'"
 }
 #+end_src
 

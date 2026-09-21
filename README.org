@@ -2,7 +2,7 @@
 
 org-mcp turns your running Emacs into an MCP server over your Org files. An MCP
 client — Claude Code, Claude Desktop, any other — reads your outline, searches it
-with org-ql, and writes back to it through 35 tools and one resource, while the
+with org-ql, and writes back to it through 31 tools and one resource, while the
 files stay where Org keeps them.
 
 The writes go through the buffer you are editing, not around it. A tool edits the
