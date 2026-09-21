@@ -3893,35 +3893,97 @@ keyword reads `(no state)'; the value that asserts it is \"\"."
 
 (defconst org-mcp-test--content-task-scheduled-repeat-to-state
   (concat "* TODO Weekly Task\n"
+          "SCHEDULED: <2026-01-01 Thu +1w>\n"
           ":PROPERTIES:\n"
           ":REPEAT_TO_STATE: NEXT\n"
-          ":END:\n"
-          "SCHEDULED: <2026-01-01 Thu +1w>")
-  "Task with +1w SCHEDULED repeater and REPEAT_TO_STATE: NEXT.")
+          ":END:")
+  "Task with +1w SCHEDULED repeater and REPEAT_TO_STATE: NEXT.
+The planning line stands between the heading and the drawer, which is
+where Org reads it as the heading's SCHEDULED.  Below the drawer it is
+a plain timestamp in the body: a repeat moves that too, but it is no
+planning field and no `before' names it.")
 
-;; After marking DONE, repeat reverts to TODO, SCHEDULED advances
+(defconst org-mcp-test--content-task-scheduled-cumulative
+  "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu ++1m>"
+  "Task with a ++1m SCHEDULED repeater, which catches up past today.")
+
+(defconst org-mcp-test--content-task-scheduled-restart
+  "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu .+2d>"
+  "Task with a .+2d SCHEDULED repeater, which restarts from today.")
+
+(defconst org-mcp-test--content-task-deadline-repeat
+  "* TODO Weekly Task\nDEADLINE: <2026-01-01 Thu +1w>"
+  "Task whose DEADLINE carries a +1w repeater and which has no SCHEDULED.")
+
+(defconst org-mcp-test--content-task-both-repeat
+  (concat "* TODO Weekly Task\n"
+          "SCHEDULED: <2026-01-01 Thu +1w> "
+          "DEADLINE: <2026-01-08 Thu +2w>")
+  "Task whose SCHEDULED and DEADLINE each carry a repeater.")
+
+(defconst org-mcp-test--content-task-plain-scheduled-repeating-deadline
+  (concat "* TODO Weekly Task\n"
+          "SCHEDULED: <2026-01-01 Thu> "
+          "DEADLINE: <2026-01-08 Thu +1w>")
+  "Task whose DEADLINE repeats and whose SCHEDULED does not.
+Org takes a SCHEDULED without a repeater away when the entry repeats,
+holding that a date the task is past is no longer worth keeping.")
+
+(defconst org-mcp-test--content-task-repeat-to-done
+  (concat "* TODO Weekly Task\n"
+          "SCHEDULED: <2026-01-01 Thu +1w>\n"
+          ":PROPERTIES:\n"
+          ":REPEAT_TO_STATE: DONE\n"
+          ":END:")
+  "Task whose REPEAT_TO_STATE names the done keyword a call asks for.
+The repeat fires and leaves the keyword the call asked for, so the
+keyword alone tells a client nothing about the date that moved.")
+
+;; A +1w step from 2026-01-01 lands on 2026-01-08 whatever the day the
+;; suite runs, so the date is literal and only the day name Org writes
+;; in it is the locale's.
 (defconst org-mcp-test--expected-weekly-task-repeat-triggered-regex
   (concat
    "\\`\\* TODO Weekly Task\n"
-   "\\(?::PROPERTIES:\n"
-   "\\(?::REPEAT_TO_STATE:[ \t]+\\S-+\n\\)?"
-   "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
-   ":END:\n\\)?"
-   "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
-   "\\(?:.\\|\n\\)*\\'")
-  "Regex: Weekly Task after repeat triggered (state back to TODO, date advanced).")
+   "SCHEDULED: <2026-01-08 [^>]*\\+1w>\n?\\'")
+  "Regex: Weekly Task back in TODO with its SCHEDULED a week on.")
 
-;; After marking DONE, repeat reverts to NEXT (REPEAT_TO_STATE)
 (defconst org-mcp-test--expected-weekly-task-repeat-to-state-regex
   (concat
    "\\`\\* NEXT Weekly Task\n"
-   "\\(?::PROPERTIES:\n"
-   "\\(?::REPEAT_TO_STATE:[ \t]+NEXT\n\\)?"
-   "\\(?::LAST_REPEAT:[ \t]+\\[.*\\]\n\\)?"
-   ":END:\n\\)?"
-   "SCHEDULED: <[0-9]+-[0-9]+-[0-9]+[^>]*\\+1w[^>]*>\n"
-   "\\(?:.\\|\n\\)*\\'")
-  "Regex: Weekly Task after repeat with REPEAT_TO_STATE reverts to NEXT.")
+   "SCHEDULED: <2026-01-08 [^>]*\\+1w>\n"
+   ":PROPERTIES:\n"
+   ":REPEAT_TO_STATE: NEXT\n"
+   ":END:\n?\\'")
+  "Regex: Weekly Task in the NEXT that REPEAT_TO_STATE names.")
+
+(defconst org-mcp-test--expected-weekly-task-deadline-repeat-regex
+  (concat
+   "\\`\\* TODO Weekly Task\n"
+   "DEADLINE: <2026-01-08 [^>]*\\+1w>\n?\\'")
+  "Regex: Weekly Task back in TODO with its DEADLINE a week on.")
+
+(defconst org-mcp-test--expected-weekly-task-both-repeat-regex
+  (concat
+   "\\`\\* TODO Weekly Task\n"
+   "SCHEDULED: <2026-01-08 [^>]*\\+1w> "
+   "DEADLINE: <2026-01-22 [^>]*\\+2w>\n?\\'")
+  "Regex: Weekly Task with each planning date on by its own repeater.")
+
+(defconst org-mcp-test--expected-weekly-task-scheduled-dropped-regex
+  (concat
+   "\\`\\* TODO Weekly Task\n"
+   "DEADLINE: <2026-01-15 [^>]*\\+1w>\n?\\'")
+  "Regex: Weekly Task with the SCHEDULED Org took away and no other.")
+
+(defconst org-mcp-test--expected-weekly-task-repeat-to-done-regex
+  (concat
+   "\\`\\* DONE Weekly Task\n"
+   "SCHEDULED: <2026-01-08 [^>]*\\+1w>\n"
+   ":PROPERTIES:\n"
+   ":REPEAT_TO_STATE: DONE\n"
+   ":END:\n?\\'")
+  "Regex: Weekly Task left in DONE with its SCHEDULED a week on.")
 
 ;;; Test data for CRUD entry tools
 
@@ -4340,10 +4402,27 @@ LOGBOOK drawer."
              test-file
              org-mcp-test--expected-task-one-done-with-note-no-drawer-regex)))))))
 
+(defun org-mcp-test--planning-move (result field)
+  "Return what RESULT reports about planning FIELD, or nil for nothing.
+FIELD is `scheduled' or `deadline'.  A report is (BEFORE . AFTER):
+the state the field was in and the state it is in now, both as a
+`before' asserts them, so \"\" is a field holding nothing.  Nothing
+reported means the field is as the client last read it."
+  (when-let* ((move (alist-get field result)))
+    (cons (alist-get 'before move) (alist-get 'after move))))
+
+(defun org-mcp-test--repeat-today-plus (days)
+  "Return the Org date text for DAYS from today.
+Org writes a date as `org-timestamp-formats' does, so the day name is
+the one the running locale gives it and this builds it the same way."
+  (format-time-string
+   (car org-timestamp-formats) (time-add nil (days-to-time days))))
+
 (ert-deftest org-mcp-test-update-todo-state-triggers-repeat ()
   "Test that marking DONE on a task with a repeater triggers the repeat.
 The response reports the state Org left the entry in, the not-done
-keyword the repeat reset it to, not the done keyword asked for."
+keyword the repeat reset it to, not the done keyword asked for, and
+the SCHEDULED it carried on with it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-task-scheduled-repeat))
     (let ((org-log-repeat nil)
@@ -4356,6 +4435,14 @@ keyword the repeat reset it to, not the done keyword asked for."
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "TODO"))
+        (should
+         (equal (car (org-mcp-test--planning-move result 'scheduled))
+                "<2026-01-01 Thu +1w>"))
+        (should
+         (string-match-p
+          "\\`<2026-01-08 [^>]*\\+1w>\\'"
+          (cdr (org-mcp-test--planning-move result 'scheduled))))
+        (should-not (org-mcp-test--planning-move result 'deadline))
         ;; File: repeat fired — state reverted to TODO, SCHEDULED advanced
         (org-mcp-test--verify-file-matches
          test-file
@@ -4364,7 +4451,7 @@ keyword the repeat reset it to, not the done keyword asked for."
 (ert-deftest org-mcp-test-update-todo-state-repeat-to-state ()
   "Test that REPEAT_TO_STATE is respected when repeat triggers.
 The response reports the keyword `REPEAT_TO_STATE' named, which is
-the state Org left the entry in."
+the state Org left the entry in, and the SCHEDULED that moved with it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-task-scheduled-repeat-to-state))
     (let ((org-log-repeat nil)
@@ -4376,10 +4463,220 @@ the state Org left the entry in."
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "NEXT"))
+        (should
+         (equal (car (org-mcp-test--planning-move result 'scheduled))
+                "<2026-01-01 Thu +1w>"))
+        (should
+         (string-match-p
+          "\\`<2026-01-08 [^>]*\\+1w>\\'"
+          (cdr (org-mcp-test--planning-move result 'scheduled))))
         ;; File: state reverted to NEXT (from REPEAT_TO_STATE)
         (org-mcp-test--verify-file-matches
          test-file
          org-mcp-test--expected-weekly-task-repeat-to-state-regex)))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-a-cumulative-date ()
+  "A `++' repeater catches the date up past today, and that is reported.
+Where it lands depends on the day the call is made, which is the
+reason a client cannot compute it and has to be told: the response
+names the date the file now holds, and the file holds the date the
+response names."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-cumulative))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (move (org-mcp-test--planning-move result 'scheduled)))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (equal (car move) "<2026-01-01 Thu ++1m>"))
+        ;; A month step from the first of a month stays on the first,
+        ;; and `++' stops at the first such date past today.
+        (should (string-match-p "\\`<[0-9]\\{4\\}-[0-9][0-9]-01 [^>]*\\+\\+1m>\\'"
+                                (cdr move)))
+        (should (string> (substring (cdr move) 1 11)
+                         (format-time-string "%Y-%m-%d")))
+        (org-mcp-test--verify-file-matches
+         test-file
+         (concat "\\`\\* TODO Weekly Task\nSCHEDULED: "
+                 (regexp-quote (cdr move)) "\n?\\'"))))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-a-restarted-date ()
+  "A `.+' repeater restarts from today, and that is reported.
+The date the file ends up with is today plus the interval, which no
+part of the call named."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-restart))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (move (org-mcp-test--planning-move result 'scheduled)))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (equal (car move) "<2026-01-01 Thu .+2d>"))
+        (should
+         (equal (cdr move)
+                (format "<%s .+2d>" (org-mcp-test--repeat-today-plus 2))))
+        (org-mcp-test--verify-file-matches
+         test-file
+         (concat "\\`\\* TODO Weekly Task\nSCHEDULED: "
+                 (regexp-quote (cdr move)) "\n?\\'"))))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-the-deadline-it-moved ()
+  "A repeater on the DEADLINE moves that field, and the response says so.
+The heading has no SCHEDULED, so no SCHEDULED is reported: a field
+the call left alone is a field the client's belief still covers."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-deadline-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (move (org-mcp-test--planning-move result 'deadline)))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (equal (car move) "<2026-01-01 Thu +1w>"))
+        (should (string-match-p "\\`<2026-01-08 [^>]*\\+1w>\\'" (cdr move)))
+        (should-not (org-mcp-test--planning-move result 'scheduled))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-deadline-repeat-regex)))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-both-planning-fields ()
+  "Two repeaters move two dates, and each is reported with its own.
+Each field keeps its own interval, so one date is no guide to the
+other and both have to be named."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-both-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (scheduled (org-mcp-test--planning-move result 'scheduled))
+             (deadline (org-mcp-test--planning-move result 'deadline)))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (equal (car scheduled) "<2026-01-01 Thu +1w>"))
+        (should
+         (string-match-p "\\`<2026-01-08 [^>]*\\+1w>\\'" (cdr scheduled)))
+        (should (equal (car deadline) "<2026-01-08 Thu +2w>"))
+        (should
+         (string-match-p "\\`<2026-01-22 [^>]*\\+2w>\\'" (cdr deadline)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-both-repeat-regex)))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-a-scheduled-taken-away ()
+  "A repeat takes away a SCHEDULED carrying no repeater, and says so.
+Once the call returns nothing in the file records that the date was
+ever there, so the response carries it back under `before', and its
+`after' is the \"\" a later call asserts the absence with."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        org-mcp-test--content-task-plain-scheduled-repeating-deadline))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (scheduled (org-mcp-test--planning-move result 'scheduled))
+             (deadline (org-mcp-test--planning-move result 'deadline)))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (equal scheduled '("<2026-01-01 Thu>" . "")))
+        (should (equal (car deadline) "<2026-01-08 Thu +1w>"))
+        (should
+         (string-match-p "\\`<2026-01-15 [^>]*\\+1w>\\'" (cdr deadline)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-scheduled-dropped-regex)))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-to-the-keyword-asked-for ()
+  "A repeat that lands on the keyword asked for still moves the date.
+`REPEAT_TO_STATE' may name the done keyword the call asked for, and
+then the response's `after' is the state the call requested while the
+SCHEDULED has moved a week on.  Comparing the two keywords would
+report no repeat here, which is why the response states the move
+rather than leaving it to be inferred."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-repeat-to-done))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO"))
+             (move (org-mcp-test--planning-move result 'scheduled)))
+        (should (equal (alist-get 'before result) "TODO"))
+        (should (equal (alist-get 'after result) "DONE"))
+        (should (equal (car move) "<2026-01-01 Thu +1w>"))
+        (should (string-match-p "\\`<2026-01-08 [^>]*\\+1w>\\'" (cdr move)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--expected-weekly-task-repeat-to-done-regex)))))
+
+(ert-deftest org-mcp-test-set-todo-reports-no-move-where-nothing-moved ()
+  "An ordinary transition reports no planning field at all.
+The heading carries both dates and neither repeats, so the client's
+belief about them still holds and the response says nothing about
+them."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat "* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-01 Thu> "
+                "DEADLINE: <2026-01-08 Thu>\n")))
+    (let ((org-log-repeat nil)
+          (org-log-done nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+             (result
+              (org-mcp-test--call-update-todo-state
+               link "DONE" "TODO")))
+        (should (equal (alist-get 'after result) "DONE"))
+        (should-not (org-mcp-test--planning-move result 'scheduled))
+        (should-not (org-mcp-test--planning-move result 'deadline))
+        (org-mcp-test--verify-file-matches
+         test-file
+         (concat "\\`\\* DONE Weekly Task\n"
+                 "SCHEDULED: <2026-01-01 Thu> "
+                 "DEADLINE: <2026-01-08 Thu>\n\\'"))))))
+
+(ert-deftest org-mcp-test-set-todo-vetoed-repeat-leaves-the-date-alone ()
+  "A veto on a repeating entry stops the repeat with the date untouched.
+The blocker is consulted before anything is written, so the heading
+keeps its keyword and its SCHEDULED, and the client's belief about
+both survives the refusal."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat "* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-01 Thu +1w>\n"
+                "** TODO Child\n")))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-repeat nil)
+          (org-enforce-todo-dependencies t)
+          (org-blocker-hook
+           '(org-block-todo-from-children-or-siblings-or-parent)))
+      (should
+       (equal
+        (org-mcp-test--call-tool-expecting-error
+         test-file "org-node-set-todo"
+         `((link . ,(org-mcp-test--file-link test-file "*Weekly Task"))
+           (before . "TODO")
+           (after . "DONE")))
+        (concat org-mcp-test--blocked-marker
+                "TODO state change from TODO to DONE blocked "
+                "(by \"TODO Child\")")))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat "\\`\\* TODO Weekly Task\n"
+               "SCHEDULED: <2026-01-01 Thu \\+1w>\n"
+               "\\*\\* TODO Child\n\\'")))))
 
 (ert-deftest org-mcp-test-add-todo-top-level ()
   "Test adding a top-level TODO item."
@@ -11620,7 +11917,9 @@ under the heading line Org chose for it."
 (ert-deftest org-mcp-test-set-todo-repeat-logs-without-asking ()
   "`org-log-repeat' records the repeat and waits for no one.
 `org-auto-repeat-maybe' is the second way `org-todo' reaches a log
-note, and a repeating entry moved to a done keyword takes it."
+note, and a repeating entry moved to a done keyword takes it.  The
+entry, the `LAST_REPEAT' property Org writes beside it and the date
+the response reports all come out of the one call."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-task-scheduled-repeat))
     (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
@@ -11632,7 +11931,14 @@ note, and a repeating entry moved to a done keyword takes it."
               "DONE" "TODO")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
-        (should (equal (alist-get 'after result) "TODO")))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should
+         (equal (car (org-mcp-test--planning-move result 'scheduled))
+                "<2026-01-01 Thu +1w>"))
+        (should
+         (string-match-p
+          "\\`<2026-01-08 [^>]*\\+1w>\\'"
+          (cdr (org-mcp-test--planning-move result 'scheduled)))))
       (org-mcp-test--should-leave-no-log-prompt)
       (org-mcp-test--verify-file-matches
        test-file

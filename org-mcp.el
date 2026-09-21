@@ -1438,6 +1438,55 @@ A field gains an assertion by appearing here, which is why the
 plist and not a per-field reader is what a field record names."
   (or (plist-get (org-mcp--heading-metadata-at-point) field) ""))
 
+(defconst org-mcp--planning-fields
+  '((:scheduled . scheduled) (:deadline . deadline))
+  "The planning fields a write reports when it moves one under a client.
+Each entry pairs an `org-mcp--asserted-value' field with the name the
+response carries it under.
+
+These two are the list because each has a setter whose required
+`before' refuses a call the moment the field has moved.  CLOSED moves
+on a repeat as well, and no tool writes it, so no guard can fire on a
+stale belief about it.")
+
+(defun org-mcp--planning-at-point ()
+  "Return the planning states of the heading at point.
+An alist of `org-mcp--planning-fields' keys, each holding what the
+field holds as a `before' asserts it.  Reading through
+`org-mcp--asserted-value' is what makes a value reported here one the
+client can send straight back."
+  (mapcar
+   (lambda (field)
+     (cons (car field) (org-mcp--asserted-value (car field))))
+   org-mcp--planning-fields))
+
+(defun org-mcp--planning-moves (before after)
+  "Return response fields for each planning field BEFORE and AFTER differ on.
+BEFORE and AFTER are `org-mcp--planning-at-point' readings taken on
+either side of a write.  A field reading the same in both is left
+out: nothing moved under the client, so what it last read still
+holds.  A field that moved is named, carrying the state it was in and
+the state it is in now, the way every write answers about the field
+it writes, so the response\\='s value is the next call\\='s `before'.
+
+Naming only what moved is what makes the report a statement rather
+than something to infer.  A write asks Org for a keyword and Org may
+decide a date as well -- a repeating entry moved to a done keyword
+comes back in its not-done keyword with its dates carried on, and Org
+takes away a SCHEDULED that carries no repeater while it is there.
+Once the call returns nothing in the file records where those dates
+were, which is why the state a field was in is reported beside the
+state it is in."
+  (delq
+   nil
+   (mapcar
+    (lambda (field)
+      (let ((was (alist-get (car field) before))
+            (now (alist-get (car field) after)))
+        (unless (equal was now)
+          `(,(cdr field) (before . ,was) (after . ,now)))))
+    org-mcp--planning-fields)))
+
 (defun org-mcp--subtree-bounds ()
   "Return the subtree of the heading at point as (BEGIN . END).
 BEGIN is the heading's first star and END is where the next heading
@@ -4351,8 +4400,12 @@ lists those roots as absolute paths."
 Returns the link to the updated headline, and as the response's
 `after' the state Org left it in, which is the state asked for
 unless Org made another of it: a repeating entry moved to a done
-keyword comes back in its not-done keyword.  A change Org vetoes is refused and nothing
-is written; see `org-mcp--set-todo-state'.
+keyword comes back in its not-done keyword.  The same repeat moves
+the headline's planning dates, and a `scheduled' or `deadline' field
+reports the one it moved, with the state that field was in and the
+state it is in now; see `org-mcp--planning-moves'.  A change Org
+vetoes is refused and nothing is written; see
+`org-mcp--set-todo-state'.
 BEFORE is the TODO state the headline is asserted to hold, \"\" for
 a headline that has none.  A headline in any other state is a
 conflict and nothing is written.
@@ -4397,10 +4450,15 @@ MCP Parameters:
   (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (actual-prev nil)
-         (actual-new nil))
+         (actual-new nil)
+         (planning-prev nil)
+         (planning-new nil))
     (org-mcp--modify-and-save file-path "update"
-                              `((before . ,actual-prev)
-                                (after . ,actual-new))
+                              (append
+                               `((before . ,actual-prev)
+                                 (after . ,actual-new))
+                               (org-mcp--planning-moves
+                                planning-prev planning-new))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (when after
@@ -4409,6 +4467,10 @@ MCP Parameters:
 
       ;; Capture actual previous state
       (setq actual-prev (org-mcp--asserted-value :todo))
+      ;; And the planning dates, which Org may decide to move on the
+      ;; way to the keyword the call asked for; see
+      ;; `org-mcp--planning-moves'.
+      (setq planning-prev (org-mcp--planning-at-point))
 
       ;; Check current state matches
       (unless (string= actual-prev before)
@@ -4423,7 +4485,8 @@ MCP Parameters:
       ;; back what Org made of the one it took.  The note rides the
       ;; change, so the transition leaves one entry however the log
       ;; settings stand.
-      (setq actual-new (org-mcp--set-todo-state after note)))))
+      (setq actual-new (org-mcp--set-todo-state after note))
+      (setq planning-new (org-mcp--planning-at-point)))))
 
 (defun org-mcp--tool-node-create
     (title

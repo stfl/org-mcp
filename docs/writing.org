@@ -500,6 +500,13 @@ call's =before=, which is what it is for — it saves you the read. It is not th
 next call's =after=: on the four fields above, =""= is no keyword, date or
 priority to write, and sending it back that way is refused.
 
+The pair belongs to the field the call writes, and sits at the top of the
+response because there is only one of it. A field the call did not write but
+Org moved on the way gets a pair of its own, under the field's name: that is
+how =org-node-set-todo= reports a planning date a repeat carried on (see
+[[*A repeat redirects the call]]). Both pairs read alike, so a response's
+=after= is the next call's =before= wherever you find it.
+
 #+begin_src json
 # Taking the SCHEDULED away
 {"link": "id:abc-123", "before": "<2026-09-20 Sun>", "after": null}
@@ -555,7 +562,7 @@ set has an empty value and spells it =[]=, the way a body spells its empty value
   - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled= or =deadline= report for a planning date the call moved, and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 =before= and =after= both name a TODO state, so the call reads as the
@@ -565,10 +572,8 @@ with no keyword as =(no state)= to keep the message readable, but the value to
 send is the empty string.
 
 The response's =after= reports the state Org left the headline in, which is not
-always the one asked for. Moving a repeating entry to a done keyword makes Org run the
-repeat: the timestamp advances and the entry comes back in its not-done
-keyword, =TODO= or whatever =REPEAT_TO_STATE= names, and that is what the
-response carries.
+always the one asked for: a headline that repeats is moved on rather than
+finished, and the response reports where it went (see [[*A repeat redirects the call]]).
 
 =org-log-done=, =org-todo-log-states= and =org-log-repeat= each record a
 transition they cover, and =note= is the prose of that one entry, so a
@@ -600,15 +605,6 @@ Example:
   "link": "file:~/org/projects.org::*Project Alpha"
 }
 
-# A repeating entry moved to DONE, which Org repeated instead:
-{
-  "success": true,
-  "saved": true,
-  "before": "TODO",
-  "after": "TODO",
-  "link": "file:~/org/tasks.org::*Water the plants"
-}
-
 # Request giving a headline its first TODO keyword:
 {
   "link": "file:/home/user/org/projects.org::*Project Beta",
@@ -638,6 +634,78 @@ Example:
   "error": "blocked: TODO state change from TODO to DONE blocked (by \"TODO Write the tests\")"
 }
 #+end_src
+
+*** A repeat redirects the call
+
+A headline whose SCHEDULED or DEADLINE carries a repeater does not become done.
+Org runs the repeat instead: the keyword goes back to a not-done one — =TODO=,
+or whatever =org-todo-repeat-to-state= or a =REPEAT_TO_STATE= property on the
+headline names — and every timestamp in the entry that carries a repeater steps
+on by its own interval. A SCHEDULED carrying no repeater is taken away rather
+than moved, as Org holds it no longer relevant once the task has moved on.
+
+With =org-log-repeat= set — it ships as =time= — Org records the transition
+(see [[*What a write records in the LOGBOOK]]) and writes a =LAST_REPEAT= property
+beside it, which it writes for an entry holding a clock line whatever that
+setting says. Either way a later read of the headline's properties finds one
+the call did not put there.
+
+One call therefore changes the keyword and the dates, and the response reports
+both. =after= is the keyword Org left. A =scheduled= or =deadline= field reports
+a planning date the call moved, carrying the state that field was in and the
+state it is in now, each read the way a =before= is read:
+
+#+begin_src json
+# Request:
+{
+  "link": "file:/home/user/org/tasks.org::*Water the plants",
+  "before": "TODO",
+  "after": "DONE"
+}
+
+# Response.  Org repeated the headline instead of finishing it:
+{
+  "success": true,
+  "saved": true,
+  "before": "TODO",
+  "after": "TODO",
+  "scheduled": {"before": "<2026-06-20 Sat +1w>", "after": "<2026-06-27 Sat +1w>"},
+  "link": "file:~/org/tasks.org::*Water the plants"
+}
+
+# A SCHEDULED with no repeater beside a DEADLINE with one.  The
+# DEADLINE moves and the SCHEDULED goes:
+{
+  "success": true,
+  "saved": true,
+  "before": "TODO",
+  "after": "TODO",
+  "scheduled": {"before": "<2026-06-18 Thu>", "after": ""},
+  "deadline": {"before": "<2026-06-20 Sat +1w>", "after": "<2026-06-27 Sat +1w>"},
+  "link": "file:~/org/tasks.org::*File the return"
+}
+#+end_src
+
+A field is there only when the call moved it, so its absence says the headline
+still holds what you last read. Its =after= is the next call's =before=, which
+is the point of reporting it: [[*org-node-set-scheduled][org-node-set-scheduled]] compares your =before=
+against the date in the file, so a =before= read before this call is refused as
+a conflict, and the field hands you the value that settles it without a read.
+A date Org took away comes back under =before=, and once the call returns that
+is the only record of it anywhere.
+
+*Read the fields, not the keyword.* A repeat usually leaves a keyword other
+than the one you asked for, but not always: =REPEAT_TO_STATE= may name the very
+done keyword the call named, and then =after= is exactly what you requested
+while the dates have moved underneath. Comparing the two finds no repeat there.
+
+=.+= and =++= land on a date that depends on the day you call — =.+= counts its
+interval from today, and =++= steps the stored date on until it is past today —
+so the new date is not one the call can work out in advance either way.
+
+What the two fields do not cover is a repeater on a plain timestamp in the
+body. It steps on with the rest, and it shows up in the body rather than in a
+planning field, so it is [[*org-node-set-content][org-node-set-content]] whose =before= goes stale.
 
 ** org-node-set-title
 - *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
