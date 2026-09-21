@@ -160,10 +160,10 @@ Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, or an Org t
 =2028-02-29= is a day and is written: the question is whether the year in hand
 has that day, not whether February has twenty-nine of them in general.
 
-The last two refusals are forms Org reads perfectly well and its planning writer
-would not carry whole. An inactive timestamp, =[2026-03-27 Fri]=, would go into
-the file active; a date range would go in as its first half alone. A range is
-two timestamps joined by =--=, and how close its halves fall changes nothing —
+An inactive timestamp and a date range are forms Org reads perfectly well and
+its planning writer would not carry whole. =[2026-03-27 Fri]= would go into the
+file active; a range, two timestamps joined by =--=, would go in as its first
+half alone. How close its halves fall changes nothing —
 =<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>= is refused for the reason
 =<2026-06-20 Sat>--<2026-06-21 Sun>= is, and so is a range written inside one
 pair of brackets, =2026-03-27 09:00--2026-03-27 10:00=, which Org reads up to
