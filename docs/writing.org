@@ -429,18 +429,17 @@ Example:
 #+end_src
 
 ** org-node-set-content
-- *Description:* Edit or append to the body content of an Org node. In replace mode (default), replaces either a unique substring of the body or the body entire, whichever =before= names. In append mode, inserts content after existing body but before child headlines
+- *Description:* Replace the body content of an Org node, either a unique substring of the body or the body entire, whichever =before= names
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Every other blank is the parameter left out (see [[*What a blank parameter means]]). Append mode reads no precondition, and the schema requires the parameter all the same: send ""
-  - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). In append mode it is the content to append and cannot be empty or whitespace-only
-  - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
+  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Every other blank is the parameter left out (see [[*What a blank parameter means]])
+  - =after= (string, required): The replacement text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= that was never sent, and otherwise (see [[*How a refusal is classed]])
-- *Special behavior (replace mode):* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
+- *Special behavior:* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
-Replace mode is a transition: =before= is what the body holds and =after= is
+Every body write is a transition: =before= is what the body holds and =after= is
 what takes its place. How much of the body =after= takes the place of follows
 the form =before= arrives in, and nothing else — there is no flag to set. A
 substring names a part of the body and replaces that part. The =content_digest=
@@ -453,11 +452,14 @@ Send back the token a read handed you, and take it from the read you planned
 this call from rather than from a list you kept (see [[*Knowing what you are about to change][Knowing what you are about
 to change]]).
 
-Append mode is no transition at all. It adds to the end of the body and
-destroys nothing, so it asserts nothing: neither parameter says what the body
-held, and the call goes through whatever has happened to the node since it was
-read. It is therefore not a way to retry a replace that was refused — read the
-node again and send the replace against the body it holds now.
+Adding a line to a body therefore costs sending that body back: assert its
+=content_digest= and send the body with the line in it. That cost buys the
+guarantee that a repeat cannot duplicate it. A call that adds to the end
+without saying what the end held has nothing to be refused against, so a client
+whose request timed out after the server wrote — or that simply retried — would
+add the text twice and be told both times that it succeeded. Asserting the
+region closes that: the second call's digest is no longer the body's, and it is
+refused as the conflict it is.
 
 Every refusal over the value =before= asserts is a conflict, whichever form
 it took:
@@ -487,9 +489,17 @@ refused unmarked as the parameter it is:
 Missing required parameter: before
 #+end_example
 
+The tool takes the four parameters above and no others, and a parameter it does
+not take is refused by name rather than dropped, so a call built against a
+surface that had something else is told what it sent:
+
+#+begin_example
+Unexpected parameter: append
+#+end_example
+
 Example:
 #+begin_src json
-# Replace mode, a substring:
+# A substring:
 {
   "link": "id:abc-123",
   "before": "This is a placeholder.",
@@ -503,22 +513,14 @@ Example:
   "link": "id:abc-123"
 }
 
-# Replace mode, the body entire:
+# The body entire:
 {
   "link": "id:abc-123",
   "before": "sha256:1b4f0e9851971998",
   "after": "The whole body, written afresh."
 }
 
-# Append mode:
-{
-  "link": "id:abc-123",
-  "before": "",
-  "after": "Additional notes from meeting.",
-  "append": true
-}
-
-# Adding content to empty node (replace mode):
+# Adding content to empty node:
 {
   "link": "file:/home/user/org/projects.org::*New task",
   "before": "",

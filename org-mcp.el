@@ -4044,38 +4044,6 @@ and this node has some; send the part of the content to replace"))
          after
          (substring body (+ at (length before)))))))))
 
-(defun org-mcp--append-to-body (link after files)
-  "Append AFTER to the body of the node LINK names.
-FILES, when non-nil, names the files an `id:' LINK is looked up in;
-see `org-mcp--link-target'.
-
-Appending destroys nothing, so it asserts nothing: the call goes
-through whatever has become of the node since it was read, which is
-why it is no way to retry a refused replacement."
-  (when (or (null after)
-            (string-empty-p after)
-            (string-match-p "\\`[[:space:]]*\\'" after))
-    (org-mcp--tool-validation-error
-     "after is the content to append and cannot be empty or \
-whitespace-only"))
-
-  (org-mcp--validate-body-no-unbalanced-blocks after)
-
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file)))
-
-    (org-mcp--modify-and-save file-path "append body" nil
-      (org-mcp--goto-heading target)
-
-      (org-mcp--validate-body-no-headlines after (org-current-level))
-
-      ;; Save the heading position for the response's link
-      (let ((heading-pos (point)))
-        (goto-char (cdr (org-mcp--body-bounds)))
-        (org-mcp--insert-body-text after)
-        ;; Return to the heading for the response's link
-        (goto-char heading-pos)))))
-
 (defun org-mcp--write-body (link before after files)
   "Replace part or all of the body of the node LINK names with AFTER.
 BEFORE says what the client believed the body held, in one of the
@@ -4090,7 +4058,7 @@ BEFORE reaches both forms through `org-mcp--before-given', so a body
 is asserted by the rule every other precondition follows: \"\" is
 the value naming an empty body, and the rest of
 `org-mcp--blank-param-p' is a parameter the call did not send.
-Append mode reads no precondition at all and never comes here.
+Every body write comes here, so no body changes unguarded.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'."
   (org-mcp--validate-body-no-unbalanced-blocks after)
@@ -4118,15 +4086,13 @@ see `org-mcp--link-target'."
       (set-marker heading nil))))
 
 (defun org-mcp--tool-node-set-content
-    (link before after &optional append files)
-  "Edit or append to body content of an Org node.
+    (link before after &optional files)
+  "Replace the body content of an Org node with AFTER.
 LINK is the link to the node to edit.
 BEFORE is what the client believed the body held: the node's
 `content_digest', which replaces the body entire, or a substring of
-the body, asserted unique, which replaces that substring.  Append
-mode destroys nothing and does not read it.
-AFTER is the replacement or appended text.
-APPEND if non-nil, append AFTER to end of body instead of replacing.
+the body, asserted unique, which replaces that substring.
+AFTER is the replacement text.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4141,19 +4107,12 @@ MCP Parameters:
            substring of the body, which must be unique, replaces
            that substring; the content_digest a read of this node
            returned replaces the body entire.  Use \"\" to add to
-           empty nodes.  Append mode does not read it; send \"\".
-  after - Replacement or appended text
-  append - Append to end of body instead of replacing (optional,
-           default false); true or \"true\" append, false, \"false\"
-           and null replace, and any other value is refused.
-           Append verifies nothing about the prior body, so it is
-           not a way to retry a refused replace.
+           empty nodes.
+  after - Replacement text
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (if (org-mcp--boolean-param append "append")
-      (org-mcp--append-to-body link after files)
-    (org-mcp--write-body link before after files)))
+  (org-mcp--write-body link before after files))
 
 (defun org-mcp--property-name-text (name)
   "Return NAME, a key of a property map, as a string.
@@ -6397,11 +6356,9 @@ Returns JSON object:
     :id "org-node-set-content"
     :description
     (concat
-     "Edit or append to the body content of an Org headline.  In replace
-mode (default), replaces either a unique substring of the headline's
-body text or the body entire, whichever before names.  In append
-mode, inserts new content after existing body content but before any
-child headlines.
+     "Replace the body content of an Org headline.  Replaces either a
+unique substring of the headline's body text or the body entire,
+whichever before names.
 
 Parameters:
   link - Link to the headline to edit (string, required)
@@ -6417,17 +6374,9 @@ Parameters:
            Use empty string \"\" only for adding to empty nodes
            Every other blank - null, false, [] - is the parameter
            left out and is refused as one
-           Append mode reads no precondition; the schema requires
-           the parameter all the same, so send \"\"
-  after - Replacement or appended text (string, required)
+  after - Replacement text (string, required)
           Cannot introduce headlines at same or higher level
           Must maintain balanced #+BEGIN/#+END blocks
-          In append mode it is the content to append and cannot
-          be empty or whitespace-only
-  append - Append instead of replacing (optional, default false):
-           true or \"true\" append; false, \"false\" and null
-           replace; any other value is refused
-           When true, after goes at the end of the body
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -6439,9 +6388,9 @@ Example - rewriting the body entire:
   {\"link\": \"id:abc-123\", \"before\": \"sha256:1b4f0e9851971998\",
    \"after\": \"The whole body, written afresh.\"}
 
-Example - adding to the end of the body:
+Example - writing into a node that has no body:
   {\"link\": \"id:abc-123\", \"before\": \"\",
-   \"after\": \"Meeting notes.\", \"append\": true}
+   \"after\": \"Meeting notes.\"}
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -6451,19 +6400,18 @@ Returns JSON object:
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
 
-Special behavior - Empty before (replace mode):
+Special behavior - Empty before:
   An empty before asserts the node has no content:
   - It is how initial content reaches a node that has none
   - A node that already has content is refused, and the refusal
     asks for the part of the content to replace
 
-Special behavior - Append mode:
-  Append adds to the body and destroys nothing, so it checks
-  nothing about the body it adds to.  It is therefore not a way
-  to retry a replace that was refused: read the node again and
-  send the replace against the body it holds now.
+Adding to a long body costs sending that body back: assert its
+content_digest and send the body with the addition in it.  Every
+body write asserts what it overwrites, so a call repeated after a
+timeout is refused rather than writing the text a second time.
 
-Refusals (replace mode):
+Refusals:
   Every refusal over the value before asserts is marked
   conflict:, whichever form it took - the substring is not there,
   is there more than once, the node has no body, the node has one

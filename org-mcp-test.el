@@ -1373,21 +1373,18 @@ NEW-TITLE is the new title to set."
 ;; Helper functions for testing org-node-set-content MCP tool
 
 (defun org-mcp-test--call-edit-body-and-check
-    (test-file link old-body new-body expected-pattern
-               append expected-link)
+    (test-file link old-body new-body expected-pattern expected-link)
   "Call org-node-set-content tool and check result structure and file content.
 TEST-FILE is the path to the file to check.
 LINK is the link to the node to edit.
-OLD-BODY is the substring to search for within the node's body.
+OLD-BODY is what the body holds now, the value `before' asserts.
 NEW-BODY is the replacement text.
 EXPECTED-PATTERN is a regexp that the file content should match.
-APPEND if true, append new-body to end of body.
 EXPECTED-LINK is the link to the edited heading the response carries."
   (let* ((params
           `((link . ,link)
             (before . ,old-body)
-            (after . ,new-body)
-            (append . ,append)))
+            (after . ,new-body)))
          (result-text (mcp-server-lib-ert-call-tool "org-node-set-content" params))
          (result (json-read-from-string result-text)))
     (should (= (length result) 3))
@@ -3247,6 +3244,17 @@ NEW-TITLE is the invalid new title that should be rejected."
     (alist-get 'inputSchema (org-mcp-test--registered-tool id)))
    nil))
 
+(defun org-mcp-test--registered-tool-properties (id)
+  "Return the parameter names tools/list publishes for the tool ID.
+A JSON object decodes with symbols for its keys, and a schema names
+its parameters as strings, so the keys come back as the client reads
+them."
+  (mapcar
+   (lambda (property) (symbol-name (car property)))
+   (alist-get
+    'properties
+    (alist-get 'inputSchema (org-mcp-test--registered-tool id)))))
+
 (defun org-mcp-test--registered-tool-ids ()
   "Return the ids in the tools/list response, sorted.
 Sorted because `mcp-server-lib' leaves the response order
@@ -3876,7 +3884,7 @@ Task body."
 Parent body.
 ** Child One
 Child body."
-  "TODO task with a child heading for append-body tests.")
+  "TODO task with a child heading, for writes bounded by that child.")
 
 (defconst org-mcp-test--content-todo-empty-body
   "* TODO Empty Body Task"
@@ -4049,27 +4057,27 @@ Org carries the repeater and the delay to the new date.")
    "\\`\\* TODO Task with Two Properties\n" "Some body\\.\n?\\'")
   "Pattern after both properties are removed and the drawer with them.")
 
-(defconst org-mcp-test--pattern-append-body
+(defconst org-mcp-test--pattern-body-line-added
   (concat
    "\\`\\* TODO Simple Task\n"
    "Task body text\\.\n"
    "Appended line\\.\n?\\'")
-  "Pattern after appending to body.")
+  "Pattern once the body holds the line that was added to it.")
 
-(defconst org-mcp-test--pattern-append-body-empty
+(defconst org-mcp-test--pattern-body-written-into-empty
   (concat
    "\\`\\* TODO Empty Body Task\n"
    "New body content\\.\n?\\'")
-  "Pattern after appending to empty body.")
+  "Pattern once an entry that had no body holds one.")
 
-(defconst org-mcp-test--pattern-append-body-with-children
+(defconst org-mcp-test--pattern-body-added-before-children
   (concat
    "\\`\\* TODO Parent Task\n"
    "Parent body\\.\n"
    "Appended text\\.\n"
    "\\*\\* Child One\n"
    "Child body\\.\n?\\'")
-  "Pattern after appending body before children.")
+  "Pattern once the added text stands between the body and the children.")
 
 (defconst org-mcp-test--pattern-logbook-note-new
   (concat
@@ -5508,7 +5516,6 @@ The navigation function should find headlines even when they have TODO keywords.
     "Second child content."
     "Updated second child content."
     org-mcp-test--pattern-edit-body-single-line
-    nil
     (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-multiline ()
@@ -5524,7 +5531,6 @@ The navigation function should find headlines even when they have TODO keywords.
 with new multiline
 content here."
      org-mcp-test--pattern-edit-body-multiline
-     nil
      (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-multiple-occurrences-error ()
@@ -5564,7 +5570,6 @@ content here."
        ""
        "New content added."
        org-mcp-test--pattern-edit-body-empty
-       nil
        (org-mcp-test--file-link test-file "*Third Child #3")))))
 
 (ert-deftest org-mcp-test-edit-body-empty-old-non-empty-body ()
@@ -5599,7 +5604,6 @@ response links to the heading by its ID."
      ""
      "Content added after properties."
      org-mcp-test--pattern-edit-body-empty-with-props
-     nil
      (concat "id:" org-mcp-test--timestamp-id))))
 
 (ert-deftest org-mcp-test-edit-body-nested-headlines ()
@@ -5612,7 +5616,6 @@ response links to the heading by its ID."
      "Some parent content."
      "Updated parent content"
      org-mcp-test--pattern-edit-body-nested-headlines
-     nil
      (concat "id:" org-mcp-test--content-nested-siblings-parent-id))))
 
 (ert-deftest org-mcp-test-edit-body-reject-headline-in-middle ()
@@ -5639,7 +5642,6 @@ response links to the heading by its ID."
      "some text
 *** Subheading content"
      org-mcp-test--pattern-edit-body-accept-lower-level
-     nil
      (concat "id:" org-mcp-test--content-with-id-id))))
 
 (ert-deftest org-mcp-test-edit-body-reject-higher-level-headline ()
@@ -5756,18 +5758,18 @@ unfinished")))
   (concat "\\`" (regexp-quote org-mcp-test--content-block-body-target) "\\'")
   "Regex matching `org-mcp-test--content-block-body-target' unchanged.")
 
-(defconst org-mcp-test--regex-block-body-escaped-appended
+(defconst org-mcp-test--regex-block-body-escaped-written
   (concat
    "\\`\\* Task\nTask body\\.\n- item\n  #\\+begin_example\n"
    "  ,\\*\\* x\n  #\\+end_example\n\\'")
-  "Regex matching the target after appending an indented escaped block.")
+  "Regex matching the target once its body holds an escaped block.")
 
 (ert-deftest org-mcp-test-body-refuses-star-line-in-indented-block ()
   "A body whose indented block holds a star line is refused.
 Org parses the star line as a heading, which breaks the block, so the
 body would add a heading.  The refusal holds for a line deeper than
-the heading the body goes under, in org-node-create and in both modes of
-org-node-set-content, and leaves the file unchanged."
+the heading the body goes under, in org-node-create and in both forms
+of org-node-set-content's before, and leaves the file unchanged."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-block-body-target))
     (let ((link (org-mcp-test--file-link test-file "*Task")))
@@ -5779,9 +5781,8 @@ org-node-set-content, and leaves the file unchanged."
                   (parent . ,(concat "file:" test-file)))
                  ("org-node-set-content"
                   (link . ,link)
-                  (before . "")
-                  (after . "  #+begin_example\n** z\n  #+end_example")
-                  (append . t))
+                  (before . "Task body.")
+                  (after . "  #+begin_example\n** z\n  #+end_example"))
                  ("org-node-set-content"
                   (link . ,link)
                   (before . "Task body.")
@@ -5794,14 +5795,18 @@ org-node-set-content, and leaves the file unchanged."
          test-file org-mcp-test--regex-block-body-target-unchanged)))))
 
 (ert-deftest org-mcp-test-body-accepts-escaped-star-line-in-indented-block ()
-  "A body whose indented block escapes its star line is appended as is."
+  "A body whose indented block escapes its star line is written as is.
+The escape is what keeps Org from reading the line as a heading, so
+the body goes in with the comma still on it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-block-body-target))
     (let ((link (org-mcp-test--file-link test-file "*Task")))
       (org-mcp-test--call-edit-body-and-check
-       test-file link ""
-       "- item\n  #+begin_example\n  ,** x\n  #+end_example"
-       org-mcp-test--regex-block-body-escaped-appended t link))))
+       test-file link "Task body."
+       (concat
+        "Task body.\n"
+        "- item\n  #+begin_example\n  ,** x\n  #+end_example")
+       org-mcp-test--regex-block-body-escaped-written link))))
 
 ;;; The two forms of org-node-set-content's before
 
@@ -5864,7 +5869,7 @@ has no body, which is a region with a token of its own.")
    "\\* Sibling\n\\'")
   "The complete file after one line of Target's body is replaced.")
 
-(defconst org-mcp-test--set-content-appended
+(defconst org-mcp-test--set-content-line-added
   (concat
    org-mcp-test--set-content-heading
    "First line of the body\\.\n"
@@ -5872,7 +5877,7 @@ has no body, which is a region with a token of its own.")
    "Appended line\\.\n"
    "\\*\\* Child\n"
    "\\* Sibling\n\\'")
-  "The complete file after a line is appended to Target's body.")
+  "The complete file once a line is added to the end of Target's body.")
 
 (defconst org-mcp-test--set-content-sibling-filled
   (concat
@@ -5915,7 +5920,6 @@ write covers is what the token covers."
        (org-mcp-test--content-digest-of link)
        "The body, written afresh."
        org-mcp-test--set-content-rewritten
-       nil
        link))))
 
 (ert-deftest org-mcp-test-set-content-substring-mode-is-unchanged ()
@@ -5930,7 +5934,6 @@ of what decides how much of the body it overwrites."
        "Second line of the body."
        "Second line, edited."
        org-mcp-test--set-content-substring-replaced
-       nil
        link))))
 
 (ert-deftest org-mcp-test-set-content-digest-writes-an-empty-body ()
@@ -5946,7 +5949,6 @@ with."
        (org-mcp-test--content-digest-of link)
        "Sibling body."
        org-mcp-test--set-content-sibling-filled
-       nil
        link))))
 
 (ert-deftest org-mcp-test-set-content-digest-round-trips ()
@@ -5977,7 +5979,6 @@ anything; the token it planned the first write from is spent."
          second
          "The body, written afresh."
          org-mcp-test--set-content-rewritten
-         nil
          link)))))
 
 (ert-deftest org-mcp-test-set-content-refuses-a-stale-digest ()
@@ -6044,7 +6045,6 @@ shortest bodies would be the ones a client could not assert."
        "1b4f0e9851971998"
        "A plain body."
        "\\`\\* Target\nA plain body\\.\n\\'"
-       nil
        link))))
 
 (defconst org-mcp-test--content-set-content-refusals
@@ -9962,17 +9962,27 @@ org-node-remove-priority is where a removal says what it destroys."
        "\\`Missing required parameter: after\\'"
        test-file))))
 
-;;; Tests for org-node-set-content append mode
+;;; Tests for adding to a body org-node-set-content rewrites
 
-(ert-deftest org-mcp-test-edit-body-append ()
-  "Test appending to existing body."
+;; Adding to a body is a rewrite of it: `before' asserts the body the
+;; addition is planned against, and `after' carries that body with the
+;; addition in it.  The tests below are the ones that covered a mode
+;; that added without asserting; what they pin — where a body ends,
+;; that the text lands before the children, that a node with no body
+;; takes its first content — is the same either way, and a repeat of
+;; any of these calls is now refused rather than writing twice.
+
+(ert-deftest org-mcp-test-edit-body-add-line-to-existing-body ()
+  "A line is added to a body by rewriting the body with it in.
+The body it is added to is asserted by its digest, so the call says
+what it is adding to and a second one cannot add the line twice."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
-           (params `((link . ,link)
-                     (before . "")
-                     (after . "Appended line.")
-                     (append . t)))
+           (params
+            `((link . ,link)
+              (before . ,(org-mcp-test--content-digest-of link))
+              (after . "Task body text.\nAppended line.")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-content" params))
            (result (json-read-from-string result-text)))
@@ -9981,58 +9991,55 @@ org-node-remove-priority is where a removal says what it destroys."
        (equal (alist-get 'link result)
               (org-mcp-test--file-link test-file "*Simple Task")))
       (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-append-body))))
+       test-file org-mcp-test--pattern-body-line-added))))
 
-(ert-deftest org-mcp-test-edit-body-append-empty-entry ()
-  "Test appending to entry with no body."
+(ert-deftest org-mcp-test-edit-body-writes-into-an-entry-with-none ()
+  "An entry with no body takes its first content through an empty before.
+The empty string is the assertion that there is nothing to overwrite,
+so the call that fills an empty node states that it is empty."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-empty-body))
     (let* ((link (org-mcp-test--file-link test-file "*Empty Body Task"))
            (params `((link . ,link)
                      (before . "")
-                     (after . "New body content.")
-                     (append . t)))
+                     (after . "New body content.")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-content" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-append-body-empty))))
+       test-file org-mcp-test--pattern-body-written-into-empty))))
 
-(ert-deftest org-mcp-test-edit-body-append-empty-after ()
-  "Append mode refuses an empty or whitespace-only after.
-The refusal says what after is on an append call, so a client reading
-it knows which argument to fix and what it is for."
+(ert-deftest org-mcp-test-edit-body-writes-whitespace-after-as-body ()
+  "A whitespace-only after is body text, and it replaces the body.
+`after' carries what the body is to hold, and whitespace is
+something a body can hold, so it is written rather than read as a
+parameter the call left out.  `before' still says what it overwrites,
+so a body cleared this way was asserted first."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-empty-body))
-    (let ((link (org-mcp-test--file-link test-file "*Empty Body Task")))
-      (dolist (after '("" "  " "\n\t"))
-        (should
-         (string=
-          "after is the content to append and cannot be empty or \
-whitespace-only"
-          (org-mcp-test--call-tool-expecting-error
-           test-file "org-node-set-content"
-           `((link . ,link)
-             (before . "")
-             (after . ,after)
-             (append . t)))))))))
+      ((test-file org-mcp-test--content-body-to-edit))
+    (let ((link (org-mcp-test--file-link test-file "*Task")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file link "old text" "   "
+       "\\`\\* Task\n *\n\\'" link))))
 
-(ert-deftest org-mcp-test-edit-body-append-before-children ()
-  "Test that appended content goes before child headlines."
+(ert-deftest org-mcp-test-edit-body-add-before-children ()
+  "Content added to a body goes before the child headlines.
+The body ends where the first child begins, so a rewrite of it
+reaches no further than that, whatever the children hold."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-children))
     (let* ((link (org-mcp-test--file-link test-file "*Parent Task"))
-           (params `((link . ,link)
-                     (before . "")
-                     (after . "Appended text.")
-                     (append . t)))
+           (params
+            `((link . ,link)
+              (before . ,(org-mcp-test--content-digest-of link))
+              (after . "Parent body.\nAppended text.")))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-content" params))
            (result (json-read-from-string result-text)))
       (should (equal (alist-get 'success result) t))
       (org-mcp-test--verify-file-matches
-       test-file org-mcp-test--pattern-append-body-with-children))))
+       test-file org-mcp-test--pattern-body-added-before-children))))
 
 (defconst org-mcp-test--content-empty-body-before-child
   "* Parent\n** Child\n*** Grandchild\nDeep.\n"
@@ -10081,11 +10088,11 @@ whitespace-only"
 (ert-deftest org-mcp-test-edit-body-empty-body-before-next-heading ()
   "org-node-set-content sets an empty body followed directly by another heading.
 The body lies between the heading's meta data and its first child, or
-the end of its subtree, whichever heading follows it.  Appending, and
-replacing with an empty before, each put the text under Parent: when
-a child follows at once, when a property drawer comes first, and when
-a sibling with a child of its own follows.  Nothing lands in the next
-heading's body, and the response links to Parent."
+the end of its subtree, whichever heading follows it.  An empty
+before asserts there is no body there and puts the text under Parent:
+when a child follows at once, when a property drawer comes first, and
+when a sibling with a child of its own follows.  Nothing lands in the
+next heading's body, and the response links to Parent."
   (pcase-dolist (`(,content ,search ,expected)
                  `((,org-mcp-test--content-empty-body-before-child
                     "*Parent"
@@ -10096,18 +10103,17 @@ heading's body, and the response links to Parent."
                    (,org-mcp-test--content-empty-body-before-sibling
                     "*Parent"
                     ,org-mcp-test--regex-empty-body-before-sibling-set)))
-    (pcase-dolist (`(,old-body ,append) '((nil t) ("" nil)))
-      (org-mcp-test--with-temp-org-files
-          ((test-file content))
-        (let ((link (org-mcp-test--file-link test-file search)))
-          (org-mcp-test--call-edit-body-and-check
-           test-file link old-body "Parent body." expected append link))))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file content))
+      (let ((link (org-mcp-test--file-link test-file search)))
+        (org-mcp-test--call-edit-body-and-check
+         test-file link "" "Parent body." expected link)))))
 
 (defconst org-mcp-test--content-body-before-sibling
   "* Parent\nParent body.\n\n* Sibling\nSibling body.\n"
   "Parent with a body and no child, a blank line, then a sibling.")
 
-(defconst org-mcp-test--regex-body-before-sibling-appended
+(defconst org-mcp-test--regex-body-before-sibling-added
   (concat
    "\\`\\* Parent\n"
    "Parent body\\.\n"
@@ -10116,49 +10122,54 @@ heading's body, and the response links to Parent."
    "\\* Sibling\n"
    "Sibling body\\.\n"
    "\\'")
-  "Regex matching the whole sibling file after appending to Parent.")
+  "Regex matching the whole sibling file once Parent's body gains a line.")
 
 (defconst org-mcp-test--content-body-to-edit "* Task\nold text\n"
-  "Task whose body is one line, for replacing and appending.")
+  "Task whose body is one line, for replacing that line.")
 
 (defconst org-mcp-test--regex-body-to-edit-replaced
   "\\`\\* Task\nnew text\n\\'"
   "Regex matching the whole file once the body line is replaced.")
 
-(defconst org-mcp-test--regex-body-to-edit-appended
-  "\\`\\* Task\nold text\nnew text\n\\'"
-  "Regex matching the whole file once a line is appended to the body.")
-
-(ert-deftest org-mcp-test-edit-body-append-false-replaces ()
-  "append false, as JSON false or any other false spelling, replaces.
-JSON false, \"false\", null, \"\" and a missing parameter each replace
-before with after; only JSON true and \"true\" append."
-  (pcase-dolist (`(,append ,expected)
-                 `((:json-false ,org-mcp-test--regex-body-to-edit-replaced)
-                   ("false" ,org-mcp-test--regex-body-to-edit-replaced)
-                   ("" ,org-mcp-test--regex-body-to-edit-replaced)
-                   (nil ,org-mcp-test--regex-body-to-edit-replaced)
-                   (t ,org-mcp-test--regex-body-to-edit-appended)
-                   ("true" ,org-mcp-test--regex-body-to-edit-appended)))
+(ert-deftest org-mcp-test-edit-body-refuses-an-append-parameter ()
+  "A call still sending `append' is refused, and the body is untouched.
+The tool publishes no such parameter, and a parameter no tool
+publishes is refused by name rather than dropped, so a client written
+against a surface that had the mode is told what it sent that no
+longer exists.  It is refused whichever way the flag is spelled,
+including the ones that used to mean replace, because what is refused
+is the parameter and not its value."
+  (dolist (append '(t "true" :json-false "false" "" nil "yes"))
     (org-mcp-test--with-temp-org-files
         ((test-file org-mcp-test--content-body-to-edit))
-      (let ((link (org-mcp-test--file-link test-file "*Task")))
-        (org-mcp-test--call-edit-body-and-check
-         test-file link "old text" "new text" expected append link)))))
-
-(ert-deftest org-mcp-test-edit-body-refuses-unknown-append ()
-  "append that is neither true nor false is refused, changing nothing."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-body-to-edit))
-    (should
-     (string-match-p
-      "\\`append must be true or false: \"yes\"\\'"
-      (org-mcp-test--call-tool-expecting-error
-       test-file "org-node-set-content"
+      (org-mcp-test--call-tool-refused
+       "org-node-set-content"
        `((link . ,(org-mcp-test--file-link test-file "*Task"))
          (before . "old text")
          (after . "new text")
-         (append . "yes")))))))
+         (append . ,append))
+       "\\`Unexpected parameter: append\\'"
+       test-file))))
+
+(ert-deftest org-mcp-test-edit-body-publishes-no-append-parameter ()
+  "org-node-set-content's schema names link, before, after and files.
+The mode is gone from the surface a client reads, not only from the
+paths it reaches, so a client never plans a call around it."
+  (org-mcp-test--with-enabled
+    (let ((properties
+           (org-mcp-test--registered-tool-properties
+            "org-node-set-content")))
+      (should
+       (equal (sort (copy-sequence properties) #'string<)
+              '("after" "before" "files" "link")))
+      (should
+       (equal
+        (sort
+         (copy-sequence
+          (org-mcp-test--registered-tool-required
+           "org-node-set-content"))
+         #'string<)
+        '("after" "before" "link"))))))
 
 (defconst org-mcp-test--content-body-mixed-case
   "* Task\nFoo bar first.\nThen foo bar again.\n"
@@ -10182,68 +10193,56 @@ unique occurrence is the lowercase one, and only it changes, whatever
     (let ((link (org-mcp-test--file-link test-file "*Task")))
       (org-mcp-test--call-edit-body-and-check
        test-file link "foo bar" "baz"
-       org-mcp-test--regex-body-mixed-case-replaced nil link))))
+       org-mcp-test--regex-body-mixed-case-replaced link))))
 
-(ert-deftest org-mcp-test-edit-body-append-before-sibling ()
-  "Appending to a body followed by a sibling adds the text after it.
+(ert-deftest org-mcp-test-edit-body-add-line-before-sibling ()
+  "Adding to a body followed by a sibling keeps the blank line between.
 The text goes on the line after the body's last line, and the blank
-line before the sibling stays the only one."
+line before the sibling stays the only one, so the body's end is
+where the sibling's own text begins and not a line earlier."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-body-before-sibling))
     (let ((link (org-mcp-test--file-link test-file "*Parent")))
       (org-mcp-test--call-edit-body-and-check
-       test-file link nil "Appended."
-       org-mcp-test--regex-body-before-sibling-appended t link))))
+       test-file link "Parent body." "Parent body.\nAppended."
+       org-mcp-test--regex-body-before-sibling-added link))))
 
-(ert-deftest org-mcp-test-edit-body-append-headline-error ()
-  "Test that content with headlines is rejected in append mode."
+(ert-deftest org-mcp-test-edit-body-headline-error ()
+  "A body that would add a headline at the same level is refused."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
-      (org-mcp-test--assert-error-and-file
-       test-file
-       (let* ((request
-               (mcp-server-lib-create-tools-call-request
-                "org-node-set-content" 1
-                `((link . ,link)
-                  (before . "")
-                  (after . "* A headline")
-                  (append . t))))
-              (response (mcp-server-lib-process-jsonrpc-parsed
-                         request mcp-server-lib-ert-server-id))
-              (result (mcp-server-lib-ert-process-tool-response response)))
-         (error "Expected error but got success: %s" result))))))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-content"
+       `((link . ,link)
+         (before . "Task body text.")
+         (after . "* A headline"))
+       "\\`Body cannot contain headlines at level 1 or higher\\'"
+       test-file))))
 
-(ert-deftest org-mcp-test-edit-body-append-unbalanced-blocks-error ()
-  "Test that unbalanced blocks are rejected in append mode."
+(ert-deftest org-mcp-test-edit-body-unbalanced-blocks-error ()
+  "A body whose #+BEGIN block is never closed is refused."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
-      (org-mcp-test--assert-error-and-file
-       test-file
-       (let* ((request
-               (mcp-server-lib-create-tools-call-request
-                "org-node-set-content" 1
-                `((link . ,link)
-                  (before . "")
-                  (after . "#+BEGIN_SRC\ncode\n")
-                  (append . t))))
-              (response (mcp-server-lib-process-jsonrpc-parsed
-                         request mcp-server-lib-ert-server-id))
-              (result (mcp-server-lib-ert-process-tool-response response)))
-         (error "Expected error but got success: %s" result))))))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-content"
+       `((link . ,link)
+         (before . "Task body text.")
+         (after . "#+BEGIN_SRC\ncode\n"))
+       "\\`Body contains unclosed SRC block\\'"
+       test-file))))
 
-(ert-deftest org-mcp-test-edit-body-append-id-link ()
-  "Test appending body via an `id:' link."
+(ert-deftest org-mcp-test-edit-body-id-link ()
+  "org-node-set-content reaches a node through an `id:' link."
   (org-mcp-test--with-id-setup
    test-file
    org-mcp-test--content-todo-with-test-id
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
-                    (before . "")
-                    (after . "Appended.")
-                    (append . t)))
+                    (before . ,(org-mcp-test--content-digest-of link))
+                    (after . "Rewritten.")))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-content" params))
           (result (json-read-from-string result-text)))
@@ -11302,7 +11301,7 @@ Line 10 is the Beta heading.")
    "\\'")
   "Regex matching the links file after clocking in and out of Gamma.")
 
-(defconst org-mcp-test--regex-links-alpha-body-appended
+(defconst org-mcp-test--regex-links-alpha-body-extended
   (concat
    "\\`"
    (regexp-quote org-mcp-test--content-links-preamble)
@@ -11311,13 +11310,13 @@ Line 10 is the Beta heading.")
    " *:CUSTOM_ID: +alpha-slug\n"
    " *:END:\n"
    "Alpha body\\.\n"
-   "Alpha appended\\.\n"
+   "Alpha extended\\.\n"
    "\\*\\* Review\n"
    "Alpha review\\.\n"
    (regexp-quote org-mcp-test--content-links-beta)
    (regexp-quote org-mcp-test--content-links-gamma)
    "\\'")
-  "Regex matching the links file after appending to Alpha's body.")
+  "Regex matching the links file once Alpha's body gains a line.")
 
 (defconst org-mcp-test--regex-links-alpha-review-renamed
   (concat
@@ -11676,10 +11675,9 @@ file, the buffer of the running clock, nor the running clock changes."
     (org-mcp-test--call-edit-body-and-check
      test-file
      (format "[[file:%s::#alpha-slug][Alpha]]" test-file)
-     nil
-     "Alpha appended."
-     org-mcp-test--regex-links-alpha-body-appended
-     t
+     "Alpha body."
+     "Alpha body.\nAlpha extended."
+     org-mcp-test--regex-links-alpha-body-extended
      (org-mcp-test--file-link test-file "#alpha-slug"))))
 
 (ert-deftest org-mcp-test-link-heading-tools ()
@@ -12971,9 +12969,8 @@ up in the parent's file."
                         (after . "Beta Renamed"))
                        ("org-node-set-content"
                         (link . ,link)
-                        (before . nil)
-                        (after . "Beta appended.")
-                        (append . t))
+                        (before . "Beta body.")
+                        (after . "Beta body rewritten."))
                        ("org-node-set-properties"
                         (link . ,link)
                         (before . ((EFFORT . "")))
@@ -14112,7 +14109,6 @@ still links to the heading whose body changed."
      "Parent body."
      "New parent body."
      org-mcp-test--regex-parent-body-replaced
-     nil
      (org-mcp-test--file-link test-file "*Parent Task"))))
 
 (ert-deftest org-mcp-test-returned-link-clock-tools ()
@@ -14503,27 +14499,35 @@ keeps the refusal it has always had."
        "\\`conflict: An empty before asserts the node has no content,"
        test-file))))
 
-(ert-deftest org-mcp-test-append-reads-no-before-at-all ()
-  "Append takes no precondition, so no spelling of one can refuse it.
-Appending destroys nothing and asserts nothing, and the rule that
-refuses a blank precondition is a rule about preconditions.  The
-schema asks for the parameter, because one tool publishes one
-parameter list and replace mode needs it, and a blank sent into it
-here reaches nothing and refuses nothing."
+(ert-deftest org-mcp-test-every-body-write-reads-its-before ()
+  "Every way to change a body reads `before\=', so none writes unguarded.
+The parameter is required, and a blank one refuses the call rather
+than reaching a path that has no use for it.  A body is added to by
+asserting what it holds and sending it back with the addition in,
+which is the same guarded write as any other."
   (org-mcp-test--with-enabled
     (should
      (member
       "before"
       (org-mcp-test--registered-tool-required "org-node-set-content"))))
   (org-mcp-test--with-set-content-file test-file
-    (org-mcp-test--call-edit-body-and-check
-     test-file
-     (org-mcp-test--set-content-link)
-     nil
-     "Appended line."
-     org-mcp-test--set-content-appended
-     t
-     (org-mcp-test--set-content-link))))
+    (let ((link (org-mcp-test--set-content-link)))
+      (dolist (blank '(nil :json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-content"
+         `((link . ,link) (before . ,blank) (after . "Added line."))
+         "\\`Missing required parameter: before\\'"
+         test-file))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       (org-mcp-test--content-digest-of link)
+       (concat
+        "First line of the body.\n"
+        "Second line of the body.\n"
+        "Appended line.")
+       org-mcp-test--set-content-line-added
+       link))))
 
 ;;; Refusal class tests
 
