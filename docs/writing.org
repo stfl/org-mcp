@@ -112,9 +112,10 @@ again, so something in the call has to change.
 
 A =conflict:= says the opposite: the call was well formed, and the file has
 moved on from what the call asserted about it. The =before= a write carries,
-and the =clock_out= of a running clock, are the assertions org-mcp checks, and
-a conflict names what it found instead, so the recovery is to read the heading
-or the active clock again and decide afresh.
+and the link a clock operation names — =clock_out= on a clock-in, =link= on a
+clock-out — are the assertions org-mcp checks, and a conflict names what it
+found instead, so the recovery is to read the heading or the active clock again
+and decide afresh.
 
 A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
 an unchecked checkbox, an ordered subtree — refused the change, nothing was

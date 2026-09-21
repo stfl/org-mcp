@@ -2558,6 +2558,56 @@ element API."
                               (cons 'marker marker))))))))))
         nil)))
 
+(defun org-mcp--clock-describe-running (active)
+  "Describe the running clock ACTIVE the way a refusal names it.
+ACTIVE is the running clock as `org-mcp--clock-find-active' returns
+it.  The text carries the heading's title, a link to that heading and
+the clock's start, so a client refused for naming the wrong clock can
+ask the user about this one and then name it back."
+  (let ((marker (alist-get 'marker active)))
+    (format "'%s' (%s) since %s"
+            (alist-get 'heading active)
+            (with-current-buffer (marker-buffer marker)
+              (org-with-wide-buffer
+               (goto-char marker)
+               (org-back-to-heading t)
+               (org-mcp--link-at-point)))
+            (alist-get 'start active))))
+
+(defun org-mcp--clock-names-running-p (active target)
+  "Return non-nil when TARGET names the heading the clock ACTIVE runs on.
+ACTIVE is the running clock as `org-mcp--clock-find-active' returns
+it, and TARGET a link resolved by `org-mcp--link-target'.  The two
+clock guards resolve an `id:' link differently, so each resolves its
+own and this decides only what the result names.
+
+The link `org-mcp--link-at-point' makes for the clock's heading names
+it even when, as a title link, it finds an earlier heading of the same
+title.  Every other link names the clock by landing on that heading,
+so one naming a whole file, another heading, or no heading at all,
+names no running clock."
+  (let ((file (alist-get 'file active))
+        (marker (alist-get 'marker active)))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker) (org-back-to-heading t)
+       (let ((heading (point))
+             (own-link (org-mcp--link-at-point)))
+         (or
+          ;; A title link org-mcp handed out for the running heading
+          ;; finds the first heading of that title, which may be
+          ;; another one.
+          (equal
+           (org-element-property
+            :raw-link (org-mcp--link-parse (plist-get target :link)))
+           own-link)
+          (and (org-mcp--paths-equal-p (plist-get target :file) file)
+               ;; A link that resolves to no heading in the file names
+               ;; no running clock either.
+               (ignore-error mcp-server-lib-tool-error
+                 (org-mcp--goto-heading target)
+                 (= (point) heading)))))))))
+
 (defun org-mcp--clock-check-clock-out (active clock-out)
   "Refuse a clock-in unless CLOCK-OUT names the running clock ACTIVE.
 ACTIVE is the running clock as `org-mcp--clock-find-active' returns
@@ -2568,15 +2618,12 @@ parameter, a link to the heading of the running clock; a value
 With no clock running, a CLOCK-OUT is refused: it names no clock.  A
 clock running outside the allowed files is refused whatever CLOCK-OUT
 holds, since org-mcp tells a client nothing about that clock, not even
-its heading.  Any other running clock needs a CLOCK-OUT that names the
-heading holding its CLOCK line.  An `id:' CLOCK-OUT is looked up in
-the running clock's file only, with no ID index and no `files', and a
-`file:' CLOCK-OUT must name that file.  The link `org-mcp--link-at-point'
-makes for that heading names it too, even when, as a title link, it
-resolves to an earlier heading of the same title.  A missing or wrong
-CLOCK-OUT is refused with the running clock's heading named by its
-title and link, and the clock's start, so the client can ask the user
-about it.  Nothing is changed.
+its heading.  Any other running clock needs a CLOCK-OUT that names its
+heading, see `org-mcp--clock-names-running-p'; an `id:' CLOCK-OUT is
+looked up in the running clock's file only, with no ID index and no
+`files'.  A missing or wrong CLOCK-OUT is refused with that clock
+described, see `org-mcp--clock-describe-running', so the client can
+ask the user about it.  Nothing is changed.
 
 A CLOCK-OUT that disagrees with the running clock is a conflict: the
 client believed something about the world that no longer holds, and
@@ -2593,44 +2640,19 @@ reading the clock again is what puts it right."
        "A clock is running in a file outside the allowed files.  Ask the \
 user to clock out of it before clocking in"))
      (t
-      (let ((file (alist-get 'file active))
-            (marker (alist-get 'marker active)))
-        (with-current-buffer (marker-buffer marker)
-          (org-with-wide-buffer
-           (goto-char marker) (org-back-to-heading t)
-           (let* ((heading (point))
-                  (link (org-mcp--link-at-point))
-                  (running
-                   (format "'%s' (%s) since %s"
-                           (alist-get 'heading active)
-                           link
-                           (alist-get 'start active))))
-             (unless clock-out
-               (org-mcp--tool-conflict-error
-                "A clock is running on %s.  Ask the user whether to \
+      (unless clock-out
+        (org-mcp--tool-conflict-error
+         "A clock is running on %s.  Ask the user whether to \
 clock out of it, then send its link as clock_out"
-                running))
-             (let ((target (org-mcp--link-target clock-out nil file)))
-               (unless (or
-                        ;; A title link org-mcp handed out for the
-                        ;; running heading finds the first heading of
-                        ;; that title, which may be another one.
-                        (equal
-                         (org-element-property
-                          :raw-link (org-mcp--link-parse clock-out))
-                         link)
-                        (and
-                         (org-mcp--paths-equal-p
-                          (plist-get target :file) file)
-                         ;; A link that resolves to no heading in
-                         ;; the file names no running clock either.
-                         (ignore-error mcp-server-lib-tool-error
-                           (org-mcp--goto-heading target)
-                           (= (point) heading))))
-                 (org-mcp--tool-conflict-error
-                  "clock_out does not name the running clock: %s.  \
+         (org-mcp--clock-describe-running active)))
+      (unless (org-mcp--clock-names-running-p
+               active
+               (org-mcp--link-target clock-out
+                                     nil (alist-get 'file active)))
+        (org-mcp--tool-conflict-error
+         "clock_out does not name the running clock: %s.  \
 The clock runs on %s"
-                  clock-out running)))))))))))
+         clock-out (org-mcp--clock-describe-running active)))))))
 
 (defun org-mcp--clock-save-closed (buf file preexisting-modified-p)
   "Save BUF, which holds the clock org-mcp closed, and report a failed save.
@@ -5774,31 +5796,38 @@ MCP Parameters:
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
           (org-mcp--clock-insert-entry clock-start))))))
 
-(defun org-mcp--tool-clock-out (&optional link end_time files)
-  "Clock out the currently active clock.
+(defun org-mcp--tool-clock-out (link &optional end_time files)
+  "Clock out the clock LINK names, which has to be the running one.
+LINK is this call's guard: a clock operation asserts which clock it
+changes rather than a value it overwrites, so a LINK naming any
+heading but the one the running clock sits under is refused as a
+conflict and nothing is closed.  Without it the call would close
+whichever clock happens to be running, which may be one the user
+started in Emacs and the client never saw.  The link
+`org-mcp--tool-clock-active' reports for the running clock names it;
+see `org-mcp--clock-names-running-p' for the rest.
 A clock running in a file outside the allowed files is refused, as
 clocking in refuses it: org-mcp writes no file outside them, and the
 refusal names neither that file nor the heading and start of the clock
-it holds, which `org-mcp--tool-clock-active' withholds too.
+it holds, which `org-mcp--tool-clock-active' withholds too.  That
+refusal comes before LINK is looked at, so it reveals nothing about
+the clock either way.
 The clock is closed through Org, so Emacs's own clock stops with it
 and Org's clock-out settings decide what the file ends up holding:
 `org-clock-out-remove-zero-time-clocks' deletes a CLOCK line of no
 length, and the drawer it empties, and `org-clock-out-switch-to-state'
 rewrites the heading's TODO keyword.  The response reports neither; it
 reports the close org-mcp asked for.
-LINK, when not blank, must name a heading or file in the active
-clock's file; see `org-mcp--link-given'.
 END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
-see `org-mcp--link-target'.  Without LINK it is not used.
+see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Optional link to validate against active clock
+  link - Link to the heading the running clock is on
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
-           - file:{absolute-path}
            - any of these as [[link]] or [[link][description]]
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)
   files - Files and directories to look up an id: link in, in order,
@@ -5811,6 +5840,13 @@ MCP Parameters:
       (org-mcp--tool-validation-error
        "A clock is running in a file outside the allowed files.  Ask \
 the user to clock out of it in Emacs"))
+    (unless (org-mcp--clock-names-running-p
+             active
+             (org-mcp--link-target link files))
+      (org-mcp--tool-conflict-error
+       "link does not name the running clock: %s.  The clock runs \
+on %s"
+       link (org-mcp--clock-describe-running active)))
     (let* ((active-file (alist-get 'file active))
            (now (current-time))
            (end
@@ -5827,13 +5863,6 @@ the user to clock out of it in Emacs"))
          "End time %s is before start time %s"
          (org-mcp--clock-format-timestamp end)
          (format "[%s]" start-str)))
-      ;; If a link is provided, validate it matches
-      (when-let* ((link (org-mcp--link-given link)))
-        (let ((link-file
-               (plist-get (org-mcp--link-target link files) :file)))
-          (unless (org-mcp--paths-equal-p link-file active-file)
-            (org-mcp--tool-validation-error
-             "Link file does not match active clock file"))))
       (let ((duration (float-time (time-subtract end start-time))))
         (org-mcp--modify-and-save active-file "clock-out"
                                   `((clocked_out . t)
@@ -7446,7 +7475,14 @@ Returns JSON object:
     #'org-mcp--tool-clock-out
     :id "org-clock-out"
     :description
-    "Clock out the currently active clock.
+    (concat
+     "Clock out the running clock.
+
+link names the clock to close: the heading whose CLOCK line is open,
+which org-clock-active reports along with the link to it.  A link
+naming any other heading, or a whole file, is refused and nothing is
+closed, so the call cannot end a clock the user started somewhere the
+client never looked.
 
 Closing the clock stops the Emacs clock it belongs to, so a clock-in
 after it needs no clock_out.  Org's clock-out settings decide what the
@@ -7462,16 +7498,11 @@ user to clock out of it in Emacs.
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
-  link - Optional link to validate against active clock (string)
-         If provided, must name the file of the active clock or a
-         heading in it; null, false and \"\" mean no link
-         Formats:
-           - id:{id}
-           - file:{absolute-path}::#{custom-id}
-           - file:{absolute-path}::*{title} (first match)
-           - file:{absolute-path}
-           - any of these as [[link]] or [[link][description]]
-  end_time - ISO 8601 end time (string, optional)
+  link - Link to the heading the running clock is on (string,
+         required)
+"
+     org-mcp--heading-link-formats
+     "  end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
              If omitted, uses current time
   files - Files and directories to look up an id: link in
@@ -7488,7 +7519,7 @@ Returns JSON object:
   duration - Duration as H:MM (string)
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}"
+         CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
    (list
     #'org-mcp--tool-clock-add

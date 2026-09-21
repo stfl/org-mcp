@@ -36,7 +36,7 @@ Example responses:
   "active": true,
   "file": "/home/user/org/tasks.org",
   "heading": "Implement feature X",
-  "start": "[2026-03-23 Mon 14:30]",
+  "start": "2026-03-23 Mon 14:30",
   "link": "file:~/org/tasks.org::*Implement feature X"
 }
 
@@ -103,13 +103,13 @@ Example:
 #+end_src
 
 ** org-clock-out
-- *Description:* Clock out the currently active clock. Org writes the close, so the Emacs clock the CLOCK line belongs to stops with it and a following =org-clock-in= needs no =clock_out=. Supports optional link validation and custom end time
+- *Description:* Clock out the running clock, which =link= has to name. Org writes the close, so the Emacs clock the CLOCK line belongs to stops with it and a following =org-clock-in= needs no =clock_out=
 - *Parameters:*
-  - =link= (string, optional): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) to validate against the active clock, such as =file:/path/to/file.org=. If provided, its file must match the active clock's file; =null=, =false= or a blank string count as none
+  - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) to the heading the running clock is on, the heading =org-clock-active= reports along with the link to it. Naming it is what keeps the call from ending a clock the client never saw — one the user started in Emacs minutes earlier, say — so a link naming another heading, or a whole file, closes nothing
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and clock-out details
-- *Refuses with:* =conflict:= when no clock runs at all, unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
+- *Refuses with:* =conflict:= when no clock runs at all, or when =link= names a heading the running clock is not on; unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Org writes the close, so Org's clock-out settings decide what the file ends up
 holding. With =org-clock-out-remove-zero-time-clocks=, a clock of no length
@@ -128,18 +128,30 @@ A call is refused when:
   #+begin_example
   conflict: No active clock to stop
   #+end_example
+- =link= names a heading the running clock is not on, or names a whole file, which names no one clock.  The client believed the clock ran where it does not, so the refusal is a conflict, and it describes the clock that is running the way =org-clock-in= describes it, so the user can be asked about that one instead:
+  #+begin_example
+  conflict: link does not name the running clock: file:~/org/tasks.org::*Write the report.  The clock runs on 'Implement feature X' (id:550e8400-e29b-41d4-a716-446655440000) since 2026-03-23 Mon 14:30
+  #+end_example
 - =end_time= is before the running clock's start, or cannot be parsed.  An =end_time= before the start is the client's to fix and stays unmarked: reading the clock again does not make the time it sent valid.
-- =link= names a file other than the running clock's, or is no link org-mcp takes or names a file outside the allowed files.
+- =link= is no link org-mcp takes, or names a file outside the allowed files.  These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
+
+A clock running outside the allowed files is refused before =link= is read, so a link into the allowed files and one naming that clock's own file are answered alike and neither tells the client where the clock is.
 
 Example:
 #+begin_src json
+# Request:
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "end_time": "2026-03-23T16:45:00"
+}
+
 # Success response:
 {
   "success": true,
   "saved": true,
   "clocked_out": true,
   "heading": "Implement feature X",
-  "start": "[2026-03-23 Mon 14:30]",
+  "start": "2026-03-23 Mon 14:30",
   "end": "[2026-03-23 Mon 16:45]",
   "duration": "2:15",
   "link": "id:550e8400-e29b-41d4-a716-446655440000"
@@ -219,7 +231,7 @@ Example response:
     {
       "file": "/home/user/org/tasks.org",
       "heading": "Implement feature X",
-      "start": "[2026-03-23 Mon 14:30]",
+      "start": "2026-03-23 Mon 14:30",
       "link": "file:~/org/tasks.org::*Implement feature X"
     }
   ],
