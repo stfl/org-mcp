@@ -24841,6 +24841,27 @@ carry: WAIT on 1 heading\\."
         (org-mcp-test--file-link test-file "*Book the room") "WAIT" "NEXT"))
       t))))
 
+(ert-deftest org-mcp-test-tool-schemas-carry-no-docstring-escapes ()
+  "No parameter description a client reads carries a docstring escape.
+The schema takes each description out of the handler's docstring
+verbatim, while an Emacs user reads that docstring through
+`substitute-command-keys', which turns the backslash escape for an
+apostrophe into one.  An escape written inside the MCP Parameters
+block therefore reads correctly in Emacs and reaches a client as the
+two characters it is spelled with, so those blocks are written with
+plain apostrophes."
+  (org-mcp-test--with-enabled
+    (dolist (tool (org-mcp-test--registered-tools))
+      (dolist (property
+               (alist-get 'properties (alist-get 'inputSchema tool)))
+        (should-not
+         (string-match-p
+          "\\\\="
+          (format "%s %s: %s"
+                  (alist-get 'name tool)
+                  (car property)
+                  (or (alist-get 'description (cdr property)) ""))))))))
+
 (defconst org-mcp-test--content-settings-two-waits
   (concat
    "#+TODO: TODO | DONE\n"
