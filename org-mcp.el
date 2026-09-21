@@ -4079,12 +4079,16 @@ MCP Parameters:
            compares titles: letter case, runs of whitespace and
            statistics cookies make no difference, so the title a
            read returned is always accepted
-  after - New title without TODO state or tags.  A statistics cookie
-          on the headline is kept unless after names one of its own
+  after - New title without TODO state or tags (required).  A
+          statistics cookie on the headline is kept unless after
+          names one of its own.  Null, false and [] are the
+          parameter left out; a headline always has a title, so
+          there is nothing a blank could ask for
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
+  (setq after (org-mcp--text-param-given after "after"))
   (org-mcp--validate-headline-title after)
   (org-mcp--assert-field-value before "Title")
 

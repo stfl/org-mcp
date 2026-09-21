@@ -14912,6 +14912,43 @@ before names."
         (should-not (member "after" required))
         (should-not (member "files" required))))))
 
+(ert-deftest org-mcp-test-blank-after-on-set-title-is-left-out ()
+  "A blank new title is the parameter left out, as everywhere else.
+A client that fills a parameter it is not using sends null, false or
+[], and none of them names a title, so the call says nothing about
+what the heading is to be called and nothing is written.  A value
+that is no text at all is a malformed call, named as such rather
+than reaching Org.  The empty string is text, and it keeps the
+refusal a title of no text has always had.
+
+`before' is read the same way, so neither parameter of this tool
+answers a client with an internal error."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (dolist (blank '(nil :json-false []))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-title"
+         `((link . ,link) (before . "Simple Task") (after . ,blank))
+         "\\`Missing required parameter: after\\'"
+         test-file))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-title"
+       `((link . ,link) (before . "Simple Task") (after . 5))
+       "\\`after must be a string, \"\" for no value: 5\\'"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-set-title"
+       `((link . ,link) (before . "Simple Task") (after . ""))
+       "\\`Headline title cannot be empty or contain only \
+whitespace\\'"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-set-title"
+       `((link . ,link) (before . 5) (after . "Renamed"))
+       "\\`before must be a string, \"\" for no value: 5\\'"
+       test-file))))
+
 (ert-deftest org-mcp-test-blank-before-on-set-content-is-left-out ()
   "A blank body precondition is the parameter left out, body or none.
 org-node-set-content asserts a body the way every other write

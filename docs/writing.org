@@ -355,10 +355,10 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
-  - =after= (string, required): New headline title (without TODO state or tags)
+  - =after= (string, required): New headline title (without TODO state or tags). =null=, =false= and =[]= are the parameter left out and are refused: a headline always has a title, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline
-- *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise — a blank =after=, and either parameter carrying something that is not text (see [[*How a refusal is classed]])
 
 A statistics cookie on the headline survives the rename. A read leaves the
 cookie out of the title it returns, so an =after= composed from one carries
