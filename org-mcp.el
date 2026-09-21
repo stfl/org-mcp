@@ -36,6 +36,7 @@
 (require 'mcp-server-lib)
 (require 'org)
 (require 'org-archive)
+(require 'org-element)
 (require 'org-id)
 (require 'org-ql)
 (require 'org-refile)
@@ -3514,55 +3515,113 @@ Throws an MCP tool error if validation fails."
     (org-mcp--tool-validation-error
      "Headline title cannot contain newlines")))
 
-(defun org-mcp--validate-date-string (date-str)
-  "Validate that DATE-STR names a date that exists.
-Accepts ISO-like dates: YYYY-MM-DD with optional HH:MM time.
-Throws an MCP tool error if the shape is wrong, and one if the shape
-is right but the date is not a date.
+(defun org-mcp--timestamp-parsed (date-str)
+  "Return DATE-STR parsed by Org as a timestamp element, or nil.
+Org reads a timestamp between brackets, so a bare `2026-03-27' is
+offered to it wrapped in the active brackets Org writes it with.
 
-A shape is not an existence.  `2026-02-30' is four digits, two and
-two; it is no day of any year, and Org does not say so — it rolls the
-value over, to 2026-03-02 here and to 2027-02-14 for `2026-13-45',
-and writes that.  The call then has a success reporting a date it
-never named.
+The parse has to account for the whole of DATE-STR.  Org reads one
+timestamp and stops, so text beside one would be dropped without
+ever reaching the file, and a value carrying it names no timestamp."
+  (let* ((wrapped (concat "<" date-str ">"))
+         (bracketed (org-timestamp-from-string date-str))
+         (source
+          (if bracketed
+              date-str
+            wrapped))
+         (timestamp
+          (or bracketed (org-timestamp-from-string wrapped))))
+    (and timestamp
+         (equal (org-element-property :raw-value timestamp) source)
+         timestamp)))
 
-So the value is read the way the write will read it and compared with
-what was sent.  `org-read-date' is that reader: `org-schedule' and
-`org-deadline' reach it through `org-add-planning-info', so what it
-makes of the string is what would land in the file.  Asking it is
-also what makes a rule about month lengths or leap years
-unnecessary, and what catches `0000-01-01', which is a real date in
-every component and which Org reads as the year 2000.
+(defconst org-mcp--timestamp-moment
+  '(:year-start :month-start :day-start :hour-start :minute-start)
+  "The element properties saying which moment a timestamp names.
+Two timestamps carrying the same values here name the same moment,
+whatever repeater, warning period or day name they are written
+with.")
 
-A date carrying no time is compared as a date: `org-read-date' fills
-the time of day from the clock, and that is not something the call
-said.  One carrying a time is compared whole, because an hour Org
-rolls over need not take the day with it — `2026-03-27 10:99' is
-11:39 on the day it names."
-  (unless
-      (string-match-p
-       "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\( [0-9]\\{2\\}:[0-9]\\{2\\}\\)?$"
-       date-str)
-    (org-mcp--tool-validation-error
-     "Invalid date format '%s' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM"
-     date-str))
-  (let* ((timed (string-match-p " " date-str))
-         (format
-          (if timed
-              "%Y-%m-%d %H:%M"
-            "%Y-%m-%d"))
-         (read
-          (condition-case _
-              (format-time-string format (org-read-date t t date-str))
-            (error
-             (org-mcp--tool-validation-error
-              "Invalid date '%s' - Org cannot read it as one"
-              date-str)))))
-    (unless (string= read date-str)
+(defun org-mcp--timestamp-parts (timestamp properties)
+  "Return the PROPERTIES of TIMESTAMP, as a list to compare by."
+  (mapcar
+   (lambda (property)
+     (org-element-property property timestamp))
+   properties))
+
+(defun org-mcp--date-normalized (date-str)
+  "Return DATE-STR as the Org timestamp string to write.
+Throws an MCP tool error when Org will not carry DATE-STR to the
+file as it was sent.
+
+Org\\='s own parser decides what a timestamp is, so a write takes the
+vocabulary a read speaks: the shorthand `2026-03-27' and
+`2026-03-27 09:00', a repeater, a warning period, and the raw string
+a read returns, brackets and all.  There is no second definition of
+a timestamp here to drift from Org\\='s.
+
+Four things Org parses are refused, because writing them would put
+something other than what the call sent into the file:
+
+- a date whose fields name no day — `2026-02-30', `2026-13-45',
+  `2026-03-27 25:99' — which Org rolls on to a day nobody asked for;
+- a year below 100, which Org\\='s date reader reads as a two-digit
+  year and answers with another century;
+- an inactive timestamp, which a planning line does not carry;
+- a date range, whose second half Org\\='s planning writer drops.
+
+The value returned is Org\\='s own rendering of what it parsed, the
+form `org-schedule' and `org-deadline' carry through whole; see
+`org-mcp--write-planning-timestamp'."
+  (let ((timestamp (org-mcp--timestamp-parsed date-str)))
+    (unless timestamp
       (org-mcp--tool-validation-error
-       "Not a date: '%s'.  Org reads it as %s, which is not the \
-date the call named"
-       date-str read))))
+       "Invalid date '%s' - expected 2026-03-27, 2026-03-27 09:00, \
+or an Org timestamp such as <2026-06-20 Sat +1w -3d>"
+       date-str))
+    (when (memq
+           (org-element-property :type timestamp)
+           '(inactive inactive-range))
+      (org-mcp--tool-validation-error
+       "Date '%s' is an inactive timestamp - SCHEDULED and DEADLINE \
+carry an active one, written <...>"
+       date-str))
+    ;; A time range within one day — `<2026-03-27 Fri 09:00-10:00>' —
+    ;; is a range Org's planning writer does carry, so what is refused
+    ;; is a range whose halves fall on different days.
+    (unless (equal
+             (org-mcp--timestamp-parts
+              timestamp '(:year-start :month-start :day-start))
+             (org-mcp--timestamp-parts
+              timestamp '(:year-end :month-end :day-end)))
+      (org-mcp--tool-validation-error
+       "Date '%s' is a date range - name the one date the field is \
+to carry"
+       date-str))
+    ;; `org-small-year-to-year' is the reading Org's date reader
+    ;; applies, so the year it leaves alone is the year that reaches
+    ;; the file.
+    (let ((year (org-element-property :year-start timestamp)))
+      (unless (= year (org-small-year-to-year year))
+        (org-mcp--tool-validation-error
+         "Date '%s' has a year below 100, which Org reads as a \
+two-digit year"
+         date-str)))
+    ;; Org's parser reads the fields as written; its writer resolves
+    ;; them against the calendar.  A day that does not exist is one
+    ;; the two disagree about, and Org's answer is the day the write
+    ;; would otherwise have landed on.
+    (let ((rendered (org-element-interpret-data timestamp)))
+      (unless (equal
+               (org-mcp--timestamp-parts
+                timestamp org-mcp--timestamp-moment)
+               (org-mcp--timestamp-parts
+                (org-mcp--timestamp-parsed rendered)
+                org-mcp--timestamp-moment))
+        (org-mcp--tool-validation-error
+         "Date '%s' does not exist - Org reads it as '%s'"
+         date-str rendered))
+      rendered)))
 
 (defun org-mcp--validate-body-no-headlines (body level)
   "Validate that BODY doesn't contain headlines at LEVEL or higher.
@@ -4997,6 +5056,22 @@ MCP Parameters:
              (org-delete-property key)
            (org-mcp--set-property key val)))))))
 
+(defun org-mcp--write-planning-timestamp (writer value)
+  "Write VALUE on the entry at point through WRITER.
+WRITER is `org-schedule' or `org-deadline', which carry a repeater
+and a warning period through to the file; `org-add-planning-info'
+takes the date alone and would drop both.
+
+VALUE is a timestamp Org itself rendered, by
+`org-mcp--date-normalized', so the date is settled before this runs.
+`org-read-date-force-compatible-dates' would nonetheless pull a year
+outside 1970-2037 into that range — it guards a 32-bit `time_t',
+which the Emacs this package requires does not have — and a deadline
+in 2050 would land in 2037.  The year the call named is the year
+written, so that guard is off here."
+  (let ((org-read-date-force-compatible-dates nil))
+    (funcall writer nil value)))
+
 (defconst org-mcp--field-scheduled
   (list
    :label "SCHEDULED"
@@ -5014,7 +5089,9 @@ MCP Parameters:
      (org-add-planning-info nil nil 'scheduled)
      (when org-log-reschedule
        (org-mcp--insert-log-note "" 'delschedule nil previous)))
-   :write (lambda (value) (org-schedule nil value)))
+   :write
+   (lambda (value)
+     (org-mcp--write-planning-timestamp #'org-schedule value)))
   "The SCHEDULED field, for `org-mcp--write-field'.
 `:label' names it in a refusal, `:key' is the field of
 `org-mcp--heading-metadata-at-point' that holds it, which
@@ -5036,7 +5113,9 @@ returns, with no second accessor to drift from it.")
      (org-add-planning-info nil nil 'deadline)
      (when org-log-redeadline
        (org-mcp--insert-log-note "" 'deldeadline nil previous)))
-   :write (lambda (value) (org-deadline nil value)))
+   :write
+   (lambda (value)
+     (org-mcp--write-planning-timestamp #'org-deadline value)))
   "The DEADLINE field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
 
@@ -5100,15 +5179,14 @@ with no cookie to take off."
 
 (defun org-mcp--date-to-write (value name)
   "Return VALUE, the date parameter NAME of a call, validated, or nil.
-An ISO date string is a date to write.  Null is nil, and takes the
-timestamp away; the required `before' says what that destroys.
-\"\" is not a date and is refused as one, because a timestamp has no
-empty value to press into service as a command; see
-`org-mcp--value-to-write'."
+An Org timestamp is a date to write, and it comes back as Org
+renders it; see `org-mcp--date-normalized' for what that takes.
+Null is nil, and takes the timestamp away; the required `before'
+says what that destroys.  \"\" is not a date and is refused as one,
+because a timestamp has no empty value to press into service as a
+command; see `org-mcp--value-to-write'."
   (let ((date (org-mcp--value-to-write value name)))
-    (when date
-      (org-mcp--validate-date-string date))
-    date))
+    (and date (org-mcp--date-normalized date))))
 
 (defun org-mcp--priority-to-write (value name)
   "Return VALUE, the priority parameter NAME of a call, validated, or nil.
@@ -7166,9 +7244,10 @@ Returns JSON object:
   before - Previous SCHEDULED value (string, empty if none)
   after - The SCHEDULED the headline now carries (string, empty when
           taken away)
-          before and after are states the field was in and is in,
-          not values to write: send either back as the next call's
-          before, never as its after
+          A timestamp here is a value: send it back as the next
+          call's before, or as its after to write it again.  The
+          empty string is a state and not a value, and a removal is
+          asked for again with null
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -7215,9 +7294,10 @@ Returns JSON object:
   before - Previous DEADLINE value (string, empty if none)
   after - The DEADLINE the headline now carries (string, empty when
           taken away)
-          before and after are states the field was in and is in,
-          not values to write: send either back as the next call's
-          before, never as its after
+          A timestamp here is a value: send it back as the next
+          call's before, or as its after to write it again.  The
+          empty string is a state and not a value, and a removal is
+          asked for again with null
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

@@ -8772,21 +8772,24 @@ found; the buffer stays narrowed to Task Two."
 ;; a link is resolved or a buffer opened.
 
 (defconst org-mcp-test--dates-that-are-not-dates
-  '(("2026-02-30" . "2026-03-02")
-    ("2026-13-45" . "2027-02-14")
-    ("2026-00-00" . "2025-11-30")
-    ("0000-01-01" . "2000-01-01")
-    ("2026-02-29" . "2026-03-01"))
-  "Dates Org rolls over, each with what it rolls over to.
-The last is a leap day of a year that has none; `2024-02-29' is the
-same date in a year that does, and it writes.")
+  '(("2026-02-30" . "2026-03-02 [^ >]+")
+    ("2026-13-45" . "2027-02-14 [^ >]+")
+    ("2026-00-00" . "2025-11-30 [^ >]+")
+    ("2026-02-29" . "2026-03-01 [^ >]+"))
+  "Dates whose fields name no day, each with the day Org reads instead.
+The day Org reads is written as a regexp, because the day name in it
+is Org\='s to choose.  The last is a leap day of a year that has none;
+`2024-02-29\=' is the same date in a year that does, and it writes.
+A year below 100 is refused for its own reason and is not here; see
+`org-mcp-test-set-scheduled-refuses-a-two-digit-year\='.")
 
 (defconst org-mcp-test--times-that-are-not-times
-  '(("2026-03-27 25:99" . "2026-03-28 02:39")
-    ("2026-03-27 10:99" . "2026-03-27 11:39"))
-  "Clock times Org rolls over, each with what it rolls over to.
-The second rolls the hour without rolling the day, so a check that
-compared dates alone would let it through.")
+  '(("2026-03-27 25:99" . "2026-03-28 [^ >]+ 02:39")
+    ("2026-03-27 10:99" . "2026-03-27 [^ >]+ 11:39"))
+  "Times whose fields name no minute, each with the one Org reads.
+Written as regexps, because the day name in them is Org\='s to choose.
+The second rolls the hour without rolling the day, so a check
+comparing dates alone would let it through.")
 
 (ert-deftest org-mcp-test-planning-refuses-a-date-that-is-not-one ()
   "A date Org would roll over to another date is refused, not written.
@@ -8802,8 +8805,9 @@ that tells it the value was wrong rather than the file."
           (org-mcp-test--call-tool-refused
            tool
            `((link . ,link) (before . "") (after . ,sent))
-           (concat "\\`Not a date: '" (regexp-quote sent)
-                   "'\\.  Org reads it as " (regexp-quote rolled))
+           (format
+            "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+            (regexp-quote sent) rolled)
            test-file))))))
 
 (ert-deftest org-mcp-test-planning-refuses-a-time-that-is-not-one ()
@@ -8818,8 +8822,9 @@ whole value is compared and not the date alone."
         (org-mcp-test--call-tool-refused
          "org-node-set-scheduled"
          `((link . ,link) (before . "") (after . ,sent))
-         (concat "\\`Not a date: '" (regexp-quote sent)
-                 "'\\.  Org reads it as " (regexp-quote rolled))
+         (format
+          "\\`Date '%s' does not exist - Org reads it as '<%s>'\\'"
+          (regexp-quote sent) rolled)
          test-file)))))
 
 (ert-deftest org-mcp-test-planning-takes-a-leap-day-that-exists ()
@@ -8858,7 +8863,7 @@ refused write is known to have opened nothing."
      `((link . ,(org-mcp-test--file-link test-file "*No Such Heading"))
        (before . "")
        (after . "2026-02-30"))
-     "\\`Not a date: '2026-02-30'\\."
+     "\\`Date '2026-02-30' does not exist - Org reads it as '<2026-03-02"
      test-file)))
 
 (ert-deftest org-mcp-test-clock-refuses-a-time-that-is-not-one ()
@@ -10426,8 +10431,8 @@ the parameter left out."
       (org-mcp-test--call-tool-refused
        "org-node-set-scheduled"
        `((link . ,link) (before . "<2026-03-01 Sun>") (after . ""))
-       "\\`Invalid date format '' - expected YYYY-MM-DD \
-or YYYY-MM-DD HH:MM\\'"
+       "\\`Invalid date '' - expected 2026-03-27, \
+2026-03-27 09:00, or an Org timestamp"
        test-file)
       (dolist (blank '(:json-false []))
         (org-mcp-test--call-tool-refused
@@ -10612,8 +10617,8 @@ the parameter left out."
       (org-mcp-test--call-tool-refused
        "org-node-set-deadline"
        `((link . ,link) (before . "<2026-03-15 Sun>") (after . ""))
-       "\\`Invalid date format '' - expected YYYY-MM-DD \
-or YYYY-MM-DD HH:MM\\'"
+       "\\`Invalid date '' - expected 2026-03-27, \
+2026-03-27 09:00, or an Org timestamp"
        test-file)
       (dolist (blank '(:json-false []))
         (org-mcp-test--call-tool-refused
@@ -10622,15 +10627,342 @@ or YYYY-MM-DD HH:MM\\'"
          "\\`Missing required parameter: after\\'"
          test-file)))))
 
-;;; The log entry a planning write means to leave
+;;; A date parameter is a timestamp Org parses
 ;;
-;; `org-log-reschedule' and `org-log-redeadline' ask Org to record a
-;; planning change.  Org's own route to that record arms
-;; `org-add-log-note' on the global `post-command-hook' and returns;
-;; an MCP call has no command loop to run it, so the entry would reach
-;; the user as a prompt at their next unrelated command.  Each test
-;; here pins the entry in the file, the tool's own response, and a
-;; hook with nothing left on it.
+;; `after' is validated by Org's own parser, so what it accepts is the
+;; Org timestamp vocabulary a read already speaks: the ISO shorthand,
+;; a repeater, a warning period, and the raw string a read returns.
+;; What Org's parser reads as another date than the one written is
+;; refused before the link is resolved, so the file is untouched.
+
+(defconst org-mcp-test--content-repeating-deadline
+  "* TODO Repeating Deadline
+DEADLINE: <2026-06-20 Sat ++1m -2d>
+Task body."
+  "TODO task whose DEADLINE carries a repeater and a warning period.")
+
+(defconst org-mcp-test--pattern-scheduled-with-repeater
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ \\+1w>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a repeater is written.")
+
+(defconst org-mcp-test--pattern-scheduled-with-warning
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ -3d>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a warning period is written.")
+
+(defconst org-mcp-test--pattern-deadline-with-repeater-and-warning
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "DEADLINE: <2026-03-27 [^ >]+ 09:00 \\.\\+2d -1d>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a DEADLINE carrying both a repeater and a warning.")
+
+(defconst org-mcp-test--pattern-scheduled-round-tripped
+  (concat
+   "\\`\\* TODO Repeating Task\n"
+   "SCHEDULED: <2026-06-20 [^ >]+ \\+1w -3d>\n"
+   "Task body\\.\n?\\'")
+  "Pattern after the string a read returned is sent back as `after'.
+The heading carries the timestamp it carried before the call.")
+
+(defconst org-mcp-test--pattern-repeating-deadline-moved
+  (concat
+   "\\`\\* TODO Repeating Deadline\n"
+   "DEADLINE: <2026-07-20 [^ >]+ \\+\\+1m -2d>\n"
+   "Task body\\.\n?\\'")
+  "Pattern after a date-only change to a DEADLINE carrying a repeater.
+The repeater and the warning period stand as they were.")
+
+(defconst org-mcp-test--pattern-leap-day-deadline
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "DEADLINE: <2028-02-29 [^ >]+>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after the leap day of a leap year is written.")
+
+(defconst org-mcp-test--pattern-scheduled-past-2037
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2050-06-15 [^ >]+>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a date beyond the 32-bit era is written.")
+
+(ert-deftest org-mcp-test-set-deadline-writes-a-real-leap-day ()
+  "The leap day of a leap year is a date, and it is written.
+The check asks Org whether the day exists, not whether February has
+twenty-nine days in general."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-deadline"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2028-02-29"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) ""))
+      (should
+       (string-match-p "\\`<2028-02-29 [^ >]+>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-leap-day-deadline))))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-two-digit-year ()
+  "A year below 100 is refused: Org reads it as a two-digit year.
+`0000-01-01' names the first day of year zero and Org's date reader
+answers with the year 2000, so the value cannot be written as
+written."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (before . "")
+       (after . "0000-01-01"))
+     "\\`Date '0000-01-01' has a year below 100, \
+which Org reads as a two-digit year\\'"
+     test-file)
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-bare-todo)))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-repeater ()
+  "A repeater is written, so a repeating task can be created.
+The response reports the timestamp the heading ends up carrying,
+repeater included."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 +1w"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ \\+1w>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-with-repeater))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-warning-period ()
+  "A warning period is written on its own, with no repeater beside it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 -3d"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ -3d>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-with-warning))))
+
+(ert-deftest org-mcp-test-set-deadline-writes-a-repeater-and-a-warning ()
+  "A repeater and a warning period are written together, beside a time.
+Each of Org's three repeater forms is a repeater; this one is the
+restart form `.+'."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-deadline"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 09:00 .+2d -1d"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 09:00 \\.\\+2d -1d>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-deadline-with-repeater-and-warning))))
+
+(ert-deftest org-mcp-test-set-scheduled-round-trips-what-a-read-returns ()
+  "The raw Org string a read returns is a value `after\=' takes.
+A client that read a repeating SCHEDULED can send it back unchanged
+— to restore it, or to write it on another heading — without taking
+the string apart first."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-repeating-scheduled))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Repeating Task"))
+               (before . "<2026-06-20 Sat +1w -3d>")
+               (after . "<2026-06-20 Sat +1w -3d>"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal (alist-get 'before result) "<2026-06-20 Sat +1w -3d>"))
+      (should
+       (string-match-p "\\`<2026-06-20 [^ >]+ \\+1w -3d>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-round-tripped))))
+
+(ert-deftest org-mcp-test-set-deadline-date-only-change-keeps-the-repeater ()
+  "Moving the date of a repeating DEADLINE leaves its repeater alone.
+`after\=' names a date and nothing else, and the repeater and the
+warning period the heading carried are carried to it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-repeating-deadline))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-deadline"
+             `((link
+                .
+                ,(org-mcp-test--file-link
+                  test-file "*Repeating Deadline"))
+               (before . "<2026-06-20 Sat ++1m -2d>")
+               (after . "2026-07-20"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal (alist-get 'before result) "<2026-06-20 Sat ++1m -2d>"))
+      (should
+       (string-match-p "\\`<2026-07-20 [^ >]+ \\+\\+1m -2d>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-repeating-deadline-moved))))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-date-range ()
+  "A date range is read and asserted but never written.
+Org\='s planning writer keeps the first half of a range and drops the
+second, so a range in `after\=' is refused rather than written short."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-scheduled))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
+       (before . "<2026-03-01 Sun>")
+       (after . "<2026-06-20 Sat>--<2026-06-21 Sun>"))
+     "\\`Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - \
+name the one date the field is to carry\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-an-inactive-timestamp ()
+  "An inactive timestamp is refused rather than written as an active one.
+A SCHEDULED and a DEADLINE carry an active timestamp; Org would take
+the brackets off silently, writing something other than what the
+call sent."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (before . "")
+       (after . "[2026-03-27 Fri]"))
+     "\\`Date '\\[2026-03-27 Fri\\]' is an inactive timestamp - \
+SCHEDULED and DEADLINE carry an active one, written <\\.\\.\\.>\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-text-after-the-timestamp ()
+  "Text Org does not read as part of the timestamp refuses the call.
+Org reads the timestamp and stops; accepting the value would drop
+the rest of it without saying so."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
+       (before . "")
+       (after . "<2026-03-27 Fri> and then some"))
+     "\\`Invalid date '<2026-03-27 Fri> and then some' - expected"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-scheduled-refuses-a-relative-date ()
+  "A repeater with no date under it is refused, never read as a date.
+`org-read-date' answers `+1w' with a date a week from today, so a
+check that reached it would write a plausible wrong date under a
+success.  Org\\='s timestamp parser reads no timestamp here at all,
+and the value never gets that far."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (dolist (relative '("+1w" "-3d" "++1m" ".+2d" "+1w -3d"))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,relative))
+         (format "\\`Invalid date '%s' - expected"
+                 (regexp-quote relative))
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-set-scheduled-reads-seconds-without-recording-them ()
+  "Seconds are read and not recorded, as the clock tools read them.
+An Org timestamp has no seconds field, so a value carrying them is
+not refused and not rounded on: the minute it names is the minute
+written, and the response says which."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2026-03-27 09:00:33"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2026-03-27 [^ >]+ 09:00>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat
+        "\\`\\* TODO Simple Task\n"
+        "SCHEDULED: <2026-03-27 [^ >]+ 09:00>\n"
+        "Task body text\\.\n?\\'")))))
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-date-past-2037 ()
+  "A date beyond the 32-bit era is written as it was sent.
+Org\='s date reader pulls a year outside 1970-2037 into that range,
+which would land the write thirteen years early; org-mcp writes the
+year the call named."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-scheduled"
+             `((link
+                .
+                ,(org-mcp-test--file-link test-file "*Simple Task"))
+               (before . "")
+               (after . "2050-06-15"))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (string-match-p "\\`<2050-06-15 [^ >]+>\\'"
+                       (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-scheduled-past-2037))))
 
 (defconst org-mcp-test--pattern-scheduled-update-logged
   (concat
@@ -20750,13 +21082,13 @@ its way out would be visible."
      "\\`conflict: Property 'OWNER' mismatch: ")
     ("org-node-set-scheduled"
      ((link . ,link) (before . "") (after . "not-a-date"))
-     "\\`Invalid date format 'not-a-date'")
+     "\\`Invalid date 'not-a-date' - expected")
     ("org-node-set-scheduled"
      ((link . ,link) (before . "<2026-03-27 Fri>") (after))
      "\\`conflict: SCHEDULED mismatch: ")
     ("org-node-set-deadline"
      ((link . ,link) (before . "") (after . "not-a-date"))
-     "\\`Invalid date format 'not-a-date'")
+     "\\`Invalid date 'not-a-date' - expected")
     ("org-node-set-deadline"
      ((link . ,link) (before . "<2026-04-01 Wed>") (after))
      "\\`conflict: DEADLINE mismatch: ")

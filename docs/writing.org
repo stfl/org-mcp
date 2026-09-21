@@ -91,33 +91,79 @@ The running clock was closed but not saved: ...
 
 * A date has to be a date
 
-=org-node-set-scheduled= and =org-node-set-deadline= take their =after= as
-=YYYY-MM-DD=, optionally followed by =HH:MM=. The value has to name a date that
-exists, and one that does not is refused before the heading is looked up, so
-nothing is opened and nothing is written:
+=org-node-set-scheduled= and =org-node-set-deadline= take a date in =after=, and
+Org's own parser decides what one is. So a write speaks the vocabulary a read
+speaks:
 
-#+begin_example
-Not a date: '2026-02-30'.  Org reads it as 2026-03-02, which is not the date the call named
-#+end_example
+| Sent                        | Written                           | What it adds                   |
+|-----------------------------+-----------------------------------+--------------------------------|
+| =2026-03-27=                | =<2026-03-27 Fri>=                | a day                          |
+| =2026-03-27 09:00=          | =<2026-03-27 Fri 09:00>=          | a time of day                  |
+| =2026-03-27 09:00-10:00=    | =<2026-03-27 Fri 09:00-10:00>=    | a span of the day              |
+| =2026-03-27 +1w=            | =<2026-03-27 Fri +1w>=            | a repeater                     |
+| =2026-03-27 -3d=            | =<2026-03-27 Fri -3d>=            | a warning period               |
+| =2026-03-27 09:00 .+2d -1d= | =<2026-03-27 Fri 09:00 .+2d -1d>= | all three at once              |
+| =<2026-06-20 Sat +1w -3d>=  | =<2026-06-20 Sat +1w -3d>=        | the raw string a read returned |
 
-The refusal names what the value would have become, because that is the part
-you cannot work out from the call. Org itself does not refuse these: it rolls
-them over, so =2026-13-45= means the 14th of February 2027, =2026-00-00= means
-the 30th of November 2025, and =0000-01-01= means the first of January 2000. A
-February 29th is a date in a leap year and not in any other, and that is
-decided by reading the value rather than by a rule — =2024-02-29= writes,
-=2026-02-29= is refused.
+All three of Org's repeater forms are repeaters: =+1w= steps a week on from the
+date written, =++1m= steps a month on until it passes today, and =.+2d= restarts
+two days from the day the task is done. A warning period is the =-3d= form, and
+it may stand alone or beside a repeater; on a DEADLINE it brings the headline
+into the agenda three days early, and on a SCHEDULED it holds the headline back
+until three days before the date. The day name is Org's to write: send it or
+leave it out, and the file gets the day the date falls on.
 
-An hour is read the same way, and it does not have to move the day to be
-refused: =2026-03-27 10:99= is 11:39 on the day it names, which is not the time
-the call named either.
+Seconds are read and not recorded: =2026-03-27 09:00:33= writes
+=<2026-03-27 Fri 09:00>=, because an Org timestamp has no seconds field. The
+clock tools answer the same way. The =T= separator belongs to their ISO 8601
+and not here, where a date and a time are parted by a space.
 
-The clock tools take ISO 8601 with a =T=, and ask the same question of it (see
-[[file:clocking.org::*A clock time has to be a time][A clock time has to be a time]]).
+Because the raw string a read returns is itself a value =after= takes, a client
+that read a repeating SCHEDULED can send it straight back — to restore it, or to
+put it on another headline — without taking the string apart first.
+
+An =after= naming only a date leaves a repeater alone. Moving a repeating task
+on a month is =after: "2026-07-20"=, and the repeater and warning period the
+headline carried are carried to the new date.
 
 =before= is not one of these. It is the Org timestamp the heading carries now,
 compared with what is in the file and never read as a date, so a repeater, a
 delay and a date range all pass through it as written.
+
+** A date that is not a date is refused
+
+Org parses the shape of a timestamp; it does not ask whether the day exists. Its
+writer resolves the fields against the calendar afterwards, and =2026-02-30=
+becomes the second of March. org-mcp asks both and refuses where the two
+disagree, so a day nobody can keep never reaches the file:
+
+#+begin_example
+Date '2026-13-45' does not exist - Org reads it as '<2027-02-14 Sun>'
+Date '2026-02-29' does not exist - Org reads it as '<2026-03-01 Sun>'
+Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
+Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
+Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
+Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
+#+end_example
+
+=2028-02-29= is a day and is written: the question is whether the year in hand
+has that day, not whether February has twenty-nine of them in general.
+
+The last two refusals are forms Org reads perfectly well and its planning writer
+would not carry whole. An inactive timestamp, =[2026-03-27 Fri]=, would go into
+the file active; a date range would go in as its first half alone. A headline
+can carry a SCHEDULED that is a range and =before= asserts one by the whole
+string, but =after= names the one date the field is to carry.
+
+A date is written out in full, never as a relative expression: =+1w= on its own
+is not next week but a repeater with no date under it, and it is refused.
+
+Every one of these refusals is unmarked validation, and every one happens before
+the link is resolved and before a file is opened, so a refused call costs
+nothing and touches nothing (see [[*How a refusal is classed]]).
+
+The clock tools take ISO 8601 with a =T=, and ask the same question of it (see
+[[file:clocking.org::*A clock time has to be a time][A clock time has to be a time]]).
 
 * What a write records in the LOGBOOK
 
@@ -286,7 +332,7 @@ parameter left out: it asserts the field held nothing (see
 deadline", and if one has appeared since you read it the write is refused
 rather than quietly replacing it. Send the field as a read returned it — for a
 timestamp that is the raw Org string, brackets, repeater, delay and date range
-included, and not the ISO shorthand =after= also takes, because comparing an
+included, and not the shorthand =after= also takes, because comparing an
 input spelling against a stored one would refuse writes over a difference the
 file does not have.
 
@@ -360,7 +406,7 @@ stand present and empty. On the four fields above it is neither a value nor an
 ask, and it is refused with the message that names what the field does take:
 
 #+begin_example
-Invalid date format '' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM
+Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
 Priority must be a single character, got ''
 Invalid TODO state: '' - valid states: TODO, IN-PROGRESS, DONE
 #+end_example
@@ -432,7 +478,7 @@ Send it back as an =after= instead and the field's own validator sees the =""=,
 so the refusal is about dates and says nothing about the mistake:
 
 #+begin_example
-Invalid date format '' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM
+Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
 #+end_example
 
 To repeat a removal rather than assert one, send =null= again. It is the ask,
@@ -913,11 +959,11 @@ Example:
 - *Description:* Move the SCHEDULED timestamp of an Org headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
+  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no SCHEDULED
+  - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a date (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
 =before= is the date the headline carries today and =after= the date it is to
@@ -926,9 +972,9 @@ reason =before= is the whole Org string rather than a date.
 
 A headline whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
-=after= replaces the range with the one date it names. =after= is an ISO date
-and has no spelling for a range, so this tool reads and replaces one but never
-writes one. An =after= of =""= takes a range away whole.
+=after= replaces the range with the one date it names. This tool reads and
+replaces a range but never writes one: a range in =after= is refused. An
+=after= of =null= takes a range away whole.
 
 =org-log-reschedule= records both the move and the removal, as it does for a
 reschedule you make by hand; see [[*What a write records in the LOGBOOK]].
@@ -958,6 +1004,22 @@ Example:
   "after": "2026-03-27"
 }
 
+# Make it repeat weekly, warning three days ahead:
+{
+  "link": "id:abc-123",
+  "before": "<2026-03-27 Fri>",
+  "after": "2026-03-27 +1w -3d"
+}
+
+# Success response for that call:
+{
+  "success": true,
+  "saved": true,
+  "before": "<2026-03-27 Fri>",
+  "after": "<2026-03-27 Fri +1w -3d>",
+  "link": "id:abc-123"
+}
+
 # Take a date off:
 {
   "link": "id:abc-123",
@@ -984,15 +1046,18 @@ Example:
 - *Description:* Move the DEADLINE timestamp of an Org headline, or take it off
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
+  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no DEADLINE
+  - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a date (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
 =before= is the date the headline carries today and =after= the date it is to
 carry instead.
+
+A warning period is what a deadline says it early: =-3d= puts the headline in
+the agenda three days before the day it is due.
 
 =org-log-redeadline= records both the move and the removal, as it does for a
 deadline you change by hand; see [[*What a write records in the LOGBOOK]].
