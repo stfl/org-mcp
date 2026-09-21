@@ -19,8 +19,8 @@ owns the question, never to a second page that repeats it:
 | `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports, how a client that cannot send an array sends one |
 | `file-access.org` | the allowed files, `org-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
 | `links.org` | the link forms a call takes, what is refused, the link every response carries |
-| `reading.org` | the `org://{link}` resource, `org-node-read`, `org-node-text`, and the five configuration and discovery tools |
-| `writing.org` | what a write does to buffers and files, and the fifteen write tools |
+| `reading.org` | the `org://{link}` resource, `org-node-read`, `org-node-text`, and the six configuration and discovery tools |
+| `writing.org` | what a write does to buffers and files, and the sixteen write tools |
 | `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
 | `clocking.org` | the seven clock tools and `org-mcp-clock-continuous-threshold` |
 

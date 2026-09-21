@@ -52,6 +52,15 @@ A value from a node's own Org property drawer. It is part of the file, it
 survives a round trip, and a call names the properties it wants.
 _Avoid_: field, attribute
 
+**In-buffer setting**:
+A `#+KEY: value` line, which is what the Org manual calls one and what
+`org-element` types as a keyword. It belongs to the file rather than to any
+node, Org may read it on several lines at once, and it is not a property: a
+property is a line in a drawer. `#+PROPERTY:` is neither — it is a keyword that
+sets properties file-wide — so "file property" names two things and this word
+names neither.
+_Avoid_: file property, file keyword, file option, header line, front matter
+
 **Computed field**:
 A value a configured function produces for a node when it is read, such as the
 rank a workflow ranks its items by. It is this server's answer at this moment,

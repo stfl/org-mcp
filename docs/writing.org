@@ -314,7 +314,7 @@ whoever can open the file and repair it:
 blocked: Property 'OWNER' is written twice in this drawer, so it holds no one value; repair the drawer in Emacs
 #+end_example
 
-Two refusals stay unmarked on purpose. A link that resolves to no heading —
+Three refusals stay unmarked on purpose. A link that resolves to no heading —
 =Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
 or one that never existed, which is a malformed call, and org-mcp cannot tell
 the two apart. It leaves the refusal in the default class rather than guess,
@@ -324,10 +324,16 @@ one: the node was found, and what disagrees is its content, which org-mcp can
 see. There is a file to read again and a fact to read out of it, so those
 refusals are conflicts.
 
-The other is a delete of the node the Emacs session's clock is running in. The
+The second is a delete of the node the Emacs session's clock is running in. The
 call is well formed and the file is exactly as the client read it, so it is no
 conflict, and reading it again resolves nothing. What resolves it is a
 clock-out, which the refusal names; see [[*org-node-delete][org-node-delete]].
+
+The third is a =#+TODO:= rewrite that would leave headings carrying a keyword
+the new sequences do not name. The file is as the client read it there too, and
+Org would go through with the write rather than veto it; what resolves it is a
+different call, which the refusal spells out. See
+[[*Rewriting #+TODO: reaches past the line it changes]].
 
 Every tool below names the classes it can refuse with; the clock tools name
 theirs in [[file:clocking.org][Clock tracking]].
@@ -521,6 +527,7 @@ them:
 | the body       | =org-node-set-content=    | =after: ""=               |
 | a tag          | =org-node-remove-tags=    | the tags named in =after= |
 | every own tag  | =org-node-set-tags=       | =after: []=               |
+| a whole setting | =org-file-set-setting=   | =after: []=               |
 
 *={}= is =null= written another way.* The JSON decoder reads an empty object
 as nothing at all, which is what it reads =null= as, so nothing past it can
@@ -535,9 +542,11 @@ left out, and refused as one; in an optional one, the default.
 the text =nil= Org stores, on either side of the call — as an =after= it writes
 that text, as a =before= it asserts the line holds it
 (see [[*The three states of a drawer line]]) — and refuses =[]= outright, because a
-property holds a line of text and an array is not one. =org-node-set-tags= takes
-=[]= for the tag set's own empty value, on either side. In every other position
-both are blank.
+property holds a line of text and an array is not one. Two tools take =[]= for
+a set's own empty value, on either side of the call: =org-node-set-tags=, where
+it is the tag set of a heading carrying none, and =org-file-set-setting=, where
+it is the setting of a file writing it on no line. In every other position both
+are blank.
 
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
@@ -675,17 +684,23 @@ Org keeps at file level too.
 
 | Tool                      | What a link naming a whole file does       |
 |---------------------------+--------------------------------------------|
+| =org-file-set-setting=    | writes one of that file's =#+= settings    |
 | =org-node-set-properties= | writes that file's own property drawer     |
 | =org-node-create=         | as =parent=: the file's top level          |
 | =org-node-refile=         | as =parent=: the file's top level          |
 | every other write tool    | refused: the link has to name a heading    |
 
+=org-file-set-setting= is the one whose subject is always a file: a heading has
+no =#+= settings of its own, so a link naming one writes the heading's file (see
+[[*org-file-set-setting]]).
+
 A TODO keyword, a priority cookie, a SCHEDULED or DEADLINE line, a heading's
 own tags and a LOGBOOK note are written on a headline, and a file has no
 headline. =org-node-set-title= renames a headline; a file's title is its
-=#+TITLE:= line, a keyword and not a headline, and this tool does not write
-one. =org-node-set-content= replaces a heading's body; a file's body is its
-preamble, which is where those =#+= lines live. And =org-node-delete=,
+=#+TITLE:= line, a keyword and not a headline, so it is written by
+=org-file-set-setting= and not here. =org-node-set-content= replaces a heading's
+body; a file's body is its preamble, which is where those =#+= lines live, and
+this tool does not rewrite one either. And =org-node-delete=,
 =org-node-archive= and =org-node-refile= take a whole node away or move it,
 which for a file would mean deleting or moving the file: no tool here does
 that, so the node those three act on is a heading. =org-node-refile= still
@@ -704,10 +719,17 @@ answers any other wrong link with (see [[file:clocking.org::*org-clock-out][org-
 *A file property is two different things.* A =#+PROPERTY:= line and a property
 drawer before the first heading are both called one, and they are not the same.
 =#+PROPERTY: OWNER ada= is a value every heading in the file inherits and no
-node carries itself, so no =properties= answer reports it and no call here
-writes it; the drawer holds the file node's own properties, which a read of the
-file returns and this tool writes. This page is about the drawer. No write tool
-writes a =#+PROPERTY:=, a =#+TITLE:= or any other =#+= line.
+node carries itself, so no =properties= answer reports it; the drawer holds the
+file node's own properties, which a read of the file returns and
+=org-node-set-properties= writes.
+
+So there are three things and two tools. A drawer line is a property and
+=org-node-set-properties= writes it, on a heading or on a file alike. A =#+=
+settings line is not a property, and =org-file-set-setting= writes six of them —
+=#+TITLE:=, =#+TODO:=, =#+ARCHIVE:=, =#+CATEGORY:=, =#+FILETAGS:= and
+=#+STARTUP:=. =#+PROPERTY:= is the third, and no tool writes it: it is a
+property line in settings clothing, and admitting it to either tool would give
+one construct two guards that spell an assertion differently.
 
 * Write tools
 
@@ -1389,6 +1411,125 @@ away rather than reaching into the heading below:
 one and =file:<path>= otherwise (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]). Writing an =ID=
 into a file's drawer therefore changes the link the next response reports, and
 taking it away changes it back.
+
+** org-file-set-setting
+- *Description:* Write one of a file's in-buffer settings
+- *Parameters:*
+  - =link= (string, required): link to the file, or to a heading in it (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a heading writes the heading's file: these settings are file-wide
+  - =setting= (string, required): which setting to write — =TITLE=, =TODO=, =ARCHIVE=, =CATEGORY=, =FILETAGS= or =STARTUP=. Case makes no difference, and any other name is refused
+  - =before= (string or array, required): every line the file writes that setting on now, in the order it writes them — the array [[file:reading.org::*org-file-settings][org-file-settings]] returns for it. =[]= asserts that the file writes it on no line
+  - =after= (string or array, required): the lines to write. =[]= leaves the file writing none
+  - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
+- *Returns:* Success status, =saved= flag, the =setting= written, the =before= asserted, the =after= now in the file, and the file's link
+
+#+begin_src json
+{
+  "link": "file:/home/you/gtd.org",
+  "setting": "TODO",
+  "before": ["TODO(t) NEXT(n) | DONE(d)", "WAIT(w) | KILL(k)"],
+  "after": ["TODO(t) NEXT(n) WAIT(w) | DONE(d) KILL(k)"]
+}
+#+end_src
+
+*Which settings this tool writes, and why those.* The six are the ones that say
+what the file is and how Org treats it: its title, the workflow its headings are
+held to, where a subtree of it is archived, the category its entries carry in
+the agenda, the tags every heading in it inherits, and how it opens. They are
+the settings a client setting a file up has to be able to write and whose effect
+on what is already written org-mcp can account for.
+
+Two kinds stay out on purpose. =#+SETUPFILE:= and =#+INCLUDE:= reach another
+file: a write here would change what this file means by naming a file the call
+never named and the allowed files never saw (see [[file:file-access.org::*Which files a call reaches][Which files a call reaches]]).
+And =#+PROPERTY:= sets properties file-wide, which is the property surface's
+business (see [[*Which tools a file's link reaches]]). Everything else is out until
+it has the same account; a name outside the six is refused with the six listed.
+
+=#+CATEGORY:= is in although Org files its value beside the =#+PROPERTY:= ones,
+because it names one thing rather than an arbitrary key.
+
+*A setting is a set of lines, and =before= asserts all of them.* Org keeps every
+line it finds, so a setting can stand on several: two =#+TODO:= lines are two
+sequences, two =#+FILETAGS:= lines are both in effect. The call takes away every
+line it does not list, so its reach is the whole set and the assertion covers
+the whole set — the rule the tag replacement follows (see [[*org-node-set-tags]]).
+Unlike a tag set, the order is asserted too, because Org reads it: two
+=#+TITLE:= lines join in the order they stand, and the first =#+TODO:= sequence
+is the one a heading with no keyword enters first.
+
+One call writes one setting. Each of them is its own value with its own reach —
+=#+TODO:= touches every heading in the file and =#+TITLE:= touches nothing — so
+a call that wrote several would have to refuse them all for one setting's sake,
+or report a part of itself done. Set a file up with one call per setting, each
+guarded on its own.
+
+*=[]= is the empty set, not a parameter left out.* It is the state of a file
+that writes the setting on no line, in =before= and in =after= alike. Every other
+blank — =null=, =false=, =""= — is the parameter missing and is refused as one,
+so nothing a client fills a parameter with absent-mindedly takes a line away
+(see [[*What a blank parameter means]]).
+
+*Where a new line goes.* A call that replaces lines writes over the first of
+them and takes the rest away. A call giving the file a setting it writes on no
+line puts it with the settings the file already has; a file with none takes it
+at the top of its preamble, below a leading comment line and below the file's
+own property drawer, both of which Org keeps above the settings (see [[*A file's own property drawer]]).
+A file whose very first line is a heading is given a preamble above that
+heading, where a drawer of its own would go.
+
+The value is the text after the colon with the space around it gone, which is
+what a read returns. A value carrying space at either end, or a newline, is
+refused: it would be written and never read back the way it was sent.
+
+*** Rewriting #+TODO: reaches past the line it changes
+
+The keywords a file names are what every write to a heading in it is validated
+against (see [[file:reading.org::*Which file the answer is about][Which file the answer is about]]). Rewriting them is therefore not a
+change to one line: a keyword the new sequences no longer name stops being a
+keyword, and Org reads it as the first word of the title of every heading
+carrying it. =* WAIT Hear back= becomes a heading with no keyword titled =WAIT
+Hear back=, and nothing in the file records that it was ever a state.
+
+So the call is refused while any heading in the file still carries such a
+keyword. The refusal names each one and counts the headings, because the count
+is what says how much work the remedy is:
+
+#+begin_src json
+{
+  "error": "#+TODO: would stop naming a keyword headings in this file carry: WAIT on 3 headings.  Org reads such a keyword as the first word of the heading's title, so the headings would be retitled rather than refused.  Write sequences that still name it, or add the new sequences beside the old ones, move those headings with org-node-set-todo, and write the sequences again without it"
+}
+#+end_src
+
+It is the unmarked class, not a conflict: the file is as the client believed it
+to be, and reading it again changes nothing (see [[*How a refusal is classed]]).
+What has to change is the call, and there are two ways:
+
+1. Write sequences that still name the keyword.
+2. Retire it in three calls — write the new sequences beside the old ones, move
+   the headings with [[*org-node-set-todo]] while both are valid, then write the
+   sequences again without the old one.
+
+A keyword no heading carries is dropped without a word, so a workflow can be
+trimmed of states nothing is in.
+
+The check is about this file only, and it asks what Org will reach there: a
+=#+SETUPFILE:=, a =#+SEQ_TODO:= and a =#+TYP_TODO:= all contribute, and a file
+left naming no sequence at all falls back to the global configuration rather
+than to nothing.
+
+*** #+ARCHIVE: and #+FILETAGS: reach past their lines too
+
+Both are written without a refusal, and the difference from =#+TODO:= is what
+happens to the file as it stands. =#+ARCHIVE:= says where [[*org-node-archive]]
+sends a subtree; rewriting it redirects the next archive and leaves everything
+already written meaning what it meant. =#+FILETAGS:= gives every heading in the
+file those tags; rewriting it changes which tags are in effect, and no heading's
+own tags are touched (see [[*Three tools for one tag set]]). Neither turns
+something already in the file into something else, which is what the =#+TODO:=
+refusal exists for.
+
+Org acts on the new value at once, in the buffer the user has open as well as on
+disk.
 
 ** org-node-set-scheduled
 - *Description:* Move the SCHEDULED timestamp of an Org headline, or take it off

@@ -57,11 +57,14 @@ works unchanged:
   file's =file:= link without a search part does. With a search part, as in
   =id:<id>::*Review=, it searches the whole file.
 - A link to a whole file — a =file:= link without a search part, or an =id:=
-  link to a file-level property drawer — reaches three write tools.
-  =org-node-set-properties= takes it as the node to write, and writes that
-  file's own drawer; =org-node-create= and =org-node-refile= take it as
-  =parent=, the top level of that file. Every other write tool needs a heading
-  and refuses it (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
+  link to a file-level property drawer — reaches four write tools.
+  =org-file-set-setting= takes it as the file whose =#+= settings to write, and
+  a link naming a /heading/ there writes the heading's file, since those
+  settings are file-wide; =org-node-set-properties= takes it as the node to
+  write, and writes that file's own drawer; =org-node-create= and
+  =org-node-refile= take it as =parent=, the top level of that file. Every
+  other write tool needs a heading and refuses it
+  (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
 
 org-mcp refuses:
 
