@@ -17624,6 +17624,51 @@ a replacement that took the whole body with it shows here.")
    '((properties_set . ["FIRST"]))
    org-mcp-test--dirty-property-regex))
 
+(defconst org-mcp-test--content-task-with-every-field
+  (concat
+   "* TODO [#A] Simple Task :work:urgent:\n"
+   "SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-04-01 Wed>\n"
+   ":PROPERTIES:\n"
+   ":OWNER:    ada\n"
+   ":END:\n"
+   "Task body text.\n")
+  "A task carrying every field a removal endpoint takes away.
+One file stands behind all of them, so each test's regexp says both
+what its endpoint took and what it left, and a removal that reached
+past its own field fails in a neighbour's test.")
+
+(defconst org-mcp-test--dirty-every-field-drawer
+  (concat
+   " *:PROPERTIES:\n"
+   " *:OWNER: +ada\n"
+   " *:END:\n"
+   "Task body text\\.\n"
+   "Typed by hand, not saved\\.\n"
+   "\\'")
+  "What the task keeps below its planning line, and the user's own line.
+The removals that leave the PROPERTIES drawer alone all end here.")
+
+(defconst org-mcp-test--dirty-properties-removed-regex
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task[ \t]+:work:urgent:\n"
+   "SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-04-01 Wed>\n"
+   "Task body text\\.\n"
+   "Typed by hand, not saved\\.\n"
+   "\\'")
+  "The whole file served after the task's only property is removed.
+The drawer goes with the last property in it.")
+
+(ert-deftest org-mcp-test-node-remove-properties-through-a-dirty-buffer ()
+  "A removed property leaves the buffer the user is editing."
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-task-with-every-field
+   "org-node-remove-properties"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . ((OWNER . "ada")))))
+   '((properties_deleted . ["OWNER"]))
+   org-mcp-test--dirty-properties-removed-regex))
+
 (defconst org-mcp-test--dirty-scheduled-regex
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -17644,6 +17689,25 @@ a replacement that took the whole body with it shows here.")
        (after . "2026-03-27")))
    '((before . ""))
    org-mcp-test--dirty-scheduled-regex))
+
+(defconst org-mcp-test--dirty-scheduled-removed-regex
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task[ \t]+:work:urgent:\n"
+   "DEADLINE: <2026-04-01 Wed>\n"
+   org-mcp-test--dirty-every-field-drawer)
+  "The whole file served after SCHEDULED is taken off the task.
+The DEADLINE beside it on the planning line stays.")
+
+(ert-deftest org-mcp-test-node-remove-scheduled-through-a-dirty-buffer ()
+  "A removed SCHEDULED leaves the buffer the user is editing."
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-task-with-every-field
+   "org-node-remove-scheduled"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "<2026-03-27 Fri>")))
+   '((before . "<2026-03-27 Fri>") (after . ""))
+   org-mcp-test--dirty-scheduled-removed-regex))
 
 (defconst org-mcp-test--dirty-deadline-regex
   (concat
@@ -17666,6 +17730,25 @@ a replacement that took the whole body with it shows here.")
    '((before . ""))
    org-mcp-test--dirty-deadline-regex))
 
+(defconst org-mcp-test--dirty-deadline-removed-regex
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task[ \t]+:work:urgent:\n"
+   "SCHEDULED: <2026-03-27 Fri>\n"
+   org-mcp-test--dirty-every-field-drawer)
+  "The whole file served after DEADLINE is taken off the task.
+The SCHEDULED beside it on the planning line stays.")
+
+(ert-deftest org-mcp-test-node-remove-deadline-through-a-dirty-buffer ()
+  "A removed DEADLINE leaves the buffer the user is editing."
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-task-with-every-field
+   "org-node-remove-deadline"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "<2026-04-01 Wed>")))
+   '((before . "<2026-04-01 Wed>") (after . ""))
+   org-mcp-test--dirty-deadline-removed-regex))
+
 (defconst org-mcp-test--dirty-tags-regex
   (concat
    "\\`\\* TODO Simple Task[ \t]+:work:urgent:\n"
@@ -17687,6 +17770,50 @@ a replacement that took the whole body with it shows here.")
      '((before . []) (after . ["work" "urgent"]) (inherited . []))
      org-mcp-test--dirty-tags-regex)))
 
+(defconst org-mcp-test--dirty-tag-added-regex
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task[ \t]+:work:urgent:later:\n"
+   "SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-04-01 Wed>\n"
+   org-mcp-test--dirty-every-field-drawer)
+  "The whole file served after one tag is added to the task.
+The two tags it carried are still on it: an add takes nothing away.")
+
+(ert-deftest org-mcp-test-node-add-tags-through-a-dirty-buffer ()
+  "An added tag lands in the buffer the user is editing."
+  (let ((org-tag-alist '("work" "urgent" "later")))
+    (org-mcp-test--write-through-dirty-buffer
+     org-mcp-test--content-task-with-every-field
+     "org-node-add-tags"
+     (lambda (file)
+       `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+         (after . "later")))
+     '((before . ["work" "urgent"])
+       (after . ["work" "urgent" "later"])
+       (inherited . []))
+     org-mcp-test--dirty-tag-added-regex)))
+
+(defconst org-mcp-test--dirty-tag-removed-regex
+  (concat
+   "\\`\\* TODO \\[#A\\] Simple Task[ \t]+:work:\n"
+   "SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-04-01 Wed>\n"
+   org-mcp-test--dirty-every-field-drawer)
+  "The whole file served after one of two tags is removed from the task.
+The tag the call did not name is still on it.")
+
+(ert-deftest org-mcp-test-node-remove-tags-through-a-dirty-buffer ()
+  "A removed tag leaves the buffer the user is editing."
+  (let ((org-tag-alist '("work" "urgent" "later")))
+    (org-mcp-test--write-through-dirty-buffer
+     org-mcp-test--content-task-with-every-field
+     "org-node-remove-tags"
+     (lambda (file)
+       `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+         (after . "urgent")))
+     '((before . ["work" "urgent"])
+       (after . ["work"])
+       (inherited . []))
+     org-mcp-test--dirty-tag-removed-regex)))
+
 (defconst org-mcp-test--dirty-priority-regex
   (concat
    "\\`\\* TODO \\[#A\\] Simple Task\n"
@@ -17706,6 +17833,25 @@ a replacement that took the whole body with it shows here.")
        (after . "A")))
    '((before . "") (after . "A"))
    org-mcp-test--dirty-priority-regex))
+
+(defconst org-mcp-test--dirty-priority-removed-regex
+  (concat
+   "\\`\\* TODO Simple Task[ \t]+:work:urgent:\n"
+   "SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-04-01 Wed>\n"
+   org-mcp-test--dirty-every-field-drawer)
+  "The whole file served after the priority is taken off the task.
+The heading keeps its TODO state and its tags; only the cookie goes.")
+
+(ert-deftest org-mcp-test-node-remove-priority-through-a-dirty-buffer ()
+  "A removed priority leaves the buffer the user is editing."
+  (org-mcp-test--write-through-dirty-buffer
+   org-mcp-test--content-task-with-every-field
+   "org-node-remove-priority"
+   (lambda (file)
+     `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+       (before . "A")))
+   '((before . "A") (after . ""))
+   org-mcp-test--dirty-priority-removed-regex))
 
 (defconst org-mcp-test--dirty-note-regex
   (concat
@@ -17779,18 +17925,36 @@ its way out would be visible."
       (before . ((TODO . "")))
       (after . ((TODO . "DONE"))))
      "\\`Cannot set special property 'TODO'")
+    ("org-node-remove-properties"
+     ((link . ,link) (before . ((OWNER . "ada"))))
+     "\\`conflict: Property 'OWNER' mismatch: ")
     ("org-node-set-scheduled"
      ((link . ,link) (before . "") (after . "not-a-date"))
      "\\`Invalid date format 'not-a-date'")
+    ("org-node-remove-scheduled"
+     ((link . ,link) (before . "<2026-03-27 Fri>"))
+     "\\`conflict: SCHEDULED mismatch: ")
     ("org-node-set-deadline"
      ((link . ,link) (before . "") (after . "not-a-date"))
      "\\`Invalid date format 'not-a-date'")
+    ("org-node-remove-deadline"
+     ((link . ,link) (before . "<2026-04-01 Wed>"))
+     "\\`conflict: DEADLINE mismatch: ")
     ("org-node-set-tags"
      ((link . ,link) (before . []) (after . "invalid tag!"))
+     "\\`Invalid tag name: invalid tag!")
+    ("org-node-add-tags"
+     ((link . ,link) (after . "invalid tag!"))
+     "\\`Invalid tag name: invalid tag!")
+    ("org-node-remove-tags"
+     ((link . ,link) (after . "invalid tag!"))
      "\\`Invalid tag name: invalid tag!")
     ("org-node-set-priority"
      ((link . ,link) (before . "") (after . "Z"))
      "\\`Priority 'Z' out of range ")
+    ("org-node-remove-priority"
+     ((link . ,link) (before . "A"))
+     "\\`conflict: Priority mismatch: ")
     ("org-node-add-note"
      ((link . ,link) (note . "   "))
      "\\`Note cannot be empty or whitespace-only")
