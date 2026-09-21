@@ -20181,6 +20181,196 @@ wants one says so."
           (org-mcp-test--read-computed
            (concat "id:" org-mcp-test--node-shape-parent-id)
            asked)))))))
+
+;;; An array from a client that cannot send one
+
+;; The tool schema types every parameter as a string, so a client that
+;; validates its arguments against it cannot send a JSON array at all:
+;; it sends the array as its own JSON text instead.  Every parameter
+;; documented as taking an array reads that text back as the array,
+;; and each string form the parameter already offers goes on meaning
+;; what it meant.
+
+(defun org-mcp-test--as-text (array)
+  "Return ARRAY as the JSON text a client sends in place of it."
+  (json-encode array))
+
+(ert-deftest org-mcp-test-array-text-fields ()
+  "`fields' sent as the text of an array asks for those fields.
+It answers exactly as the array does, and the string forms the
+parameter offers — the name of a configured list, and a blank value —
+still ask for what they asked for."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+      (should
+       (equal
+        (org-mcp-test--read-fields
+         link (org-mcp-test--as-text ["todo" "title"]))
+        '((todo . "TODO") (title . "Parent"))))
+      (should
+       (equal
+        (org-mcp-test--read-fields
+         link (org-mcp-test--as-text ["title" "todo" "level" "link"]))
+        (org-mcp-test--read-fields link "outline")))
+      (should
+       (equal
+        (org-mcp-test--read-fields link "")
+        (org-mcp-test--node-shape-read link)))
+      (should
+       (equal
+        (aref
+         (org-mcp-test--query-fields
+          "(todo \"TODO\")"
+          (org-mcp-test--as-text ["title" "content"]))
+         0)
+        '((title . "Parent") (content . "Parent body.")))))))
+
+(ert-deftest org-mcp-test-array-text-properties-and-computed ()
+  "`properties' and `computed' sent as text name those names.
+The two parameters are one grammar, and the group names \"all\" and
+\"none\", which a client can always send, go on standing for the whole
+group and for none of it."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-node-shape
+      (list org-mcp-test--node-shape-parent-id)
+    (org-mcp-test--with-computed-fields
+      (let ((link (concat "id:" org-mcp-test--node-shape-parent-id)))
+        (should
+         (equal
+          (org-mcp-test--read-properties
+           link (org-mcp-test--as-text ["Effort"]))
+          '((title . "Parent") (properties . ((EFFORT . "1:00"))))))
+        (should
+         (equal
+          (org-mcp-test--read-properties link "all")
+          `((title . "Parent")
+            (properties
+             . ((EFFORT . "1:00")
+                (ID . ,org-mcp-test--node-shape-parent-id))))))
+        (should
+         (equal
+          (org-mcp-test--read-properties link "none")
+          '((title . "Parent"))))
+        (should
+         (equal
+          (org-mcp-test--read-computed
+           link (org-mcp-test--as-text ["rank"]))
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "all")
+          '((title . "Parent") (computed . ((rank . 12))))))
+        (should
+         (equal
+          (org-mcp-test--read-computed link "none")
+          '((title . "Parent"))))))))
+
+(ert-deftest org-mcp-test-array-text-files-name-a-set ()
+  "`files' sent as the text of an array names that set of files.
+A client that can send only a string is otherwise held to one file.
+A single path sent as a bare string still names that one file."
+  (org-mcp-test--with-scope-dirs t
+    (let* ((alpha
+            (org-mcp-test--write-set-file outside "alpha.org" "alpha"))
+           (beta (org-mcp-test--write-set-file outside "beta.org" "beta"))
+           (org-mcp-allowed-files (list alpha)))
+      (should
+       (equal
+        (org-mcp-test--scan-files
+         (org-mcp-test--as-text (vector beta alpha)))
+        '("alpha" "beta")))
+      (should (equal (org-mcp-test--scan-files beta) '("beta"))))))
+
+(ert-deftest org-mcp-test-array-text-files-find-an-id ()
+  "`files' sent as text finds an ID the way the array does.
+The file is one Emacs never indexed, so the ID is reachable through
+the parameter alone, and the index is left as it was."
+  (org-mcp-test--with-scope-dirs t
+    (let ((file
+           (org-mcp-test--write-file
+            outside "task.org"
+            org-mcp-test--scope-task-with-id-content)))
+      (org-mcp-test--with-id-tracking (list allowed) nil
+        (org-mcp-test--assert-id-task-permitted
+         file (org-mcp-test--as-text (vector file)))
+        (should-not
+         (org-mcp-test--id-registered-p
+          org-mcp-test--content-with-id-id))))))
+
+(ert-deftest org-mcp-test-array-text-tags ()
+  "`after' sent as the text of an array sets those tags.
+org-node-set-tags replaces the whole local set in one call, so a
+client that can send only a string would otherwise be held to one
+tag.  A single tag sent as a bare string still sets that one."
+  (org-mcp-test--with-temp-org-files
+      ((bare-file org-mcp-test--content-bare-todo)
+       (tagged-file org-mcp-test--content-todo-with-tags))
+    (let ((org-tag-alist '("work" "personal" "urgent")))
+      (should
+       (equal
+        (alist-get
+         'after
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-set-tags"
+           `((link
+              . ,(org-mcp-test--file-link bare-file "*Simple Task"))
+             (before . [])
+             (after . ,(org-mcp-test--as-text ["work" "urgent"]))))))
+        ["work" "urgent"]))
+      (org-mcp-test--verify-file-matches
+       bare-file org-mcp-test--pattern-tags-set)
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-tags"
+       `((link
+          . ,(org-mcp-test--file-link tagged-file "*Task with Tags"))
+         (before . ["work" "urgent"])
+         (after . "personal")))
+      (org-mcp-test--verify-file-matches
+       tagged-file org-mcp-test--pattern-tags-replace))))
+
+(ert-deftest org-mcp-test-array-text-malformed-refused ()
+  "Text that opens an array and is not one is refused by parameter.
+Read as one value instead, it would send the call looking for a
+field, a property, a computed name, a path or a tag written with a
+bracket, and be refused for the wrong reason."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task"))
+          (broken "[\"title\""))
+      (dolist (parameter '(fields properties computed files))
+        (org-mcp-test--call-tool-refused
+         "org-node-read"
+         `((link . ,link) (,parameter . ,broken))
+         (format "%s begins with \\[ but is not a JSON array: %s"
+                 parameter (regexp-quote broken))
+         test-file))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-tags"
+       `((link . ,link) (before . []) (after . ,broken))
+       (format "tags begins with \\[ but is not a JSON array: %s"
+               (regexp-quote broken))
+       test-file))))
+
+(ert-deftest org-mcp-test-array-text-said-in-the-tool-description ()
+  "A tool taking an array parameter says the text form is taken.
+A client reads the description to decide what to send, so one that
+offers the array alone leaves a client that cannot send an array with
+nothing it can do instead."
+  (org-mcp-test--with-enabled
+    (dolist (tool
+             '("org-node-read"
+               "org-query"
+               "org-config-tag-candidates"
+               "org-node-create"
+               "org-node-set-tags"
+               "org-node-add-tags"
+               "org-node-remove-tags"))
+      (should
+       (string-match-p
+        "array as its JSON text"
+        (org-mcp-test--registered-tool-description tool))))))
+
 ;;; Reading a subtree in one call
 
 ;; `depth' expands that many generations of children in place, and the

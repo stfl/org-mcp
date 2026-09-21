@@ -116,3 +116,35 @@ the name =org-mcp= and org-mcp's own package version, and no =instructions=
 field, so a client can name the server and the version it is talking to.
 
 To remove the installed wrapper, run =M-x org-mcp-uninstall=.
+
+* When your client cannot send an array
+
+org-mcp's tool schema types every parameter as a string. The schema is built
+from the Elisp handler's argument list, and =mcp-server-lib= gives every
+argument the type =string=, so there is no =array= in it to validate against.
+
+A client that checks its arguments against that schema therefore cannot send a
+JSON array for the parameters documented as taking one — =fields=,
+=properties=, =computed=, =files= and =tags=. It sends the array as its own
+JSON text instead, and org-mcp reads that text back as the array. The two
+calls below ask the same thing:
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "fields": ["title", "link"]}
+#+end_src
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "fields": "[\"title\", \"link\"]"}
+#+end_src
+
+A =[= begins no other value these parameters take: a file path is absolute, a
+field, property or computed name is an identifier, and Org's tag rules forbid
+=[= in a tag. So every string form a parameter already offers keeps meaning
+what it meant — a single tag, a single file path, ="all"=, ="none"= and the
+name of a configured field list. A value that begins with =[= and is not a
+JSON array is refused, naming the parameter.
+
+Nothing has to be encoded this way. A client that can send a real JSON array
+sends one, and org-mcp reads it directly.

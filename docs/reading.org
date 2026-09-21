@@ -129,6 +129,10 @@ call a client makes often stays short:
 }
 #+end_src
 
+=fields=, =properties= and =computed= are also taken as the JSON text of the
+array, which is what a client that sends every argument as a string has to do;
+see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]].
+
 A call that sends no =fields= — or sends =null=, =false=, an empty string or an
 empty array, which mean the same as sending none — gets what that node carries
 unasked:

@@ -942,6 +942,37 @@ line, and the tag set, which spells its empty value [], see
 `org-mcp--tag-set-given'."
   (member value '(nil "" [] :json-false)))
 
+(defun org-mcp--array-param (value what)
+  "Return VALUE, a call's array parameter WHAT, as the array it names.
+The tool schema types every parameter as a string, so a client that
+validates its arguments against the schema cannot send a JSON array
+at all: it sends the array as its own JSON text instead.  A VALUE
+whose first non-blank character is a left bracket is read back here,
+decoding as mcp-server-lib decodes an array that arrived as one, so
+the call goes on as if it had.  Such text that is not a JSON array is
+refused, naming WHAT.
+
+A left bracket begins no other value any of these parameters takes: a
+path is absolute, a field, property or computed name is an
+identifier, and `org-tag-re' forbids a bracket in a tag.  Any other
+VALUE is returned as it came, so a single tag, a single path,
+\"all\", \"none\" and the name of a configured list each reach their
+own check unchanged."
+  (if (and (stringp value)
+           (string-match-p "\\`[[:space:]]*\\[" value))
+      (condition-case nil
+          (json-parse-string value
+                             :array-type 'array
+                             :object-type 'alist
+                             :null-object nil
+                             :false-object
+                             :json-false)
+        (json-error
+         (org-mcp--tool-validation-error
+          "%s begins with [ but is not a JSON array: %s"
+          what value)))
+    value))
+
 (defun org-mcp--boolean-param (value name)
   "Return VALUE, the call's boolean parameter NAME, as t or nil.
 JSON true and \"true\" are true.  A blank VALUE, see
@@ -983,10 +1014,12 @@ as a fraction of a generation or a walk of minus one."
 
 (defun org-mcp--files-given (files)
   "Return FILES, a call's `files' parameter, or nil when it is blank.
-See `org-mcp--blank-param-p'.  Every tool taking `files' reads it
-through here."
-  (unless (org-mcp--blank-param-p files)
-    files))
+See `org-mcp--blank-param-p'.  A FILES sent as the text of a JSON
+array is read back as that array first, see `org-mcp--array-param'.
+Every tool taking `files' reads it through here."
+  (let ((files (org-mcp--array-param files "files")))
+    (unless (org-mcp--blank-param-p files)
+      files)))
 
 (defun org-mcp--optional-link-given (link)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
@@ -1654,12 +1687,16 @@ Every name is resolved here, at the parameter, rather than in
 `org-mcp--node-at-point': a node is then built from fields that are
 known to exist, and a call that misspells one is refused before a
 file is opened.  A field named twice is dropped to once, since it
-would otherwise be a key sent twice."
-  (if (org-mcp--blank-param-p fields)
-      default
-    (delete-dups
-     (mapcar
-      #'org-mcp--node-field (org-mcp--node-field-names fields)))))
+would otherwise be a key sent twice.
+
+A FIELDS sent as the text of a JSON array is read back as that array
+first, see `org-mcp--array-param'."
+  (let ((fields (org-mcp--array-param fields "fields")))
+    (if (org-mcp--blank-param-p fields)
+        default
+      (delete-dups
+       (mapcar
+        #'org-mcp--node-field (org-mcp--node-field-names fields))))))
 
 (defun org-mcp--group-given (value default what)
   "Return what a call's WHAT parameter, VALUE, asks for.
@@ -1671,21 +1708,25 @@ the parameter and takes DEFAULT, what that endpoint carries unasked.
 The answer is the symbol `all', nil for none, or the list of names
 the call wrote.  Which names are valid is the parameter's business
 rather than this grammar's, so the caller checks them; WHAT names the
-parameter in the refusal raised here."
-  (cond
-   ((org-mcp--blank-param-p value)
-    default)
-   ((equal value "all")
-    'all)
-   ((equal value "none")
-    nil)
-   ((or (vectorp value) (consp value))
-    (append value nil))
-   (t
-    (org-mcp--tool-validation-error
-     "%s takes an array of names, or \"all\" or \"none\" as a \
+parameter in the refusal raised here.
+
+A VALUE sent as the text of a JSON array is read back as that array
+first, see `org-mcp--array-param'."
+  (let ((value (org-mcp--array-param value what)))
+    (cond
+     ((org-mcp--blank-param-p value)
+      default)
+     ((equal value "all")
+      'all)
+     ((equal value "none")
+      nil)
+     ((or (vectorp value) (consp value))
+      (append value nil))
+     (t
+      (org-mcp--tool-validation-error
+       "%s takes an array of names, or \"all\" or \"none\" as a \
 string, not: %s"
-     what (org-mcp--json-name value)))))
+       what (org-mcp--json-name value))))))
 
 (defun org-mcp--assert-not-accumulating (name)
   "Refuse NAME when it is a drawer line adding to a property, not one.
@@ -3910,9 +3951,11 @@ Throws an MCP tool error if unbalanced blocks are found."
   "Return TAGS, a call's tag set, as a list of tag strings.
 One tag arrives as a string and several as a JSON array, which
 decodes to a vector; null and the empty array are the empty set.  A
-list comes back as it stands, so a set a tool has already read
-through `org-mcp--tag-set-given' passes here unchanged when it is
-handed on for validation.
+client that sends every argument as a string sends that array as its
+text, and it is read back as the array first, see
+`org-mcp--array-param'.  A list comes back as it stands, so a set a
+tool has already read through `org-mcp--tag-set-given' passes here
+unchanged when it is handed on for validation.
 
 Every member is a string.  `org-tag-re' is a test on text, so a
 number, a boolean, an object or a nested array among the members
@@ -3925,19 +3968,20 @@ of pairs, and a pair is no more a tag than a number is.
 This is the one place that says what a tag set is, so every
 parameter that takes one is covered by the check rather than each
 growing a guard of its own."
-  (let ((tag-list
-         (cond
-          ((null tags)
-           nil) ; No tags (nil or empty list)
-          ((vectorp tags)
-           (append tags nil)) ; Convert JSON array (vector) to list
-          ((listp tags)
-           tags) ; Already a list
-          ((stringp tags)
-           (list tags)) ; Single tag string
-          (t
-           (org-mcp--tool-validation-error "Invalid tags format: %s"
-                                           tags)))))
+  (let* ((tags (org-mcp--array-param tags "tags"))
+         (tag-list
+          (cond
+           ((null tags)
+            nil) ; No tags (nil or empty list)
+           ((vectorp tags)
+            (append tags nil)) ; Convert JSON array (vector) to list
+           ((listp tags)
+            tags) ; Already a list
+           ((stringp tags)
+            (list tags)) ; Single tag string
+           (t
+            (org-mcp--tool-validation-error "Invalid tags format: %s"
+                                            tags)))))
     (dolist (tag tag-list)
       (unless (stringp tag)
         (org-mcp--tool-validation-error "A tag must be a string: %s"
@@ -4632,7 +4676,8 @@ MCP Parameters:
              - any of these as [[link]] or [[link][description]]
   content - Optional body text; null, false and \"\" write no body,
             as leaving it out does
-  tags - Tags to add (optional, single string or array of strings)
+  tags - Tags to add (optional, single string or array of strings,
+         or the JSON text of such an array)
   previous_sibling - Link to the sibling to insert after (optional),
                      a direct child of the parent, or a top-level
                      heading of the file when parent names a whole
@@ -6041,6 +6086,8 @@ MCP Parameters:
   after - Tags to add (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           A tag the headline already has or inherits is left alone
           Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
@@ -6075,6 +6122,8 @@ MCP Parameters:
   after - Tags to remove (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           A tag the headline does not have is passed over
           A tag it only inherits is refused
   files - Files and directories to look up an id: link in, in order,
@@ -6139,6 +6188,8 @@ MCP Parameters:
   after - Tags to write (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           [] leaves the headline carrying no tags of its own
           Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
@@ -7235,6 +7286,9 @@ Tool descriptions `concat' it after the parameter's first line.")
           buffers the call opens for these files are closed
           afterwards.
           null, false, \"\" and [] mean no files.
+          A client that sends every argument as a string sends the
+          array as its JSON text, the characters
+          [\"/home/you/notes.org\"] in a string.
 "
   "How the `files' parameter of a tool scanning a set of files works.
 Tool descriptions `concat' it after the parameter's first lines.")
@@ -7246,6 +7300,9 @@ Tool descriptions `concat' it after the parameter's first lines.")
           field name and an unknown list name are both refused, and
           the refusal names the valid ones.
           null, false, \"\" and [] ask for the default.
+          A client that sends every argument as a string sends the
+          array as its JSON text, the characters [\"title\",
+          \"link\"] in a string.
 "
   "How the `fields' parameter works, for every tool that takes one.
 Each such tool names its own default before this text, because the
@@ -7261,6 +7318,9 @@ parameter.")
           a special property, which Org computes rather than stores,
           is refused and named as a node field instead.
           null, false, \"\" and [] ask for the default.
+          A client that sends every argument as a string sends the
+          array as its JSON text, the characters [\"Effort\"] in a
+          string.
 "
   "How the `properties' parameter works, for every tool taking one.
 Each such tool names its own default before this text, as it does
@@ -7273,6 +7333,9 @@ for `fields'.")
           refused, and the refusal names the ones that are.  A field
           whose function answers with nothing is left out.
           null, false, \"\" and [] ask for the default.
+          A client that sends every argument as a string sends the
+          array as its JSON text, the characters [\"rank\"] in a
+          string.
 "
   "How the `computed' parameter works, for every tool taking one.
 Each such tool names its own default before this text, as it does
@@ -7603,6 +7666,8 @@ Parameters:
   tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]
+         A client that sends every argument as a string sends the
+         array as its JSON text, those characters in a string
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
@@ -7954,6 +8019,8 @@ Parameters:
      "  after - Tags to add (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           A tag the headline already has, written on it or
           inherited, is left alone rather than written twice
           Must follow Org tag rules (alphanumeric, _, @)
@@ -7993,6 +8060,8 @@ Parameters:
      "  after - Tags to remove (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           A tag the headline does not have is passed over
           A tag it only inherits is refused, naming where the tag
           is written
@@ -8039,6 +8108,8 @@ Parameters:
   after - Tags to write (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
+          A client that sends every argument as a string sends the
+          array as its JSON text, those characters in a string
           [] leaves the headline carrying no tags of its own
           Must follow Org tag rules (alphanumeric, _, @)
           Respects mutually exclusive tag groups
@@ -8334,6 +8405,9 @@ Parameters:
           holds is an error.  Refused with any link but an id:
           link, such as a file: link, which names its file already.
           null, false, \"\" and [] mean no files.
+          A client that sends every argument as a string sends the
+          array as its JSON text, the characters
+          [\"/home/you/notes.org\"] in a string.
           Every tool that names a heading takes files in the same
           way.
 

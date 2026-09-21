@@ -117,9 +117,11 @@ tell you where a node went (see [[file:writing.org::*org-node-archive][org-node-
 =files= parameter naming the files to work on.  The named set replaces the
 allowed files for that call; without it, the call works on the allowed files.
 A blank value, =null=, =false=, =""= or =[]=, counts as no =files=, since some
-clients fill every optional parameter.  Each entry is an absolute path to an
-Org file or to a directory, and a relative path is refused, since it has no
-directory to resolve against but whichever buffer is current in Emacs:
+clients fill every optional parameter.  A set is also taken as the JSON text of
+the array, which is what a client that sends every argument as a string has to
+do; see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]].  Each entry is an absolute path
+to an Org file or to a directory, and a relative path is refused, since it has
+no directory to resolve against but whichever buffer is current in Emacs:
 
 - a file is checked like any file a call names: one outside the allowed files
   is accepted only as far as =org-mcp-file-scope-override= permits;
