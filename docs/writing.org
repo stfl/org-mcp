@@ -309,6 +309,11 @@ write for nothing. A body rewritten whole is the =content_digest= region, the
 one =org-node-set-content= works inside. A subtree is =digest=, because
 everything under the node goes with it.
 
+One call asserts a field it does not write. =org-node-set-todo= names a keyword,
+and Org may move the headline's planning dates on the way there, so where it
+can it carries =before_planning= beside =before=: what you would destroy, which
+is not always what you asked to change (see [[*A repeat redirects the call]]).
+
 Every one of them refuses a token in =before= outright, rather than comparing
 it against the field and failing. The refusal is unmarked, the malformed-call
 class: a token covers a region and a field is not a region, so no version of
@@ -504,6 +509,13 @@ The pair belongs to the field the call writes, and sits at the top of the
 response because there is only one of it. A field the call did not write but
 Org moved on the way gets a pair of its own, under the field's name: that is
 how =org-node-set-todo= reports a planning date a repeat carried on (see
+[[*A repeat redirects the call]]). Both pairs read alike, so a response's =after=
+is the next call's =before= wherever you find it.
+
+The pair belongs to the field the call writes, and sits at the top of the
+response because there is only one of it. A field the call did not write but
+Org moved on the way gets a pair of its own, under the field's name: that is
+how =org-node-set-todo= reports a planning date a repeat carried on (see
 [[*A repeat redirects the call]]). Both pairs read alike, so a response's
 =after= is the next call's =before= wherever you find it.
 
@@ -559,11 +571,12 @@ set has an empty value and spells it =[]=, the way a body spells its empty value
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
-  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out
+  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out. It names the keyword only: a planning date this call moves is Org's doing
+  - =before_planning= (object, optional): what the headline's planning fields hold now, as ={"scheduled": "<2026-06-20 Sat +1w>"}=. Name a field the headline carries one for, and leave out a field it carries none for — leaving it out is how the map asserts that it holds nothing, so =""= and =null= are refused. A field holding something else is a conflict and nothing is written. Required for a headline whose state change would move a planning value, and refused there when it is missing (see [[*A repeat redirects the call]])
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled= or =deadline= report for a planning date the call moved, and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
-- *Refuses with:* =conflict:= when =before= is not the state the headline holds, =blocked:= when Org vetoes the change, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the state the headline holds or =before_planning= is not what its planning fields hold, =blocked:= when Org vetoes the change, unmarked validation otherwise — a missing =before_planning= on a headline that needs one among them (see [[*How a refusal is classed]])
 
 =before= and =after= both name a TODO state, so the call reads as the
 transition it performs. A headline that carries no TODO keyword is asserted
@@ -654,10 +667,11 @@ a planning date the call moved, carrying the state that field was in and the
 state it is in now, each read the way a =before= is read:
 
 #+begin_src json
-# Request:
+# Request.  The headline has no DEADLINE, so the map leaves it out:
 {
   "link": "file:/home/user/org/tasks.org::*Water the plants",
   "before": "TODO",
+  "before_planning": {"scheduled": "<2026-06-20 Sat +1w>"},
   "after": "DONE"
 }
 
@@ -671,8 +685,17 @@ state it is in now, each read the way a =before= is read:
   "link": "file:~/org/tasks.org::*Water the plants"
 }
 
-# A SCHEDULED with no repeater beside a DEADLINE with one.  The
-# DEADLINE moves and the SCHEDULED goes:
+# A SCHEDULED with no repeater beside a DEADLINE with one.  Both are
+# asserted, because the repeat reaches both: the DEADLINE moves and
+# the SCHEDULED goes:
+{
+  "link": "file:/home/user/org/tasks.org::*File the return",
+  "before": "TODO",
+  "before_planning": {"scheduled": "<2026-06-18 Thu>",
+                      "deadline": "<2026-06-20 Sat +1w>"},
+  "after": "DONE"
+}
+
 {
   "success": true,
   "saved": true,
@@ -682,6 +705,12 @@ state it is in now, each read the way a =before= is read:
   "deadline": {"before": "<2026-06-20 Sat +1w>", "after": "<2026-06-27 Sat +1w>"},
   "link": "file:~/org/tasks.org::*File the return"
 }
+
+# The same call sent without before_planning.  The refusal names what
+# the headline holds, so the next one needs no read:
+{
+  "error": "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds SCHEDULED '<2026-06-18 Thu>' and DEADLINE '<2026-06-20 Sat +1w>'"
+}
 #+end_src
 
 A field is there only when the call moved it, so its absence says the headline
@@ -690,24 +719,47 @@ still holds what you last read. Its =after= is the next call's =before=:
 one read before this call is a conflict afterwards, and the reported value is
 the one to send. Plan from it rather than from what you read a moment earlier.
 
-*Nothing guards the date a repeat takes.* Every other write on this page that
-destroys something takes a required =before= for the thing it destroys, and is
-refused when the file disagrees (see [[*Knowing what you are about to change]]). A
-repeat destroys a planning value no parameter of the call named: you asserted
-the keyword, and the date went with it. What the response does instead is leave
-none of it unseen — the value that went comes back under =before=, which after
-the call is the only record of it anywhere, and what replaced it comes back
-beside it. Not asserted, but never unseen, and that is less than the rest of
-this page offers you.
+*The reported date comes from Org, and there is no working it out.* =.+= counts
+its interval from today and =++= steps the stored date on until it is past
+today, so applying the repeater to the old date yourself is wrong for two of
+the three forms — and a plausible wrong date is worse than none. org-mcp reads
+the field back after Org has decided it, which is what the report is for.
+
+*=before_planning= guards the date, and you send it only where a date is at
+risk.* Every write that destroys something takes a =before= for the thing it
+destroys and is refused when the file disagrees (see [[*Knowing what you are about to change]]).
+A repeat destroys a planning value, so the call asserts that value too — but
+only a repeat can, so an ordinary transition carries no assertion at all and
+costs nothing. Send =before_planning= when the headline repeats, and org-mcp
+refuses the call without it exactly there, naming what the headline holds so
+you can send it again without reading first.
+
+*Name a field the headline carries; leave out one it does not.* Silence about a
+field is not a field skipped — it asserts that the field holds nothing, and a
+headline that does carry a DEADLINE refuses the call that said nothing about
+it. That is what spares you spelling out an empty DEADLINE on every headline
+that never had one. It also means there is one spelling and not two: =""= and
+=null= inside the map are refused, because leaving the name out already says
+what they would say.
+
+*Assert both fields, whichever one carries the repeater.* A repeat reaches
+every planning date on the headline, and it takes away a SCHEDULED that carries
+no repeater of its own. The repeater need not even be on the planning line: one
+on a plain timestamp in the body repeats the headline and removes a plain
+SCHEDULED with it. So which field is at risk is a fact about the headline, not
+about the repeaters you can see on its dates, and org-mcp decides it for you —
+when it asks for an assertion, assert everything the headline holds.
+
+CLOSED is the third field of Org's planning line, and you never assert it. Org
+writes it when a headline reaches a done keyword and clears it when the
+headline leaves one, so it is Org's record of the transition rather than
+anything you chose. The response reports it like the other two: you assert what
+you could have destroyed, and you are told everything that moved.
 
 *Read the fields, not the keyword.* A repeat usually leaves a keyword other
 than the one you asked for, but not always: =REPEAT_TO_STATE= may name the very
 done keyword the call named, and then =after= is exactly what you requested
 while the dates have moved underneath. Comparing the two finds no repeat there.
-
-=.+= and =++= land on a date that depends on the day you call — =.+= counts its
-interval from today, and =++= steps the stored date on until it is past today —
-so the new date is not one the call can work out in advance either way.
 
 What the two fields do not cover is a repeater on a plain timestamp in the
 body. It steps on with the rest, and it shows up in the body rather than in a
