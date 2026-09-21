@@ -3099,6 +3099,39 @@ what gets described."
      org-log-note-effective-time (org-current-effective-time))
     (org-mcp--store-log-note note)))
 
+(defmacro org-mcp--repeat-catching-up (&rest body)
+  "Run BODY with Org's ten-interval question answered yes.
+`org-auto-repeat-maybe' shifts a `++' date forward until it is past
+today, and on the tenth shift it stops and asks a person whether to
+keep going.  Inside an MCP call there is nobody to ask: in batch the
+call dies reading an answer that never comes, and in the user's own
+Emacs it opens a minibuffer prompt the server armed and waits at it.
+That is the failure `org-mcp--logging-note' removed for
+`org-add-log-setup', reached through a different function.
+
+The answer is yes, and it is a decision rather than a default.  `++'
+means shift forward until past today, and yes is the only answer that
+carries that out; Org's question is a guard for a person who may have
+mistyped a repeater, and a call has already named the heading and
+asserted the state it is in, so there is no doubt here for a question
+to resolve.  Refusing would fail the ordinary case instead — a
+monthly task last done a year ago is twelve intervals behind — and
+leave the client no recovery but rewriting the timestamp by hand.
+Answering no is what Org turns into `user-error \"Abort\"', which
+names nothing a client could act on.
+
+It terminates: every shift moves the date forward by at least one
+interval, and a repeater of no length never reaches the loop.
+
+The binding is by scope and not by prompt, so it answers yes to any
+question the Org command in BODY asks.  The repeater is the only one
+reachable, and `org-mcp-test-a-write-asks-the-user-nothing' is what
+keeps that true: it turns every reader Org asks with into a failure
+and runs the write surface through them."
+  (declare (indent 0) (debug t))
+  `(cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
+     ,@body))
+
 (defmacro org-mcp--logging-note (note &rest body)
   "Run BODY, and write as NOTE the log entry BODY leaves Org waiting for.
 Returns non-nil when BODY set such an entry up, so a caller holding a
@@ -3472,7 +3505,8 @@ still recorded, as the state change org-mcp writes of its own accord."
               ;; `org-todo' cycles to the next keyword when its
               ;; argument is nil, so the ask for no keyword is spelled
               ;; as the `none' Org names it, never as a missing one.
-              (org-todo (or state 'none)))
+              (org-mcp--repeat-catching-up
+                (org-todo (or state 'none))))
       (when (org-string-nw-p note)
         (org-mcp--insert-log-note note 'state
                                   (or state "")
@@ -4243,7 +4277,8 @@ response's `saved' answers for the archive file too."
       ;; the archive buffer, so that is where the entry goes.
       (let ((org-archive-subtree-save-file-p nil))
         (org-mcp--logging-note nil
-          (org-archive-subtree))))
+          (org-mcp--repeat-catching-up
+            (org-archive-subtree)))))
     (when elsewhere
       (let ((buffer (plist-get context :buffer)))
         (org-mcp--maybe-save-buffer
@@ -6859,8 +6894,9 @@ MCP Parameters:
         ;; written before the buffer is saved rather than left on
         ;; `post-command-hook'.
         (org-mcp--logging-note nil
-          (org-clock-clock-out
-           (cons marker running-start) t close-at))
+          (org-mcp--repeat-catching-up
+            (org-clock-clock-out
+             (cons marker running-start) t close-at)))
         (org-mcp--clock-save-closed
          buf (alist-get 'file active) was-modified)
         ;; Only an edit that reached BUF can stay unsaved, and it has
@@ -7028,8 +7064,9 @@ on %s"
             (let ((org-log-note-clock-out
                    (or note org-log-note-clock-out)))
               (org-mcp--logging-note note
-                (org-clock-clock-out
-                 (cons marker start-time) nil end)))
+                (org-mcp--repeat-catching-up
+                  (org-clock-clock-out
+                   (cons marker start-time) nil end))))
             ;; The response links to the heading clocked out of.
             (goto-char heading)))))))
 

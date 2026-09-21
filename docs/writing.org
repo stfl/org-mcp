@@ -107,7 +107,11 @@ speaks:
 
 All three of Org's repeater forms are repeaters: =+1w= steps a week on from the
 date written, =++1m= steps a month on until it passes today, and =.+2d= restarts
-two days from the day the task is done. A warning period is the =-3d= form, and
+two days from the day the task is done. A =++= date catches up however far
+behind it is: completing a monthly task last done two years ago steps it
+twenty-four months on, in one call and without asking. Org stops to ask a
+person at the tenth step; a call has nobody to ask, and the answer taken here
+is the one that carries the repeater out. A warning period is the =-3d= form, and
 it may stand alone or beside a repeater; on a DEADLINE it brings the headline
 into the agenda three days early, and on a SCHEDULED it holds the headline back
 until three days before the date. The day name is Org's to write: send it or

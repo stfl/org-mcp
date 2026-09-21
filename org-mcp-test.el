@@ -3923,9 +3923,43 @@ where Org reads it as the heading's SCHEDULED.  Below the drawer it is
 a plain timestamp in the body: a repeat moves that too, but it is no
 planning field and no `before' names it.")
 
-(defconst org-mcp-test--content-task-scheduled-cumulative
-  "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu ++1m>"
-  "Task with a ++1m SCHEDULED repeater, which catches up past today.")
+(defun org-mcp-test--midday (decoded)
+  "Return DECODED at noon, with the clock change left for Emacs to work out.
+A date built by arithmetic on today carries today's daylight-saving
+flag, and at midnight an hour of that is a different day: a date
+computed across a clock change comes out one day off.  Noon is far
+enough from both edges for an hour either way not to reach them, and
+a daylight-saving field of -1 asks `encode-time' to decide it from
+the date rather than from the one it was copied off."
+  (setf (decoded-time-hour decoded) 12
+        (decoded-time-minute decoded) 0
+        (decoded-time-second decoded) 0
+        (decoded-time-dst decoded) -1
+        (decoded-time-zone decoded) nil)
+  decoded)
+
+(defun org-mcp-test--first-of-month-months-ago (months)
+  "Return the Org date stamp for the first of the month MONTHS ago.
+The first of a month is used so that a `++1m' step from it lands on
+the first of a month too, whatever month the suite runs in.
+
+A repeater fixture is written from today rather than from a date
+typed into the file, because `++' behaves by how far behind today the
+date is: a fixed date drifts, and the day it crosses ten intervals
+behind it is the day the test starts exercising a different path
+than the one it names."
+  (let ((back
+         (org-mcp-test--midday
+          (decoded-time-add
+           (decode-time) (make-decoded-time :month (- months))))))
+    (setf (decoded-time-day back) 1)
+    (format-time-string "<%Y-%m-%d %a ++1m>" (encode-time back))))
+
+(defun org-mcp-test--content-cumulative-months-ago (months)
+  "Return a task whose ++1m SCHEDULED is MONTHS behind today."
+  (concat
+   "* TODO Weekly Task\nSCHEDULED: "
+   (org-mcp-test--first-of-month-months-ago months)))
 
 (defconst org-mcp-test--content-task-scheduled-restart
   "* TODO Weekly Task\nSCHEDULED: <2026-01-01 Thu .+2d>"
@@ -4447,9 +4481,18 @@ what it holds."
 (defun org-mcp-test--repeat-today-plus (days)
   "Return the Org date text for DAYS from today.
 Org writes a date as `org-timestamp-formats' does, so the day name is
-the one the running locale gives it and this builds it the same way."
+the one the running locale gives it and this builds it the same way.
+
+The day is counted on the calendar rather than in hours, because Org
+counts it that way: adding 24 hours across a clock change lands on a
+different day than adding one day, and `org-mcp-test--midday' is what
+keeps the two agreeing."
   (format-time-string
-   (car org-timestamp-formats) (time-add nil (days-to-time days))))
+   (car org-timestamp-formats)
+   (encode-time
+    (org-mcp-test--midday
+     (decoded-time-add
+      (decode-time) (make-decoded-time :day days))))))
 
 (ert-deftest org-mcp-test-update-todo-state-triggers-repeat ()
   "Test that marking DONE on a task with a repeater triggers the repeat.
@@ -4514,27 +4557,224 @@ Where it lands depends on the day the call is made, which is the
 reason a client cannot compute it and has to be told: the response
 names the date the file now holds, and the file holds the date the
 response names."
-  (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-task-scheduled-cumulative))
-    (let ((org-log-repeat nil)
-          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
-      (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
-             (result
-              (org-mcp-test--finish-repeating
-               link 'scheduled "<2026-01-01 Thu ++1m>"))
-             (move (org-mcp-test--planning-move result 'scheduled)))
-        (should (equal (alist-get 'after result) "TODO"))
-        (should (equal (car move) "<2026-01-01 Thu ++1m>"))
+  (let ((started (org-mcp-test--first-of-month-months-ago 3)))
+    (org-mcp-test--with-temp-org-files
+        ((test-file (org-mcp-test--content-cumulative-months-ago 3)))
+      (let ((org-log-repeat nil)
+            (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+        (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+               (result
+                (org-mcp-test--finish-repeating
+                 link 'scheduled started))
+               (move (org-mcp-test--planning-move result 'scheduled)))
+          (should (equal (alist-get 'after result) "TODO"))
+          (should (equal (car move) started))
         ;; A month step from the first of a month stays on the first,
         ;; and `++' stops at the first such date past today.
-        (should (string-match-p "\\`<[0-9]\\{4\\}-[0-9][0-9]-01 [^>]*\\+\\+1m>\\'"
-                                (cdr move)))
-        (should (string> (substring (cdr move) 1 11)
-                         (format-time-string "%Y-%m-%d")))
-        (org-mcp-test--verify-file-matches
-         test-file
-         (concat "\\`\\* TODO Weekly Task\nSCHEDULED: "
-                 (regexp-quote (cdr move)) "\n?\\'"))))))
+          (should
+           (string-match-p
+            "\\`<[0-9]\\{4\\}-[0-9][0-9]-01 [^>]*\\+\\+1m>\\'"
+            (cdr move)))
+          (should (string> (substring (cdr move) 1 11)
+                           (format-time-string "%Y-%m-%d")))
+          (org-mcp-test--verify-file-matches
+           test-file
+           (concat "\\`\\* TODO Weekly Task\nSCHEDULED: "
+                   (regexp-quote (cdr move)) "\n?\\'")))))))
+
+;;; A write never waits for an answer
+
+;; Org asks a person questions in the middle of commands a write here
+;; calls.  There is nobody to ask: in batch the call dies parsing an
+;; answer that never comes, and in the user's own Emacs it opens a
+;; minibuffer prompt the server armed and waits.  That is the failure
+;; the log-note work removed for `org-add-log-setup', arriving through
+;; a different function.
+
+(defmacro org-mcp-test--with-no-answer-to-give (&rest body)
+  "Run BODY with every question Org could ask turned into a failure.
+A prompt reached here would block the user's Emacs, so a test that
+reaches one fails loudly rather than hanging or being answered by
+accident."
+  (declare (indent 0) (debug t))
+  `(cl-letf (((symbol-function 'y-or-n-p)
+              (lambda (prompt &rest _)
+                (error "Asked the user: %s" prompt)))
+             ((symbol-function 'yes-or-no-p)
+              (lambda (prompt &rest _)
+                (error "Asked the user: %s" prompt)))
+             ((symbol-function 'read-string)
+              (lambda (prompt &rest _)
+                (error "Asked the user: %s" prompt)))
+             ((symbol-function 'completing-read)
+              (lambda (prompt &rest _)
+                (error "Asked the user: %s" prompt)))
+             ((symbol-function 'read-from-minibuffer)
+              (lambda (prompt &rest _)
+                (error "Asked the user: %s" prompt))))
+     ,@body))
+
+(ert-deftest org-mcp-test-set-todo-repeats-a-long-overdue-entry ()
+  "A `++' entry further behind than Org asks about still repeats.
+Past ten intervals Org stops to ask a person whether to keep
+shifting.  The answer is settled here and the date is caught up, so
+an entry eighteen months behind completes the way one three months
+behind does."
+  (let ((started (org-mcp-test--first-of-month-months-ago 18)))
+    (org-mcp-test--with-temp-org-files
+        ((test-file (org-mcp-test--content-cumulative-months-ago 18)))
+      (let ((org-log-repeat nil)
+            (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+        (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
+               (result
+                (org-mcp-test--finish-repeating
+                 link 'scheduled started))
+               (move (org-mcp-test--planning-move result 'scheduled)))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'before result) "TODO"))
+          (should (equal (alist-get 'after result) "TODO"))
+          (should (equal (car move) started))
+          ;; Caught up past today, on the first of a month, and the
+          ;; file holds the date the response names.
+          (should
+           (string-match-p
+            "\\`<[0-9]\\{4\\}-[0-9][0-9]-01 [^>]*\\+\\+1m>\\'"
+            (cdr move)))
+          (should (string> (substring (cdr move) 1 11)
+                           (format-time-string "%Y-%m-%d")))
+          (org-mcp-test--verify-file-matches
+           test-file
+           (concat "\\`\\* TODO Weekly Task\nSCHEDULED: "
+                   (regexp-quote (cdr move)) "\n?\\'")))))))
+
+(ert-deftest org-mcp-test-a-write-asks-the-user-nothing ()
+  "No write reaches a question Org would put to a person.
+Every reader Org asks with is bound to fail here, so a write that
+reached one fails this test rather than hanging a session.  The
+repeat that does have a question behind it is settled inside
+`org-mcp--set-todo-state', which is why it passes with the readers
+still bound."
+  (org-mcp-test--with-no-answer-to-give
+    (org-mcp-test--with-temp-org-files
+        ((test-file
+          (concat
+           "* TODO Task One\n"
+           ":PROPERTIES:\n:EFFORT:   1:00\n:END:\n"
+           "Body text.\n"))
+         (repeating (org-mcp-test--content-cumulative-months-ago 18)))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-log-into-drawer t)
+            (link (org-mcp-test--file-link test-file "*Task One")))
+        (dolist (call
+                 `(("org-node-set-title"
+                    ((link . ,link) (before . "Task One")
+                     (after . "Task Renamed")))
+                   ("org-node-set-scheduled"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . "") (after . "2026-03-27")))
+                   ("org-node-set-deadline"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . "") (after . "2026-04-15")))
+                   ("org-node-set-priority"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . "") (after . "A")))
+                   ("org-node-add-tags"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (after . ["work"])))
+                   ("org-node-set-properties"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . ((EFFORT . "1:00")))
+                     (after . ((EFFORT . "2:00")))))
+                   ("org-node-add-note"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (note . "A note.")))
+                   ("org-node-set-content"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . "Body text.") (after . "New body.")))
+                   ("org-node-set-todo"
+                    ((link . ,(org-mcp-test--file-link
+                               test-file "*Task Renamed"))
+                     (before . "TODO") (after . "DONE")))))
+          (let ((result
+                 (json-read-from-string
+                  (mcp-server-lib-ert-call-tool
+                   (car call) (cadr call)))))
+            (should (equal (alist-get 'success result) t))))
+        ;; The repeating entry is the one with a question behind it.
+        (let ((result
+               (org-mcp-test--finish-repeating
+                (org-mcp-test--file-link repeating "*Weekly Task")
+                'scheduled
+                (org-mcp-test--first-of-month-months-ago 18))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) "TODO")))))))
+
+(ert-deftest org-mcp-test-a-node-verb-asks-the-user-nothing ()
+  "The whole-node verbs and the clock tools ask nothing either.
+`org-archive-subtree' marks the subtree done through `org-todo', so
+it reaches the repeat question the way the setter does, and
+`org-clock-out' reaches it through
+`org-clock-out-switch-to-state'.  Both are settled, and the rest of
+what these call asks nothing at all."
+  (org-mcp-test--with-no-answer-to-give
+    (org-mcp-test--with-verbs-file test-file
+      (let* ((link (org-mcp-test--verbs-link))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-refile"
+                `((link . ,link)
+                  (before . ,(org-mcp-test--verbs-digest))
+                  (parent
+                   .
+                   ,(org-mcp-test--file-link test-file "*Home")))))))
+        (should (equal (alist-get 'success result) t)))
+      (let* ((link (org-mcp-test--verbs-link))
+             (archive (concat test-file "_archive"))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-archive"
+                `((link . ,link)
+                  (before . ,(org-mcp-test--verbs-digest link)))))))
+        (unwind-protect
+            (should (equal (alist-get 'success result) t))
+          (when (file-exists-p archive)
+            (delete-file archive)))))
+    (org-mcp-test--with-temp-org-files
+        ((clocked org-mcp-test--clock-task-with-open-clock))
+      (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+            (org-clock-out-switch-to-state "DONE")
+            (link (org-mcp-test--file-link clocked "*Task One")))
+        (org-mcp-test--with-session-clock clocked
+          (let ((result
+                 (org-mcp-test--call-clock-out
+                  link "2026-01-01T11:00:00")))
+            (should (equal (alist-get 'success result) t))))
+        (let ((result
+               (org-mcp-test--call-clock-add
+                link "2026-01-02T10:00:00" "2026-01-02T11:00:00")))
+          (should (equal (alist-get 'success result) t)))
+        (let ((result
+               (org-mcp-test--call-clock-delete
+                link "2026-01-02T10:00:00")))
+          (should (equal (alist-get 'success result) t)))))
+    (org-mcp-test--with-verbs-file test-file
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-delete"
+               `((link . ,(org-mcp-test--verbs-link))
+                 (before . ,(org-mcp-test--verbs-digest)))))))
+        (should (equal (alist-get 'success result) t))))))
 
 (ert-deftest org-mcp-test-set-todo-repeat-reports-a-restarted-date ()
   "A `.+' repeater restarts from today, and that is reported.
