@@ -3362,33 +3362,132 @@ etc.)."
             (when drawer-pos
               (org-remove-empty-drawer-at drawer-pos))))))))
 
+(defun org-mcp--clock-entries-matching (predicate)
+  "Return the CLOCK elements of the heading at point PREDICATE keeps.
+Point must be at a heading and is not moved.  PREDICATE is called with
+one CLOCK element at a time, and every element it keeps comes back, in
+the order they are written.
+
+The search is bounded by `org-entry-end-position', so it covers that
+heading's own entry and not its subtree.  A CLOCK line under a
+descendant is that descendant's, named by a link of its own, and a
+call naming an ancestor is not the one entitled to destroy it.  That
+bound is one fact about which lines are this heading's, so it is
+asked in one place and every question about them is put through
+here."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((entry-begin (point))
+          (entry-end (org-entry-end-position)))
+      (save-restriction
+        (narrow-to-region entry-begin entry-end)
+        (org-element-map
+         (org-element-parse-buffer 'element)
+         'clock
+         (lambda (clock) (and (funcall predicate clock) clock)))))))
+
 (defun org-mcp--clock-entries-starting-at (start-time)
   "Return the CLOCK elements of the heading at point starting at START-TIME.
 Point must be at a heading and is not moved.  START-TIME is an Emacs
 time value.
 
-The search is bounded by `org-entry-end-position', so it covers that
-heading's own entry and not its subtree.  A CLOCK line under a
-descendant is that descendant's, named by a link of its own, and a
-call naming an ancestor is not the one entitled to destroy it.
-
 Several CLOCK lines may share a start, so every match comes back, in
 the order they are written; what an ambiguous START-TIME means is the
 caller's to decide."
-  (save-excursion
-    (org-back-to-heading t)
-    (let ((entry-begin (point))
-          (entry-end (org-entry-end-position))
-          (target (float-time start-time)))
-      (save-restriction
-        (narrow-to-region entry-begin entry-end)
-        (org-element-map
-         (org-element-parse-buffer 'element) 'clock
-         (lambda (clock)
-           (when (= (float-time
-                     (org-mcp--clock-element-start-time clock))
-                    target)
-             clock)))))))
+  (let ((target (float-time start-time)))
+    (org-mcp--clock-entries-matching
+     (lambda (clock)
+       (= (float-time (org-mcp--clock-element-start-time clock))
+          target)))))
+
+(defun org-mcp--clock-closed-ends (start)
+  "Return the end times of the heading's closed CLOCK lines at START.
+Point must be at a heading and is not moved."
+  (delq
+   nil
+   (mapcar
+    #'org-mcp--clock-element-end-time
+    (org-mcp--clock-entries-starting-at start))))
+
+(defun org-mcp--clock-end-added (before after)
+  "Return the one time in AFTER that BEFORE does not account for.
+BEFORE and AFTER are lists of end times read on either side of a
+write, and one time may appear in either more than once, so they are
+compared as multisets rather than as sets.
+
+Nil when AFTER adds none, and nil when it adds more than one: only
+one clock runs at a time, so a second addition is not this call's to
+claim, and saying nothing is the honest answer where saying which
+would be a guess.
+
+A matched time is dropped with `delq', which goes by identity, and
+what it drops is the element `seq-find' has just returned, so one
+match consumes one entry.  That is what keeps the comparison a
+multiset where a list holds one instant twice: two such entries are
+separate objects, `eq' between them being nil where `time-equal-p' is
+t.  Times interned so that equal ones were one object would break
+it, dropping both entries for one match and inventing an addition."
+  (let ((unmatched (copy-sequence before))
+        (added nil))
+    (dolist (end after)
+      (let ((seen
+             (seq-find
+              (lambda (time) (time-equal-p time end)) unmatched)))
+        (if seen
+            (setq unmatched (delq seen unmatched))
+          (push end added))))
+    (and (null (cdr added)) (car added))))
+
+(defun org-mcp--clock-open-reading ()
+  "Return what will find again the clock running in the heading at point.
+Nil when no CLOCK line of the heading is open.  Otherwise a cons of
+that line's start and the end times of the lines already closed at
+the same start.  Point must be at a heading and is not moved.
+
+A start does not name a CLOCK line.  `org-clock-rounding-minutes'
+makes two lines of one heading beginning together ordinary, which is
+why `org-clock-delete' refuses a start that names two.  So the
+reading carries what was already closed there, and the line this call
+closed is the one that reading cannot account for; see
+`org-mcp--clock-closed-moves'."
+  (when-let* ((open
+               (org-mcp--clock-entries-matching
+                (lambda (clock)
+                  (eq
+                   (org-element-property :status clock) 'running))))
+              (start (org-mcp--clock-element-start-time (car open))))
+    (cons start (org-mcp--clock-closed-ends start))))
+
+(defun org-mcp--clock-closed-moves (reading)
+  "Return the response field for the clock READING the call closed, or nil.
+READING is `org-mcp--clock-open-reading' taken before the write, and
+nil when no clock was running in the heading, which is most calls.
+Point must be at the heading and is not moved.
+
+The field is there only when this call closed that clock, so its
+presence is the statement — the shape `org-mcp--planning-moves' uses
+for a planning field a call moved without being asked to.  It reports
+what `org-clock-out' reports, because a client that was clocking the
+task it has just finished is owed what the call it did not have to
+make would have told it.
+
+The line is identified by being closed now and not then, never by its
+start.  Reading the start alone would report a line closed long
+before the call whenever one began at the same minute, and would
+report a close on a keyword that closed nothing at all, which is the
+statement the field's absence is supposed to make."
+  (when-let* ((reading)
+              (start (car reading))
+              (end
+               (org-mcp--clock-end-added
+                (cdr reading) (org-mcp--clock-closed-ends start))))
+    `((clock
+       (start . ,(org-mcp--clock-format-timestamp start))
+       (end . ,(org-mcp--clock-format-timestamp end))
+       (duration
+        .
+        ,(org-mcp--clock-duration-string
+          (float-time (time-subtract end start))))))))
 
 (defun org-mcp--clock-describe-ends (clocks)
   "Describe CLOCKS by the ends that tell entries of one start apart.
@@ -4591,6 +4690,7 @@ MCP Parameters:
          (file-path (plist-get target :file))
          (actual-prev nil)
          (actual-new nil)
+         (clock-reading nil)
          (planning-prev nil)
          (planning-new nil))
     (org-mcp--modify-and-save file-path "update"
@@ -4598,7 +4698,9 @@ MCP Parameters:
                                `((before . ,actual-prev)
                                  (after . ,actual-new))
                                (org-mcp--planning-moves
-                                planning-prev planning-new))
+                                planning-prev planning-new)
+                               (org-mcp--clock-closed-moves
+                                clock-reading))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (when after
@@ -4611,6 +4713,14 @@ MCP Parameters:
       ;; way to the keyword the call asked for; see
       ;; `org-mcp--planning-moves'.
       (setq planning-prev (org-mcp--planning-at-point))
+      ;; A clock running in this heading is the other thing the
+      ;; keyword can take with it: `org-clock-out-when-done' closes
+      ;; one when the heading reaches a done keyword.  What is read
+      ;; here is the open line's start and the ends already closed at
+      ;; it, so that afterwards the close this call made can be told
+      ;; from the closes that were there before;
+      ;; see `org-mcp--clock-closed-moves'.
+      (setq clock-reading (org-mcp--clock-open-reading))
 
       ;; Check current state matches
       (unless (string= actual-prev before)
@@ -7660,6 +7770,13 @@ Returns JSON object:
           CLOSED is reported like the other two and asserted like
           neither: Org writes it on a done transition and clears it
           on a repeat
+  clock - Present only when the transition closed a clock running in
+          the heading, which `org-clock-out-when-done' does on a move
+          to a done keyword (object): the start, end and duration of
+          that close.  Both timestamps are bracketed, as a CLOCK line
+          spells an inactive timestamp and as org-clock-add reports
+          them; org-clock-out spells its own start without brackets,
+          so compare the two as instants, not as strings
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

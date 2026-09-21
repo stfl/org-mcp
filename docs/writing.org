@@ -590,6 +590,11 @@ on (see [[*A repeat redirects the call]]), and =org-node-set-scheduled= or
 that call moved it, and never the field the call was asked to write, which the
 pair at the top already reports.
 
+A clock is reported the same way and does not read the same, because a clock
+is not a field a =before= asserts: =org-node-set-todo= names a =clock= when the
+transition closed one, carrying what that close recorded rather than a state to
+send back (see [[*A done keyword can close the clock]]).
+
 #+begin_src json
 # Taking the SCHEDULED away
 {"link": "id:abc-123", "before": "<2026-09-20 Sun>", "after": null}
@@ -646,7 +651,7 @@ set has an empty value and spells it =[]=, the way a body spells its empty value
   - =before_planning= (object, optional): what the headline's planning fields hold now, as ={"scheduled": "<2026-06-20 Sat +1w>"}=. Name a field the headline carries one for, and leave out a field it carries none for — leaving it out is how the map asserts that it holds nothing, so =""= and =null= are refused. A field holding something else is a conflict and nothing is written. Required for a headline whose state change would move a planning value, and refused there when it is missing (see [[*A repeat redirects the call]])
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, a =clock= report when the transition closed a running clock (see [[*A done keyword can close the clock]]), and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
 - *Refuses with:* =conflict:= when =before= is not the state the headline holds or =before_planning= is not what its planning fields hold, =blocked:= when Org vetoes the change, unmarked validation otherwise — a missing =before_planning= on a headline that needs one among them (see [[*How a refusal is classed]])
 
 =before= and =after= both name a TODO state, so the call reads as the
@@ -718,6 +723,48 @@ Example:
   "error": "blocked: TODO state change from TODO to DONE blocked (by \"TODO Write the tests\")"
 }
 #+end_src
+
+*** A done keyword can close the clock
+
+A move to a done keyword closes the clock running in that headline, because
+=org-clock-out-when-done= is on by default. Org does it as it does for the
+=C-c C-t= you would have typed, so the CLOCK line is closed in place and
+Emacs's own clock stops with it.
+
+The response says so. A =clock= report is there only when the call closed one,
+carrying that close's =start=, =end= and =duration=, so a client that was
+clocking the task it has just finished learns the close from the call it
+already made. Both timestamps are bracketed, the way a CLOCK line spells an
+inactive timestamp and the way [[file:clocking.org::*org-clock-add][org-clock-add]] reports them; =org-clock-out= spells
+its own =start= without the brackets, so compare the two as instants rather
+than as strings:
+
+#+begin_src json
+{
+  "success": true,
+  "saved": true,
+  "before": "TODO",
+  "after": "DONE",
+  "clock": {
+    "start": "[2026-03-23 Mon 14:30]",
+    "end": "[2026-03-23 Mon 16:45]",
+    "duration": "2:15"
+  },
+  "link": "id:550e8400-e29b-41d4-a716-446655440000"
+}
+#+end_src
+
+No =clock= means this call closed none, which is the whole of what the field
+says. Org closes the clock only where it is the Emacs session's own, running in
+that heading, and the keyword reached is a done one under
+=org-clock-out-when-done=; anything short of that leaves the clock alone and
+the field out. An open CLOCK line the session is not clocking is one such case,
+and so is a clock left open by an earlier session.
+
+A repeat closes the clock all the same, which is the case worth knowing. Org
+closes it while the headline is done and moves the keyword back afterwards, so
+a repeating task comes back in =TODO= with its clock stopped, and the response
+carries both the =scheduled= Org moved and the =clock= it closed (see [[*A repeat redirects the call]]).
 
 *** A repeat redirects the call
 
@@ -1216,6 +1263,21 @@ Example:
 carry instead. Rescheduling a repeating entry keeps its repeater, which is one
 reason =before= is the whole Org string rather than a date.
 
+That inheritance has one condition: the =after= brings neither a repeater nor a
+warning period of its own. Where it brings neither — a bare date, or one
+carrying a time of day or a span of the day — the headline's repeater and
+warning stay where they are and the date moves under them. Where it brings
+either, it replaces both, and the headline ends up carrying exactly what was
+sent. The same rule governs =org-node-set-deadline=.
+
+Against =<2026-06-20 Sat +1w -3d>=, an =after= of =2026-07-02= writes
+=<2026-07-02 Thu +1w -3d>=; an =after= of =2026-07-02 -2d= writes
+=<2026-07-02 Thu -2d>=, the repeater gone; and an =after= of =2026-07-02 +2w=
+writes =<2026-07-02 Thu +2w>=, the warning gone. Name the repeater alongside
+the warning — =2026-07-02 +1w -2d= — to move all three at once. The response
+reads the timestamp back from the file, so its =after= reports the whole of
+what the headline ended up with.
+
 A headline whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
 =after= replaces the range with the one date it names. This tool reads and
@@ -1350,7 +1412,11 @@ Example:
 carry instead.
 
 A warning period is what a deadline says it early: =-3d= puts the headline in
-the agenda three days before the day it is due.
+the agenda three days before the day it is due. Sending one to a repeating
+deadline replaces its repeater, because an =after= carrying a repeater or a
+warning replaces both — name the repeater alongside the warning to keep it
+(see [[*org-node-set-scheduled][org-node-set-scheduled]], which states the rule
+for both tools).
 
 =org-log-redeadline= records both the move and the removal, as it does for a
 deadline you change by hand; see [[*What a write records in the LOGBOOK]].
