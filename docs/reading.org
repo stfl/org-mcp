@@ -673,6 +673,13 @@ Org honours a settings line wherever it stands, below the first heading
 included, and this answer reports it wherever it stands too; a =#+TODO:= inside
 an example block is part of that block to Org and is not reported here.
 
+*A file node's =content= carries these lines too,* because a file's body is the
+preamble they stand in, and =org-node-read= returns it with a =content_digest=
+over it like any other body. Changing them goes through
+[[file:writing.org::*org-file-set-setting][org-file-set-setting]] all the same: =org-node-set-content= refuses a link naming
+a whole file, so there is one guarded way for a setting to change and the digest
+is not a second one (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
+
 ** org-config-tags
 - *Description:* Get tag configuration as literal Elisp variable values
 - *Parameters:* None

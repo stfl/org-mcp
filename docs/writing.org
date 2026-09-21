@@ -1431,6 +1431,15 @@ taking it away changes it back.
 }
 #+end_src
 
+*This is the only way these lines change.* A file node has a body, and that
+body /is/ the preamble: a read of a =file:= link returns =#+TITLE:= and
+=#+TODO:= under =content=, with a =content_digest= over them.
+[[*org-node-set-content]] does not take a file's link all the same, and that is
+deliberate. It replaces a body against a digest, and a digest says only that the
+region has not moved — so overwriting a preamble through it would rewrite a
+file's TODO sequence with no keyword named anywhere in the call, and none of the
+guarding below would run. The settings of a file are written here.
+
 *Which settings this tool writes, and why those.* The six are the ones that say
 what the file is and how Org treats it: its title, the workflow its headings are
 held to, where a subtree of it is archived, the category its entries carry in
