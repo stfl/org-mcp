@@ -202,7 +202,12 @@ and they arrive together, under one key of the node:
 #+end_src
 
 A file is a node, so =properties= reaches a file's own top-level drawer the
-same way it reaches a heading's.
+same way it reaches a heading's, and so does a write (see
+[[file:writing.org::*A file's own property drawer][A file's own property drawer]]). That drawer is the one at the top of the file,
+above its =#+= settings and before its first heading, where org-roam keeps the
+=ID= of a file node. A file whose very first line is a heading has no room for
+one and carries no properties of its own: the drawer on that line belongs to
+the heading, and a read of the heading is what returns it.
 
 Property names are matched the way Org matches them, ignoring case, and come
 back under the name Org keeps, which is upper case. A property the node does

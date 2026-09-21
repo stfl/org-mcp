@@ -56,9 +56,12 @@ works unchanged:
   =org-node-text= and the =org://{link}= resource it reads exactly as the
   file's =file:= link without a search part does. With a search part, as in
   =id:<id>::*Review=, it searches the whole file.
-- =org-node-create= reads a link to a whole file, a =file:= link without a search
-  part or an =id:= link to a file-level property drawer, as the top level of
-  that file. A tool that needs a heading refuses either.
+- A link to a whole file — a =file:= link without a search part, or an =id:=
+  link to a file-level property drawer — reaches three write tools.
+  =org-node-set-properties= takes it as the node to write, and writes that
+  file's own drawer; =org-node-create= and =org-node-refile= take it as
+  =parent=, the top level of that file. Every other write tool needs a heading
+  and refuses it (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
 
 org-mcp refuses:
 
@@ -135,7 +138,7 @@ files, name that file in =files= on each call that sends the link, as far as
 * Links org-mcp returns
 
 Every =link= field org-mcp returns is a native Org link: a write returns the
-link to the heading it changed, and every node in a read result, a query result
+link to the node it changed, and every node in a read result, a query result
 or an outline carries its own (see [[file:reading.org::*The node][The node]]). For a heading it is the link
 =org-store-link= makes when it may only use the identifiers the heading already
 has, chosen in this order:
