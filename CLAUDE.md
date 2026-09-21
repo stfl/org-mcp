@@ -96,10 +96,26 @@ one, so a `.omc/plans/…` path is stripped before anything is published.
 Work ends committed, never stashed: the stash is shared with every worktree of
 this repository and other sessions pop it.
 
-A session ends with the branch pushed: `git pull --rebase && git push`, then
-`git status` to confirm the branch tracks its remote. `feat/native-links-and-file-scope`
-is published and tracks `origin`; `main` is where it is headed, and merging it
-there is Stefan's decision, not a session's.
+A session ends with the branch pushed, then `git status` to confirm the branch
+tracks its remote. `dev` is published and tracks `origin`; `main` is where it is
+headed, and merging it there is Stefan's decision, not a session's.
+
+**Ask whether the remote moved before reaching for a rebase:**
+
+```sh
+git rev-list --left-right --count origin/dev...dev   # behind<TAB>ahead
+```
+
+A `0` on the left means there is nothing to pull, and `git push` is the whole
+of it. `git pull --rebase` there is not a no-op — it replays the local commits
+onto the same base, which **flattens the merge commits a session of parallel
+worktrees produces** and stops on the first conflict, one branch at a time.
+Rebase only when the left-hand number is non-zero, and on a branch carrying
+merges prefer `git pull --no-rebase` so the merges survive.
+
+Read the exit status of a git command, never the tail of its output: `git merge
+… | tail` reports `tail`'s success, so a following `&&` runs even when the merge
+failed and the check that follows tests the wrong tree.
 
 Several agents work this repository at once, each in its own worktree under
 `.claude/worktrees/`. Before editing after a resume, check `git status
