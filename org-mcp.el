@@ -5937,16 +5937,15 @@ reads, so a call asking after `todo' asks after `#+TODO:'.  A name
 outside `org-mcp--file-settings' is refused with the names that are
 in it: the boundary is this tool\\='s subject, and a client that
 guessed at one outside it is told which are there rather than left
-to guess again."
+to guess again.  They are named as this parameter takes them, so
+that the refusal hands back a value that can be sent — `#+TODO:' is
+how the line reads and `TODO' is what the call carries."
   (let* ((text (org-mcp--text-param-given setting "setting"))
          (key (upcase (string-trim text))))
     (unless (member key org-mcp--file-settings)
       (org-mcp--tool-validation-error
        "No such setting: '%s' - this tool writes %s"
-       text
-       (mapconcat
-        (lambda (name) (concat "#+" name ":")) org-mcp--file-settings
-        ", ")))
+       text (mapconcat #'identity org-mcp--file-settings ", ")))
     key))
 
 (defun org-mcp--setting-set-given (value name)
