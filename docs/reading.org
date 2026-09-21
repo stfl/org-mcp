@@ -388,7 +388,8 @@ change]]). =digest= covers the node's whole subtree: its heading, its body, its
 drawers and every descendant under it, up to where the next heading of the same
 level or a shallower one begins — the whole file, for a file node.
 =content_digest= covers the body alone, exactly the region =content= is read
-from and =org-node-set-content= writes within, which for a file is its preamble.
+from: for a heading, the region =org-node-set-content= writes within, and for a
+file, its preamble.
 
 A token is opaque. It says which version of a region you read, and the way to
 use one is to send back the token you were given. How org-mcp builds one is
@@ -411,10 +412,12 @@ to see of them, so a node read without its children still carries a token over
 the subtree below it.
 
 Read a token on the read immediately before you act on it, rather than from a
-list you kept. Both regions take in =:LOGBOOK:= drawers and =CLOCK:= lines,
-which move as notes and clocks are written — including by org-mcp's own clock
-tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier call can name a
-version that the client's own clocking has left behind.
+list you kept. =digest= takes in the heading's =:LOGBOOK:= drawer and its
+=CLOCK:= lines, which move as notes and clocks are written — including by
+org-mcp's own clock tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier
+call can name a version that the client's own clocking has left behind. A body
+starts past those lines, so =content_digest= moves for what is written into the
+body itself, a log note Org keeps outside a drawer among it.
 
 * Available MCP Resources
 

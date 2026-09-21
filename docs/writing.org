@@ -123,7 +123,11 @@ Two refusals stay unmarked on purpose. A link that resolves to no heading —
 =Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
 or one that never existed, which is a malformed call, and org-mcp cannot tell
 the two apart. It leaves the refusal in the default class rather than guess,
-and a client that cares reads the file to find out which it was.
+and a client that cares reads the file to find out which it was. A =before=
+that the node disagrees with is not the same case, however much it reads like
+one: the node was found, and what disagrees is its content, which org-mcp can
+see. There is a file to read again and a fact to read out of it, so those
+refusals are conflicts.
 
 The other is a delete of the node the Emacs session's clock is running in. The
 call is well formed and the file is exactly as the client read it, so it is no
@@ -141,11 +145,17 @@ edits the buffer, a capture lands, another client writes, a clock tool adds a
 =CLOCK:= line.
 
 =digest= and =content_digest= are how a client tells whether it has. Ask for
-one on the read you plan from, keep it, and read it again when you come to
-write: an unchanged token says the region is as you left it, and a different
-one says your plan was made against something the file no longer holds. Ask on
-that read rather than reaching for a token from a list you kept, because a kept
-token goes stale for reasons a client causes itself (see [[file:reading.org::*The two digests][The two digests]]).
+one on the read you plan from, and send it back in =before= when you come to
+write: an unchanged region takes the write, and a region that has moved refuses
+it, because your plan was made against something the file no longer holds. Ask
+on that read rather than reaching for a token from a list you kept, because a
+kept token goes stale for reasons a client causes itself (see [[file:reading.org::*The two digests][The two digests]]).
+
+A token is opaque, and it is echoed rather than computed. What you send is the
+string a read handed you, prefix and all; the region it covers is a region of
+the file, and a client holds at most part of it. The published recipe is in
+[[file:reading.org::*The two digests][The two digests]], so that org-mcp's answer can be checked — not so that a client
+can build a token of its own.
 
 Which token to ask for follows what you are about to change, because what you
 assert is what you would destroy. A field change carries the field's own value,
@@ -156,6 +166,17 @@ it is still the heading whose state you meant to change, and a token over its
 subtree would refuse that write for nothing. A body rewritten whole is the
 =content_digest= region, the one =org-node-set-content= works inside. A subtree
 is =digest=, because everything under the node goes with it.
+
+Those six tools refuse a token in =before= outright, rather than comparing it
+against the field and failing. The refusal is unmarked, the malformed-call
+class: a token covers a region and a field is not a region, so no version of
+the file would make the two match, and reading the node again and sending the
+same token back refuses the call again. What has to change is the call — send
+the value the field holds. It reads:
+
+#+begin_example
+Priority is asserted with the value it holds, not with a digest: 'sha256:…' covers a region and this call changes one field
+#+end_example
 
 On =org-node-set-scheduled=, =org-node-set-deadline=, =org-node-set-priority=
 and =org-node-set-properties= the =before= is required, and an empty one is a
@@ -178,11 +199,12 @@ grades the requirement by how recoverable the verb is — an optional guard is a
 off guard, and it would be off at =org-node-archive=, whose damage is the one
 you are least likely to notice.
 
-A refusal over a =digest= names the token you sent and not the one the subtree
-carries now. The current token is the only value that would make the same call
-succeed, and a call asserting a digest you never read asserts nothing; what the
-refusal tells you is that the node has moved on from the read you planned from,
-and the way forward is to read it again. A =before= over a field is different:
+A refusal over a token names the token you sent and not the one the region
+carries now, at either radius. The current token is the only value that would
+make the same call succeed, and a call asserting a digest you never read
+asserts nothing; what the refusal tells you is that the region has moved on
+from the read you planned from, and the way forward is to read it again. A
+=before= over a field is different:
 the value such a refusal reports — the state, the title, the date, the priority,
 the property — is a fact about the node, and it is yours to act on.
 
@@ -359,27 +381,58 @@ Example:
 #+end_src
 
 ** org-node-set-content
-- *Description:* Edit or append to the body content of an Org node. In replace mode (default), finds and replaces a unique substring. In append mode, inserts content after existing body but before child headlines
+- *Description:* Edit or append to the body content of an Org node. In replace mode (default), replaces either a unique substring of the body or the body entire, whichever =before= names. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): Substring to search for within the node's body (must be unique). Use empty string "" to add content to an empty node. Append mode does not read it, and still expects the parameter: send ""
+  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Append mode does not read it, and still expects the parameter: send ""
   - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). In append mode it is the content to append and cannot be empty or whitespace-only
   - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
-- *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= for every refusal over =before=, in either form, and unmarked validation otherwise (see [[*How a refusal is classed]])
 - *Special behavior (replace mode):* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
-Replace mode is a transition: =before= is the text the body holds and =after=
-is what takes its place. Append mode is not. It adds to the end of the body
-and destroys nothing, so it asserts nothing: neither parameter says what the
-body held, and the call goes through whatever has happened to the node since
-it was read. It is therefore not a way to retry a replace that was refused —
-read the node again and send the replace against the body it holds now.
+Replace mode is a transition: =before= is what the body holds and =after= is
+what takes its place. How much of the body =after= takes the place of follows
+the form =before= arrives in, and nothing else — there is no flag to set. A
+substring names a part of the body and replaces that part. The =content_digest=
+a read of the node returned names the region entire and replaces the region,
+which is how a body too long to echo back is rewritten. The =sha256:= prefix is
+the whole of what tells the two apart, because a short body could itself be
+sixteen hexadecimal characters and a client must still be able to assert it.
+
+Send back the token a read handed you, and take it from the read you planned
+this call from rather than from a list you kept (see [[*Knowing what you are about to change][Knowing what you are about
+to change]]).
+
+Append mode is no transition at all. It adds to the end of the body and
+destroys nothing, so it asserts nothing: neither parameter says what the body
+held, and the call goes through whatever has happened to the node since it was
+read. It is therefore not a way to retry a replace that was refused — read the
+node again and send the replace against the body it holds now.
+
+Every refusal over =before= is a conflict, whichever form it took:
+
+#+begin_example
+conflict: Body text not found: This is a placeholder.
+conflict: Text appears 3 times (must be unique)
+conflict: Node has no body content
+conflict: An empty before asserts the node has no content, and this node has some; send the part of the content to replace
+conflict: Content mismatch: expected 'sha256:…'; the body has changed since that read, so read the node again for a current content_digest; nothing was written
+#+end_example
+
+Each of them answers a =before= you believed you read: the body you planned
+against is not the body the file holds, whether the part you named has gone,
+has been duplicated, was never there because the node has no body, or the whole
+region has moved. The recovery is the same one every conflict has — read the
+node again and plan against what it holds now — so they carry the marker that
+says it. A digest is a stricter assertion than a substring, not a different
+kind of one: it asserts the region rather than a part of it, and it fails on a
+change a substring would have written straight through.
 
 Example:
 #+begin_src json
-# Replace mode:
+# Replace mode, a substring:
 {
   "link": "id:abc-123",
   "before": "This is a placeholder.",
@@ -391,6 +444,13 @@ Example:
   "success": true,
   "saved": true,
   "link": "id:abc-123"
+}
+
+# Replace mode, the body entire:
+{
+  "link": "id:abc-123",
+  "before": "sha256:1b4f0e9851971998",
+  "after": "The whole body, written afresh."
 }
 
 # Append mode:

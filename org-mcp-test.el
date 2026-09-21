@@ -5491,7 +5491,7 @@ content here."
      '((link . "id:test-id")
        (before . "occurrence of pattern")
        (after . "REPLACED"))
-     "\\`Text appears 3 times (must be unique)\\'"
+     "\\`conflict: Text appears 3 times (must be unique)\\'"
      test-file)))
 
 
@@ -5525,13 +5525,14 @@ content here."
   "An empty before is refused when the node already has content.
 The refusal names the assertion the call made, what the tool found
 instead and what to send in its place, because a client has only the
-message to act on."
+message to act on.  It is a conflict: the client read a body it
+believed was empty, and the node has one."
   (org-mcp-test--with-id-setup test-file
       org-mcp-test--content-nested-siblings
       `(,org-mcp-test--content-with-id-id)
     (should
      (string=
-      "An empty before asserts the node has no content, \
+      "conflict: An empty before asserts the node has no content, \
 and this node has some; send the part of the content to replace"
       (org-mcp-test--call-tool-expecting-error
        test-file "org-node-set-content"
@@ -5755,6 +5756,324 @@ org-node-set-content, and leaves the file unchanged."
        test-file link ""
        "- item\n  #+begin_example\n  ,** x\n  #+end_example"
        org-mcp-test--regex-block-body-escaped-appended t link))))
+
+;;; The two forms of org-node-set-content's before
+
+;; What a replacement overwrites follows the form of what it asserts: a
+;; substring names a part of the body and replaces that part, and a
+;; content_digest names the region entire and replaces the region.  The
+;; prefix is the whole of the discrimination, so these tests go through
+;; the tool the way a client does, and each pins the response as well as
+;; the file: a wrong before, after or saved reaches a client through the
+;; response and never through the bytes.
+
+(defconst org-mcp-test--set-content-id
+  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  "ID of Target in `org-mcp-test--content-set-content'.")
+
+(defconst org-mcp-test--content-set-content
+  (concat
+   "* TODO [#B] Target :work:\n"
+   "SCHEDULED: <2026-04-02 Thu> DEADLINE: <2026-04-09 Thu>\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--set-content-id "\n"
+   ":Effort:   2:00\n"
+   ":END:\n"
+   "First line of the body.\n"
+   "Second line of the body.\n"
+   "** Child\n"
+   "* Sibling\n")
+  "A node with a body to rewrite and every field a digest must not guard.
+Target carries a TODO state, a priority, a tag, both planning
+timestamps and a property, so a call asserting the subtree where a
+field's value belongs is refused by each setter in turn.  Sibling
+has no body, which is a region with a token of its own.")
+
+(defconst org-mcp-test--set-content-heading
+  (concat
+   "\\`\\* TODO \\[#B\\] Target :work:\n"
+   "SCHEDULED: <2026-04-02 Thu> DEADLINE: <2026-04-09 Thu>\n"
+   ":PROPERTIES:\n"
+   ":ID:       "
+   org-mcp-test--set-content-id
+   "\n"
+   ":Effort:   2:00\n"
+   ":END:\n")
+  "Everything above Target's body, as a regexp, unchanged by a body write.")
+
+(defconst org-mcp-test--set-content-rewritten
+  (concat
+   org-mcp-test--set-content-heading
+   "The body, written afresh\\.\n"
+   "\\*\\* Child\n"
+   "\\* Sibling\n\\'")
+  "The complete file after Target's body is replaced entire.")
+
+(defconst org-mcp-test--set-content-substring-replaced
+  (concat
+   org-mcp-test--set-content-heading
+   "First line of the body\\.\n"
+   "Second line, edited\\.\n"
+   "\\*\\* Child\n"
+   "\\* Sibling\n\\'")
+  "The complete file after one line of Target's body is replaced.")
+
+(defconst org-mcp-test--set-content-sibling-filled
+  (concat
+   org-mcp-test--set-content-heading
+   "First line of the body\\.\n"
+   "Second line of the body\\.\n"
+   "\\*\\* Child\n"
+   "\\* Sibling\n"
+   "Sibling body\\.\n\\'")
+  "The complete file after the empty body of Sibling is written into.")
+
+(defun org-mcp-test--content-digest-of (link)
+  "Return the `content_digest' a read of LINK returns, as a client reads it."
+  (alist-get
+   'content_digest
+   (org-mcp-test--read-fields link ["content_digest"])))
+
+(defun org-mcp-test--set-content-link ()
+  "Return the link to Target in `org-mcp-test--content-set-content'."
+  (concat "id:" org-mcp-test--set-content-id))
+
+(defmacro org-mcp-test--with-set-content-file (file-var &rest body)
+  "Bind FILE-VAR to a temp file of `org-mcp-test--content-set-content'."
+  (declare (indent 1) (debug t))
+  `(org-mcp-test--with-id-setup ,file-var
+       org-mcp-test--content-set-content
+       (list org-mcp-test--set-content-id)
+     ,@body))
+
+(ert-deftest org-mcp-test-set-content-digest-replaces-the-body-entire ()
+  "A content_digest in before replaces the whole body with after.
+A client holding a token over the region has said what it believed
+was there, so it echoes no part of the region back, and what the
+write covers is what the token covers."
+  (org-mcp-test--with-set-content-file test-file
+    (let ((link (org-mcp-test--set-content-link)))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       (org-mcp-test--content-digest-of link)
+       "The body, written afresh."
+       org-mcp-test--set-content-rewritten
+       nil
+       link))))
+
+(ert-deftest org-mcp-test-set-content-substring-mode-is-unchanged ()
+  "A before that is no token still names the substring it replaces.
+The same node takes both forms; which one a call sends is the whole
+of what decides how much of the body it overwrites."
+  (org-mcp-test--with-set-content-file test-file
+    (let ((link (org-mcp-test--set-content-link)))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       "Second line of the body."
+       "Second line, edited."
+       org-mcp-test--set-content-substring-replaced
+       nil
+       link))))
+
+(ert-deftest org-mcp-test-set-content-digest-writes-an-empty-body ()
+  "The token over an empty body is a token, and asserts with it.
+A region with nothing in it is still a region, so a client saying
+\"this body is empty and I am replacing it\" has a value to say it
+with."
+  (org-mcp-test--with-set-content-file test-file
+    (let ((link (org-mcp-test--file-link test-file "*Sibling")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       (org-mcp-test--content-digest-of link)
+       "Sibling body."
+       org-mcp-test--set-content-sibling-filled
+       nil
+       link))))
+
+(ert-deftest org-mcp-test-set-content-digest-round-trips ()
+  "The token a read hands back is the token the next write takes.
+A client reads, writes against what it read, and reads again for the
+next write.  The token the write leaves behind is the one over the
+body it wrote, so the loop closes without the client computing
+anything; the token it planned the first write from is spent."
+  (org-mcp-test--with-set-content-file test-file
+    (let* ((link (org-mcp-test--set-content-link))
+           (first (org-mcp-test--content-digest-of link)))
+      (should
+       (eq
+        t
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-set-content"
+           `((link . ,link)
+             (before . ,first)
+             (after . "One rewrite.")))))))
+      (let ((second (org-mcp-test--content-digest-of link)))
+        (should-not (string= first second))
+        (org-mcp-test--call-edit-body-and-check
+         test-file
+         link
+         second
+         "The body, written afresh."
+         org-mcp-test--set-content-rewritten
+         nil
+         link)))))
+
+(ert-deftest org-mcp-test-set-content-refuses-a-stale-digest ()
+  "A token the body no longer carries refuses the write, file untouched.
+The refusal is a conflict: the call was well formed, and the body
+has moved on from what the call asserted about it."
+  (org-mcp-test--with-set-content-file test-file
+    (let* ((link (org-mcp-test--set-content-link))
+           (stale (org-mcp-test--content-digest-of link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-content"
+       `((link . ,link)
+         (before . "Second line of the body.")
+         (after . "Second line, edited.")))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-content"
+       `((link . ,link) (before . ,stale) (after . "Rewritten."))
+       "\\`conflict: Content mismatch: .*nothing was written\\'"
+       test-file)
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--set-content-substring-replaced))))
+
+(ert-deftest org-mcp-test-set-content-withholds-the-digest-it-found ()
+  "The conflict names the token the call sent, never the current one.
+The current token is the one value that would make the same call
+succeed, so a refusal carrying it would make resending the call the
+cheapest recovery there is — and a caller asserting a token it never
+read asserts nothing.  The refusal sends the caller back to a read."
+  (org-mcp-test--with-set-content-file test-file
+    (let* ((link (org-mcp-test--set-content-link))
+           (stale (org-mcp-test--content-digest-of link)))
+      (mcp-server-lib-ert-call-tool
+       "org-node-set-content"
+       `((link . ,link)
+         (before . "Second line of the body.")
+         (after . "Second line, edited.")))
+      (let ((fresh (org-mcp-test--content-digest-of link))
+            (message
+             (org-mcp-test--refusal-message
+              "org-node-set-content"
+              `((link . ,link)
+                (before . ,stale)
+                (after . "Rewritten.")))))
+        (should-not (string= stale fresh))
+        (should (string-match-p (regexp-quote stale) message))
+        (should-not (string-match-p (regexp-quote fresh) message))
+        (should (string-match-p "read the node again" message))))))
+
+(defconst org-mcp-test--content-hex-body
+  "* Target\n1b4f0e9851971998\n"
+  "A node whose whole body reads like a token and is not one.")
+
+(ert-deftest org-mcp-test-set-content-hex-body-is-a-value ()
+  "A body of sixteen hexadecimal characters is a value, not a token.
+The prefix is the whole of what tells the two forms of before apart,
+and this is why a token carries one: told apart by shape alone, the
+shortest bodies would be the ones a client could not assert."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-hex-body))
+    (let ((link (org-mcp-test--file-link test-file "*Target")))
+      (org-mcp-test--call-edit-body-and-check
+       test-file
+       link
+       "1b4f0e9851971998"
+       "A plain body."
+       "\\`\\* Target\nA plain body\\.\n\\'"
+       nil
+       link))))
+
+(defconst org-mcp-test--content-set-content-refusals
+  (concat
+   "* Target\n"
+   "A line, and a line, and a line.\n"
+   "* Bare\n")
+  "A body repeating a substring, beside a node with no body at all.")
+
+(ert-deftest org-mcp-test-set-content-before-refusals-are-conflicts ()
+  "Every refusal over set-content's before says the file moved on.
+The client read a body and planned against it, and the body is not
+what it planned against: the substring it named is missing, or is
+there more than once, or the node has no body, or it has one where
+the call said it had none.  Each answers a belief about the file
+rather than a malformed call, so each carries the marker whose
+recovery is to read the node again and retry against what is there."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-set-content-refusals))
+    (let ((target (org-mcp-test--file-link test-file "*Target"))
+          (bare (org-mcp-test--file-link test-file "*Bare")))
+      (pcase-dolist
+          (`(,link ,before ,refusal)
+           `((,target
+              "no such text"
+              "\\`conflict: Body text not found: no such text\\'")
+             (,target
+              "a line"
+              "\\`conflict: Text appears 2 times (must be unique)\\'")
+             (,bare "anything" "\\`conflict: Node has no body content\\'")
+             (,target
+              ""
+              "\\`conflict: An empty before asserts the node has no content,")))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-content"
+         `((link . ,link) (before . ,before) (after . "Replaced."))
+         refusal
+         test-file)))))
+
+(ert-deftest org-mcp-test-field-setters-refuse-a-digest ()
+  "A setter that changes one field takes a value and never a token.
+A token covers a region, and a region takes in what the call does
+not touch: a priority set asserted with one would be refused because
+a clock line moved or a descendant was edited, which is the
+over-sensitivity the field-scoped assertion exists to avoid.  The
+refusal is unmarked, the validation class, because no version of the
+file makes a token the value of a field — reading the node again and
+sending the token back refuses the call again."
+  (org-mcp-test--with-set-content-file test-file
+    (let* ((link (org-mcp-test--set-content-link))
+           (node
+            (org-mcp-test--read-fields
+             link ["digest" "content_digest"])))
+      (dolist (token
+               (list (alist-get 'digest node)
+                     (alist-get 'content_digest node)))
+        (pcase-dolist
+            (`(,tool ,params ,field)
+             `(("org-node-set-todo"
+                ((before . ,token) (after . "DONE"))
+                "State")
+               ("org-node-set-title"
+                ((before . ,token) (after . "Renamed"))
+                "Title")
+               ("org-node-set-scheduled"
+                ((before . ,token) (after . "2026-05-01"))
+                "SCHEDULED")
+               ("org-node-set-deadline"
+                ((before . ,token) (after . "2026-05-08"))
+                "DEADLINE")
+               ("org-node-set-priority"
+                ((before . ,token) (after . "A"))
+                "Priority")
+               ("org-node-set-properties"
+                ((before . ((Effort . ,token)))
+                 (after . ((Effort . "3:00"))))
+                "Property 'Effort'")))
+          (org-mcp-test--call-tool-refused
+           tool
+           (cons `(link . ,link) params)
+           (concat
+            "\\`"
+            (regexp-quote field)
+            " is asserted with the value it holds, not with a digest")
+           test-file))))))
 
 ;;; Read tool tests
 
@@ -17000,7 +17319,7 @@ its way out would be visible."
      "\\`conflict: Title mismatch: ")
     ("org-node-set-content"
      ((link . ,link) (before . "no such text") (after . "Replaced."))
-     "\\`Body text not found: ")
+     "\\`conflict: Body text not found: ")
     ("org-node-set-properties"
      ((link . ,link)
       (before . ((TODO . "")))
