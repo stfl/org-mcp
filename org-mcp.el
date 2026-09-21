@@ -3417,7 +3417,15 @@ compared as multisets rather than as sets.
 Nil when AFTER adds none, and nil when it adds more than one: only
 one clock runs at a time, so a second addition is not this call's to
 claim, and saying nothing is the honest answer where saying which
-would be a guess."
+would be a guess.
+
+A matched time is dropped with `delq', which goes by identity, and
+what it drops is the element `seq-find' has just returned, so one
+match consumes one entry.  That is what keeps the comparison a
+multiset where a list holds one instant twice: two such entries are
+separate objects, `eq' between them being nil where `time-equal-p' is
+t.  Times interned so that equal ones were one object would break
+it, dropping both entries for one match and inventing an addition."
   (let ((unmatched (copy-sequence before))
         (added nil))
     (dolist (end after)
@@ -4706,8 +4714,10 @@ MCP Parameters:
       (setq planning-prev (org-mcp--planning-at-point))
       ;; A clock running in this heading is the other thing the
       ;; keyword can take with it: `org-clock-out-when-done' closes
-      ;; one when the heading reaches a done keyword.  The start is
-      ;; read here because afterwards it is what finds the line again;
+      ;; one when the heading reaches a done keyword.  What is read
+      ;; here is the open line's start and the ends already closed at
+      ;; it, so that afterwards the close this call made can be told
+      ;; from the closes that were there before;
       ;; see `org-mcp--clock-closed-moves'.
       (setq clock-reading (org-mcp--clock-open-reading))
 
