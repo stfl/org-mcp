@@ -1318,13 +1318,17 @@ response returns as it is."
 ;; Helper functions for testing org-node-set-title MCP tool
 
 (defun org-mcp-test--call-rename-headline-and-check
-    (link current-title new-title test-file expected-content-regex)
+    (link current-title new-title test-file expected-content-regex
+          &optional found-title)
   "Call org-node-set-title tool via JSON-RPC and verify the result.
 LINK is the link to the headline.
-CURRENT-TITLE is the expected current title.
+CURRENT-TITLE is the title the call asserts.
 NEW-TITLE is the new title to set.
 TEST-FILE is the file to verify content after rename.
 EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer.
+FOUND-TITLE is the title the file held, which the response reports as
+`before\='; it defaults to CURRENT-TITLE, and differs from it where
+the assertion accepted a spelling the heading does not carry.
 The response must link to the renamed heading: by LINK itself when it
 is an `id:' link with no search part, else by its new title."
   (let* ((params
@@ -1338,7 +1342,9 @@ is an `id:' link with no search part, else by its new title."
     (should (= (length result) 5))
     (should (equal (alist-get 'success result) t))
     (should (eq (alist-get 'saved result) t))
-    (should (equal (alist-get 'before result) current-title))
+    (should
+     (equal (alist-get 'before result)
+            (or found-title current-title)))
     (should (equal (alist-get 'after result) new-title))
     (should
      (equal result-link
@@ -6188,6 +6194,149 @@ client which part of the title it has to spell another way.")
     "Buy milk :fresh:x")
   "Titles carrying a colon, a bracket or the word COMMENT and no grammar.
 Each writes, and reads back exactly as it was sent.")
+
+(defconst org-mcp-test--content-file-keywords
+  "#+TODO: TODO NEXT | DONE\n* TODO Original\nBody.\n"
+  "A file defining NEXT as a keyword of its own.")
+
+(defconst org-mcp-test--content-file-without-todo
+  "#+TODO: NEXT | DONE\n* NEXT Original\nBody.\n"
+  "A file whose keywords do not include TODO.")
+
+(ert-deftest org-mcp-test-set-title-reads-the-file-s-keywords ()
+  "The headline grammar is the target file's, not the session's.
+A word the file names as a keyword claims the front of a title, and
+a word only the global setting names does not: the check is run
+where the file's `#+TODO:\=' is in force, so it answers for the file
+the title is going into."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-file-keywords))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-title"
+       `((link . ,(org-mcp-test--file-link test-file "*Original"))
+         (before . "Original")
+         (after . "NEXT thing to do"))
+       (concat "\\`Not a title: 'NEXT thing to do'\\.  It would become "
+               "the TODO keyword NEXT, leaving the title "
+               (regexp-quote "\"thing to do\"") "\\'")
+       test-file))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-file-without-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-title"
+               `((link . ,(org-mcp-test--file-link test-file "*Original"))
+                 (before . "Original")
+                 (after . "TODO thing"))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'after result) "TODO thing")))
+      (org-mcp-test--verify-file-matches
+       test-file
+       "\\`#\\+TODO: NEXT | DONE\n\\* NEXT TODO thing\nBody\\.\n\\'"))))
+
+(ert-deftest org-mcp-test-node-create-reads-the-file-s-keywords ()
+  "org-node-create asks the same question of the same file."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file "#+TODO: TODO NEXT | DONE\n"))
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . "NEXT thing to do")
+         (parent . ,(concat "file:" test-file)))
+       (concat "\\`Not a title: 'NEXT thing to do'\\.  It would become "
+               "the TODO keyword NEXT, leaving the title "
+               (regexp-quote "\"thing to do\"") "\\'")
+       test-file))
+    (org-mcp-test--with-temp-org-files
+        ((test-file "#+TODO: NEXT | DONE\n"))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . "TODO thing")
+                 (parent . ,(concat "file:" test-file)))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'title result) "TODO thing")))
+      (org-mcp-test--verify-file-matches
+       test-file "\\`#\\+TODO: NEXT | DONE\n\\* TODO thing\n\\'"))))
+
+(ert-deftest org-mcp-test-set-title-reports-the-title-the-file-holds ()
+  "The response states the file, not the call.
+Org normalizes the whitespace of a headline when it reads one back,
+so a title sent with doubled spaces is not the title the file
+reports.  The response carries what a read would return — which is
+what the `link\=' beside it already named — so a client can send it
+back as the next call's `before\='."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* Task one\nBody.\n"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task one"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-title"
+              `((link . ,link)
+                (before . "Task one")
+                (after . "Two  spaces  here"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'after result) "Two spaces here"))
+      (should
+       (equal (alist-get 'link result)
+              (org-mcp-test--file-link test-file "*Two spaces here"))))))
+
+(ert-deftest org-mcp-test-set-title-reports-the-before-it-found ()
+  "`before\=' in the response is the title the heading held.
+The assertion accepts every title that would reach the heading
+through a link, so a call may asserts one spelling where the file
+holds another.  The response is the record of what was destroyed, so
+it carries the file's spelling rather than the call's."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* Task with spaces\nBody.\n"))
+    (let* ((link (org-mcp-test--file-link test-file "*Task with spaces"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-title"
+              `((link . ,link)
+                (before . "task WITH spaces")
+                (after . "Renamed"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'before result) "Task with spaces"))
+      (should (equal (alist-get 'after result) "Renamed")))))
+
+(ert-deftest org-mcp-test-set-priority-reads-the-file-s-range ()
+  "The priority range is the target file's, not the session's.
+A `#+PRIORITIES:\=' line moves the bounds, and the check is made where
+that line is in force: a character outside the file's range is
+refused rather than reaching `org-priority\=', which answers one by
+signalling, and a character inside it is written."
+  (let ((org-priority-highest ?A)
+        (org-priority-lowest ?C)
+        (org-priority-default ?B))
+    (org-mcp-test--with-temp-org-files
+        ((test-file "#+PRIORITIES: A B B\n* TODO Task\n"))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-priority"
+       `((link . ,(org-mcp-test--file-link test-file "*Task"))
+         (before . "")
+         (after . "C"))
+       "\\`Priority 'C' out of range ('A' to 'B')\\'"
+       test-file))
+    (org-mcp-test--with-temp-org-files
+        ((test-file "#+PRIORITIES: A E C\n* TODO Task\n"))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-priority"
+               `((link . ,(org-mcp-test--file-link test-file "*Task"))
+                 (before . "")
+                 (after . "D"))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'after result) "D")))
+      (org-mcp-test--verify-file-matches
+       test-file
+       "\\`#\\+PRIORITIES: A E C\n\\* TODO \\[#D\\] Task\n\\'"))))
 
 (ert-deftest org-mcp-test-set-title-refuses-a-title-org-would-claim ()
   "A title Org reads as something else is refused, and nothing is written.
@@ -19668,7 +19817,9 @@ written in letter case, in spacing and by a statistics cookie.  The
 node reports the title Org compares against, and sending a title back
 as `before' renames the heading instead of being refused — the
 refusal a byte-exact comparison produced for a call the link had just
-resolved."
+resolved.  The response reports the title the heading held, not the
+spelling the call asserted, so what it hands back is a title the next
+call can assert in turn."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-cookie-title))
     (let ((link (org-mcp-test--file-link test-file "*ship v2")))
@@ -19679,11 +19830,13 @@ resolved."
         "Ship v2"))
       (org-mcp-test--call-rename-headline-and-check
        link "SHIP  V2" "Ship v3" test-file
-       org-mcp-test--regex-cookie-title-renamed))))
+       org-mcp-test--regex-cookie-title-renamed "Ship v2"))))
 
 (ert-deftest org-mcp-test-rename-keeps-the-statistics-cookie ()
   "A rename carries the heading's statistics cookie over.
-A read normalizes the cookie away, so `after' has none to send back,
+A read normalizes the cookie away, so `after' has none to send back —
+including when the call named a cookie of its own, since the response
+reports what a read of the heading returns,
 and writing it verbatim would take the cookie off the heading for
 good: Org refreshes a cookie that is there and never adds one, so
 the parent's progress display would not come back.  A heading that
@@ -19711,7 +19864,7 @@ is written as it stands."
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'before result) "Ship v2"))
-      (should (equal (alist-get 'after result) "Ship v3 [2/5]"))
+      (should (equal (alist-get 'after result) "Ship v3"))
       (should
        (equal (alist-get 'link result)
               (org-mcp-test--file-link named "*Ship v3")))
@@ -21813,6 +21966,13 @@ its way out would be visible."
     ("org-node-set-title"
      ((link . ,link) (before . "Wrong Title") (after . "Renamed"))
      "\\`conflict: Title mismatch: ")
+    ;; The headline grammar is the file's, so this one is refused with
+    ;; the buffer open and the change group already standing.
+    ("org-node-set-title"
+     ((link . ,link)
+      (before . "Simple Task")
+      (after . "Renamed :tag:"))
+     "\\`Not a title: ")
     ("org-node-set-content"
      ((link . ,link) (before . "no such text") (after . "Replaced."))
      "\\`conflict: Body text not found: ")

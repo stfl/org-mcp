@@ -391,7 +391,11 @@ its start, reword it — Org has no spelling that keeps it there as text.
 
 The check is what Org makes of the whole headline line, not a rule about
 punctuation, so a title is refused exactly when it would be reinterpreted and
-not otherwise. These all write, and read back as you sent them:
+not otherwise. The question is asked of the file the title is going into: a
+word is a TODO keyword there when that file's =#+TODO:= line or the Org
+configuration names it, so =NEXT thing= is refused in a file defining =NEXT=
+and written whole in one that does not. These all write, and read back as you
+sent them:
 
 #+begin_example
 10:30 standup
@@ -720,7 +724,7 @@ planning field, so it is [[*org-node-set-content][org-node-set-content]] whose =
   - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
   - =after= (string, required): New headline title (without TODO state or tags), and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]]). =null=, =false= and =[]= are the parameter left out and are refused: a headline always has a title, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline
+- *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline. Both titles are the ones the file held and holds, as a read returns them — Org collapses a run of spaces and leaves a statistics cookie out — so =after= is what the next call sends as its =before=
 - *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise — a blank =after=, and either parameter carrying something that is not text (see [[*How a refusal is classed]])
 
 A statistics cookie on the headline survives the rename. A read leaves the
@@ -766,7 +770,7 @@ Example:
   - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent= in, instead of the ID index; it applies to =parent= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
   - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new headline has no line for it to take away, so the state it asks for is the one the headline is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
-- *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title
+- *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title. The title is the one the file now holds, as a read returns it, which is the title the link beside it names
 - *Refuses with:* =blocked:= when Org vetoes =todo= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
 Example:
@@ -1388,7 +1392,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the priority character the headline carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority
-  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. =null= takes the priority away, guarded by =before=. =""= is no character and is refused as one; =false= is the parameter left out
+  - =after= (string, required): Single character in the range the target file admits — the Org configuration's, or the one a =#+PRIORITIES:= line in that file sets. Use =org-config-priority= to check the configured range. A character outside the file's range is refused. =null= takes the priority away, guarded by =before=. =""= is no character and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
 - *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a priority character (see [[*How a refusal is classed]] and [[*What a blank parameter means]])

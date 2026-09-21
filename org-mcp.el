@@ -3613,6 +3613,34 @@ Errors if multiple tags from same mutex group."
          (mapconcat (lambda (tag) (format "'%s'" tag)) conflict
                     ", "))))))
 
+(defun org-mcp--headline-grammar-settings ()
+  "Return the current buffer's headline grammar as `#+' setting lines.
+A headline's grammar is decided by which words the file names as TODO
+keywords and which characters its priority bounds admit, and a
+`#+TODO:' or `#+PRIORITIES:' line moves either.  A check made in a
+scratch buffer therefore has to be given them, or it answers for the
+session instead of for the file being written to.
+
+The lines are rebuilt from the values Org derived rather than copied
+out of the file: the grammar asks only which words are keywords and
+which characters are priorities, and one sequence carrying every
+keyword answers that exactly as several sequences do.  A file naming
+no keywords contributes no line, and Org's own defaults stand."
+  (concat
+   (when org-todo-keywords-1
+     (let ((not-done
+            (seq-remove
+             (lambda (keyword)
+               (member keyword org-done-keywords))
+             org-todo-keywords-1)))
+       (format "#+TODO: %s | %s\n"
+               (string-join not-done " ")
+               (string-join org-done-keywords " "))))
+   (format "#+PRIORITIES: %c %c %c\n"
+           org-priority-highest
+           org-priority-lowest
+           org-priority-default)))
+
 (defun org-mcp--title-claimed-by-org (title)
   "Return what Org's headline grammar claims of TITLE, or nil.
 The result is a clause naming what the heading would carry instead of
@@ -3634,35 +3662,44 @@ nobody has named yet is caught by the last clause, which asks only
 whether the title came back whole.
 
 The line is built without a TODO keyword or a priority of its own, so
-what claims those positions is the title's own text.  A keyword a
-per-file `#+TODO:' adds is not known here, because this runs before
-any file is opened \u2014 which is what keeps a refusal from touching
-anything."
-  (with-temp-buffer
-    (let ((org-inhibit-startup t))
-      (delay-mode-hooks
-        (org-mode)))
-    (insert "* " title "\n")
-    (goto-char (point-min))
-    (let* ((components (org-heading-components))
-           (keyword (nth 2 components))
-           (priority (nth 3 components))
-           (parsed (nth 4 components)))
-      (cond
-       ((org-in-commented-heading-p)
-        "would comment the heading out of export and the agenda")
-       ((org-get-tags)
-        (format "would become tags, leaving the title %S" parsed))
-       (keyword
-        (format
-         "would become the TODO keyword %s, leaving the title %S"
-         keyword parsed))
-       (priority
-        (format "would become the priority %c, leaving the title %S"
-                priority
-                parsed))
-       ((not (equal parsed title))
-        (format "would be read as the title %S" parsed))))))
+what claims those positions is the title's own text.
+
+Which words are keywords and which characters are priorities is the
+target file's answer, not the session's, so this runs with that
+buffer current and carries its settings into the scratch buffer it
+builds the line in; see `org-mcp--headline-grammar-settings'."
+  (let ((settings (org-mcp--headline-grammar-settings)))
+    (with-temp-buffer
+      (let ((org-inhibit-startup t))
+        (delay-mode-hooks
+          (org-mode)))
+      (insert settings)
+      ;; Org derives the headline regexps from the lines just
+      ;; inserted, as it does for a file it opens, so the grammar here
+      ;; is the grammar there.
+      (org-set-regexps-and-options)
+      (let ((heading (point)))
+        (insert "* " title "\n")
+        (goto-char heading))
+      (let* ((components (org-heading-components))
+             (keyword (nth 2 components))
+             (priority (nth 3 components))
+             (parsed (nth 4 components)))
+        (cond
+         ((org-in-commented-heading-p)
+          "would comment the heading out of export and the agenda")
+         ((org-get-tags)
+          (format "would become tags, leaving the title %S" parsed))
+         (keyword
+          (format
+           "would become the TODO keyword %s, leaving the title %S"
+           keyword parsed))
+         (priority
+          (format "would become the priority %c, leaving the title %S"
+                  priority
+                  parsed))
+         ((not (equal parsed title))
+          (format "would be read as the title %S" parsed)))))))
 
 (defun org-mcp--validate-headline-title (title)
   "Validate that TITLE is a title and not a line of Org grammar.
@@ -4572,12 +4609,12 @@ MCP Parameters:
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent"
   (setq title (org-mcp--text-param-given title "title"))
-  (org-mcp--validate-headline-title title)
   (setq todo
         (unless (org-mcp--blank-param-p todo)
           (org-mcp--text-param-given todo "todo")))
   (let*
-      ((tag-list (org-mcp--validate-and-normalize-tags tags))
+      ((written nil)
+       (tag-list (org-mcp--validate-and-normalize-tags tags))
        ;; The body is inserted and checked as text, so a number, an
        ;; object or a non-empty array would reach that as a wrong type
        ;; and cross the MCP boundary as an internal error, which names
@@ -4612,11 +4649,14 @@ MCP Parameters:
                               `((file
                                  .
                                  ,(file-name-nondirectory file-path))
-                                (title . ,title))
-      ;; Validate inside the Org buffer so `org-todo-keywords-1'
-      ;; reflects merged user-customization + per-file `#+TODO:'.
+                                (title . ,written))
+      ;; Validate inside the Org buffer so `org-todo-keywords-1' and
+      ;; the priority bounds are the file's, per-file `#+TODO:' and
+      ;; `#+PRIORITIES:' lines included.  Nothing is written until
+      ;; both pass, so a refusal leaves the file as it was.
       (when todo
         (org-mcp--validate-todo-state todo))
+      (org-mcp--validate-headline-title title)
       (let ((parent-level
              (org-mcp--navigate-to-parent-or-top parent-target)))
 
@@ -4639,6 +4679,12 @@ MCP Parameters:
 
         ;; Insert the new heading
         (org-mcp--insert-heading title parent-level)
+
+        ;; The response states the file rather than the call: Org
+        ;; normalizes a headline's whitespace as it reads one back, so
+        ;; the title here is the one a read returns and the one the
+        ;; `link' beside it names.
+        (setq written (org-mcp--asserted-value :title))
 
         ;; A new heading carries no keyword, so naming no state asks
         ;; for the state it is already in.
@@ -4769,25 +4815,32 @@ MCP Parameters:
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
   (setq after (org-mcp--text-param-given after "after"))
-  (org-mcp--validate-headline-title after)
   (org-mcp--assert-field-value before "Title")
 
   (let* ((target (org-mcp--link-target link "link" files))
-         (file-path (plist-get target :file)))
+         (file-path (plist-get target :file))
+         (found nil)
+         (written nil))
 
     ;; Rename the headline in the file
     (org-mcp--modify-and-save file-path "rename"
-                              `((before . ,before) (after . ,after))
+                              `((before . ,found) (after . ,written))
       ;; Navigate to the headline
       (org-mcp--goto-heading target)
 
-      ;; Verify current title matches
-      (let ((actual-title (org-mcp--asserted-value :title)))
-        (unless (org-mcp--titles-equal-p actual-title before)
-          (org-mcp--state-mismatch-error
-           before actual-title "Title")))
+      ;; The file's own keywords and priority bounds decide what its
+      ;; headline grammar claims, so the title is checked here rather
+      ;; than before the buffer exists.  Nothing is written yet, so a
+      ;; refusal leaves the file as it was.
+      (org-mcp--validate-headline-title after)
 
-      (org-edit-headline (org-mcp--title-keeping-cookie after)))))
+      ;; Verify current title matches
+      (setq found (org-mcp--asserted-value :title))
+      (unless (org-mcp--titles-equal-p found before)
+        (org-mcp--state-mismatch-error before found "Title"))
+
+      (org-edit-headline (org-mcp--title-keeping-cookie after))
+      (setq written (org-mcp--asserted-value :title)))))
 
 (defun org-mcp--sole-occurrence (text body)
   "Return where TEXT begins in BODY, refusing unless it is there once.
@@ -5343,7 +5396,10 @@ Shaped like `org-mcp--field-scheduled'.")
    ;; `org-priority' has no log setting and records nothing, so the
    ;; value it takes away is of no use to it.
    :remove (lambda (_previous) (org-priority 'remove))
-   :write (lambda (value) (org-priority (string-to-char value))))
+   :write
+   (lambda (value)
+     (org-mcp--assert-priority-in-range value)
+     (org-priority (string-to-char value))))
   "The priority field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
 
@@ -5405,25 +5461,36 @@ command; see `org-mcp--value-to-write'."
     (and date (org-mcp--date-normalized date))))
 
 (defun org-mcp--priority-to-write (value name)
-  "Return VALUE, the priority parameter NAME of a call, validated, or nil.
-One character within `org-priority-highest' and
-`org-priority-lowest' is a priority to write.  Null is nil, and
-takes the priority away, guarded by the required `before'.  \"\" is
-no character and is refused as one; see `org-mcp--date-to-write' for
-the same line drawn on a date."
+  "Return VALUE, the priority parameter NAME of a call, as one character.
+Null is nil, and takes the priority away, guarded by the required
+`before'.  \"\" is no character and is refused as one; see
+`org-mcp--date-to-write' for the same line drawn on a date.
+
+Whether the character is one the file admits is asked later, by
+`org-mcp--assert-priority-in-range', where the file's own bounds are
+in force."
   (let ((priority (org-mcp--value-to-write value name)))
     (when priority
       (unless (= (length priority) 1)
         (org-mcp--tool-validation-error
          "Priority must be a single character, got '%s'"
-         priority))
-      (let ((char (string-to-char priority)))
-        (unless (and (>= char org-priority-highest)
-                     (<= char org-priority-lowest))
-          (org-mcp--tool-validation-error
-           "Priority '%s' out of range ('%c' to '%c')"
-           priority org-priority-highest org-priority-lowest))))
+         priority)))
     priority))
+
+(defun org-mcp--assert-priority-in-range (priority)
+  "Refuse PRIORITY unless the current buffer's own range admits it.
+This runs with the target buffer current, so `org-priority-highest'
+and `org-priority-lowest' are the file's, as a `#+PRIORITIES:' line
+may have set them, and not the session's.  Org answers a character
+outside the range by signalling from `org-priority', which reaches a
+client as an internal error naming no parameter, so the range is
+asked here first."
+  (let ((char (string-to-char priority)))
+    (unless (and (>= char org-priority-highest)
+                 (<= char org-priority-lowest))
+      (org-mcp--tool-validation-error
+       "Priority '%s' out of range ('%c' to '%c')"
+       priority org-priority-highest org-priority-lowest))))
 
 (defun org-mcp--tool-node-set-scheduled
     (link before after &optional files)
