@@ -11877,6 +11877,20 @@ Task body."
    "Task body text\\.\n?\\'")
   "Pattern after a SCHEDULED whose span ends at an earlier hour.")
 
+(defconst org-mcp-test--pattern-scheduled-with-first-only-delay
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ --3d>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a SCHEDULED carrying a first-only warning delay.")
+
+(defconst org-mcp-test--pattern-scheduled-repeater-alone
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   "SCHEDULED: <2026-03-27 [^ >]+ \\+1w>\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a repeater takes a first-only delay down with it.")
+
 (defconst org-mcp-test--pattern-deadline-with-repeater-and-warning
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -12163,6 +12177,70 @@ only where Org would put something else in the file."
       (org-mcp-test--verify-file-matches
        test-file
        org-mcp-test--pattern-scheduled-with-backwards-span))))
+
+(defconst org-mcp-test--first-only-delays
+  '("<2026-03-27 Fri --3d>" "2026-03-27 --3d")
+  "A first-only warning delay standing alone, in both spellings.
+Org writes a warning that fires before every repeat `-3d\=' and one
+that fires only before the first `--3d\=', so the doubled hyphen after
+a date says which warning it is rather than joining two timestamps.")
+
+(ert-deftest org-mcp-test-set-scheduled-writes-a-first-only-delay ()
+  "A `--3d\=' delay is a warning period and is written, not refused.
+It carries the same doubled hyphen a date range is joined by, and
+Org\='s planning writer puts the whole of it in the file, so what a
+range is told apart by cannot be the hyphen alone."
+  (dolist (date org-mcp-test--first-only-delays)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-scheduled"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
+                 (after . ,date))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (string-match-p "\\`<2026-03-27 [^ >]+ --3d>\\'"
+                         (alist-get 'after result)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-scheduled-with-first-only-delay)))))
+
+(defconst org-mcp-test--first-only-delays-with-a-repeater
+  '("<2026-03-27 Fri +1w --3d>" "2026-03-27 +1w --3d")
+  "A first-only warning delay sent beside a repeater, both spellings.")
+
+(ert-deftest org-mcp-test-set-scheduled-repeater-drops-a-first-only-delay ()
+  "A repeater takes a first-only delay down with it, and says so.
+Org\='s planning writer carries a repeater and a `-3d\=' warning
+together, and carries a `--3d\=' delay standing alone, but writes the
+repeater by itself when the two arrive together.  The delay is Org\='s
+to drop rather than this server\='s to refuse, and the response reports
+the timestamp read back from the file, so a client is told what the
+field ended up holding."
+  (dolist (date org-mcp-test--first-only-delays-with-a-repeater)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-scheduled"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "")
+                 (after . ,date))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (string-match-p "\\`<2026-03-27 [^ >]+ \\+1w>\\'"
+                         (alist-get 'after result)))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-scheduled-repeater-alone)))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-an-inactive-timestamp ()
   "An inactive timestamp is refused rather than written as an active one.

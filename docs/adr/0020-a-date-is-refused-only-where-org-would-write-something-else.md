@@ -1,16 +1,26 @@
 # A date is refused only where Org would write something else
 
 A date parameter is validated against one question: would Org put in the file
-exactly what the call sent? A value Org reads and writes back unchanged is
-written, whatever it looks like; a value Org reads and writes shorter, or as
-another date, is refused. Nothing else is asked, so the check has no opinion of
+the date the call named? A value Org reads and writes back unchanged is
+written, whatever it looks like; a value Org reads and then writes as some
+other date is refused. Nothing else is asked, so the check has no opinion of
 its own to drift from Org's.
 
 That settles the cases the surface has. An inactive timestamp goes into a
 planning line active and a date range goes in as its first half alone, so both
-are refused. A span whose hours run backwards — `2026-03-27 10:00-09:00` —
-reaches the file exactly as sent, a read hands it straight back, and a `before`
-built from that read matches it, so it is written.
+are refused. A span whose hours run backwards — `2026-03-27 10:00-09:00` — and
+a first-only warning delay — `2026-03-27 --3d`, which carries the doubled
+hyphen a range is joined by — each reach the file exactly as sent, a read hands
+them straight back, and a `before` built from that read matches, so both are
+written.
+
+The rule is about the date, and one loss that is not a date sits outside it.
+Org's planning writer takes a first-only warning delay off a timestamp that
+also carries a repeater, so `<2026-03-27 Fri +1w --3d>` reaches the file as
+`<2026-03-27 Fri +1w>`. The date the call named is the date the field holds —
+what goes is a warning — and the response reports the timestamp read back from
+the file, so the client is told which one survived. Whether that loss earns a
+refusal of its own is open.
 
 We chose this over refusing what reads as a mistake. Backwards hours are one,
 but Org accepts them, the agenda shows them, and a person editing the file in

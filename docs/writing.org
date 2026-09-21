@@ -102,6 +102,7 @@ speaks:
 | =2026-03-27 09:00-10:00=    | =<2026-03-27 Fri 09:00-10:00>=    | a span of the day              |
 | =2026-03-27 +1w=            | =<2026-03-27 Fri +1w>=            | a repeater                     |
 | =2026-03-27 -3d=            | =<2026-03-27 Fri -3d>=            | a warning period               |
+| =2026-03-27 --3d=           | =<2026-03-27 Fri --3d>=           | a first-only warning           |
 | =2026-03-27 09:00 .+2d -1d= | =<2026-03-27 Fri 09:00 .+2d -1d>= | all three at once              |
 | =<2026-06-20 Sat +1w -3d>=  | =<2026-06-20 Sat +1w -3d>=        | the raw string a read returned |
 
@@ -114,15 +115,25 @@ person at the tenth step; a call has nobody to ask, and the answer taken here
 is the one that carries the repeater out. A warning period is the =-3d= form, and
 it may stand alone or beside a repeater; on a DEADLINE it brings the headline
 into the agenda three days early, and on a SCHEDULED it holds the headline back
-until three days before the date. The day name is Org's to write: send it or
-leave it out, and the file gets the day the date falls on.
+until three days before the date. Doubling the hyphen narrows it to the first
+occurrence: =-3d= warns before every repeat and =--3d= before the first date
+only. The day name is Org's to write: send it or leave it out, and the file
+gets the day the date falls on.
+
+The two warning forms part company beside a repeater. Org writes
+=<2026-03-27 Fri +1w -3d>= whole, and writes =<2026-03-27 Fri +1w --3d>= as
+=<2026-03-27 Fri +1w>=, leaving the delay out. The field holds the date the
+call named either way, and the =after= a response carries is read back from the
+file, so it reports the warning that survived rather than the one that was
+sent. A =--3d= standing alone is written whole.
 
 =09:00-10:00= is a span within the day and not a range: Org writes it inside the
 one timestamp, so the whole of it reaches the file. It goes in as sent even when
 its hours run backwards — =2026-03-27 10:00-09:00= writes
 =<2026-03-27 Fri 10:00-09:00>=, which is what Org itself does with it and what a
 read hands back. Two timestamps joined by =--= are a range, and a range is
-refused (see [[*A date that is not a date is refused]]).
+refused (see [[*A date that is not a date is refused]]); the same doubled hyphen
+after a date is a warning rather than a range, and is written.
 
 Seconds are read and not recorded: =2026-03-27 09:00:33= writes
 =<2026-03-27 Fri 09:00>=, because an Org timestamp has no seconds field. The
