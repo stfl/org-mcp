@@ -290,29 +290,48 @@ CONTEXT describes what is being compared."
    "%s mismatch: expected '%s', found '%s'"
    context expected found))
 
+(defun org-mcp--missing-param-error (name)
+  "Throw the refusal a call that did not send parameter NAME gets.
+A required parameter carrying a blank, see `org-mcp--blank-param-p',
+is refused with this message too, so that the two spellings of one
+mistake read alike: a client that fills a parameter it is not using
+has sent nothing, whether it left the parameter out or wrote an
+empty value into it."
+  (org-mcp--tool-validation-error "Missing required parameter: %s"
+                                  name))
+
+(defun org-mcp--before-given (before)
+  "Return BEFORE, a call's precondition, as the value it asserts.
+Any string is an assertion, \"\" included: the fields asserted this
+way hold text, so \"\" is the value naming none, and a required
+parameter is free to carry it.
+
+Every other blank, see `org-mcp--blank-param-p', is a parameter the
+call did not send and is refused as one.  Null in particular asserts
+nothing: a client that fills an unused parameter with it would
+otherwise claim the field was empty and go on to destroy whatever
+was there.  Anything else is a malformed call."
+  (cond
+   ((stringp before)
+    before)
+   ((org-mcp--blank-param-p before)
+    (org-mcp--missing-param-error "before"))
+   (t
+    (org-mcp--tool-validation-error
+     "before must be a string, \"\" for no value: %S"
+     before))))
+
 (defun org-mcp--assert-before (before found context)
   "Refuse the call unless FOUND is the value BEFORE asserts.
 FOUND is what the heading holds, in the form a read hands back, and
 \"\" when the field has no value.  BEFORE is what the client believed
-it held, and JSON null spells the same empty assertion \"\" does.
-BEFORE is a required parameter, so it never meets
-`org-mcp--blank-param-p': \"\" says there was no value, never that
-the call sent none.  Anything that is neither a string nor null is a
-malformed call, and so is a digest, which
-`org-mcp--assert-field-value' refuses here on behalf of every field
-setter that asserts this way.  A value that disagrees with FOUND is
-a conflict, and CONTEXT names the field the refusal reports."
+it held, read through `org-mcp--before-given'.  A digest is a
+malformed call here, which `org-mcp--assert-field-value' refuses on
+behalf of every field setter that asserts this way.  A value that
+disagrees with FOUND is a conflict, which CONTEXT names the field
+of."
   (org-mcp--assert-field-value before context)
-  (let ((asserted
-         (cond
-          ((null before)
-           "")
-          ((stringp before)
-           before)
-          (t
-           (org-mcp--tool-validation-error
-            "before must be a string, or null for no value: %S"
-            before)))))
+  (let ((asserted (org-mcp--before-given before)))
     (unless (equal asserted found)
       (org-mcp--state-mismatch-error asserted found context))))
 
@@ -809,10 +828,21 @@ returns the file of the restriction, not the binding."
      ,@body))
 
 (defun org-mcp--blank-param-p (value)
-  "Return non-nil when VALUE, an optional parameter of a call, is blank.
-Clients may fill an optional parameter they do not use with an empty
-value, so JSON null, false, \"\", [] and {}, which decodes to nil,
-all mean that the call does not send it."
+  "Return non-nil when VALUE, a parameter of a call, is blank.
+A blank parameter is one the call does not send.  Clients fill a
+parameter they are not using with an empty value, so JSON null,
+false, \"\", [] and {}, which decodes to nil, all read that way, and
+that is the whole of what blank means here: an optional parameter
+that is blank takes its default, a required one is refused with
+`org-mcp--missing-param-error', and no blank ever removes anything.
+Removal is a tool of its own, which names the field it takes away
+and asserts the value it destroys.
+
+Two parameters would otherwise have no way to name a value they
+need, and each reads its own empty value before asking this: a
+required `before' over a field holding text takes \"\" for no value,
+see `org-mcp--assert-before', and a tag set takes [] for the empty
+set, see `org-mcp--tag-set-given'."
   (member value '(nil "" [] :json-false)))
 
 (defun org-mcp--boolean-param (value name)
@@ -1724,7 +1754,11 @@ token rebuilt from the parts of one.
 A value in no such form matches no subtree at all.  Calling that a
 malformed call sends the client back to a read for a token; calling
 it a conflict would send it back to read the same file and assert
-with the same value again."
+with the same value again.  A blank, see `org-mcp--blank-param-p',
+is the parameter left out: a subtree has no empty spelling, so there
+is nothing for one to name."
+  (when (org-mcp--blank-param-p before)
+    (org-mcp--missing-param-error "before"))
   (unless (org-mcp--digest-form-p before)
     (org-mcp--tool-validation-error
      "before must be the digest a read of this node returned, starting `%s': %S"
@@ -3633,6 +3667,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
+  (setq before (org-mcp--before-given before))
   (org-mcp--assert-field-value before "State")
 
   (let* ((target (org-mcp--link-target link files))
@@ -3904,6 +3939,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
+  (setq before (org-mcp--before-given before))
   (org-mcp--validate-headline-title after)
   (org-mcp--assert-field-value before "Title")
 
@@ -4112,6 +4148,14 @@ MCP Parameters:
       (org-mcp--append-to-body link after files)
     (org-mcp--write-body link before after files)))
 
+(defun org-mcp--property-name-text (name)
+  "Return NAME, a key of a property map, as a string.
+A JSON object decodes with symbols for keys, and a refusal names the
+property the way the call spelled it."
+  (if (symbolp name)
+      (symbol-name name)
+    name))
+
 (defun org-mcp--validate-properties (properties what)
   "Validate PROPERTIES and return them as (NAME . VALUE) pairs.
 WHAT names the parameter PROPERTIES arrived in, so that a call
@@ -4133,10 +4177,7 @@ here."
      what))
   (mapcar
    (lambda (pair)
-     (let ((name
-            (if (symbolp (car pair))
-                (symbol-name (car pair))
-              (car pair)))
+     (let ((name (org-mcp--property-name-text (car pair)))
            (value (cdr pair)))
        ;; Org has no public predicate for property names.  This is the
        ;; check `org-set-property' and `org-entry-put' make themselves,
@@ -4180,12 +4221,57 @@ here."
           value)))))
    properties))
 
+(defun org-mcp--property-assertions (before what)
+  "Return the assertions the property map BEFORE carries.
+The result is (NAME . VALUE) pairs, VALUE the string the property is
+asserted to hold and \"\" for none.  WHAT names the parameter BEFORE
+arrived in.
+
+An empty string is how a `before' asserts that a value is absent,
+here as everywhere, see `org-mcp--assert-before'.  Every other blank
+value, see `org-mcp--blank-param-p', is an entry the call left
+unfilled and is refused rather than read as absence: a client that
+writes null into a value it is not using would otherwise vouch for
+an emptiness it never saw, and a removal would go through on it."
+  (when (org-mcp--blank-param-p before)
+    (org-mcp--missing-param-error what))
+  (when (listp before)
+    (pcase-dolist (`(,name . ,value) before)
+      (when (and (org-mcp--blank-param-p value)
+                 (not (equal value "")))
+        (org-mcp--tool-validation-error
+         "%s gives no value for the property '%s': send \"\" to \
+assert it holds none"
+         what (org-mcp--property-name-text name)))))
+  (mapcar
+   (lambda (pair) (cons (car pair) (or (cdr pair) "")))
+   (org-mcp--validate-properties before what)))
+
+(defun org-mcp--properties-to-write (after what)
+  "Return the properties the map AFTER writes, as (NAME . VALUE) pairs.
+WHAT names the parameter AFTER arrived in.  Every VALUE is a value
+to write: a blank one, see `org-mcp--blank-param-p', is an entry the
+call left unfilled, and it is refused naming the tool that removes a
+property, because a client that empties a value it is not using
+would otherwise destroy whatever that property held."
+  (when (org-mcp--blank-param-p after)
+    (org-mcp--missing-param-error what))
+  (let ((written (org-mcp--validate-properties after what)))
+    (pcase-dolist (`(,name . ,value) written)
+      (unless value
+        (org-mcp--tool-validation-error
+         "%s gives no value for the property '%s': use \
+org-node-remove-properties to remove it"
+         what name)))
+    written))
+
 (defun org-mcp--asserted-property-values (before after)
   "Return what BEFORE asserts, in the order AFTER writes it.
-BEFORE and AFTER are the validated (NAME . VALUE) pairs of the two
-property maps of one call.  The result holds one pair per property
-AFTER writes, NAME as AFTER spells it and VALUE the string BEFORE
-says that property held, \"\" for none.
+BEFORE is the assertions of `org-mcp--property-assertions' and AFTER
+the properties of `org-mcp--properties-to-write', the two property
+maps of one call.  The result holds one pair per property AFTER
+writes, NAME as AFTER spells it and VALUE the string BEFORE says
+that property held, \"\" for none.
 
 A call asserts exactly what it changes: a property AFTER writes and
 BEFORE does not name is refused, because the write would destroy a
@@ -4214,14 +4300,48 @@ call writes"
 write"
          (caar unwritten))))))
 
+(defun org-mcp--write-properties
+    (link files action reported asserted apply)
+  "Change the properties ASSERTED names on the heading LINK names.
+ASSERTED is the (NAME . VALUE) pairs the call vouches for, VALUE the
+string the property is asserted to hold and \"\" for none.  Every one
+is checked before APPLY runs, so that a property named later in the
+call cannot be refused after an earlier one has already been
+changed.  APPLY is then called at the heading, inside the change,
+and writes the properties.
+ACTION names what the call does, for the call site to read.
+REPORTED is the field the response lists the property names under,
+in the order ASSERTED gives them: `properties_set' for a write and
+`properties_deleted' for a removal.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+This is the whole of what writing properties and removing them
+share, and they differ only in what APPLY does."
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         (names (mapcar #'car asserted)))
+
+    (org-mcp--modify-and-save file-path action
+                              (list (cons reported names))
+      (org-mcp--goto-heading target)
+
+      (pcase-dolist (`(,key . ,val) asserted)
+        (org-mcp--assert-before
+         val
+         (or (org-entry-get (point) key) "")
+         (format "Property '%s'" key)))
+
+      (funcall apply))))
+
 (defun org-mcp--tool-node-set-properties
     (link before after &optional files)
-  "Set or delete properties on the headline LINK names.
+  "Set properties on the headline LINK names.
 BEFORE is an alist naming each property AFTER writes and the value it
-held, \"\" or null for none.
-AFTER is an alist of property name-value pairs.
-String, number and boolean values set the property; null/empty values
-delete it.
+held, \"\" for none.
+AFTER is an alist of property name-value pairs, each a value to
+write; a blank value is the entry left unfilled and is refused.
+Removing a property is org-node-remove-properties.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4237,59 +4357,195 @@ MCP Parameters:
            One entry per property after writes, and no other:
            a property after writes and before omits is refused,
            and so is one before names and after leaves alone
-           null or empty string asserts the property is absent
-           Values take the same forms after takes
+           Empty string asserts the property is absent
   after - JSON object of property name-value pairs (required)
           String or number value: set property to that value;
           it must be a single line
-          true or false: set property to the text t or nil;
-          false keeps the property
-          null or empty string: delete the property
+          true or false: set property to the text t or nil
+          An empty string or null is the entry left unfilled;
+          org-node-remove-properties takes a property away
           ID and CUSTOM_ID are accepted and written as given
           Special properties (TODO, TAGS, PRIORITY, etc.) are
           forbidden
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (setq after (org-mcp--validate-properties after "after"))
-  (let* ((asserted
+  (let* ((written (org-mcp--properties-to-write after "after"))
+         (asserted
           (org-mcp--asserted-property-values
-           (org-mcp--validate-properties before "before") after))
-         (target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (set-props nil)
-         (deleted-props nil))
+           (org-mcp--property-assertions before "before") written)))
+    (org-mcp--write-properties
+     link files "set properties" 'properties_set asserted
+     (lambda ()
+       (pcase-dolist (`(,key . ,val) written)
+         (org-set-property key val))))))
 
-    (org-mcp--modify-and-save file-path "set properties"
-                              `((properties_set . ,set-props)
-                                (properties_deleted . ,deleted-props))
+(defun org-mcp--tool-node-remove-properties
+    (link before &optional files)
+  "Take properties off the headline LINK names.
+BEFORE is an alist whose names are the properties the call removes
+and whose values are what each one is asserted to hold, \"\" for
+none, so the removal names both what it takes away and what it
+believed was there.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - JSON object of the properties this call destroys and the
+           values they hold now (required)
+           Its names are the properties removed; there is no other
+           parameter naming them
+           Empty string asserts the property is absent, and the
+           call then takes it away all the same
+           Special properties (TODO, TAGS, PRIORITY, etc.) are
+           forbidden
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let ((asserted (org-mcp--property-assertions before "before")))
+    (org-mcp--write-properties
+     link files "remove properties" 'properties_deleted asserted
+     (lambda ()
+       (pcase-dolist (`(,key . ,_val) asserted)
+         (org-delete-property key))))))
+
+(defconst org-mcp--field-scheduled
+  (list
+   :label "SCHEDULED"
+   :read (lambda () (or (org-entry-get (point) "SCHEDULED") ""))
+   :remove (lambda () (org-schedule '(4))))
+  "The SCHEDULED field, for `org-mcp--write-field'.
+`:label' names it in a refusal, `:read' returns what the heading at
+point carries, \"\" for none, in the form a read hands back, and
+`:remove' takes that value away.")
+
+(defconst org-mcp--field-deadline
+  (list
+   :label "DEADLINE"
+   :read (lambda () (or (org-entry-get (point) "DEADLINE") ""))
+   :remove (lambda () (org-deadline '(4))))
+  "The DEADLINE field, for `org-mcp--write-field'.
+Shaped like `org-mcp--field-scheduled'.")
+
+(defconst org-mcp--field-priority
+  (list
+   :label "Priority"
+   :read
+   (lambda ()
+     (let ((priority
+            (org-element-property :priority (org-element-at-point))))
+       (if priority
+           (char-to-string priority)
+         "")))
+   :remove (lambda () (org-priority 'remove)))
+  "The priority field, for `org-mcp--write-field'.
+Shaped like `org-mcp--field-scheduled'.  Priority is read from the
+parsed heading rather than with `org-entry-get', which answers with
+the default priority for a heading that carries none and so could
+not say that the field is empty.")
+
+(defun org-mcp--write-field (link files field before action change)
+  "Change FIELD of the heading LINK names, asserting BEFORE first.
+FIELD is a field record — `org-mcp--field-scheduled' and its two
+siblings — naming the field and saying how to read and remove it.
+BEFORE is what the call believes the field holds, checked before
+CHANGE runs, so a refused call leaves the file as it was.  CHANGE is
+called at the heading, inside the change, with the value the field
+held, and writes or clears it.
+ACTION names what the call does, for the call site to read.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+The response reports the value the field held as `before' and the
+value it holds afterwards as `after', both read through FIELD.  This
+is the whole of what a setter and a removal of one field share, and
+they differ only in what CHANGE does: the setter writes a value, the
+removal takes one away and leaves `after' empty.  Either way the
+response is the record of what the call destroyed."
+  (let* ((target (org-mcp--link-target link files))
+         (file-path (plist-get target :file))
+         (read-field (plist-get field :read))
+         (previous nil)
+         (current nil))
+
+    (org-mcp--modify-and-save file-path action
+                              `((before . ,previous)
+                                (after . ,current))
       (org-mcp--goto-heading target)
 
-      ;; Every assertion is checked before the first write, so that a
-      ;; property named later in the call cannot be refused after an
-      ;; earlier one has already been changed.
-      (pcase-dolist (`(,key . ,val) asserted)
-        (org-mcp--assert-before
-         val
-         (or (org-entry-get (point) key) "")
-         (format "Property '%s'" key)))
+      (setq previous (funcall read-field))
+      (org-mcp--assert-before
+       before previous (plist-get field :label))
 
-      (pcase-dolist (`(,key . ,val) after)
-        (if val
-            (progn
-              (org-set-property key val)
-              (push key set-props))
-          (org-delete-property key)
-          (push key deleted-props)))
-      (setq set-props (nreverse set-props))
-      (setq deleted-props (nreverse deleted-props)))))
+      (funcall change previous)
+      (setq current (funcall read-field)))))
+
+(defun org-mcp--remove-field (link files field before action)
+  "Take FIELD off the heading LINK names, asserting BEFORE first.
+The arguments are those of `org-mcp--write-field', which does the
+work; the change is FIELD\='s own `:remove'.
+
+A heading that carries nothing there is left alone rather than
+written to: the empty `before' such a call sends is an honest
+assertion, so the call is accepted, and Org\='s own removers are
+written for a value that is there — `org-priority' refuses a heading
+with no cookie to take off."
+  (org-mcp--write-field
+   link files field before action
+   (lambda (previous)
+     (unless (equal previous "")
+       (funcall (plist-get field :remove))))))
+
+(defun org-mcp--date-to-write (value name)
+  "Return VALUE, the date parameter NAME of a call, validated.
+A blank VALUE, see `org-mcp--blank-param-p', is the parameter left
+out rather than a date: a setter writes a date and never takes one
+away, so nothing a client fills an unused parameter with can clear
+the heading.  Removal is org-node-remove-scheduled and
+org-node-remove-deadline, each asserting the timestamp it destroys."
+  (when (org-mcp--blank-param-p value)
+    (org-mcp--missing-param-error name))
+  (unless (stringp value)
+    (org-mcp--tool-validation-error "%s must be a date string: %S"
+                                    name
+                                    value))
+  (org-mcp--validate-date-string value)
+  value)
+
+(defun org-mcp--priority-to-write (value name)
+  "Return VALUE, the priority parameter NAME of a call, validated.
+A blank VALUE, see `org-mcp--blank-param-p', is the parameter left
+out rather than a priority: a setter writes one and never takes one
+away, so nothing a client fills an unused parameter with can clear
+the heading.  Removal is org-node-remove-priority, which asserts the
+character it destroys.  Otherwise VALUE is one character within
+`org-priority-highest' and `org-priority-lowest'."
+  (when (org-mcp--blank-param-p value)
+    (org-mcp--missing-param-error name))
+  (unless (and (stringp value) (= (length value) 1))
+    (org-mcp--tool-validation-error
+     "Priority must be a single character, got '%s'"
+     value))
+  (let ((char (string-to-char value)))
+    (unless (and (>= char org-priority-highest)
+                 (<= char org-priority-lowest))
+      (org-mcp--tool-validation-error
+       "Priority '%s' out of range ('%c' to '%c')"
+       value org-priority-highest org-priority-lowest)))
+  value)
 
 (defun org-mcp--tool-node-set-scheduled
     (link before after &optional files)
   "Move SCHEDULED on the headline LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is an ISO date string or empty to remove.
+AFTER is an ISO date string; a blank one is the parameter left out.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4306,41 +4562,53 @@ MCP Parameters:
            Empty string asserts the heading has no SCHEDULED
   after - ISO date string (required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string removes the timestamp
+          An empty string, null or false is the parameter left
+          out; org-node-remove-scheduled takes a date away
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (previous-scheduled nil)
-         (new-scheduled nil))
+  (let ((date (org-mcp--date-to-write after "after")))
+    (org-mcp--write-field
+     link
+     files
+     org-mcp--field-scheduled
+     before
+     "set scheduled"
+     (lambda (_previous) (org-schedule nil date)))))
 
-    (org-mcp--modify-and-save file-path "update scheduled"
-                              `((before . ,previous-scheduled)
-                                (after . ,new-scheduled))
-      (org-mcp--goto-heading target)
+(defun org-mcp--tool-node-remove-scheduled
+    (link before &optional files)
+  "Take SCHEDULED off the headline LINK names.
+BEFORE is the raw Org timestamp the call destroys, or \"\" when the
+heading is asserted to carry none; the call is refused when the
+heading says otherwise, so the removal names what it takes away.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
 
-      (setq previous-scheduled
-            (or (org-entry-get (point) "SCHEDULED") ""))
-      (org-mcp--assert-before before previous-scheduled "SCHEDULED")
-
-      (if (or (null after) (equal after ""))
-          ;; Remove scheduled
-          (progn
-            (org-schedule '(4))
-            (setq new-scheduled ""))
-        ;; Validate date format before calling org-schedule
-        (org-mcp--validate-date-string after)
-        (org-schedule nil after)
-        (setq new-scheduled
-              (or (org-entry-get (point) "SCHEDULED") ""))))))
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The SCHEDULED timestamp this call destroys, as a read
+           returns it, repeater and delay included (required)
+           Example: \"<2026-06-20 Sat +1w -3d>\"
+           Empty string asserts the heading has no SCHEDULED, and
+           the call then takes nothing away
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (org-mcp--remove-field
+   link files org-mcp--field-scheduled before "remove scheduled"))
 
 (defun org-mcp--tool-node-set-deadline
     (link before after &optional files)
   "Move DEADLINE on the headline LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is an ISO date string or empty to remove.
+AFTER is an ISO date string; a blank one is the parameter left out.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4357,34 +4625,46 @@ MCP Parameters:
            Empty string asserts the heading has no DEADLINE
   after - ISO date string (required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string removes the timestamp
+          An empty string, null or false is the parameter left
+          out; org-node-remove-deadline takes a date away
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (previous-deadline nil)
-         (new-deadline nil))
+  (let ((date (org-mcp--date-to-write after "after")))
+    (org-mcp--write-field
+     link
+     files
+     org-mcp--field-deadline
+     before
+     "set deadline"
+     (lambda (_previous) (org-deadline nil date)))))
 
-    (org-mcp--modify-and-save file-path "update deadline"
-                              `((before . ,previous-deadline)
-                                (after . ,new-deadline))
-      (org-mcp--goto-heading target)
+(defun org-mcp--tool-node-remove-deadline
+    (link before &optional files)
+  "Take DEADLINE off the headline LINK names.
+BEFORE is the raw Org timestamp the call destroys, or \"\" when the
+heading is asserted to carry none; the call is refused when the
+heading says otherwise, so the removal names what it takes away.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
 
-      (setq previous-deadline
-            (or (org-entry-get (point) "DEADLINE") ""))
-      (org-mcp--assert-before before previous-deadline "DEADLINE")
-
-      (if (or (null after) (equal after ""))
-          ;; Remove deadline
-          (progn
-            (org-deadline '(4))
-            (setq new-deadline ""))
-        ;; Validate date format before calling org-deadline
-        (org-mcp--validate-date-string after)
-        (org-deadline nil after)
-        (setq new-deadline
-              (or (org-entry-get (point) "DEADLINE") ""))))))
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The DEADLINE timestamp this call destroys, as a read
+           returns it, repeater and delay included (required)
+           Example: \"<2026-06-20 Sat +1w -3d>\"
+           Empty string asserts the heading has no DEADLINE, and
+           the call then takes nothing away
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (org-mcp--remove-field
+   link files org-mcp--field-deadline before "remove deadline"))
 
 (defun org-mcp--tag-set-given (value name)
   "Return VALUE, the tag-set parameter NAME of a call, as a list.
@@ -4401,8 +4681,7 @@ read alike.  Blank therefore names no set at all, and in particular
 never means the empty one: nothing a client fills a parameter with
 absent-mindedly can take a tag away."
   (when (and (org-mcp--blank-param-p value) (not (equal value [])))
-    (org-mcp--tool-validation-error "Missing required parameter: %s"
-                                    name))
+    (org-mcp--missing-param-error name))
   (org-mcp--normalize-tags-to-list value))
 
 (defun org-mcp--tags-for-message (tags)
@@ -4636,7 +4915,8 @@ MCP Parameters:
   "Move the priority of the headline LINK names from BEFORE to AFTER.
 BEFORE is the priority character the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is a single-character string or empty to remove.
+AFTER is a single-character string; a blank one is the parameter
+left out.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4652,50 +4932,45 @@ MCP Parameters:
            Empty string asserts the heading has no priority
   after - Priority character (string, required)
           Must be within org-priority-highest to org-priority-lowest
-          Empty string removes the priority
+          An empty string, null or false is the parameter left
+          out; org-node-remove-priority takes a priority away
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  ;; Validate priority if provided
-  (when (and after (not (equal after "")))
-    (unless (= (length after) 1)
-      (org-mcp--tool-validation-error
-       "Priority must be a single character, got '%s'"
-       after))
-    (let ((char (string-to-char after)))
-      (unless (and (>= char org-priority-highest)
-                   (<= char org-priority-lowest))
-        (org-mcp--tool-validation-error
-         "Priority '%s' out of range ('%c' to '%c')"
-         after org-priority-highest org-priority-lowest))))
+  (let ((priority (org-mcp--priority-to-write after "after")))
+    (org-mcp--write-field
+     link
+     files
+     org-mcp--field-priority
+     before
+     "set priority"
+     (lambda (_previous) (org-priority (string-to-char priority))))))
 
-  (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (previous-priority nil)
-         (new-priority nil))
+(defun org-mcp--tool-node-remove-priority
+    (link before &optional files)
+  "Take the priority off the headline LINK names.
+BEFORE is the priority character the call destroys, or \"\" when the
+heading is asserted to carry none; the call is refused when the
+heading says otherwise, so the removal names what it takes away.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
 
-    (org-mcp--modify-and-save file-path "set priority"
-                              `((before . ,previous-priority)
-                                (after . ,new-priority))
-      (org-mcp--goto-heading target)
-
-      (setq previous-priority
-            (let ((p
-                   (org-element-property
-                    :priority (org-element-at-point))))
-              (if p
-                  (char-to-string p)
-                "")))
-      (org-mcp--assert-before before previous-priority "Priority")
-
-      (if (or (null after) (equal after ""))
-          ;; Remove priority
-          (progn
-            (org-priority 'remove)
-            (setq new-priority ""))
-        ;; Set priority
-        (org-priority (string-to-char after))
-        (setq new-priority after)))))
+MCP Parameters:
+  link - Link to the headline
+         Formats:
+           - id:{id}
+           - file:{absolute-path}::#{custom-id}
+           - file:{absolute-path}::*{title} (first match)
+           - any of these as [[link]] or [[link][description]]
+  before - The priority character this call destroys, without the
+           [# ] Org writes around it (required)
+           Empty string asserts the heading has no priority, and
+           the call then takes nothing away
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (org-mcp--remove-field
+   link files org-mcp--field-priority before "remove priority"))
 
 
 (defun org-mcp--tool-node-add-note (link note &optional files)
@@ -6170,9 +6445,9 @@ Refusals (replace mode):
     :id "org-node-set-properties"
     :description
     (concat
-     "Set or delete properties on an Org headline.  Updates the
-PROPERTIES drawer.  Setting ID or CUSTOM_ID gives the headline a
-stable link; org-mcp creates neither itself.
+     "Set properties on an Org headline.  Updates the PROPERTIES
+drawer.  Setting ID or CUSTOM_ID gives the headline a stable link;
+org-mcp creates neither itself.
 
 Parameters:
   link - Link to the headline (string, required)
@@ -6185,14 +6460,14 @@ Parameters:
            so is one before names and after leaves alone
            Read the values from org-node-read rather than
            assuming them
-           null or empty string asserts the property is absent
+           Empty string asserts the property is absent
            Values take the same forms after takes
   after - JSON object of property name-value pairs (required)
           String value (numbers and booleans are accepted):
           set the property; it must be a single line
-          true or false writes the text t or nil (false keeps
-          the property; null deletes it)
-          null or empty string: delete the property
+          true or false writes the text t or nil
+          An empty string or null names no value and is refused:
+          use org-node-remove-properties to take a property away
           ID and CUSTOM_ID can be set; values are written as
           given and not otherwise checked, and an ID is not
           added to Org's ID index
@@ -6206,7 +6481,46 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   properties_set - Array of property names that were set
-  properties_deleted - Array of property names that were deleted
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-remove-properties
+    :id "org-node-remove-properties"
+    :description
+    (concat
+     "Remove properties from an Org headline's PROPERTIES drawer.
+Deletion is this tool and not an empty value passed to
+org-node-set-properties: before names the properties that go and
+says what each of them holds, so the call states what it destroys.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - JSON object of the properties to remove and the
+           values they hold now (required)
+           Its names are the properties removed; the call has no
+           other parameter naming them
+           Read the values from org-node-read rather than
+           assuming them; a value the headline does not hold is
+           refused as a conflict and nothing is removed
+           Empty string asserts the property is absent, and the
+           call then takes nothing away
+           Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
+           DEADLINE, etc.) are forbidden - use dedicated tools
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Example - removing one property:
+  {\"link\": \"id:abc-123\", \"before\": {\"OWNER\": \"ada\"}}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  properties_deleted - Array of the property names removed
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -6238,7 +6552,9 @@ Parameters:
            Empty string asserts the headline has no SCHEDULED
   after - ISO date string (string, required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string removes the timestamp
+          An empty string, null or false names no date and is
+          refused: use org-node-remove-scheduled to take the
+          timestamp away
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -6247,7 +6563,46 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous SCHEDULED value (string, empty if none)
-  after - New SCHEDULED value (string, empty if removed)
+  after - New SCHEDULED value (string)
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-remove-scheduled
+    :id "org-node-remove-scheduled"
+    :description
+    (concat
+     "Take the SCHEDULED timestamp off an Org headline.  Removal is
+this tool and not an empty after passed to org-node-set-scheduled:
+before is the timestamp the call destroys, so the call states what
+it takes away.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The SCHEDULED timestamp this call destroys
+           (string, required)
+           The raw Org timestamp a read returns, brackets,
+           repeater and delay included, such as
+           \"<2026-06-20 Sat +1w -3d>\"
+           A timestamp the headline does not carry is refused as
+           a conflict and nothing is removed
+           Empty string asserts the headline has no SCHEDULED,
+           and the call then takes nothing away
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Example - taking a date off:
+  {\"link\": \"id:abc\", \"before\": \"<2026-09-20 Sun>\"}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  before - The SCHEDULED value removed (string, empty if none)
+  after - Empty string: the headline carries no SCHEDULED
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -6279,7 +6634,9 @@ Parameters:
            Empty string asserts the headline has no DEADLINE
   after - ISO date string (string, required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string removes the timestamp
+          An empty string, null or false names no date and is
+          refused: use org-node-remove-deadline to take the
+          timestamp away
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -6288,7 +6645,46 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous DEADLINE value (string, empty if none)
-  after - New DEADLINE value (string, empty if removed)
+  after - New DEADLINE value (string)
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-remove-deadline
+    :id "org-node-remove-deadline"
+    :description
+    (concat
+     "Take the DEADLINE timestamp off an Org headline.  Removal is
+this tool and not an empty after passed to org-node-set-deadline:
+before is the timestamp the call destroys, so the call states what
+it takes away.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The DEADLINE timestamp this call destroys
+           (string, required)
+           The raw Org timestamp a read returns, brackets,
+           repeater and delay included, such as
+           \"<2026-06-20 Sat +1w -3d>\"
+           A timestamp the headline does not carry is refused as
+           a conflict and nothing is removed
+           Empty string asserts the headline has no DEADLINE,
+           and the call then takes nothing away
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Example - taking a deadline off:
+  {\"link\": \"id:abc\", \"before\": \"<2026-09-20 Sun>\"}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  before - The DEADLINE value removed (string, empty if none)
+  after - Empty string: the headline carries no DEADLINE
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -6440,7 +6836,9 @@ Parameters:
   after - Priority character (string, required)
           Must be in the configured range (default \"A\" to \"C\")
           Use org-config-priority to check the valid range
-          Empty string removes priority
+          An empty string, null or false names no priority and is
+          refused: use org-node-remove-priority to take the
+          priority away
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -6449,7 +6847,44 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous priority (string, empty if none)
-  after - New priority (string, empty if removed)
+  after - New priority (string)
+  link - Link to the headline (string): id:{id} when it has
+         an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-node-remove-priority
+    :id "org-node-remove-priority"
+    :description
+    (concat
+     "Take the priority off an Org headline.  Removal is this tool
+and not an empty after passed to org-node-set-priority: before is
+the priority the call destroys, so the call states what it takes
+away.
+
+Parameters:
+  link - Link to the headline (string, required)
+"
+     org-mcp--heading-link-formats
+     "  before - The priority character this call destroys
+           (string, required)
+           Just the letter, without the [# ] Org writes around it
+           A character the headline does not carry is refused as a
+           conflict and nothing is removed
+           Empty string asserts the headline has no priority, and
+           the call then takes nothing away
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Example - taking a priority off:
+  {\"link\": \"id:abc\", \"before\": \"A\"}
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  before - The priority removed (string, empty if none)
+  after - Empty string: the headline carries no priority
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
