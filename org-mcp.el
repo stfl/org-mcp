@@ -2902,9 +2902,10 @@ What that amounts to differs by caller, because it is
 write.  `org-todo', `org-schedule', `org-deadline' and
 `org-archive-subtree' set up purposes it gives a heading line to, so
 an entry is written for each of them.  It gives `clock-out' an empty
-heading, so for `org-clock-out' there is nothing to write and all
-this does is take the prompt off the hook; a user who gives that
-purpose a heading gets the entry Org would have written there too."
+heading, so a close with no NOTE has nothing to write and all this
+does is take the prompt off the hook; a NOTE under that empty heading
+is the whole of the entry, and a user who gives the purpose a heading
+gets the prose under it, as they would from a clock-out by hand."
   (declare (indent 1) (debug (form body)))
   (let ((prose (gensym "prose")))
     `(let ((,prose (or ,note ""))
@@ -6003,7 +6004,7 @@ MCP Parameters:
             (setq resolved-count (org-mcp--clock-resolve-dangling)))
           (org-mcp--clock-insert-entry clock-start))))))
 
-(defun org-mcp--tool-clock-out (link &optional end_time files)
+(defun org-mcp--tool-clock-out (link &optional end_time files note)
   "Clock out the clock LINK names, which has to be the running one.
 LINK is this call's guard: a clock operation asserts which clock it
 changes rather than a value it overwrites, so a LINK naming any
@@ -6028,6 +6029,10 @@ reports the close org-mcp asked for.
 END_TIME is an optional ISO 8601 end time (e.g. 2026-03-23T16:45:00).
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
+NOTE is prose to record against the clock being closed, or none.
+`org-string-nw-p' is what reads it, so every blank the call can spell
+-- \"\", null, false, [] and a string of whitespace -- is a note the
+call does not send, and no entry is written for one.
 
 MCP Parameters:
   link - Link to the heading the running clock is on
@@ -6039,7 +6044,10 @@ MCP Parameters:
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
-          refused with any other link"
+          refused with any other link
+  note - Prose to record against the clock being closed (string,
+         optional); an empty or whitespace-only note records nothing"
+  (setq note (org-string-nw-p note))
   (let ((active (org-mcp--clock-find-active)))
     (unless active
       (org-mcp--tool-conflict-error "No active clock to stop"))
@@ -6105,8 +6113,21 @@ on %s"
             ;; another TODO state, which its own log settings record;
             ;; both are written here rather than left waiting on
             ;; `post-command-hook'.
-            (org-mcp--logging-note nil
-              (org-clock-clock-out (cons marker start-time) nil end))
+            ;;
+            ;; A NOTE is the prose of the entry that setting asks Org
+            ;; to set up, so a call carrying one turns the setting on
+            ;; for its own close and Org places the entry where it
+            ;; places every clock-out entry: against the clock line it
+            ;; belongs to, in whatever drawer that line sits in.  The
+            ;; rule that a clock line taken away takes its entry with
+            ;; it is Org's, and holds here as it does by hand:
+            ;; `org-clock-out-remove-zero-time-clocks' deleting the
+            ;; line leaves nothing for a note to be about.
+            (let ((org-log-note-clock-out
+                   (or note org-log-note-clock-out)))
+              (org-mcp--logging-note note
+                (org-clock-clock-out
+                 (cons marker start-time) nil end)))
             ;; The response links to the heading clocked out of.
             (goto-char heading)))))))
 
@@ -7582,6 +7603,13 @@ Parameters:
              If omitted, uses current time
   files - Files and directories to look up an id: link in
           (array of strings, optional); see org-node-read
+  note - Prose to record against the clock being closed (string,
+         optional).  It is written under the closed CLOCK line, in
+         the drawer that line sits in, the way Org records a note
+         for a clock closed by hand.  Empty or whitespace-only
+         values are ignored.  A clock of no length that
+         org-clock-out-remove-zero-time-clocks takes away carries
+         no note either, there being no clock line left to mark
 
 Returns JSON object:
   success - Always true on success (boolean)

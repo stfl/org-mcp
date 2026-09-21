@@ -108,7 +108,8 @@ Example:
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]) to the heading the running clock is on, the heading =org-clock-active= reports along with the link to it. Naming it is what keeps the call from ending a clock the client never saw — one the user started in Emacs minutes earlier, say — so a link naming another heading, or a whole file, closes nothing
   - =end_time= (string, optional): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Defaults to current time
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* JSON object with success status, =saved= flag, and clock-out details
+  - =note= (string, optional): prose to record against the clock being closed. =""=, a string of nothing but whitespace, =null=, =false= and =[]= are the parameter left out, and record nothing (see [[file:writing.org::*What a blank parameter means][What a blank parameter means]])
+- *Returns:* JSON object with success status, =saved= flag, and clock-out details. A =note= changes no field of it: the response reports the close, and the note is in the file
 - *Refuses with:* =conflict:= when no clock runs at all, or when =link= names a heading the running clock is not on; unmarked validation otherwise (see [[file:writing.org::*How a refusal is classed][How a refusal is classed]])
 
 Org writes the close, so Org's clock-out settings decide what the file ends up
@@ -124,10 +125,24 @@ records the clock closing, and the TODO change
 =org-log-done=, =org-todo-log-states= and =org-log-repeat= covers it (see
 [[file:writing.org::*What a write records in the LOGBOOK][What a write records in the LOGBOOK]]). =org-log-note-headings= gives the
 clock-out entry an empty heading, so with its shipped value
-=org-log-note-clock-out= writes nothing and only the closed CLOCK line is
-there; give that entry a heading of your own and it is written against the
-clock it belongs to. The same happens to the clock =org-clock-in= closes
-before it opens its own.
+=org-log-note-clock-out= writes nothing of its own accord and only the
+closed CLOCK line is there; give that entry a heading of your own and it is
+written against the clock it belongs to. The same happens to the clock
+=org-clock-in= closes before it opens its own.
+
+=note= is the prose of that entry, sent with the call because Org's way of
+getting it is to prompt and a tool call has nobody to answer. It is
+recorded whether or not =org-log-note-clock-out= is on — a call that sends a
+note has already said it has one — and it lands where Org lands a clock-out
+entry: under the closed CLOCK line, in the drawer that line sits in, which
+=org-clock-into-drawer= and a =LOG_INTO_DRAWER= property on the heading name
+between them. With the shipped =org-log-note-headings= the prose is the
+whole entry; a =clock-out= heading of your own puts the prose under it. The
+one close a note cannot mark is a clock of no length:
+=org-clock-out-remove-zero-time-clocks= takes that CLOCK line away and Org
+writes no entry for a line it removed, so the note goes with it.
+=org-clock-in= takes no =note= of its own, so the clock it closes before
+opening one is closed without prose.
 
 A call is refused when:
 
@@ -167,7 +182,24 @@ Example:
   "duration": "2:15",
   "link": "id:550e8400-e29b-41d4-a716-446655440000"
 }
+
+# A close that says what the work was:
+{
+  "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "end_time": "2026-03-23T16:45:00",
+  "note": "Wired the parser up to the new schema"
+}
 #+end_src
+
+The prose of that call lands under the clock it closed:
+
+#+begin_example
+,* Implement feature X
+:LOGBOOK:
+CLOCK: [2026-03-23 Mon 14:30]--[2026-03-23 Mon 16:45] =>  2:15
+- Wired the parser up to the new schema
+:END:
+#+end_example
 
 ** org-clock-add
 - *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK

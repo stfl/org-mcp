@@ -114,17 +114,18 @@ drawer. =org-node-archive= reaches the same TODO machinery, when
 =org-archive-mark-done= has it mark the subtree done, and records what
 =org-log-repeat= asks for; Org turns the other two off for an archive itself.
 =org-log-note-headings= gives the clock-out entry an empty heading, so with its
-shipped value that setting writes nothing (see [[file:clocking.org::*org-clock-out][org-clock-out]]), and a
-clock-out that =org-clock-out-switch-to-state= turns into a TODO change is
-recorded by the settings above it.
+shipped value that setting writes nothing of its own accord (see
+[[file:clocking.org::*org-clock-out][org-clock-out]]), and a clock-out that =org-clock-out-switch-to-state= turns
+into a TODO change is recorded by the settings above it.
 
 An entry carries its heading line and no prose under it, whether the setting is
 =time= or =note=. =note= asks for prose a person types into a buffer, and a
 tool call has no person to ask; Org makes the same substitution itself when it
-acts in bulk from the agenda. The one exception is =org-node-set-todo=, whose
-=note= parameter is prose you supply, and it becomes the prose of that entry,
-so one transition leaves one record. Anything else to say about a change is a
-call to [[*org-node-add-note][org-node-add-note]].
+acts in bulk from the agenda. The exceptions are the two calls that carry the
+prose themselves: =org-node-set-todo= and =org-clock-out= each take a =note=,
+and it becomes the prose of the entry that change writes, so one change leaves
+one record. Both record it whether or not the setting that would have asked is
+on. Anything else to say about a change is a call to [[*org-node-add-note][org-node-add-note]].
 
 Every other Org setting is honoured as Org honours it, and the tools that write
 no log entry — the title, property, tag, priority and content tools, and

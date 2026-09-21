@@ -1590,14 +1590,19 @@ to the heading of the running clock."
           (mcp-server-lib-ert-call-tool "org-clock-in" params)))
     (json-read-from-string result-text)))
 
-(defun org-mcp-test--call-clock-out (link &optional end-time)
+(defun org-mcp-test--call-clock-out (link &optional end-time note)
   "Call org-clock-out tool via JSON-RPC and return the parsed result.
 LINK names the heading the running clock is on.  END-TIME is an
-optional ISO 8601 end timestamp."
+optional ISO 8601 end timestamp.  NOTE, when non-nil, is sent as the
+`note' parameter, the prose to record against the closed clock; the
+blanks a client can spell -- \"\", a string of whitespace, false and
+[] -- are all non-nil here, so each is sent as the call wrote it and
+only nil leaves the parameter out."
   (let* ((params
           (append
            `((link . ,link))
-           (when end-time `((end_time . ,end-time)))))
+           (when end-time `((end_time . ,end-time)))
+           (when note `((note . ,note)))))
          (result-text
           (mcp-server-lib-ert-call-tool "org-clock-out" params)))
     (json-read-from-string result-text)))
@@ -7484,6 +7489,240 @@ heading gets it here as they would from a clock-out by hand."
         (org-mcp-test--should-leave-no-log-prompt)
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--clock-out-note-expected-regex)))))
+
+;;; The note a clock-out carries
+
+;; `org-log-note-clock-out' asks Org to record a clock closing, and Org
+;; asks a person for the prose.  A `note' is that prose, sent with the
+;; call that closes the clock.
+
+(defconst org-mcp-test--clock-out-prose "Stopped to take the call."
+  "The prose these tests send as a clock-out's `note'.")
+
+(ert-deftest org-mcp-test-clock-out-publishes-note-as-optional ()
+  "org-clock-out publishes `note\=' as a parameter a call may carry.
+A client discovers the note from the schema and never from the
+handler, so prose no published parameter carries is prose nothing
+will ever send.  It is optional: a close says nothing unless the
+caller has something to say."
+  (org-mcp-test--with-enabled
+    (should
+     (member
+      "note"
+      (org-mcp-test--registered-tool-properties "org-clock-out")))
+    (should-not
+     (member
+      "note"
+      (org-mcp-test--registered-tool-required "org-clock-out")))))
+
+(defconst org-mcp-test--clock-out-prose-regex
+  "- Stopped to take the call\\.\n"
+  "The entry `org-mcp-test--clock-out-prose' is written as.
+`org-log-note-headings' leaves the `clock-out' purpose an empty
+heading, so the prose is the whole entry and no heading line
+precedes it.")
+
+(defconst org-mcp-test--clock-out-with-note-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   org-mcp-test--clock-out-prose-regex
+   ":END:\n"
+   "\\'")
+  "File contents once a clock-out carrying a note records it.
+The entry sits under the CLOCK line it is about rather than at the
+top of the drawer, which is where Org puts a clock-out entry.")
+
+(defun org-mcp-test--should-report-the-closed-hour (result link)
+  "Assert RESULT is the response closing the test hour returns.
+LINK is the link the call named the heading with, which the response
+carries back.  A note changes no field of it: the response reports
+the close that was asked for, and the note is in the file."
+  (should (equal (alist-get 'success result) t))
+  (should (eq (alist-get 'saved result) t))
+  (should (equal (alist-get 'clocked_out result) t))
+  (should (equal (alist-get 'heading result) "Task One"))
+  (should
+   (string-match-p "\\`2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\'"
+                   (alist-get 'start result)))
+  (should
+   (string-match-p "\\`\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\\'"
+                   (alist-get 'end result)))
+  (should (equal (alist-get 'duration result) "1:00"))
+  (should (equal (alist-get 'link result) link)))
+
+(ert-deftest org-mcp-test-clock-out-note-is-written-against-its-clock ()
+  "A `note' becomes the entry `org-log-note-clock-out' asks for.
+Org gets that prose by prompting, which an MCP call has nobody to
+answer; sent with the call, it is written where Org writes a
+clock-out entry -- under the CLOCK line it closed, in the drawer that
+line sits in."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((link (org-mcp-test--file-link test-file "*Task One")))
+          (org-mcp-test--should-report-the-closed-hour
+           (org-mcp-test--call-clock-out
+            link "2026-01-01T11:00:00"
+            org-mcp-test--clock-out-prose)
+           link))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-out-with-note-regex)))))
+
+(ert-deftest org-mcp-test-clock-out-note-outlives-the-setting-being-off ()
+  "A `note' is recorded whether or not `org-log-note-clock-out' is on.
+The setting says whether Org asks for prose of its own accord.  A
+call that sends prose has already said it has some, and it is
+recorded, as `org-node-set-todo' records a note under log settings
+that asked for none."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-log-note-clock-out nil)
+          (org-log-into-drawer t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((link (org-mcp-test--file-link test-file "*Task One")))
+          (org-mcp-test--should-report-the-closed-hour
+           (org-mcp-test--call-clock-out
+            link "2026-01-01T11:00:00"
+            org-mcp-test--clock-out-prose)
+           link))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-out-with-note-regex)))))
+
+(ert-deftest org-mcp-test-clock-out-blank-note-records-nothing ()
+  "Every blank `note' is a note the call did not send.
+\"\", a string of whitespace, false and [] all leave the close
+recorded the way a call with no note at all records it: the closed
+CLOCK line alone, since `org-log-note-headings' gives the `clock-out'
+purpose an empty heading and there is no prose to go under it."
+  (dolist (blank '("" "   " :json-false []))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--clock-task-with-open-clock))
+      (let ((org-log-note-clock-out t)
+            (org-log-into-drawer t))
+        (org-mcp-test--with-session-clock test-file
+          (let ((link
+                 (org-mcp-test--file-link test-file "*Task One")))
+            (org-mcp-test--should-report-the-closed-hour
+             (org-mcp-test--call-clock-out
+              link "2026-01-01T11:00:00" blank)
+             link))
+          (org-mcp-test--should-leave-no-log-prompt)
+          (org-mcp-test--verify-file-matches
+           test-file org-mcp-test--clock-add-expected-regex))))))
+
+(ert-deftest org-mcp-test-clock-out-note-arms-no-prompt ()
+  "A `note' changes nothing about the prompt a clock-out must not arm.
+Org reaches its clock-out entry by pushing `org-add-log-note' onto
+the global `post-command-hook', which inside an MCP call would pop a
+note prompt at the user's next unrelated command.  The note rides
+that entry, so it is written here and the hook is left as it was
+found, whether the call carried prose or not."
+  (dolist (note (list nil org-mcp-test--clock-out-prose))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--clock-task-with-open-clock))
+      (let ((org-log-note-clock-out t)
+            (org-log-into-drawer t))
+        (org-mcp-test--with-session-clock test-file
+          (let ((link
+                 (org-mcp-test--file-link test-file "*Task One")))
+            (org-mcp-test--should-report-the-closed-hour
+             (org-mcp-test--call-clock-out
+              link "2026-01-01T11:00:00" note)
+             link))
+          (org-mcp-test--should-leave-no-log-prompt)
+          (org-mcp-test--verify-file-matches
+           test-file
+           (if note
+               org-mcp-test--clock-out-with-note-regex
+             org-mcp-test--clock-add-expected-regex)))))))
+
+(defconst org-mcp-test--clock-open-in-named-drawer
+  (concat
+   "* TODO Task One\n"
+   ":PROPERTIES:\n"
+   ":LOG_INTO_DRAWER: NOTES\n"
+   ":END:\n"
+   ":NOTES:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]\n"
+   ":END:\n")
+  "An open clock in the drawer the node's LOG_INTO_DRAWER names.
+`org-clock-into-drawer' reads that property through
+`org-log-into-drawer', so this is the drawer clocking in put the line
+in.")
+
+(defconst org-mcp-test--clock-out-note-in-named-drawer-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":PROPERTIES:\n"
+   ":LOG_INTO_DRAWER:[ \t]+NOTES\n"
+   ":END:\n"
+   ":NOTES:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   org-mcp-test--clock-out-prose-regex
+   ":END:\n"
+   "\\'")
+  "File contents once a note followed its clock into the NOTES drawer.
+The entry is under the CLOCK line, not at the top of the drawer:
+a clock-out entry is placed against its clock, so the drawer it lands
+in is the one holding that clock.")
+
+(ert-deftest org-mcp-test-clock-out-note-follows-its-clock-into-the-drawer ()
+  "A note lands in the drawer the clock it closes sits in.
+A node carrying LOG_INTO_DRAWER keeps its clocks somewhere other
+than LOGBOOK, and the entry marking a close belongs with the line it
+marks, so it goes there too.  `org-log-into-drawer' is off globally
+here, so the property is the only thing naming that drawer."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-open-in-named-drawer))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer nil))
+      (org-mcp-test--with-session-clock test-file
+        (let ((link (org-mcp-test--file-link test-file "*Task One")))
+          (org-mcp-test--should-report-the-closed-hour
+           (org-mcp-test--call-clock-out
+            link "2026-01-01T11:00:00"
+            org-mcp-test--clock-out-prose)
+           link))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-out-note-in-named-drawer-regex)))))
+
+(ert-deftest org-mcp-test-clock-out-note-goes-with-a-removed-clock-line ()
+  "A note has nothing to mark once Org takes the clock line away.
+`org-clock-out-remove-zero-time-clocks' deletes a CLOCK line of no
+length and the drawer it empties, and Org records no close for a line
+it removed.  A note sent with such a call goes the same way, leaving
+the file a close with no note leaves."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-out-zero-time-content))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t)
+          (org-clock-out-remove-zero-time-clocks t))
+      (org-mcp-test--with-session-clock test-file
+        (let* ((link (org-mcp-test--file-link test-file "*Task Two"))
+               (result
+                (org-mcp-test--call-clock-out
+                 link "2026-01-01T10:00:00"
+                 org-mcp-test--clock-out-prose)))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'clocked_out result) t))
+          (should (equal (alist-get 'heading result) "Task Two"))
+          (should (equal (alist-get 'duration result) "0:00"))
+          (should (equal (alist-get 'link result) link)))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-out-zero-time-expected-regex)))))
 
 (defconst org-mcp-test--clock-out-switch-state-logged-regex
   (concat
