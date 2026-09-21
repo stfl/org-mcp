@@ -122,10 +122,10 @@ the file gets the day the date falls on.
 
 The two warning forms part company beside a repeater. Org writes
 =<2026-03-27 Fri +1w -3d>= whole, and writes =<2026-03-27 Fri +1w --3d>= as
-=<2026-03-27 Fri +1w>=, leaving the delay out. The field holds the date the
-call named either way, and the =after= a response carries is read back from the
-file, so it reports the warning that survived rather than the one that was
-sent. A =--3d= standing alone is written whole.
+=<2026-03-27 Fri +1w>=, leaving the delay out, so that pairing is refused
+rather than written short (see [[*A date that is not a date is refused]]). A
+=--3d= standing alone is written whole, and so is a =-3d= beside a repeater of
+any of the three forms.
 
 =09:00-10:00= is a span within the day and not a range: Org writes it inside the
 one timestamp, so the whole of it reaches the file. It goes in as sent even when
@@ -166,6 +166,7 @@ Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
 Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
 Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
 Date '<2026-03-27 Fri 09:00 +1w typo>' carries text that is no part of a timestamp: 'typo' - Org would write '<2026-03-27 Fri 09:00 +1w>' without it
+Date '<2026-03-27 Fri +1w --3d>' pairs a first-only warning delay with a repeater - Org's planning writer drops the delay and writes '<2026-03-27 Fri +1w>'; '<2026-03-27 Fri +1w -3d>' warns before every repeat
 Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
 #+end_example
 
@@ -196,6 +197,16 @@ The day name is read past and not refused. Org writes the day the date falls on
 and reads nothing out of the slot the day name stands in, so =2026-03-27 zzz=
 reaches the file as =<2026-03-27 Fri>= — the day the call named, with nothing of
 it lost.
+
+A first-only warning delay is refused beside a repeater. Org's planning writer
+carries a repeater and a =-3d= warning together, and carries a =--3d= delay
+standing alone, but writes the repeater by itself when the two arrive together:
+=<2026-03-27 Fri +1w --3d>= would reach the file as =<2026-03-27 Fri +1w>=, a
+heading repeating on the schedule the call named with the warning it asked for
+gone. The refusal names the two timestamps that go in its place — the repeater
+by itself, and the =-3d= that warns before every repeat rather than before the
+first date only — and both are written whole. A delay that is to fire once
+wants a date that happens once, so a heading carrying one carries no repeater.
 
 A date is written out in full, never as a relative expression: =+1w= on its own
 is not next week but a repeater with no date under it, and it is refused.

@@ -3999,6 +3999,25 @@ date by putting something else there."
             (throw 'read (nthcdr n words)))))
       nil)))
 
+(defun org-mcp--timestamp-warning-retyped (timestamp type)
+  "Return TIMESTAMP rendered with its warning period set to TYPE.
+TYPE is `all', the warning that fires before every repeat, or nil
+for no warning period at all.  The number and the unit are
+TIMESTAMP\\='s own either way, so what comes back differs from
+TIMESTAMP\\='s own rendering in the warning alone.  TIMESTAMP is left
+as it was found.
+
+Org spells a warning type in the hyphens before the period and
+renders a timestamp from the element\\='s properties, so retyping a
+copy and asking Org to render it is asking Org how the retyped form
+is written, rather than spelling a timestamp out here."
+  (let ((copy (org-element-copy timestamp)))
+    (org-element-put-property copy :warning-type type)
+    (unless type
+      (org-element-put-property copy :warning-value nil)
+      (org-element-put-property copy :warning-unit nil))
+    (org-element-interpret-data copy)))
+
 (defun org-mcp--date-normalized (date-str)
   "Return DATE-STR as the Org timestamp string to write.
 Throws an MCP tool error when Org will not carry DATE-STR to the
@@ -4010,7 +4029,7 @@ vocabulary a read speaks: the shorthand `2026-03-27' and
 a read returns, brackets and all.  There is no second definition of
 a timestamp here to drift from Org\\='s.
 
-Five things Org parses are refused, because writing them would put
+Six things Org parses are refused, because writing them would put
 something other than what the call sent into the file:
 
 - a date whose fields name no day — `2026-02-30', `2026-13-45',
@@ -4023,13 +4042,18 @@ something other than what the call sent into the file:
 - text Org reads past — the `typo' of
   `<2026-03-27 Fri 09:00 +1w typo>' — which never reaches the file,
   so the call would be answered with the repeater it asked for and
-  none of the word it got wrong.
+  none of the word it got wrong;
+- a first-only warning delay standing beside a repeater — the
+  `--3d' of `<2026-03-27 Fri +1w --3d>' — which Org\\='s planning
+  writer takes off, writing the repeater by itself.
 
-Two forms carrying a doubled hyphen are not ranges and are written.
-A span of the day, `2026-03-27 09:00-10:00', lives inside the one
-timestamp and Org carries the whole of it, backwards hours and all.
-A first-only warning delay, `--3d' against the `-3d' that warns
-before every repeat, is Org\\='s own spelling and it goes in as sent.
+Two forms carrying a doubled hyphen are not ranges.  A span of the
+day, `2026-03-27 09:00-10:00', lives inside the one timestamp and
+Org carries the whole of it, backwards hours and all, so it is
+written.  A first-only warning delay, `--3d' against the `-3d' that
+warns before every repeat, is Org\\='s own spelling and goes in as
+sent while it stands alone; what it costs beside a repeater is the
+sixth refusal above.
 
 The day name is read past and not refused, because the day Org
 writes is the day the date falls on and no date is lost by whatever
@@ -4060,7 +4084,8 @@ carry an active one, written <...>"
       ;; such a range however close the halves fall — one inside a
       ;; single day is cut as surely as one across a month.  After a
       ;; date it is the first-only warning delay, `--3d' against the
-      ;; `-3d' that warns before every repeat, and Org writes it.
+      ;; `-3d' that warns before every repeat, which is no range at
+      ;; all; what it costs beside a repeater is settled below.
       ;; Inside one pair of brackets the separator is neither: Org's
       ;; parser reads up to it and stops, so the rendering comes back
       ;; without it, and that is what tells the two apart here rather
@@ -4106,6 +4131,34 @@ two-digit year"
         (org-mcp--tool-validation-error
          "Date '%s' does not exist - Org reads it as '%s'"
          date-str rendered))
+      ;; Org's planning writer carries a repeater and a warning
+      ;; period together, and carries a first-only delay standing
+      ;; alone, but writes the repeater by itself when the two
+      ;; arrive together.  What goes is a warning rather than a
+      ;; date, so the rule above does not reach it; a warning the
+      ;; call asked for, gone from the file and answered with a
+      ;; success, is the silent half-write a range is refused for.
+      ;;
+      ;; The loss happens inside the planning writer and not in the
+      ;; parse, so the rendering carries the delay and cannot show
+      ;; it.  The parsed element is where the evidence survives:
+      ;; `first' is the doubled hyphen, and a repeater type is any
+      ;; of Org's three repeater forms.
+      ;;
+      ;; This check runs last so the timestamps it names are ones
+      ;; every check above has passed, leaving a client two values
+      ;; it can send rather than a suggestion refused in its turn.
+      (when (and (eq
+                  (org-element-property :warning-type timestamp)
+                  'first)
+                 (org-element-property :repeater-type timestamp))
+        (org-mcp--tool-validation-error
+         "Date '%s' pairs a first-only warning delay with a \
+repeater - Org's planning writer drops the delay and writes '%s'; \
+'%s' warns before every repeat"
+         date-str
+         (org-mcp--timestamp-warning-retyped timestamp nil)
+         (org-mcp--timestamp-warning-retyped timestamp 'all)))
       rendered)))
 
 (defun org-mcp--validate-body-no-headlines (body level)
@@ -5682,10 +5735,9 @@ WRITER is `org-schedule' or `org-deadline', which carry a repeater
 and a warning period through to the file; `org-add-planning-info'
 takes the date alone and would drop both.  One pairing they do not
 carry is a repeater beside a first-only warning delay: given
-`<2026-03-27 Fri +1w --3d>' both write `<2026-03-27 Fri +1w>'.  The
-date the call named is the date the file holds, and the response
-reports the timestamp read back from the file, so the client is told
-which warning survived.
+`<2026-03-27 Fri +1w --3d>' both write `<2026-03-27 Fri +1w>'.
+`org-mcp--date-normalized' refuses that pairing, so no VALUE
+reaching here has a warning to lose.
 
 VALUE is a timestamp Org itself rendered, by
 `org-mcp--date-normalized', so the date is settled before this runs.
