@@ -17852,6 +17852,93 @@ that writes one name twice, which has neither."
          test-file
          org-mcp-test--regex-accumulating-property-removed)))))
 
+(defconst org-mcp-test--regex-accumulating-property-set
+  (concat
+   "\\`\\* TODO Joined Up\n"
+   ":PROPERTIES:\n"
+   ":FOO: +three\n"
+   ":END:\n"
+   "Body line\\.\n\\'")
+  "Regex matching the joined-up file once the property is set afresh.
+The lines the new value supersedes are gone, so the property holds
+what the call asked for and nothing else.")
+
+(ert-deftest org-mcp-test-a-set-supersedes-what-a-property-accumulated ()
+  "A set writes the whole of what the property holds, accumulators included.
+`org-set-property' writes the plain line and leaves a `NAME+' line
+standing, which would leave the property reading as the new value and
+the old addition together while the response called it set.  The call
+asserted the joined value, so the lines that value came from are the
+lines it replaces."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-accumulating-property))
+    (let* ((link (org-mcp-test--file-link test-file "*Joined Up"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((FOO . "one two")))
+                (after . ((FOO . "three"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'properties_set result) ["FOO"]))
+      (should-not (alist-get 'properties_deleted result))
+      (should (equal (alist-get 'before result) '((FOO . "one two"))))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-accumulating-property-set)
+      ;; The value the response reports set is the value a read hands
+      ;; back, so the client's next `before' is the one it just sent.
+      (should
+       (equal
+        (alist-get
+         'properties
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-read"
+           `((link . ,link) (properties . ["FOO"])))))
+        '((FOO . "three")))))))
+
+(ert-deftest org-mcp-test-a-set-against-an-accumulator-asserts-the-whole ()
+  "Half of a joined value is not the value the property holds.
+The `before' a client sends is the value a read handed it, and a
+read joins the lines, so asserting one line alone is a conflict and
+nothing is written."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-accumulating-property))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link . ,(org-mcp-test--file-link test-file "*Joined Up"))
+       (before . ((FOO . "one")))
+       (after . ((FOO . "three"))))
+     "\\`conflict: Property 'FOO' mismatch: expected 'one', \
+found 'one two'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-an-accumulating-name-is-not-a-property ()
+  "A name ending in `+' names no property a call can read or write.
+`FOO+' is a line that adds to what FOO holds: no read reports it, so
+a `before' for it asserts nothing, and a write under it would change
+FOO behind an assertion that never named it.  Both ends refuse it and
+the drawer is left alone."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-accumulating-property))
+    (let ((link (org-mcp-test--file-link test-file "*Joined Up")))
+      (dolist (value '("three" ""))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-properties"
+         `((link . ,link)
+           (before . (("FOO+" . "")))
+           (after . (("FOO+" . ,value))))
+         "\\`Not a property name: FOO\\+\\."
+         test-file))
+      (org-mcp-test--call-tool-refused
+       "org-node-read"
+       `((link . ,link) (properties . ["FOO+"]))
+       "\\`Not a property name: FOO\\+\\."
+       test-file))))
+
 (defconst org-mcp-test--content-duplicate-property
   "* TODO Twice Told
 :PROPERTIES:

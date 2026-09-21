@@ -205,6 +205,24 @@ back under the name Org keeps, which is upper case. A property the node does
 not carry is left out, exactly as a field with no value is, so an answer says
 what the node has rather than what you asked about.
 
+A drawer may spread one property over several lines: a =NAME+= line adds to
+what =NAME= holds, and Org joins them with a space.
+
+#+begin_example
+:PROPERTIES:
+:FOO: one
+:FOO+: two
+:END:
+#+end_example
+
+=FOO= comes back as ="one two"=, the joined value, and that is the value a
+write asserts and replaces. =FOO+= names no property of its own, so asking for
+it is refused rather than answered empty:
+
+#+begin_example
+Not a property name: FOO+.  A trailing `+' makes a drawer line add to the property named without it, so it names none of its own
+#+end_example
+
 A value is the drawer's own text. =:FLAGGED: nil= is a property the node
 carries whose value is the string ="nil"= — the spelling
 =org-node-set-properties= writes for JSON =false= — and not a property the

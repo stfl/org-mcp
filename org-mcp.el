@@ -1571,6 +1571,19 @@ parameter in the refusal raised here."
 string, not: %S"
      what value))))
 
+(defun org-mcp--assert-not-accumulating (name)
+  "Refuse NAME when it is a drawer line adding to a property, not one.
+Org joins a `NAME+' line into what the plain name holds, so no read
+reports the `+' spelling and no `before' can assert it.  A write
+under it would change the plain property behind an assertion that
+never named it, which is the one thing every write here is guarded
+against."
+  (when (string-suffix-p "+" name)
+    (org-mcp--tool-validation-error
+     "Not a property name: %s.  A trailing `+' makes a drawer line \
+add to the property named without it, so it names none of its own"
+     name)))
+
 (defun org-mcp--drawer-property (name)
   "Return NAME as a drawer property name, or refuse it as not one.
 Org holds a property name upcased and matches it that way, so a call
@@ -1579,7 +1592,10 @@ and reads it back under the name Org keeps.
 
 A special property is refused rather than answered empty: Org
 computes those rather than storing them, so no drawer holds one, and
-what each says a node says as a field of its own."
+what each says a node says as a field of its own.  A `NAME+' line is
+refused the same way, by `org-mcp--assert-not-accumulating': it adds
+to what NAME holds rather than being a property, and NAME is the
+name a read answers under."
   (unless (stringp name)
     (org-mcp--tool-validation-error
      "A property name is a string, not: %S"
@@ -1588,6 +1604,7 @@ what each says a node says as a field of its own."
             (org--valid-property-p name))
     (org-mcp--tool-validation-error "Invalid property name: '%s'"
                                     name))
+  (org-mcp--assert-not-accumulating name)
   (let ((upper (upcase name)))
     (when (member upper org-mcp--special-properties)
       (org-mcp--tool-validation-error
@@ -1918,6 +1935,37 @@ one instead of reporting a mismatch no re-read can resolve."
                   (cl-pushnew name doubled :test #'string=)
                 (push name seen)))))
         (nreverse doubled)))))
+
+(defun org-mcp--set-property (name value)
+  "Write VALUE as the whole of what the property NAME holds at point.
+A `NAME+' line adds to what NAME holds, and every reader Org has
+joins the lines into the one value a read returns.
+`org-set-property' writes the plain line alone, so on such a drawer
+it would leave the property holding the new value and the old
+addition together, while the response reported it set to the value
+asked for.  The accumulating lines are what the new value
+supersedes, and the `before' this write is guarded by asserted the
+value they are part of, so the call named everything taken away
+here.
+
+Org takes those lines away only together with the plain one, in
+`org-entry-delete', which is the removal this tool goes through;
+this is that function's search narrowed to them, off the same
+`org-re-property'.  The plain line is left for `org-set-property' to
+rewrite where it stands, so setting a property does not move it down
+the drawer."
+  (save-excursion
+    (when-let* ((block (org-get-property-block)))
+      (let ((end (copy-marker (cdr block)))
+            (re
+             (org-re-property
+              (concat (regexp-quote name) "\\+") t t)))
+        (goto-char (car block))
+        (while (re-search-forward re end t)
+          (delete-region
+           (match-beginning 0) (line-beginning-position 2)))
+        (set-marker end nil))))
+  (org-set-property name value))
 
 (defun org-mcp--drawer-value (drawer name)
   "Return the value DRAWER holds for the property NAME, or \"\".
@@ -4419,6 +4467,7 @@ here."
                  (org--valid-property-p name))
          (org-mcp--tool-validation-error "Invalid property name: '%s'"
                                          name))
+       (org-mcp--assert-not-accumulating name)
        (when (member (upcase name) org-mcp--special-properties)
          (org-mcp--tool-validation-error
           "Cannot set special property '%s' - use the dedicated tool"
@@ -4612,9 +4661,13 @@ MCP Parameters:
           Empty string removes the property, guarded by what
           before says it holds; null or false is the entry left
           unfilled and is refused
+          A property the drawer spreads over a NAME and a NAME+
+          line holds the lines joined; a set writes the value
+          given and takes the NAME+ lines with the old one
           ID and CUSTOM_ID are accepted and written as given
           Special properties (TODO, TAGS, PRIORITY, etc.) are
-          forbidden
+          forbidden, and so is a name ending in +, which adds to
+          another property rather than naming one
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -4635,9 +4688,12 @@ MCP Parameters:
      asserted
      (lambda ()
        (pcase-dolist (`(,key . ,val) written)
+         ;; `org-delete-property' takes the `NAME+' lines with the
+         ;; plain one, and `org-mcp--set-property' supersedes them, so
+         ;; a property ends up holding what the call said either way.
          (if (string-empty-p val)
              (org-delete-property key)
-           (org-set-property key val)))))))
+           (org-mcp--set-property key val)))))))
 
 (defconst org-mcp--field-scheduled
   (list

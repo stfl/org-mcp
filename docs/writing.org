@@ -614,10 +614,10 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. An empty string asserts the property is absent. Names are matched without regard to case, as Org reads them
-  - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= takes the property away, guarded by what =before= says it holds. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
+  - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= takes the property away, guarded by what =before= says it holds. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead — and so is a name ending in =+=
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =properties_set= and =properties_deleted= — the names written and the names removed — =before=, the values they held, plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and an entry carrying =null= (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, a name ending in =+=, and an entry carrying =null= (see [[*How a refusal is classed]])
 
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
@@ -635,6 +635,26 @@ Removing a property the headline does not hold is a no-op success. =before= of
 =""= on it is an honest assertion, so the call is neither a conflict nor a
 write, and the name appears in neither =properties_set= nor
 =properties_deleted=: nothing was set and nothing was deleted.
+
+A drawer may spread one property over several lines, a =NAME+= line adding to
+what =NAME= holds (see [[file:reading.org::*Asking for properties][Asking for properties]]). The joined value is what
+=before= asserts and what =after= replaces, so a set writes the value you asked
+for and nothing else: the lines it supersedes go with the old value, and =FOO=
+afterwards holds exactly what =after= said. =""= takes the property away whole,
+those lines included. =FOO+= is not a name a call may send, on either side:
+
+#+begin_example
+Not a property name: FOO+.  A trailing `+' makes a drawer line add to the property named without it, so it names none of its own
+#+end_example
+
+A drawer writing the /plain/ name on two lines is a different thing, and it is
+refused with =blocked:=. Org's own readers disagree about which line such a
+property is, so there is no value to assert and no line a write could be said
+to land on; the drawer is repaired in Emacs, not through a call:
+
+#+begin_example
+blocked: Property 'FOO' is written twice in this drawer, so it holds no one value; repair the drawer in Emacs
+#+end_example
 
 Example:
 #+begin_src json
