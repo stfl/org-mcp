@@ -13,5 +13,4 @@ file — a write outside the allowed files, from a server whose posture is that 
 touches those files and nothing else. `org-refile` itself relocates with
 `org-copy-subtree`, `org-paste-subtree` and a `delete-region`, so this is the
 same machinery one level down, at the level where a position is expressible.
-The cost accepted is that `org-log-refile` records nothing and
-`org-after-refile-insert-hook` does not run.
+The cost accepted is that `org-after-refile-insert-hook` does not run.
