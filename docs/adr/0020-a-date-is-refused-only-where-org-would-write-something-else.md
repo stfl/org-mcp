@@ -8,11 +8,23 @@ its own to drift from Org's.
 
 That settles the cases the surface has. An inactive timestamp goes into a
 planning line active and a date range goes in as its first half alone, so both
-are refused. A span whose hours run backwards — `2026-03-27 10:00-09:00` — and
-a first-only warning delay — `2026-03-27 --3d`, which carries the doubled
-hyphen a range is joined by — each reach the file exactly as sent, a read hands
-them straight back, and a `before` built from that read matches, so both are
-written.
+are refused. So is text Org's parser reads past: it reads a timestamp's parts
+and keeps none of what else stands between the brackets, so
+`<2026-03-27 Fri 09:00 +1w typo>` would reach the file as
+`<2026-03-27 Fri 09:00 +1w>` — the repeater the call asked for and none of the
+word it got wrong. What Org read is asked of the string the call sent, by
+cutting words off its end and rendering what is left until the rendering
+changes; the parsed element cannot answer it, because the words Org dropped are
+in no property of it, and reading Org's timestamp grammar a second time here
+would give the check an opinion of its own, which this record denies it.
+
+The day name is read past and written rather than refused, for the reason the
+rule is what it is: Org writes the day the date falls on, so a call that
+misspells the day name still gets the date it named and loses nothing by it. A
+span whose hours run backwards — `2026-03-27 10:00-09:00` — and a first-only
+warning delay — `2026-03-27 --3d`, which carries the doubled hyphen a range is
+joined by — each reach the file exactly as sent, a read hands them straight
+back, and a `before` built from that read matches, so both are written.
 
 The rule is about the date, and one loss that is not a date sits outside it.
 Org's planning writer takes a first-only warning delay off a timestamp that

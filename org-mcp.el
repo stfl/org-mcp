@@ -3919,6 +3919,54 @@ with.")
      (org-element-property property timestamp))
    properties))
 
+(defconst org-mcp--timestamp-day-name-re "\\`[^]+0-9>\r\n -]+\\'"
+  "What Org\\='s timestamp grammar lets stand in the day-name slot.
+`org-ts-regexp0' gives the day name a group of its own, matching a
+run of characters carrying no digit, no sign and no bracket.  Org
+reads nothing out of that group \u2014 the day it writes is the day the
+date falls on \u2014 so a word standing there is not one a call loses by
+sending it.")
+
+(defun org-mcp--timestamp-unread-words (timestamp rendered)
+  "Return the words of TIMESTAMP Org read past, or nil.
+RENDERED is `org-element-interpret-data' on TIMESTAMP: what Org
+writes for it, carrying the parts Org read and nothing else.
+
+Org\\='s parser reads a timestamp\\='s parts and reads past whatever else
+stands between the brackets, keeping none of it.  A word the call
+sent and Org dropped is therefore in the raw string and in no
+property of the element, and what Org read has to be asked of the
+raw string: words are cut off its end one at a time, and the
+shortest head that still renders as RENDERED is what Org read.  The
+words after that head are what it read past.  Asking which words
+change the rendering is asking Org\\='s own parser which of them
+carried meaning, rather than reading its timestamp grammar a second
+time here.
+
+The word after the date is exempt.  It stands in the day-name slot
+`org-mcp--timestamp-day-name-re' describes, and Org writes the day
+the date falls on whatever that slot holds, so the call loses no
+date by putting something else there."
+  (let* ((raw (org-element-property :raw-value timestamp))
+         (words (split-string (substring raw 1 -1) nil t))
+         (from
+          (if (and (cdr words)
+                   (string-match-p
+                    org-mcp--timestamp-day-name-re (nth 1 words)))
+              2
+            1)))
+    (catch 'read
+      (dolist (n (number-sequence from (length words)))
+        (let ((head
+               (org-mcp--timestamp-parsed
+                (format "<%s>"
+                        (string-join (cl-subseq words 0 n) " ")))))
+          (when (and head
+                     (equal
+                      (org-element-interpret-data head) rendered))
+            (throw 'read (nthcdr n words)))))
+      nil)))
+
 (defun org-mcp--date-normalized (date-str)
   "Return DATE-STR as the Org timestamp string to write.
 Throws an MCP tool error when Org will not carry DATE-STR to the
@@ -3930,7 +3978,7 @@ vocabulary a read speaks: the shorthand `2026-03-27' and
 a read returns, brackets and all.  There is no second definition of
 a timestamp here to drift from Org\\='s.
 
-Four things Org parses are refused, because writing them would put
+Five things Org parses are refused, because writing them would put
 something other than what the call sent into the file:
 
 - a date whose fields name no day — `2026-02-30', `2026-13-45',
@@ -3939,13 +3987,21 @@ something other than what the call sent into the file:
   year and answers with another century;
 - an inactive timestamp, which a planning line does not carry;
 - a date range — two timestamps joined by `--' — whose second half
-  Org\\='s planning writer drops, however close the two fall.
+  Org\\='s planning writer drops, however close the two fall;
+- text Org reads past — the `typo' of
+  `<2026-03-27 Fri 09:00 +1w typo>' — which never reaches the file,
+  so the call would be answered with the repeater it asked for and
+  none of the word it got wrong.
 
 Two forms carrying a doubled hyphen are not ranges and are written.
 A span of the day, `2026-03-27 09:00-10:00', lives inside the one
 timestamp and Org carries the whole of it, backwards hours and all.
 A first-only warning delay, `--3d' against the `-3d' that warns
 before every repeat, is Org\\='s own spelling and it goes in as sent.
+
+The day name is read past and not refused, because the day Org
+writes is the day the date falls on and no date is lost by whatever
+stands there; see `org-mcp--timestamp-day-name-re'.
 
 The value returned is Org\\='s own rendering of what it parsed, the
 form `org-schedule' and `org-deadline' carry through whole; see
@@ -3984,6 +4040,18 @@ carry an active one, written <...>"
          "Date '%s' is a date range - name the one date the field is \
 to carry"
          date-str))
+      ;; Org's parser reads a timestamp's parts and reads past the
+      ;; rest, so text it read past is text the call sent and the
+      ;; file will not hold.  A repeater with a typo after it is the
+      ;; costly one: the repeater goes in, the typo does not, and the
+      ;; heading comes out repeating on a schedule nobody chose.
+      (when-let* ((unread
+                   (org-mcp--timestamp-unread-words
+                    timestamp rendered)))
+        (org-mcp--tool-validation-error
+         "Date '%s' carries text that is no part of a timestamp: \
+'%s' - Org would write '%s' without it"
+         date-str (string-join unread " ") rendered))
       ;; `org-small-year-to-year' is the reading Org's date reader
       ;; applies, so the year it leaves alone is the year that
       ;; reaches the file.
