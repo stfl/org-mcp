@@ -40,7 +40,7 @@ org-mcp's own tools reach the line where it is, so a client is not missing
 anything. [[*org-clock-active][org-clock-active]] reports it, [[*org-clock-dangling][org-clock-dangling]] lists it while it is
 open, and [[*org-clock-out][org-clock-out]] closes it.
 
-What it costs is the Org settings that act on the clock Emacs is running.
+What it costs is the Org settings that need a clock running in the session.
 There is none for them to find, so against a clock org-mcp started they do
 nothing:
 
@@ -52,17 +52,25 @@ nothing:
   done keyword — neither through [[file:writing.org::*org-node-set-todo][org-node-set-todo]] nor through =C-c C-t= in
   Emacs.
 
-The settings that decide where the line goes and what it says still apply,
-because =org-clock-in= asks Org those questions as it writes:
-=org-clock-into-drawer= places the line, =org-clock-rounding-minutes= rounds
-its start, and =org-clock-continuously= decides whether that start is taken
-from the previous clock's end.
+These do act on a clock org-mcp started:
 
-Closing runs the other way round, because [[*org-clock-out][org-clock-out]] hands the close to Org
-instead of writing it. =org-clock-out-switch-to-state=,
-=org-clock-out-remove-zero-time-clocks=, =org-clock-out-hook= and the
-clock-out logging all act on a clock org-mcp started, once =org-clock-out=
-closes it.
+- =org-clock-into-drawer= decides where the CLOCK line goes, so the drawer is
+  made, or the line written bare under the heading, as it says.
+- =org-clock-rounding-minutes= rounds the start that gets written.
+- =org-clock-continuously= decides whether that start is taken from the
+  previous clock's end rather than the current time, within
+  =org-mcp-clock-continuous-threshold= minutes of it.
+- =org-clock-out-switch-to-state= moves the heading's keyword when
+  [[*org-clock-out][org-clock-out]] closes the line.
+- =org-clock-out-remove-zero-time-clocks= takes a closed line of no length
+  away, and the drawer it empties with it.
+- =org-clock-out-hook= runs on that close, and =org-log-note-clock-out= records
+  it, as they do for a clock-out in Emacs.
+
+What sorts the two lists is that org-mcp writes the opening line itself and
+asks Org to write the close. A setting Org consults as it closes a clock
+therefore reaches an org-mcp clock the moment [[*org-clock-out][org-clock-out]] is called, and a
+setting that reaches for the clock Emacs is running finds none.
 
 A clock the user started in Emacs is Emacs's own clock, and every one of these
 settings acts on it as it always has. org-mcp reaches that clock too:
