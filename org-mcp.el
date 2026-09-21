@@ -5199,15 +5199,17 @@ absent: as an `after' it takes the line away, as a `before' it
 asserts there is none.  \"\" is a line carrying nothing, `:FOO:' with
 nothing after the name, which `org-entry-properties' reads back as
 \"\" and which a call can therefore assert as readily as write.  Any
-other string is the text the line holds.
+other string is the text the line holds, so long as it is one line.
 
 Each field spells its own emptiness, and a property has one more
 state to spell than a deadline has; see `org-mcp--text-param-given'
 for the two-state form the fields take.  A property value\\='s
 vocabulary is wider still, so `false' is not blank here: with `true'
 it writes the text Org stores, `nil', which is a value like any
-other.  An array or an object is refused by
-`org-mcp--validate-properties', which no property value may be.
+other.  `org-mcp--validate-properties' refuses what no property
+value may be: an array, an object with anything in it, and a string
+spanning several lines.  `{}' is none of those, decoding to the nil
+that takes the line away.
 
 The map is itself the call\\='s statement of what it means to touch,
 which is what makes a destructive null safe here where an unfilled

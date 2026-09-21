@@ -16,15 +16,17 @@ spellings are blank is the position's answer rather than a fixed list: `false`
 is the text `nil` as a property value, `[]` is the tag set's own empty on
 `org-node-set-tags`, and `{}` decodes to the same nothing `null` does, so no
 code past the decoder tells them apart and it means wherever it stands what
-`null` means there. Each exception is a position that reads a meaning of its own
-into the spelling, which is to say one where the client did mean to fill the
-parameter, so the guarantee holds. We chose this over spelling every removal
-`after: ""`, which we shipped first: that made an *invalid input* into a
-command, and it only looked uniform because one spelling was applied across
-fields whose value sets differ. We chose it over a named removal tool per field,
-which we also shipped first and reversed, because `before` is required and
-already says what a removal destroys, so four extra ids bought nothing on a
-surface whose convention is one tool per field.
+`null` means there. The first two are positions that read a meaning of their own
+into the spelling, so a client that sent one meant it. `{}` is not: nothing
+tells it from `null`, and what stands between a removal nobody intended and the
+file is the required `before`, which refuses the call when it does not name what
+the field holds. We chose this over spelling every removal `after: ""`, which we
+shipped first: that made an *invalid input* into a command, and it only looked
+uniform because one spelling was applied across fields whose value sets differ.
+We chose it over a named removal tool per field, which we also shipped first and
+reversed, because `before` is required and already says what a removal destroys,
+so four extra ids bought nothing on a surface whose convention is one tool per
+field.
 
 A `before` keeps `""` for *there was no value*, on every field, and that
 asymmetry with `after` is deliberate rather than tolerated. An assertion names a

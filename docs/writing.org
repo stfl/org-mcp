@@ -505,11 +505,13 @@ it is likewise what =null= is there: in a =before= map, the assertion that the
 drawer carries no such line; in any other required parameter, the parameter
 left out, and refused as one; in an optional one, the default.
 
-*=false= and =[]= are each a value in one position.* A property map takes
-=false= for the text =nil= Org stores, on either side of the call — as an
-=after= it writes that text, as a =before= it asserts the line holds it (see
-[[*The three states of a drawer line]]). =org-node-set-tags= takes =[]= for the tag
-set's own empty value, likewise on either side. Everywhere else both are blank.
+*=false= and =[]= are read by position too.* A property map takes =false= for
+the text =nil= Org stores, on either side of the call — as an =after= it writes
+that text, as a =before= it asserts the line holds it
+(see [[*The three states of a drawer line]]) — and refuses =[]= outright, because a
+property holds a line of text and an array is not one. =org-node-set-tags= takes
+=[]= for the tag set's own empty value, on either side. In every other position
+both are blank.
 
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
