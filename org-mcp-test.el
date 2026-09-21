@@ -25517,6 +25517,60 @@ word of a title would refuse both."
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-settings-words-left-alone))))
 
+(defconst org-mcp-test--content-settings-below-a-heading
+  (concat
+   "* Task\n"
+   "Body\n"
+   "#+CATEGORY: c\n")
+  "A file that writes its only setting inside a heading's body.
+Org honours a settings line there, so the line is the file's
+setting and the heading's content at once.")
+
+(defconst org-mcp-test--pattern-settings-in-the-preamble
+  (concat
+   "\\`#\\+TITLE: A file\n"
+   "\\* Task\n"
+   "Body\n"
+   "#\\+CATEGORY: c\n\\'")
+  "Pattern after a file whose only setting is below its heading gains one.
+The new line goes in the preamble, above the heading, so the
+heading's body is the body it was.")
+
+(ert-deftest org-mcp-test-file-set-setting-writes-no-line-into-a-heading ()
+  "A line the file does not write yet goes in the preamble, and only there.
+Org honours a settings line below a heading, so a file may write one
+inside a heading's body -- and joining it would put a `#+' line in
+that body, changing a node the call never named and invalidating the
+`content_digest' a client holds for it.  The heading's content is
+the content it was, and the setting already there stays where it
+stands, because that is the line a call asserting it means."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-below-a-heading))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (heading (org-mcp-test--file-link test-file "*Task"))
+           (content
+            (alist-get 'content
+                       (json-read-from-string
+                        (org-mcp-test--call-read heading)))))
+      (should (equal content "Body\n#+CATEGORY: c"))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TITLE")
+         (before . [])
+         (after . "A file")))
+      (should
+       (equal
+        (alist-get 'content
+                   (json-read-from-string
+                    (org-mcp-test--call-read heading)))
+        content))
+      (should
+       (equal (alist-get 'CATEGORY (org-mcp-test--file-settings link))
+              ["c"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-in-the-preamble))))
+
 (defconst org-mcp-test--content-settings-with-an-archive
   (concat
    "#+TITLE: A file\n"

@@ -1478,7 +1478,7 @@ Unlike a tag set, the order is asserted too, because Org reads it: two
 is the one a heading with no keyword enters first.
 
 One call writes one setting. Each of them is its own value with its own reach —
-=#+TODO:= touches every heading in the file and =#+TITLE:= touches nothing — so
+=#+TODO:= reaches every heading in the file and =#+TITLE:= reaches none — so
 a call that wrote several would have to refuse them all for one setting's sake,
 or report a part of itself done. Set a file up with one call per setting, each
 guarded on its own.
@@ -1490,12 +1490,21 @@ so nothing a client fills a parameter with absent-mindedly takes a line away
 (see [[*What a blank parameter means]]).
 
 *Where a new line goes.* A call that replaces lines writes over the first of
-them and takes the rest away. A call giving the file a setting it writes on no
-line puts it with the settings the file already has; a file with none takes it
-at the top of its preamble, below a leading comment line and below the file's
-own property drawer, both of which Org keeps above the settings (see [[*A file's own property drawer]]).
-A file whose very first line is a heading is given a preamble above that
-heading, where a drawer of its own would go.
+them, wherever it stands, and takes the rest away. A call giving the file a
+setting it writes on no line puts it with the settings the file already has in
+its *preamble*; a file with none there takes it at the top of the preamble,
+below a leading comment line and below the file's own property drawer, both of
+which Org keeps above the settings (see [[*A file's own property drawer]]). A file
+whose very first line is a heading is given a preamble above that heading,
+where a drawer of its own would go.
+
+The preamble is where a new line goes even when the file's settings are not
+there. Org honours a settings line below a heading, so a file may write one
+inside a heading's body — and a second line beside it would be part of that
+heading's =content=, changing a node the call never named and invalidating the
+=content_digest= a client holds for it (see [[file:reading.org::*The node][The node]]). A line the file
+already writes there is still replaced where it stands, because that line is
+what the call asserted.
 
 The value is the text after the colon with the space around it gone, which is
 what a read returns. A value carrying space at either end, or a newline, is

@@ -5918,6 +5918,22 @@ LINES comes from `org-mcp--setting-lines'."
 LINES comes from `org-mcp--setting-lines'."
   (mapcar #'cadr (org-mcp--setting-lines-of key lines)))
 
+(defun org-mcp--settings-in-preamble (lines)
+  "Return the entries of LINES that stand before the file\\='s first heading.
+LINES comes from `org-mcp--setting-lines'.  Org honours a settings
+line wherever it stands, below a heading included, so a file may
+write one inside a heading\\='s body — and a line written there is
+part of that heading\\='s content."
+  (let ((first-heading
+         (save-excursion
+           (goto-char (point-min))
+           (and (re-search-forward org-outline-regexp-bol nil t)
+                (match-beginning 0)))))
+    (if first-heading
+        (cl-remove-if-not
+         (lambda (line) (< (nth 2 line) first-heading)) lines)
+      lines)))
+
 (defun org-mcp--settings-insert-position (lines)
   "Return where a settings line is written, given the LINES it joins.
 LINES is entries of `org-mcp--setting-lines': the lines of the
@@ -6273,7 +6289,7 @@ reading of the settings back when a refusal puts the text back."
         (setq states (org-mcp--headline-states)))
       (let ((position
              (org-mcp--settings-insert-position
-              (or own-lines lines))))
+              (or own-lines (org-mcp--settings-in-preamble lines)))))
         ;; Backwards, so that a line still to be deleted keeps the
         ;; position read off the buffer before any deletion.
         (dolist (start (reverse starts))
