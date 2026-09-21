@@ -22615,17 +22615,58 @@ destroys something the caller did not name."
      test-file)))
 
 (ert-deftest org-mcp-test-node-verbs-refuse-a-link-naming-a-file ()
-  "A whole file is no node for these verbs to take away.
-`org-mcp--goto-heading' refuses the link before anything is read or
-written, so the file is as it was."
+  "A whole file is no node for any of these verbs to act on.
+All three are asserted and not delete alone.  `org-mcp--goto-heading'
+refuses the link before anything is read or written, so the file is
+as it was.  A file link does reach `org-node-refile' as its
+`parent', where it names that file's top level; it is the node the
+verb acts on that has to be a heading."
   (org-mcp-test--with-verbs-file test-file
     (let ((file-link (concat "file:" test-file)))
+      (dolist (tool '("org-node-delete" "org-node-archive"))
+        (org-mcp-test--call-tool-refused
+         tool
+         `((link . ,file-link)
+           (before . ,(org-mcp-test--verbs-digest file-link)))
+         "\\`Link does not point to a heading:"
+         test-file))
       (org-mcp-test--call-tool-refused
-       "org-node-delete"
+       "org-node-refile"
        `((link . ,file-link)
-         (before . ,(org-mcp-test--verbs-digest file-link)))
+         (before . ,(org-mcp-test--verbs-digest file-link))
+         (parent . ,(org-mcp-test--file-link test-file "*Home")))
        "\\`Link does not point to a heading:"
        test-file))))
+
+(ert-deftest org-mcp-test-write-tools-refuse-a-link-naming-a-file ()
+  "org-node-set-properties is the only write tool a file's link reaches.
+A file node is written where Org has a file construct to write, and
+that is its property drawer.  A TODO keyword, a priority cookie, a
+planning line, a heading's own tags and a LOGBOOK note are heading
+constructs, and a file's title is a `#+TITLE:' keyword rather than a
+headline, so each of these refuses the link and leaves the file as it
+was."
+  (org-mcp-test--with-verbs-file test-file
+    (let ((file-link (concat "file:" test-file)))
+      (pcase-dolist
+          (`(,tool . ,params)
+           '(("org-node-set-todo" (before . "") (after . "TODO"))
+             ("org-node-set-title" (before . "x") (after . "y"))
+             ("org-node-set-content" (before . "") (after . "x"))
+             ("org-node-set-scheduled"
+              (before . "") (after . "2026-03-27"))
+             ("org-node-set-deadline"
+              (before . "") (after . "2026-03-27"))
+             ("org-node-set-priority" (before . "") (after . "A"))
+             ("org-node-add-tags" (after . "work"))
+             ("org-node-remove-tags" (after . "work"))
+             ("org-node-set-tags" (before . []) (after . ["work"]))
+             ("org-node-add-note" (note . "a note"))))
+        (org-mcp-test--call-tool-refused
+         tool
+         (cons (cons 'link file-link) params)
+         "\\`Link does not point to a heading:"
+         test-file)))))
 
 (ert-deftest org-mcp-test-node-delete-description-points-at-archive ()
   "The delete tool's description steers a client toward archiving.
