@@ -1472,6 +1472,16 @@ visiting FILE when there is one."
   "Verify the whole text the server serves for FILE matches EXPECTED-PATTERN."
   (should (string-match-p expected-pattern (org-mcp-test--served-text file))))
 
+(defun org-mcp-test--served-regex (file-regex)
+  "Return FILE-REGEX, a regexp over a whole Org file, as the server serves it.
+The buffer `org-mcp-test--with-dirty-buffer' leaves holds the file
+and the user's own line after it, so a regexp pinning the file image
+pins what the server answers with once it is extended by that line."
+  (concat
+   (string-remove-suffix "\\'" file-regex)
+   (regexp-quote org-mcp-test--user-edit)
+   "\\'"))
+
 (defmacro org-mcp-test--with-dirty-buffer (spec file &rest body)
   "Run BODY over FILE with a buffer visiting it the user has edited.
 SPEC is (BUFFER-VAR ON-DISK-VAR).  BUFFER-VAR is bound to the buffer,
@@ -17315,11 +17325,10 @@ and `saved' says the change has not reached disk."
                "org-node-delete"
                `((link . ,(org-mcp-test--verbs-link))
                  (before . ,(org-mcp-test--verbs-digest)))))))
-        (let ((served (org-mcp-test--served-text test-file)))
-          (should-not (string-match-p "TODO Target" served))
-          (should-not (string-match-p "Grandchild" served))
-          (should (string-match-p "Typed by hand" served))
-          (should (string-match-p "TODO Home" served)))
+        (org-mcp-test--verify-served-matches
+         test-file
+         (org-mcp-test--served-regex
+          org-mcp-test--verbs-target-gone))
         (org-mcp-test--assert-unsaved result test-file on-disk buffer)))))
 
 (ert-deftest org-mcp-test-node-delete-refused-leaves-the-buffer-alone ()
@@ -17360,9 +17369,10 @@ what the node's file holds now, and the node is gone from it."
                      "org-node-archive"
                      `((link . ,(org-mcp-test--verbs-link))
                        (before . ,(org-mcp-test--verbs-digest)))))))
-              (let ((served (org-mcp-test--served-text test-file)))
-                (should-not (string-match-p "TODO Target" served))
-                (should (string-match-p "Typed by hand" served)))
+              (org-mcp-test--verify-served-matches
+               test-file
+               (org-mcp-test--served-regex
+                org-mcp-test--verbs-target-gone))
               (org-mcp-test--assert-unsaved
                result test-file on-disk buffer)
               ;; The archive file was org-mcp's to save, and it is on
@@ -17411,13 +17421,11 @@ buffer it came from unsaved with the user's edit still in it."
                   .
                   ,(org-mcp-test--file-link
                     other-file "*Project One")))))))
-        (let ((served (org-mcp-test--served-text test-file)))
-          (should-not (string-match-p "TODO Target" served))
-          (should (string-match-p "Typed by hand" served)))
-        (should
-         (string-match-p
-          "TODO Target"
-          (org-mcp-test--served-text other-file)))
+        (org-mcp-test--verify-served-matches
+         test-file
+         (org-mcp-test--served-regex org-mcp-test--verbs-target-gone))
+        (org-mcp-test--verify-served-matches
+         other-file org-mcp-test--verbs-other-with-target)
         (org-mcp-test--assert-unsaved result test-file on-disk buffer)
         (org-mcp-test--verify-file-matches
          other-file org-mcp-test--verbs-other-with-target)))))
@@ -17439,10 +17447,10 @@ disk.  `saved' answers for both files, so it is false."
                   .
                   ,(org-mcp-test--file-link
                     other-file "*Project One")))))))
-        (let ((served (org-mcp-test--served-text other-file)))
-          (should (string-match-p "TODO Target" served))
-          (should (string-match-p "Grandchild" served))
-          (should (string-match-p "Typed by hand" served)))
+        (org-mcp-test--verify-served-matches
+         other-file
+         (org-mcp-test--served-regex
+          org-mcp-test--verbs-other-with-target))
         (org-mcp-test--assert-unsaved result other-file on-disk buffer)
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--verbs-target-gone)))))
@@ -17666,7 +17674,7 @@ The drawer goes with the last property in it.")
    (lambda (file)
      `((link . ,(org-mcp-test--file-link file "*Simple Task"))
        (before . ((OWNER . "ada")))))
-   '((properties_deleted . ["OWNER"]))
+   '((properties_deleted . ["OWNER"]) (before . ((OWNER . "ada"))))
    org-mcp-test--dirty-properties-removed-regex))
 
 (defconst org-mcp-test--dirty-scheduled-regex
