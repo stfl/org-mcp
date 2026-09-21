@@ -12230,6 +12230,156 @@ Returns the tool's parsed response."
       (before . ,before)
       (after . ,after)))))
 
+(defconst org-mcp-test--content-done-closed-task
+  "* DONE Scheduled Task\nCLOSED: [2026-09-01 Tue 10:00]\nTask body.\n"
+  "A finished task carrying the CLOSED timestamp Org wrote for it.")
+
+(defconst org-mcp-test--content-done-closed-deadline-task
+  (concat "* DONE Deadline Task\n"
+          "CLOSED: [2026-09-01 Tue 10:00] DEADLINE: <2026-02-01 Sun>\n"
+          "Task body.\n")
+  "A finished task carrying both a CLOSED and a DEADLINE.")
+
+(defconst org-mcp-test--content-done-closed-scheduled-task
+  (concat "* DONE Scheduled Task\n"
+          "CLOSED: [2026-09-01 Tue 10:00] SCHEDULED: <2026-02-01 Sun>\n"
+          "Task body.\n")
+  "A finished task carrying both a CLOSED and a SCHEDULED.")
+
+(defconst org-mcp-test--pattern-closed-gone-scheduled-written
+  (concat "\\`\\* DONE Scheduled Task\n"
+          "SCHEDULED: <2026-10-01 [^>]*>\n"
+          "Task body\\.\n\\'")
+  "Pattern after a SCHEDULED is written over a CLOSED that does not survive.")
+
+(defconst org-mcp-test--pattern-closed-gone-deadline-written
+  (concat "\\`\\* DONE Deadline Task\n"
+          "DEADLINE: <2026-10-01 [^>]*>\n"
+          "Task body\\.\n\\'")
+  "Pattern after a DEADLINE is written over a CLOSED that does not survive.")
+
+(ert-deftest org-mcp-test-set-scheduled-reports-the-closed-it-took ()
+  "Writing a SCHEDULED takes the heading's CLOSED with it, and says so.
+`org-schedule' rebuilds the planning line and does not carry CLOSED
+onto the new one.  org-mcp reports what Org did rather than putting
+it back: the value is gone from the file and the response is the only
+record of it left."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-done-closed-task))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (org-log-reschedule nil))
+      (let ((result
+             (org-mcp-test--call-set-scheduled test-file "" "2026-10-01")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) ""))
+        (should
+         (string-match-p "\\`<2026-10-01 " (alist-get 'after result)))
+        (should
+         (equal (org-mcp-test--planning-move result 'closed)
+                '("[2026-09-01 Tue 10:00]" . ""))))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-closed-gone-scheduled-written))))
+
+(ert-deftest org-mcp-test-set-deadline-reports-the-closed-it-took ()
+  "Writing a DEADLINE takes the heading's CLOSED with it, and says so.
+`org-deadline' rebuilds the planning line the way `org-schedule'
+does, so the same value goes the same way."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-done-closed-deadline-task))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (org-log-redeadline nil))
+      (let ((result
+             (org-mcp-test--call-set-deadline test-file "<2026-02-01 Sun>"
+                                              "2026-10-01")))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (equal (org-mcp-test--planning-move result 'closed)
+                '("[2026-09-01 Tue 10:00]" . ""))))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-closed-gone-deadline-written))))
+
+(ert-deftest org-mcp-test-planning-removal-leaves-the-closed-alone ()
+  "Taking a planning date away leaves CLOSED where it is, and reports nothing.
+The two branches of these tools do different things to the rest of
+the planning line: a write goes through `org-schedule', which
+rebuilds it, and a removal through `org-add-planning-info', which
+takes out the one field it names.  A suite that exercised only this
+branch would find nothing and conclude the tools never touch CLOSED."
+  (org-mcp-test--with-temp-org-files
+      ((scheduled-file org-mcp-test--content-done-closed-scheduled-task)
+       (deadline-file org-mcp-test--content-done-closed-deadline-task))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (org-log-reschedule nil)
+          (org-log-redeadline nil))
+      (let ((result
+             (org-mcp-test--call-set-scheduled
+              scheduled-file "<2026-02-01 Sun>" nil)))
+        (should (equal (alist-get 'after result) ""))
+        (should-not (org-mcp-test--planning-move result 'closed)))
+      (org-mcp-test--verify-file-matches
+       scheduled-file
+       (concat "\\`\\* DONE Scheduled Task\n"
+               "CLOSED: \\[2026-09-01 Tue 10:00\\]\n"
+               "Task body\\.\n\\'"))
+      (let ((result
+             (org-mcp-test--call-set-deadline
+              deadline-file "<2026-02-01 Sun>" nil)))
+        (should (equal (alist-get 'after result) ""))
+        (should-not (org-mcp-test--planning-move result 'closed)))
+      (org-mcp-test--verify-file-matches
+       deadline-file
+       (concat "\\`\\* DONE Deadline Task\n"
+               "CLOSED: \\[2026-09-01 Tue 10:00\\]\n"
+               "Task body\\.\n\\'")))))
+
+(ert-deftest org-mcp-test-a-planning-write-leaves-its-sibling-alone ()
+  "A planning write disturbs CLOSED and no other planning field.
+Writing a SCHEDULED beside a DEADLINE keeps the DEADLINE, so the
+response names CLOSED and nothing else: a field is reported when the
+call moved it, and this one did not move."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat "* DONE Scheduled Task\n"
+                "CLOSED: [2026-09-01 Tue 10:00] DEADLINE: <2026-02-01 Sun>\n"
+                "Task body.\n")))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (org-log-reschedule nil))
+      (let ((result
+             (org-mcp-test--call-set-scheduled test-file "" "2026-10-01")))
+        (should (org-mcp-test--planning-move result 'closed))
+        (should-not (org-mcp-test--planning-move result 'deadline))
+        (should-not (org-mcp-test--planning-move result 'scheduled)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat "\\`\\* DONE Scheduled Task\n"
+               "SCHEDULED: <2026-10-01 [^>]*> DEADLINE: <2026-02-01 Sun>\n"
+               "Task body\\.\n\\'")))))
+
+(ert-deftest org-mcp-test-a-planning-write-reports-nothing-it-moved-not ()
+  "A heading with no CLOSED gets no report of one.
+The field a call writes is reported at the top of the response as
+`before' and `after', and never a second time under its own name."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Scheduled Task\nTask body.\n"))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-reschedule nil))
+      (let ((result
+             (org-mcp-test--call-set-scheduled test-file "" "2026-10-01")))
+        (should (equal (alist-get 'before result) ""))
+        (should-not (org-mcp-test--planning-move result 'closed))
+        (should-not (org-mcp-test--planning-move result 'scheduled)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat "\\`\\* TODO Scheduled Task\n"
+               "SCHEDULED: <2026-10-01 [^>]*>\n"
+               "Task body\\.\n\\'")))))
+
 ;;; A note the user is typing is none of a write's business
 
 ;; Org's own note prompt is one buffer, `*Org Note*', and one set of

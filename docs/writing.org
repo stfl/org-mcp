@@ -535,17 +535,18 @@ priority to write, and sending it back that way is refused.
 
 The pair belongs to the field the call writes, and sits at the top of the
 response because there is only one of it. A field the call did not write but
-Org moved on the way gets a pair of its own, under the field's name: that is
-how =org-node-set-todo= reports a planning date a repeat carried on (see
-[[*A repeat redirects the call]]). Both pairs read alike, so a response's =after=
-is the next call's =before= wherever you find it.
+Org moved on the way gets a pair of its own, under the field's name. Both pairs
+read alike, so a response's =after= is the next call's =before= wherever you
+find it.
 
-The pair belongs to the field the call writes, and sits at the top of the
-response because there is only one of it. A field the call did not write but
-Org moved on the way gets a pair of its own, under the field's name: that is
-how =org-node-set-todo= reports a planning date a repeat carried on (see
-[[*A repeat redirects the call]]). Both pairs read alike, so a response's
-=after= is the next call's =before= wherever you find it.
+*Any write that moves a planning field reports it, not just the one that made
+the rule.* =scheduled=, =deadline= and =closed= are named in the response of
+whichever call moved them: =org-node-set-todo= when a repeat carries the dates
+on (see [[*A repeat redirects the call]]), and =org-node-set-scheduled= or
+=org-node-set-deadline= when writing a date takes the heading's CLOSED with it
+(see [[*A planning write takes the CLOSED with it]]). A field is named only when
+that call moved it, and never the field the call was asked to write, which the
+pair at the top already reports.
 
 #+begin_src json
 # Taking the SCHEDULED away
@@ -1161,7 +1162,7 @@ Example:
   - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no SCHEDULED
   - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the headline's CLOSED with it, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
@@ -1177,6 +1178,53 @@ replaces a range but never writes one: a range in =after= is refused. An
 
 =org-log-reschedule= records both the move and the removal, as it does for a
 reschedule you make by hand; see [[*What a write records in the LOGBOOK]].
+
+*** A planning write takes the CLOSED with it
+
+Writing a date to a headline that carries a =CLOSED:= timestamp takes the
+CLOSED away. Org builds the planning line afresh when it writes a date to it
+and does not carry the closing timestamp onto the new one — which is what your
+own =C-c C-s= does to the same headline. org-mcp reports that rather than
+putting it back: repairing what an Org command does to the line would part your
+file from what Org itself would have written in it.
+
+So the response names =closed=, with the value that went and the =""= the field
+holds now. Once the call returns nothing in the file records the timestamp, and
+the response is the only place it survives:
+
+#+begin_src json
+# Reschedule a finished task that carries a CLOSED:
+{
+  "link": "id:abc-123",
+  "before": "",
+  "after": "2026-10-01"
+}
+
+# The response.  The SCHEDULED is the field you asked for; the CLOSED
+# is the one that went with it:
+{
+  "success": true,
+  "saved": true,
+  "before": "",
+  "after": "<2026-10-01 Thu>",
+  "closed": {"before": "[2026-09-01 Tue 10:00]", "after": ""},
+  "link": "id:abc-123"
+}
+#+end_src
+
+*Taking a date away leaves the CLOSED alone.* An =after= of =null= removes the
+one field it names and builds no new line, so the closing timestamp stays where
+it is and the response says nothing about it. The two halves of these tools
+differ here, and the difference is Org's rather than org-mcp's.
+
+[[*org-node-set-deadline][org-node-set-deadline]] does all of this too:
+=org-deadline= builds the line the same way =org-schedule= does.
+
+You never assert CLOSED. Org writes it when a headline reaches a done keyword
+and clears it when the headline leaves one, so it holds Org's record of the
+transition rather than a date you chose — and a =before= names what you chose.
+[[*org-node-set-todo][org-node-set-todo]] reports it on the same terms, when a
+state change out of a done keyword takes it away.
 
 Example:
 #+begin_src json
@@ -1248,7 +1296,7 @@ Example:
   - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no DEADLINE
   - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the headline's CLOSED with it, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:

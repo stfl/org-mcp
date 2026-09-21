@@ -5449,7 +5449,12 @@ Shaped like `org-mcp--field-scheduled' but for its `:write' and
 reaches a done keyword and clears it when the heading leaves one, so
 what it holds is Org\='s record of the transition rather than anything
 a client chose.  Having no writer is what keeps it out of
-`org-mcp--write-field' and out of every assertion.")
+`org-mcp--write-field' and out of every assertion.
+
+Calls destroy it all the same, which is why it is in the report: a
+planning write rebuilds the planning line without it, and a state
+change out of a done keyword takes it away.  Neither names it, and
+after either the response is the only record of what it held.")
 
 (defconst org-mcp--planning-fields
   (list
@@ -5633,12 +5638,18 @@ named by its record\='s label."
             (alist-get name org-mcp--planning-fields)
             :label)))))))
 
-(defun org-mcp--planning-moves (before after)
+(defun org-mcp--planning-moves (before after &optional written)
   "Return response fields for each planning field BEFORE and AFTER differ on.
 BEFORE and AFTER are `org-mcp--planning-at-point' readings taken on
 either side of a write.  A field reading the same in both is left
 out: nothing moved under the client, so what it last read still
-holds.  A field that moved is named, carrying the state it was in and
+holds.
+
+WRITTEN, when non-nil, is the field record the call writes itself,
+and it is left out however it moved: the response already reports
+that field at the top, as the `before' and `after' of the call.  What
+is named here is what the call moved without being asked to, which is
+what a client has no other way to learn.  A field that moved is named, carrying the state it was in and
 the state it is in now, the way every write answers about the field
 it writes, so the response\='s value is the next call's `before'.
 
@@ -5657,7 +5668,7 @@ have destroyed and what it is told about are different questions."
       (let* ((name (car entry))
              (was (alist-get name before))
              (now (alist-get name after)))
-        (unless (equal was now)
+        (unless (or (equal was now) (eq (cdr entry) written))
           `(,name (before . ,was) (after . ,now)))))
     org-mcp--planning-fields)))
 
@@ -5693,6 +5704,14 @@ value it holds afterwards as `after', both read through the one
 accessor a client\='s next `before' will be compared against, so the
 response is the record of what the call destroyed.
 
+A planning field the call did not name is reported under its own name
+when the write moved it; see `org-mcp--planning-moves'.  Org rebuilds
+the planning line when it writes a date to it and does not carry
+CLOSED onto the new one, so a heading loses its closing timestamp to
+a reschedule.  org-mcp reports that rather than putting it back:
+repairing what an Org primitive does to the line would part the file
+from what the same command produces in the user's own Emacs.
+
 A field that holds nothing already is left alone rather than written
 to: a nil AFTER on it asks for what is there, and Org\='s removers are
 written for a value that exists — `org-priority' refuses a heading
@@ -5701,14 +5720,24 @@ with no cookie to take off."
          (file-path (plist-get target :file))
          (key (plist-get field :key))
          (previous nil)
-         (current nil))
+         (current nil)
+         (planning-prev nil)
+         (planning-new nil))
 
     (org-mcp--modify-and-save file-path action
-                              `((before . ,previous)
-                                (after . ,current))
+                              (append
+                               `((before . ,previous)
+                                 (after . ,current))
+                               (org-mcp--planning-moves
+                                planning-prev planning-new
+                                field))
       (org-mcp--goto-heading target)
 
       (setq previous (org-mcp--asserted-value key))
+      ;; The other planning fields, which this call does not name and
+      ;; Org may move on its way to the one it does; see
+      ;; `org-mcp--planning-moves'.
+      (setq planning-prev (org-mcp--planning-at-point))
       (org-mcp--assert-before
        before previous (plist-get field :label))
 
@@ -5720,7 +5749,8 @@ with no cookie to take off."
             (funcall (plist-get field :write) after)
           (unless (string-empty-p previous)
             (funcall (plist-get field :remove) previous))))
-      (setq current (org-mcp--asserted-value key)))))
+      (setq current (org-mcp--asserted-value key))
+      (setq planning-new (org-mcp--planning-at-point)))))
 
 (defun org-mcp--date-to-write (value name)
   "Return VALUE, the date parameter NAME of a call, validated, or nil.
