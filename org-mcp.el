@@ -955,9 +955,9 @@ false to.  Any other VALUE is refused with an error naming NAME."
         (member value '(:false "false")))
     nil)
    (t
-    (org-mcp--tool-validation-error "%s must be true or false: %S"
+    (org-mcp--tool-validation-error "%s must be true or false: %s"
                                     name
-                                    value))))
+                                    (org-mcp--json-name value)))))
 
 (defun org-mcp--depth-given (depth)
   "Return DEPTH, a call's `depth' parameter, as a generation count.
@@ -977,8 +977,8 @@ as a fraction of a generation or a walk of minus one."
            (string-to-number depth)))))
     (unless (and count (>= count 0))
       (org-mcp--tool-validation-error
-       "depth must be a whole number of generations, not: %S"
-       depth))
+       "depth must be a whole number of generations, not: %s"
+       (org-mcp--json-name depth)))
     count))
 
 (defun org-mcp--files-given (files)
@@ -988,15 +988,36 @@ through here."
   (unless (org-mcp--blank-param-p files)
     files))
 
-(defun org-mcp--link-given (link)
+(defun org-mcp--optional-link-given (link)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
 Clients may fill an optional parameter they do not use with an empty
 value, so JSON null, false and a string holding nothing but whitespace
 all mean that the call names no link.  Any other value is returned
-for `org-mcp--link-parse' to check."
+for `org-mcp--link-parse' to check.
+
+The required counterpart is `org-mcp--link-given', which refuses a
+blank instead of reading it as none: an optional parameter has a
+meaning for a parameter that was not sent, and a required one has
+none."
   (unless (or (memq link '(nil :json-false))
               (and (stringp link) (string-blank-p link)))
     link))
+
+(defun org-mcp--link-given (link name)
+  "Return LINK, the link the required parameter NAME carries.
+A blank LINK is the parameter the call did not send and is refused as
+one, naming NAME, the way every required text parameter is refused by
+`org-mcp--text-param-given'.  A link is blank on the same terms an
+optional one is, see `org-mcp--optional-link-given': JSON null, false
+and a string holding nothing but whitespace.
+
+A blank is read here rather than left to `org-mcp--link-parse', which
+has no parameter to name and would answer a JSON null with `nil\=',
+the Elisp reader\='s spelling of the client\='s own value.  Anything
+that is not blank is returned for that parser to check, which is where
+a string that is no link is refused."
+  (or (org-mcp--optional-link-given link)
+      (org-mcp--missing-param-error name)))
 
 (defmacro org-mcp--closing-opened-buffers (files &rest body)
   "Run BODY, then kill the buffers it opened to visit FILES.
@@ -1618,8 +1639,8 @@ spelled out is."
    (t
     (org-mcp--tool-validation-error
      "fields takes an array of field names, or the name of a \
-configured list as a string, not: %S"
-     fields))))
+configured list as a string, not: %s"
+     (org-mcp--json-name fields)))))
 
 (defun org-mcp--node-fields-given (fields default)
   "Return the node fields a call asking for FIELDS wants.
@@ -1663,8 +1684,8 @@ parameter in the refusal raised here."
    (t
     (org-mcp--tool-validation-error
      "%s takes an array of names, or \"all\" or \"none\" as a \
-string, not: %S"
-     what value))))
+string, not: %s"
+     what (org-mcp--json-name value)))))
 
 (defun org-mcp--assert-not-accumulating (name)
   "Refuse NAME when it is a drawer line adding to a property, not one.
@@ -1693,8 +1714,8 @@ to what NAME holds rather than being a property, and NAME is the
 name a read answers under."
   (unless (stringp name)
     (org-mcp--tool-validation-error
-     "A property name is a string, not: %S"
-     name))
+     "A property name is a string, not: %s"
+     (org-mcp--json-name name)))
   (unless (with-syntax-table org-mode-syntax-table
             (org--valid-property-p name))
     (org-mcp--tool-validation-error "Invalid property name: '%s'"
@@ -1901,8 +1922,8 @@ is nothing for one to name."
     (org-mcp--missing-param-error "before"))
   (unless (org-mcp--digest-form-p before)
     (org-mcp--tool-validation-error
-     "before must be the digest a read of this node returned, starting `%s': %S"
-     org-mcp--digest-prefix before))
+     "before must be the digest a read of this node returned, starting `%s': %s"
+     org-mcp--digest-prefix (org-mcp--json-name before)))
   before)
 
 (defun org-mcp--assert-field-value (before context)
@@ -2491,8 +2512,9 @@ names its file already, or a link of another type."
        link))
     files))
 
-(defun org-mcp--link-target (link &optional files id-file)
-  "Return the target of LINK, a native Org link, visiting no buffer.
+(defun org-mcp--link-target (link name &optional files id-file)
+  "Return the target of LINK, the link parameter NAME carries.
+LINK is a native Org link and no buffer is visited to resolve it.
 The value is a plist: `:link' is LINK, `:file' the allowed file it
 names, `:id' the ID of an `id:' link, and `:search' the part after
 `::', if any.  Whether an `id:' link without a search part names a
@@ -2503,6 +2525,13 @@ accepted.  A string that is not a link is refused by
 file is opened, and so is a link that names no file, such as
 `[[#custom-id]]' or `[[*Title]]'.
 
+NAME is the parameter LINK arrived in, so that a blank is refused as
+the parameter it is rather than parsed: every link a call sends comes
+through here, which is what makes that refusal the same on every
+tool.  `org-mcp--link-given' is where it happens, and an optional link
+parameter reaches here only once `org-mcp--optional-link-given' has
+found it is not blank.
+
 FILES is the call's `files' parameter, checked against LINK by
 `org-mcp--check-files'.  When it is not blank, the ID of an `id:' link
 is looked up in those files by `org-mcp--link-id-in-files' rather
@@ -2510,7 +2539,8 @@ than through Org's ID index.  ID-FILE, when non-nil, is a file the
 call already reaches: the ID of an `id:' link is taken to be in it,
 with no lookup, and the caller finds the ID in that file's buffer."
   (let*
-      ((object (org-mcp--link-parse link))
+      ((link (org-mcp--link-given link name))
+       (object (org-mcp--link-parse link))
        (link (string-trim link))
        (files (org-mcp--check-files object link files))
        (type (org-element-property :type object))
@@ -2626,13 +2656,14 @@ visits its file, widened.  A TARGET naming a whole file, see
   (org-back-to-heading t))
 
 (defun org-mcp--read-link
-    (link read-heading read-file &optional files)
+    (link name read-heading read-file &optional files)
   "Read what native Org LINK points to.
+NAME is the parameter LINK arrived in; see `org-mcp--link-target'.
 READ-HEADING is called with no arguments and point at the heading
 LINK names.  READ-FILE is called with the file when LINK names a
 whole file, see `org-mcp--target-heading-p'.  FILES is the call's
 `files' parameter; see `org-mcp--link-target'."
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link name files))
          (file (plist-get target :file)))
     (org-mcp--with-org-file file
       (if (org-mcp--target-heading-p target)
@@ -2879,7 +2910,7 @@ names no running clock."
 ACTIVE is the running clock as `org-mcp--clock-find-active' returns
 it, or nil when none runs.  CLOCK-OUT is the call's `clock_out'
 parameter, a link to the heading of the running clock; a value
-`org-mcp--link-given' reads as blank counts as not sent.
+`org-mcp--optional-link-given' reads as blank counts as not sent.
 
 With no clock running, a CLOCK-OUT is refused: it names no clock.  A
 clock running outside the allowed files is refused whatever CLOCK-OUT
@@ -2894,7 +2925,7 @@ ask the user about it.  Nothing is changed.
 A CLOCK-OUT that disagrees with the running clock is a conflict: the
 client believed something about the world that no longer holds, and
 reading the clock again is what puts it right."
-  (let ((clock-out (org-mcp--link-given clock-out)))
+  (let ((clock-out (org-mcp--optional-link-given clock-out)))
     (cond
      ((not active)
       (when clock-out
@@ -2913,7 +2944,7 @@ clock out of it, then send its link as clock_out"
          (org-mcp--clock-describe-running active)))
       (unless (org-mcp--clock-names-running-p
                active
-               (org-mcp--link-target clock-out
+               (org-mcp--link-target clock-out "clock_out"
                                      nil (alist-get 'file active)))
         (org-mcp--tool-conflict-error
          "clock_out does not name the running clock: %s.  \
@@ -3811,8 +3842,8 @@ growing a guard of its own."
                                            tags)))))
     (dolist (tag tag-list)
       (unless (stringp tag)
-        (org-mcp--tool-validation-error "A tag must be a string: %S"
-                                        tag)))
+        (org-mcp--tool-validation-error "A tag must be a string: %s"
+                                        (org-mcp--json-name tag))))
     tag-list))
 
 (defun org-mcp--navigate-to-parent-or-top (parent)
@@ -4362,7 +4393,7 @@ MCP Parameters:
   ;; still nothing to take back.
   (setq note (org-mcp--optional-text-given note "note"))
 
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (actual-prev nil)
          (actual-new nil))
@@ -4491,14 +4522,14 @@ MCP Parameters:
         (unless (org-mcp--blank-param-p content)
           (unless (stringp content)
             (org-mcp--tool-validation-error
-             "content must be a string: %S"
-             content))
+             "content must be a string: %s"
+             (org-mcp--json-name content)))
           content))
        (property-list
         (unless (org-mcp--blank-param-p properties)
           (org-mcp--validate-properties properties "properties")))
        ;; A link that names a whole file means top level.
-       (parent-target (org-mcp--link-target parent files))
+       (parent-target (org-mcp--link-target parent "parent" files))
        (file-path (plist-get parent-target :file))
        ;; The sibling can only be a child of the parent, or a heading
        ;; with no parent at the top level, so its `id:' link is taken
@@ -4506,8 +4537,11 @@ MCP Parameters:
        ;; neither are FILES.  Resolving it here refuses a bad link
        ;; before the parent's buffer is changed.
        (sibling-target
-        (when-let* ((sibling (org-mcp--link-given previous_sibling)))
-          (org-mcp--link-target sibling nil file-path))))
+        (when-let* ((sibling
+                     (org-mcp--optional-link-given previous_sibling)))
+          (org-mcp--link-target sibling "previous_sibling"
+                                nil
+                                file-path))))
 
     ;; Add the TODO item
     (org-mcp--modify-and-save file-path "add TODO"
@@ -4602,7 +4636,7 @@ FILES is the org-node-read tool's `files' parameter; see
         (depth (org-mcp--depth-given depth))
         (properties (org-mcp--node-properties-given properties nil))
         (computed (org-mcp--node-computed-given computed nil)))
-    (org-mcp--read-link link
+    (org-mcp--read-link link "link"
                         (lambda ()
                           (json-encode
                            (org-mcp--projected-node-at-point
@@ -4670,7 +4704,7 @@ MCP Parameters:
   (org-mcp--validate-headline-title after)
   (org-mcp--assert-field-value before "Title")
 
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file)))
 
     ;; Rename the headline in the file
@@ -4793,7 +4827,7 @@ see `org-mcp--link-target'."
   (org-mcp--validate-body-no-unbalanced-blocks after)
 
   (let* ((asserted (org-mcp--text-param-given before "before"))
-         (target (org-mcp--link-target link files))
+         (target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          ;; The replacement leaves point at the end of the new body,
          ;; which is the first child's heading when there is one; the
@@ -5081,7 +5115,7 @@ see `org-mcp--link-target'.
 
 This is the whole of what writing properties and removing them
 share, and they differ only in what APPLY does."
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (drawer nil))
 
@@ -5266,7 +5300,7 @@ A field that holds nothing already is left alone rather than written
 to: a nil AFTER on it asks for what is there, and Org\='s removers are
 written for a value that exists — `org-priority' refuses a heading
 with no cookie to take off."
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (key (plist-get field :key))
          (previous nil)
@@ -5525,7 +5559,7 @@ The response reports that heading's own tags as `before' and
 `after', and the tags it has from elsewhere as `inherited', so a
 client sees the same partition a read gives it under `local_tags'
 and `tags'."
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (own-before nil)
          (own-after nil)
@@ -5748,7 +5782,7 @@ MCP Parameters:
     (org-mcp--tool-validation-error
      "Note cannot be empty or whitespace-only"))
 
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file)))
 
     (org-mcp--modify-and-save file-path "add logbook note" nil
@@ -5795,7 +5829,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let ((target (org-mcp--link-target link files))
+  (let ((target (org-mcp--link-target link "link" files))
         (digest (org-mcp--digest-given before))
         (deleted nil))
     (org-mcp--modify-and-save (plist-get target :file) "delete"
@@ -5831,7 +5865,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let ((target (org-mcp--link-target link files))
+  (let ((target (org-mcp--link-target link "link" files))
         (digest (org-mcp--digest-given before))
         (archived nil)
         (archive-file nil)
@@ -5895,19 +5929,20 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (digest (org-mcp--digest-given before))
          ;; FILES says where to find the node, not where to put it.
-         (parent-target (org-mcp--link-target parent))
+         (parent-target (org-mcp--link-target parent "parent"))
          ;; The sibling is a child of the parent, so it is looked for
          ;; in the parent's file, wherever that is: no ID index is
          ;; consulted for it, which lets it be any link the parent's
          ;; children answer to.
          (sibling-target
           (when-let* ((sibling
-                       (org-mcp--link-given previous_sibling)))
-            (org-mcp--link-target sibling
+                       (org-mcp--optional-link-given
+                        previous_sibling)))
+            (org-mcp--link-target sibling "previous_sibling"
                                   nil
                                   (plist-get parent-target :file))))
          (refiled nil)
@@ -6291,7 +6326,7 @@ MCP Parameters:
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
   (org-mcp--read-link
-   link #'org-mcp--node-text-at-point #'org-mcp--read-file
+   link "link" #'org-mcp--node-text-at-point #'org-mcp--read-file
    files))
 
 ;; Clock tools
@@ -6413,7 +6448,7 @@ MCP Parameters:
   clock_out - Link to the heading of the running clock, which is
               closed first; required while a clock runs, refused
               while none does"
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (resolve (org-mcp--boolean-param resolve "resolve"))
          (now (current-time))
@@ -6536,6 +6571,11 @@ MCP Parameters:
           refused with any other link
   note - Prose to record against the clock being closed (string,
          optional); an empty or whitespace-only note records nothing"
+  ;; The call is checked before the world is: a `link' the client did
+  ;; not send is a malformed call, and answering it with the state of
+  ;; the clock would report on something the call never got to ask
+  ;; about.
+  (setq link (org-mcp--link-given link "link"))
   (setq note (org-string-nw-p note))
   (let ((active (org-mcp--clock-find-active)))
     (unless active
@@ -6546,7 +6586,7 @@ MCP Parameters:
 the user to clock out of it in Emacs"))
     (unless (org-mcp--clock-names-running-p
              active
-             (org-mcp--link-target link files))
+             (org-mcp--link-target link "link" files))
       (org-mcp--tool-conflict-error
        "link does not name the running clock: %s.  The clock runs \
 on %s"
@@ -6641,7 +6681,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time
@@ -6699,7 +6739,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (start-time
           (org-mcp--clock-round-time

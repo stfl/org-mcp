@@ -4989,7 +4989,7 @@ The body is inserted and checked as text, so a number or an array
 would reach that as a wrong type and cross the MCP boundary as an
 internal error, which names no parameter.  The refusal names it, and
 the file is left as it was."
-  (dolist (case '((42 . "42") (["a"] . "\\[\"a\"\\]")))
+  (dolist (case '((42 . "42") (["a"] . "an array")))
     (org-mcp-test--with-add-todo-setup test-file
         org-mcp-test--content-empty
       (org-mcp-test--call-tool-refused
@@ -12189,17 +12189,19 @@ itself on the other two, so none of them has a meaning without it."
 
 (defconst org-mcp-test--tag-members-that-are-no-string
   '((1 "1")
-    (t "t")
-    (:json-false ":json-false")
-    (nil "nil")
-    (((a . "b")) "((a . \"b\"))")
-    (["inner"] "[\"inner\"]"))
-  "JSON values a tag set may not hold, each with how a refusal prints it.
+    (t "true")
+    (:json-false "false")
+    (nil "null")
+    (((a . "b")) "an object")
+    (["inner"] "an array"))
+  "JSON values a tag set may not hold, each with how a refusal names it.
 A number, true, false, null, an object and a nested array, as
-`json-read-from-string' decodes them.  The second element is the
-`%S' of the first, written out rather than computed, so that a
-message which changes has to be edited here instead of agreeing
-with whatever the code prints.")
+`json-read-from-string' decodes them.  The second element is the JSON
+spelling `org-mcp--json-name' gives the first, written out rather than
+computed, so that a message which changes has to be edited here instead
+of agreeing with whatever the code prints.  A client reads its own
+vocabulary back: what it sent as false is named false, not the
+`:json-false' its value decoded to.")
 
 (ert-deftest org-mcp-test-tag-tools-refuse-a-member-that-is-no-string ()
   "A tag set holds strings, and one place says so for every tool.
@@ -12265,7 +12267,7 @@ this test adds is the whole parameter rather than a member of it."
           (`(,value ,refusal)
            '((5 "Invalid tags format: 5")
              (t "Invalid tags format: t")
-             (((a . "b")) "A tag must be a string: (a . \"b\")")))
+             (((a . "b")) "A tag must be a string: an object")))
         (org-mcp-test--call-tool-refused
          "org-node-set-tags"
          `((link . ,link) (before . ,value) (after . ["personal"]))
@@ -12274,6 +12276,164 @@ this test adds is the whole parameter rather than a member of it."
         (org-mcp-test--call-tool-refused
          "org-node-set-tags"
          `((link . ,link) (before . ["work" "urgent"]) (after . ,value))
+         (concat "\\`" (regexp-quote refusal) "\\'")
+         test-file)))))
+
+(defconst org-mcp-test--calls-taking-a-required-link
+  '(("org-node-read" "link" ())
+    ("org-node-text" "link" ())
+    ("org-node-set-todo" "link" ((before . "TODO") (after . "DONE")))
+    ("org-node-set-title" "link" ((before . "a") (after . "b")))
+    ("org-node-set-content" "link" ((before . "a") (after . "b")))
+    ("org-node-set-properties"
+     "link"
+     ((before . ((EFFORT . "1:00"))) (after . ((EFFORT . "2:00")))))
+    ("org-node-set-scheduled"
+     "link"
+     ((before . "") (after . "2026-09-27")))
+    ("org-node-set-deadline"
+     "link"
+     ((before . "") (after . "2026-09-27")))
+    ("org-node-set-priority" "link" ((before . "") (after . "A")))
+    ("org-node-add-tags" "link" ((after . ["urgent"])))
+    ("org-node-remove-tags" "link" ((after . ["urgent"])))
+    ("org-node-set-tags" "link" ((before . []) (after . ["urgent"])))
+    ("org-node-add-note" "link" ((note . "A note.")))
+    ("org-node-delete" "link" ((before . "sha256:0000000000000000")))
+    ("org-node-archive" "link" ((before . "sha256:0000000000000000")))
+    ("org-node-refile"
+     "link"
+     ((before . "sha256:0000000000000000") (parent . real-link)))
+    ("org-node-refile"
+     "parent"
+     ((link . real-link) (before . "sha256:0000000000000000")))
+    ("org-node-create" "parent" ((title . "T") (todo . "TODO")))
+    ("org-clock-in" "link" ())
+    ("org-clock-out" "link" ())
+    ("org-clock-add"
+     "link"
+     ((start . "2026-09-21T09:00") (end . "2026-09-21T10:00")))
+    ("org-clock-delete" "link" ((start . "2026-09-21T09:00"))))
+  "Every required link parameter on the surface, with a call around it.
+Each entry is the tool, the parameter that names a link, and the rest
+of a call that would otherwise be well formed, so that what a refusal
+answers is the blank link and nothing else.  The symbol `real-link\='
+stands for a link the test file answers to, since a second link that
+resolves to nothing would be refused before the blank one is read.
+The list is the sweep:
+a tool added with a link parameter and left out of it is a tool whose
+blank was never checked.")
+
+(ert-deftest org-mcp-test-a-blank-link-names-the-parameter-it-arrived-in ()
+  "A required link parameter left blank refuses as the parameter it is.
+A blank that reached the parser instead would come back as `Not an Org
+link: nil\=' -- the Elisp reader\='s spelling of the client\='s own JSON
+null, in a message naming no parameter of the call.  Every link a call
+sends is resolved through `org-mcp--link-target\=', which reads it with
+`org-mcp--link-given\=' first, so the refusal is the same on every tool
+and in every spelling a client fills an unused parameter with."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let ((real-link
+           (org-mcp-test--file-link test-file "*Task with Properties")))
+      (pcase-dolist (`(,tool ,name ,rest)
+                     org-mcp-test--calls-taking-a-required-link)
+        (dolist (blank (list nil :json-false "" "   "))
+          (org-mcp-test--call-tool-refused
+           tool
+           (cons (cons (intern name) blank)
+                 (mapcar
+                  (lambda (pair)
+                    (if (eq (cdr pair) 'real-link)
+                        (cons (car pair) real-link)
+                      pair))
+                  rest))
+           (concat
+            "\\`Missing required parameter: " (regexp-quote name) "\\'")
+           test-file))))))
+
+(ert-deftest org-mcp-test-a-blank-optional-link-still-means-none ()
+  "An optional link parameter keeps its meaning for every blank.
+`previous_sibling\=' means the new node goes last, and `clock_out\='
+means there is no clock the call has to close.  Both are read by
+`org-mcp--optional-link-given\=', which answers nil where the required
+reader refuses, so a sweep over the required ones cannot take these
+with it."
+  (dolist (blank (list nil :json-false "" "   "))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let* ((parent (concat "file:" test-file))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-create"
+                `((title . "Appended")
+                  (todo . "TODO")
+                  (parent . ,parent)
+                  (previous_sibling . ,blank))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'title result) "Appended")))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-clock-in"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (start_time . "2026-09-21T09:00")
+                 (clock_out . ,blank))))))
+        (should (equal (alist-get 'clocked_in result) t))
+        (org-clock-out nil t)))))
+
+(ert-deftest org-mcp-test-a-refusal-names-a-value-in-json ()
+  "A refusal that shows a value shows it in the client\='s own language.
+`json-read-from-string\=' makes an alist of an object, nil of null and
+`:json-false\=' of false, and a refusal that printed those back handed
+the client the spelling of its own value in another language.
+`org-mcp--json-name\=' is the one definition of how a JSON value is
+named in a message, and this covers every parameter reader that names
+one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (let ((link
+           (org-mcp-test--file-link test-file "*Task with Properties")))
+      (pcase-dolist
+          (`(,tool ,params ,refusal)
+           `(("org-node-read"
+              ((depth . ((a . "b"))))
+              "depth must be a whole number of generations, not: \
+an object")
+             ("org-node-read"
+              ((depth . ["x"]))
+              "depth must be a whole number of generations, not: \
+an array")
+             ("org-node-read"
+              ((fields . 7))
+              "fields takes an array of field names, or the name of a \
+configured list as a string, not: 7")
+             ("org-node-read"
+              ((computed . 7))
+              "computed takes an array of names, or \"all\" or \"none\" \
+as a string, not: 7")
+             ("org-node-read"
+              ((properties . [7]))
+              "A property name is a string, not: 7")
+             ("org-node-delete"
+              ((before . ((a . "b"))))
+              ,(concat
+                "before must be the digest a read of this node "
+                "returned, starting `sha256:': an object"))
+             ("org-node-delete"
+              ((before . 7))
+              ,(concat
+                "before must be the digest a read of this node "
+                "returned, starting `sha256:': 7"))
+             ("org-clock-in"
+              ((resolve . ((a . "b"))))
+              "resolve must be true or false: an object")))
+        (org-mcp-test--call-tool-refused
+         tool
+         (cons `(link . ,link) params)
          (concat "\\`" (regexp-quote refusal) "\\'")
          test-file)))))
 
@@ -16917,7 +17077,8 @@ it is called directly to check where point ends."
       ((test-file org-mcp-test--content-notes-by-search))
     (let ((target
            (org-mcp--link-target
-            (org-mcp-test--file-link test-file "other-anchor"))))
+            (org-mcp-test--file-link test-file "other-anchor")
+            "link")))
       (org-mcp--with-org-file test-file
         (org-mcp--goto-heading target)
         (should (bolp))
