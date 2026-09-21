@@ -6740,6 +6740,24 @@ buffer with the CLOCK line and the user's edit both in it."
    ":END:\n")
   "Dangling CLOCK under Task Two; resolve target is Task One.")
 
+(defconst org-mcp-test--clock-resolve-child-content
+  (concat
+   "* TODO Task One\n"
+   "** TODO Child\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-30 Tue 09:00]\n"
+   ":END:\n")
+  "Dangling CLOCK under a child of Task One, the resolve target.")
+
+(defconst org-mcp-test--clock-resolve-parent-and-child-content
+  (concat
+   "* TODO Task One\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-29 Mon 09:00]\n"
+   ":END:\n"
+   "** TODO Child\n:LOGBOOK:\n"
+   "CLOCK: [2025-12-30 Tue 09:00]\n"
+   ":END:\n")
+  "Task One and its child each holding a dangling CLOCK entry.")
+
 (defconst org-mcp-test--clock-in-resolve-mixed-expected-regex
   (concat
    "\\`\\* TODO Task One\n"
@@ -6763,6 +6781,19 @@ buffer with the CLOCK line and the user's edit both in it."
    ":END:\n"
    "\\'")
   "After resolve=true on Task One, Task Two's dangling CLOCK survives.")
+
+(defconst org-mcp-test--clock-in-resolve-child-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]\n"
+   ":END:\n"
+   "\\*\\* TODO Child\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2025-12-30 [A-Za-z]\\{2,3\\} 09:00\\]\n"
+   ":END:\n"
+   "\\'")
+  "After resolve=true on Task One, its child's dangling CLOCK survives.")
 
 (defconst org-mcp-test--clock-in-keeps-dangling-expected-regex
   (concat
@@ -6808,17 +6839,22 @@ Meanwhile the Emacs clock runs on Running Task in another allowed file,
 so every open CLOCK line in CONTENT is dangling as Org defines it.  The
 call names that clock in clock_out and clocks in at 10:00, which closes
 it.  The file must then match EXPECTED-REGEX, and the response report
-RESOLVED deleted clocks, or nil for none."
+RESOLVED deleted clocks, or nil for none.  Whatever RESOLVE deleted,
+the response names Task One as the heading clocked in to, since that
+is the heading the call named."
   (org-mcp-test--with-temp-org-files
       ((test-file content)
        (running-file org-mcp-test--clock-running-elsewhere-content))
     (org-mcp-test--with-session-clock running-file
-      (let ((result
-             (org-mcp-test--call-clock-in
-              (org-mcp-test--file-link test-file "*Task One")
-              "2026-01-01T10:00:00" resolve
-              (org-mcp-test--file-link running-file "*Running Task"))))
+      (let* ((link (org-mcp-test--file-link test-file "*Task One"))
+             (result
+              (org-mcp-test--call-clock-in
+               link "2026-01-01T10:00:00" resolve
+               (org-mcp-test--file-link running-file "*Running Task"))))
         (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (should (equal (alist-get 'heading result) "Task One"))
+        (should (equal (alist-get 'link result) link))
         (should (equal (alist-get 'resolved result) resolved))
         (org-mcp-test--verify-file-matches test-file expected-regex)
         (org-mcp-test--verify-file-matches
@@ -6856,13 +6892,30 @@ RESOLVED deleted clocks, or nil for none."
    org-mcp-test--clock-resolve-mixed-content "true"
    org-mcp-test--clock-in-resolve-mixed-expected-regex 1))
 
-(ert-deftest org-mcp-test-clock-in-resolve-scoped-to-subtree ()
+(ert-deftest org-mcp-test-clock-in-resolve-leaves-a-sibling-alone ()
   "Test resolve=true deletes no dangling clock in a sibling heading.
 Task Two's dangling CLOCK lies outside Task One, the heading clocked in
 to, so it survives."
   (org-mcp-test--check-clock-in-resolve
    org-mcp-test--clock-resolve-other-heading-content "true"
    org-mcp-test--clock-in-resolve-other-heading-expected-regex nil))
+
+(ert-deftest org-mcp-test-clock-in-resolve-leaves-a-descendant-alone ()
+  "A dangling clock on a child is not the parent's to cancel.
+Task One carries none of its own, so resolve=true finds nothing to
+delete, its child keeps its dangling CLOCK, and the response reports
+no `resolved' count at all."
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-child-content "true"
+   org-mcp-test--clock-in-resolve-child-expected-regex nil))
+
+(ert-deftest org-mcp-test-clock-in-resolve-counts-the-named-heading ()
+  "`resolved' counts what was cancelled on the heading the call named.
+Task One and its child each hold a dangling CLOCK.  Only Task One's is
+cancelled, so the count is one, and the child's survives."
+  (org-mcp-test--check-clock-in-resolve
+   org-mcp-test--clock-resolve-parent-and-child-content "true"
+   org-mcp-test--clock-in-resolve-child-expected-regex 1))
 
 (ert-deftest org-mcp-test-clock-in-resolve-true-forms ()
   "Test clock-in reads resolve given as JSON true and as \"true\" alike.

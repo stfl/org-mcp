@@ -2966,13 +2966,20 @@ and `org-mcp--clock-duration-string', and the `CLOCK:' prefix uses
              (org-mcp--clock-format-timestamp start)))))
 
 (defun org-mcp--clock-resolve-dangling ()
-  "Delete unclosed CLOCK entries under current heading.
-Point must be at a heading.  Running clocks under the current
-subtree are discovered via `org-element-map', then each deletion
+  "Delete the unclosed CLOCK entries of the entry at point.
+Point must be at a heading.  The search is bounded by
+`org-entry-end-position', so it covers that heading's own entry and
+not its subtree: a dangling CLOCK line under a descendant is that
+descendant's, named by a link of its own, and a call naming an
+ancestor is not the one entitled to cancel it.  The same bound holds
+the clock lookups in `org-mcp--clock-entries-starting-at', and it is
+the one `org-clock-find-position' places a new CLOCK line within.
+
+Open clocks are discovered via `org-element-map', then each deletion
 is delegated to Org's `org-clock-clock-cancel', which removes the
 CLOCK line and collapses the containing drawer when it becomes
 empty via `org-remove-empty-drawer-at'.  Returns count of deleted
-entries.
+entries, which is therefore a count for that heading alone.
 
 `org-find-open-clocks' is deliberately not used here because another
 buffer may already be visiting the same file (e.g. the buffer opened
@@ -2981,15 +2988,12 @@ whichever buffer `get-file-buffer' finds first, which is not guaranteed
 to be the buffer currently being edited. Element-map on the current
 buffer guarantees the markers we operate on."
   (org-back-to-heading t)
-  (let* ((subtree-begin (point))
-         (subtree-end
-          (save-excursion
-            (org-end-of-subtree t t)
-            (point)))
+  (let* ((entry-begin (point))
+         (entry-end (org-entry-end-position))
          (clocks nil)
          (count 0))
     (save-restriction
-      (narrow-to-region subtree-begin subtree-end)
+      (narrow-to-region entry-begin entry-end)
       (org-element-map
        (org-element-parse-buffer 'element) 'clock
        (lambda (el)
@@ -5894,9 +5898,12 @@ that fails ends the call saying so, see `org-mcp--clock-save-closed'.
 When `org-clock-continuously' is non-nil and no explicit START_TIME
 is given, the new clock may start at the previous clock's end time
 if it is within `org-mcp-clock-continuous-threshold' minutes.
-When RESOLVE is true, the dangling CLOCK lines under the target
-heading are deleted before clocking in: open lines other than the
-running clock, which is closed, never deleted.
+When RESOLVE is true, the dangling CLOCK lines of the target heading
+are deleted before clocking in: the open lines of its own entry other
+than the running clock, which is closed, never deleted.  One on a
+descendant is left to a call naming that descendant, so the response's
+`resolved' counts the heading LINK names and nothing under it; see
+`org-mcp--clock-resolve-dangling'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.  It does not apply to CLOCK_OUT.
 
@@ -7513,8 +7520,9 @@ Parameters:
                If omitted, uses current time (or continuous time)
                Must not be before the running clock's start
   resolve - true or \"true\" to delete the dangling (unclosed) CLOCK
-            lines under the heading before clocking in (optional);
-            the running clock is closed, never deleted; false,
+            lines the heading itself carries, before clocking in
+            (optional); one on a child of that heading is left alone,
+            and the running clock is closed, never deleted; false,
             \"false\" and null mean not to; any other value is refused
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read.  Not used for clock_out
