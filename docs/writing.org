@@ -436,7 +436,7 @@ Example:
   - =after= (string, required): The replacement text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
-- *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= that was never sent, and otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= or an =after= that was never sent, and otherwise (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
 - *Special behavior:* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
 Every body write is a transition: =before= is what the body holds and =after= is

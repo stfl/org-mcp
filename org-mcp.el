@@ -300,38 +300,42 @@ empty value into it."
   (org-mcp--tool-validation-error "Missing required parameter: %s"
                                   name))
 
-(defun org-mcp--before-given (before)
-  "Return BEFORE, a call's precondition, as the value it asserts.
-Any string is an assertion, \"\" included: the fields asserted this
-way hold text, so \"\" is the value naming none, and a required
-parameter is free to carry it.
+(defun org-mcp--text-param-given (value name)
+  "Return VALUE, the text the required parameter NAME carries.
+Any string is text, \"\" included: the parameters read this way carry
+text, so \"\" is the text naming none, and a required parameter is
+free to carry it.
 
 Every other blank, see `org-mcp--blank-param-p', is a parameter the
-call did not send and is refused as one.  Null in particular asserts
+call did not send and is refused as one.  Null in particular says
 nothing: a client that fills an unused parameter with it would
-otherwise claim the field was empty and go on to destroy whatever
-was there.  Anything else is a malformed call."
+otherwise be read as asserting that a field was empty, or as asking
+for a body of no text, and either way go on to destroy what was
+there.  Anything else is a malformed call.
+
+NAME is the parameter as the call spells it, so the refusal names
+what the client sent rather than the field behind it."
   (cond
-   ((stringp before)
-    before)
-   ((org-mcp--blank-param-p before)
-    (org-mcp--missing-param-error "before"))
+   ((stringp value)
+    value)
+   ((org-mcp--blank-param-p value)
+    (org-mcp--missing-param-error name))
    (t
     (org-mcp--tool-validation-error
-     "before must be a string, \"\" for no value: %S"
-     before))))
+     "%s must be a string, \"\" for no value: %S"
+     name value))))
 
 (defun org-mcp--assert-before (before found context)
   "Refuse the call unless FOUND is the value BEFORE asserts.
 FOUND is what the heading holds, in the form a read hands back, and
 \"\" when the field has no value.  BEFORE is what the client believed
-it held, read through `org-mcp--before-given'.  A digest is a
+it held, read through `org-mcp--text-param-given'.  A digest is a
 malformed call here, which `org-mcp--assert-field-value' refuses on
 behalf of every field setter that asserts this way.  A value that
 disagrees with FOUND is a conflict, which CONTEXT names the field
 of."
   (org-mcp--assert-field-value before context)
-  (let ((asserted (org-mcp--before-given before)))
+  (let ((asserted (org-mcp--text-param-given before "before")))
     (unless (equal asserted found)
       (org-mcp--state-mismatch-error asserted found context))))
 
@@ -3667,7 +3671,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (setq before (org-mcp--before-given before))
+  (setq before (org-mcp--text-param-given before "before"))
   (org-mcp--assert-field-value before "State")
 
   (let* ((target (org-mcp--link-target link files))
@@ -3939,7 +3943,7 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (setq before (org-mcp--before-given before))
+  (setq before (org-mcp--text-param-given before "before"))
   (org-mcp--validate-headline-title after)
   (org-mcp--assert-field-value before "Title")
 
@@ -4054,16 +4058,19 @@ that substring.  The prefix is the whole of the discrimination, so a
 client that means to rewrite the body says so by asserting the
 region rather than by setting a flag.
 
-BEFORE reaches both forms through `org-mcp--before-given', so a body
-is asserted by the rule every other precondition follows: \"\" is
-the value naming an empty body, and the rest of
-`org-mcp--blank-param-p' is a parameter the call did not send.
+BEFORE and AFTER both reach the file through
+`org-mcp--text-param-given', so a body is asserted, and written, by
+the rule every other text parameter follows: \"\" is the text naming
+an empty body, and the rest of `org-mcp--blank-param-p' is a
+parameter the call did not send.  AFTER is read first, so a call
+carrying no body to write is refused before the node is found.
 Every body write comes here, so no body changes unguarded.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'."
+  (setq after (org-mcp--text-param-given after "after"))
   (org-mcp--validate-body-no-unbalanced-blocks after)
 
-  (let* ((asserted (org-mcp--before-given before))
+  (let* ((asserted (org-mcp--text-param-given before "before"))
          (target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          ;; The replacement leaves point at the end of the new body,

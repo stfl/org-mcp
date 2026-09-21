@@ -14499,6 +14499,46 @@ keeps the refusal it has always had."
        "\\`conflict: An empty before asserts the node has no content,"
        test-file))))
 
+(ert-deftest org-mcp-test-blank-after-on-set-content-is-left-out ()
+  "A blank body to write is the parameter left out, whatever before says.
+`after' carries the text the body is to hold, and a client that
+fills a parameter it is not using leaves no text there, so the call
+says nothing about what the body should become and nothing is
+written.  It reads the same in all three ways a body is asserted -
+a substring of it, the \"\" that says it has none, and the digest
+over the whole of it - because what is missing is the text to write
+and not the assertion.
+
+The empty string is not among the blanks: it is the text naming a
+body with nothing in it, and a body is emptied by sending it."
+  (org-mcp-test--with-set-content-file test-file
+    (let ((target (org-mcp-test--set-content-link))
+          (bare (org-mcp-test--file-link test-file "*Sibling"))
+          (missing "\\`Missing required parameter: after\\'"))
+      (dolist (blank '(nil :json-false []))
+        (pcase-dolist (`(,link ,before)
+                       `((,target "Second line of the body.")
+                         (,target ,(org-mcp-test--content-digest-of target))
+                         (,bare "")))
+          (org-mcp-test--call-tool-refused
+           "org-node-set-content"
+           `((link . ,link) (before . ,before) (after . ,blank))
+           missing
+           test-file))))))
+
+(ert-deftest org-mcp-test-non-string-after-on-set-content-is-malformed ()
+  "An `after\=' that is no kind of text is a malformed call.
+It is refused as validation and not as a conflict: nothing about the
+file is in question, so reading the node again would not help."
+  (org-mcp-test--with-set-content-file test-file
+    (org-mcp-test--call-tool-refused
+     "org-node-set-content"
+     `((link . ,(org-mcp-test--set-content-link))
+       (before . "Second line of the body.")
+       (after . 3))
+     "\\`after must be a string, \\\"\\\" for no value: 3\\'"
+     test-file)))
+
 (ert-deftest org-mcp-test-every-body-write-reads-its-before ()
   "Every way to change a body reads `before\=', so none writes unguarded.
 The parameter is required, and a blank one refuses the call rather
