@@ -89,6 +89,36 @@ The running clock was closed and saved, but a function run by the save failed: .
 The running clock was closed but not saved: ...
 #+end_example
 
+* A date has to be a date
+
+=org-node-set-scheduled= and =org-node-set-deadline= take their =after= as
+=YYYY-MM-DD=, optionally followed by =HH:MM=. The value has to name a date that
+exists, and one that does not is refused before the heading is looked up, so
+nothing is opened and nothing is written:
+
+#+begin_example
+Not a date: '2026-02-30'.  Org reads it as 2026-03-02, which is not the date the call named
+#+end_example
+
+The refusal names what the value would have become, because that is the part
+you cannot work out from the call. Org itself does not refuse these: it rolls
+them over, so =2026-13-45= means the 14th of February 2027, =2026-00-00= means
+the 30th of November 2025, and =0000-01-01= means the first of January 2000. A
+February 29th is a date in a leap year and not in any other, and that is
+decided by reading the value rather than by a rule — =2024-02-29= writes,
+=2026-02-29= is refused.
+
+An hour is read the same way, and it does not have to move the day to be
+refused: =2026-03-27 10:99= is 11:39 on the day it names, which is not the time
+the call named either.
+
+The clock tools take ISO 8601 with a =T=, and ask the same question of it (see
+[[file:clocking.org::*A clock time has to be a time][A clock time has to be a time]]).
+
+=before= is not one of these. It is the Org timestamp the heading carries now,
+compared with what is in the file and never read as a date, so a repeater, a
+delay and a date range all pass through it as written.
+
 * What a write records in the LOGBOOK
 
 Your Org log settings decide what a change writes down, and a write through
@@ -770,7 +800,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -841,7 +871,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=), naming a date that exists (see [[*A date has to be a date]]). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])

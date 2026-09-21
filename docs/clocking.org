@@ -3,6 +3,31 @@
 This page answers how org-mcp starts, stops, adds and repairs Org clocks, and
 what the one clock setting does. The [[file:../README.org][README]] introduces the server itself.
 
+* A clock time has to be a time
+
+Every timestamp a clock tool takes — =org-clock-in='s =start_time=,
+=org-clock-out='s =end_time=, =org-clock-add='s =start= and =end=, and
+=org-clock-delete='s =start= — is ISO 8601: =2026-03-23T14:30:00=, with the
+seconds and the whole time optional. It has to name a time that exists, and one
+that does not is refused before any file is opened:
+
+#+begin_example
+Not a time: '2026-02-30T14:30:00'.  Org reads it as 2026-03-02T14:30:00, which is not the time the call named
+#+end_example
+
+Org does not refuse these of its own accord: it rolls them over, so
+=2026-03-27T25:99:00= means 02:39 the following morning. On =org-clock-delete=
+that matters most, because its =start= is compared against the CLOCK lines
+rather than written: a value that rolled over would match a different clock and
+take that one away.
+
+A CLOCK line holds minutes, so seconds are read and not recorded. Sending
+=14:30:45= clocks 14:30, and that is not a refusal — there is no spelling of a
+second in a CLOCK line for it to be compared against.
+
+The planning setters take a different format, =YYYY-MM-DD= with an optional
+=HH:MM=, and ask the same question of it (see [[file:writing.org::*A date has to be a date][A date has to be a date]]).
+
 * Clock Tracking Tools
 ** org-config-clock
 - *Description:* Get clock-related configuration from the current Emacs Org-mode settings

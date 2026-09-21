@@ -8697,6 +8697,173 @@ found; the buffer stays narrowed to Task Two."
          (equal (alist-get 'start (aref clocks 0))
                 "2026-01-01 Thu 10:00"))))))
 
+;;; A date has to be a date, and a time a time
+
+;; A shape is not an existence: `2026-02-30' is four digits, two and
+;; two, and it is no day of any year.  Org reads such a value by
+;; rolling it over — `2026-13-45' becomes 2027-02-14 — so a call that
+;; sent one got a success reporting a date eighteen months from the
+;; one it named.  Every date and time parameter is therefore read the
+;; way the write will read it and compared with what was sent, before
+;; a link is resolved or a buffer opened.
+
+(defconst org-mcp-test--dates-that-are-not-dates
+  '(("2026-02-30" . "2026-03-02")
+    ("2026-13-45" . "2027-02-14")
+    ("2026-00-00" . "2025-11-30")
+    ("0000-01-01" . "2000-01-01")
+    ("2026-02-29" . "2026-03-01"))
+  "Dates Org rolls over, each with what it rolls over to.
+The last is a leap day of a year that has none; `2024-02-29' is the
+same date in a year that does, and it writes.")
+
+(defconst org-mcp-test--times-that-are-not-times
+  '(("2026-03-27 25:99" . "2026-03-28 02:39")
+    ("2026-03-27 10:99" . "2026-03-27 11:39"))
+  "Clock times Org rolls over, each with what it rolls over to.
+The second rolls the hour without rolling the day, so a check that
+compared dates alone would let it through.")
+
+(ert-deftest org-mcp-test-planning-refuses-a-date-that-is-not-one ()
+  "A date Org would roll over to another date is refused, not written.
+The refusal names what the call would have got, because that is the
+one thing the client cannot work out for itself and the one thing
+that tells it the value was wrong rather than the file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,sent . ,rolled)
+                     org-mcp-test--dates-that-are-not-dates)
+        (dolist (tool '("org-node-set-scheduled" "org-node-set-deadline"))
+          (org-mcp-test--call-tool-refused
+           tool
+           `((link . ,link) (before . "") (after . ,sent))
+           (concat "\\`Not a date: '" (regexp-quote sent)
+                   "'\\.  Org reads it as " (regexp-quote rolled))
+           test-file))))))
+
+(ert-deftest org-mcp-test-planning-refuses-a-time-that-is-not-one ()
+  "An hour or minute Org would roll over is refused with the date.
+`2026-03-27 10:99' keeps the day it names and moves the hour, so the
+whole value is compared and not the date alone."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,sent . ,rolled)
+                     org-mcp-test--times-that-are-not-times)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,sent))
+         (concat "\\`Not a date: '" (regexp-quote sent)
+                 "'\\.  Org reads it as " (regexp-quote rolled))
+         test-file)))))
+
+(ert-deftest org-mcp-test-planning-takes-a-leap-day-that-exists ()
+  "A leap day of a leap year is a date, and it is written.
+The check is what Org makes of the value, not a rule about February,
+so the day exists exactly in the years it exists in."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-scheduled"
+              `((link . ,link) (before . "") (after . "2024-02-29"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) ""))
+      (should
+       (string-match-p "\\`<2024-02-29 " (alist-get 'after result)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat
+        "\\`\\* TODO Simple Task\n"
+        "SCHEDULED: <2024-02-29 [^>]+>\n"
+        "Task body text\\.\n?\\'")))))
+
+(ert-deftest org-mcp-test-planning-refuses-a-date-before-it-opens-a-file ()
+  "The date is read before the link is, so a refusal reaches no file.
+The link here names no heading.  A call checking the file first would
+answer for the link; this one answers for the date, which is how a
+refused write is known to have opened nothing."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-scheduled"
+     `((link . ,(org-mcp-test--file-link test-file "*No Such Heading"))
+       (before . "")
+       (after . "2026-02-30"))
+     "\\`Not a date: '2026-02-30'\\."
+     test-file)))
+
+(ert-deftest org-mcp-test-clock-refuses-a-time-that-is-not-one ()
+  "A clock time Org would roll over is refused by every clock tool.
+They take a different format from the planning setters and read it
+with a different parser, and the same question is asked of it: is the
+value the call sent the value Org makes of it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-content))
+    (let ((link (org-mcp-test--file-link test-file "*Task One")))
+      (dolist (sent '("2026-02-30T14:30:00" "2026-13-45T14:30:00"
+                      "2026-00-00T14:30:00" "2026-03-27T25:99:00"))
+        (dolist (call
+                 (list
+                  (list "org-clock-in" `((link . ,link)
+                                         (start_time . ,sent)))
+                  (list "org-clock-add" `((link . ,link)
+                                          (start . ,sent)
+                                          (end . "2026-03-27T15:00:00")))
+                  (list "org-clock-add" `((link . ,link)
+                                          (start . "2026-03-27T14:00:00")
+                                          (end . ,sent)))
+                  (list "org-clock-delete" `((link . ,link)
+                                             (start . ,sent)))))
+          (org-mcp-test--call-tool-refused
+           (car call) (cadr call)
+           (concat "\\`Not a time: '" (regexp-quote sent) "'\\.")
+           test-file))))))
+
+(ert-deftest org-mcp-test-clock-out-refuses-a-time-that-is-not-one ()
+  "`org-clock-out' asks the same question of its `end_time'.
+It is the one clock tool whose timestamp needs a running clock to
+reach, and the refusal comes first: the clock is still running
+afterwards."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (org-mcp-test--with-session-clock test-file
+      (org-mcp-test--call-tool-refused
+       "org-clock-out"
+       `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+         (end_time . "2026-02-30T14:30:00"))
+       "\\`Not a time: '2026-02-30T14:30:00'\\."
+       test-file))))
+
+(defconst org-mcp-test--clock-on-the-rolled-over-day
+  (concat
+   "* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-03-02 Mon 14:30]--[2026-03-02 Mon 15:30] =>  1:00\n"
+   ":END:\n")
+  "A heading clocked on the day `2026-02-30' rolls over to.
+A delete that rolled its `start' over would find this entry and take
+away a clock the call never named.")
+
+(ert-deftest org-mcp-test-clock-delete-takes-no-clock-a-rollover-finds ()
+  "A `start' that is no time takes nothing away, not something else.
+`org-clock-delete' only ever compares its `start' against the CLOCK
+lines it finds, which is why a rolled-over value does not write a
+wrong time — it matches a different clock and deletes that one.  The
+entry the rollover lands on is still here afterwards."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-on-the-rolled-over-day))
+    (org-mcp-test--call-tool-refused
+     "org-clock-delete"
+     `((link . ,(org-mcp-test--file-link test-file "*Task One"))
+       (start . "2026-02-30T14:30:00"))
+     "\\`Not a time: '2026-02-30T14:30:00'\\."
+     test-file)))
+
 ;;; Tests for org-clock-delete
 
 (defconst org-mcp-test--clock-delete-only-entry-expected-regex

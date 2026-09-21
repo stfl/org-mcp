@@ -2639,17 +2639,58 @@ Delegates the format to `org-time-stamp-format' so the output tracks
 Org's own `org-timestamp-formats' customization."
   (format-time-string (org-time-stamp-format t t) time))
 
+(defconst org-mcp--clock-timestamp-re
+  (concat
+   "\\`\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)"
+   "\\(?:[ T]\\([0-9]\\{2\\}:[0-9]\\{2\\}\\)\\(?::[0-9]\\{2\\}\\)?\\)?\\'")
+  "The shape a clock tool's timestamp parameter takes.
+ISO 8601 as the clock tools document it: a date, optionally a time
+after `T' or a space, optionally seconds after that.  Group 1 is the
+date and group 2 the minute, which is what
+`org-mcp--clock-parse-timestamp' compares against.")
+
 (defun org-mcp--clock-parse-timestamp (str)
-  "Parse ISO timestamp STR to Emacs time.
+  "Parse ISO timestamp STR to Emacs time, refusing a time that is not one.
 STR should be in ISO 8601 format like 2026-03-23T14:30:00.
 The `T' separator is normalised to a space so `org-time-string-to-time'
-accepts it."
+accepts it.
+
+A shape is not an existence, and `org-time-string-to-time' does not
+say which it was given: it rolls `2026-02-30' over to 2026-03-02 and
+`2026-03-27T25:99:00' to 02:39 the next day, and the clock written
+then records a time the call never named.  `org-clock-delete' is the
+one that loses something by it — its `start' is compared against the
+CLOCK lines rather than written, so a rolled-over value does not
+record a wrong time, it matches a different clock and takes that one
+away.
+
+So the parsed time is formatted back and compared with what was
+sent.  The comparison is to the minute because that is what a CLOCK
+line holds: `org-time-string-to-time' drops seconds, so a call may
+send them and they are not recorded."
   (let ((normalised (replace-regexp-in-string "T" " " (or str ""))))
-    (condition-case _
-        (org-time-string-to-time normalised)
-      (error
-       (org-mcp--tool-validation-error "Cannot parse timestamp: '%s'"
-                                       str)))))
+    (unless (string-match org-mcp--clock-timestamp-re normalised)
+      (org-mcp--tool-validation-error "Cannot parse timestamp: '%s'"
+                                      str))
+    (let ((sent
+           (concat
+            (match-string 1 normalised)
+            " "
+            (or (match-string 2 normalised) "00:00")))
+          (time
+           (condition-case _
+               (org-time-string-to-time normalised)
+             (error
+              (org-mcp--tool-validation-error
+               "Cannot parse timestamp: '%s'"
+               str)))))
+      (unless (string=
+               (format-time-string "%Y-%m-%d %H:%M" time) sent)
+        (org-mcp--tool-validation-error
+         "Not a time: '%s'.  Org reads it as %s, which is not the \
+time the call named"
+         str (format-time-string "%Y-%m-%dT%H:%M:%S" time)))
+      time)))
 
 (defun org-mcp--clock-duration-string (seconds)
   "Format SECONDS as clock duration string `H:MM'.
@@ -3474,16 +3515,54 @@ Throws an MCP tool error if validation fails."
      "Headline title cannot contain newlines")))
 
 (defun org-mcp--validate-date-string (date-str)
-  "Validate that DATE-STR is a recognizable date format.
+  "Validate that DATE-STR names a date that exists.
 Accepts ISO-like dates: YYYY-MM-DD with optional HH:MM time.
-Throws an MCP tool error if the format is invalid."
+Throws an MCP tool error if the shape is wrong, and one if the shape
+is right but the date is not a date.
+
+A shape is not an existence.  `2026-02-30' is four digits, two and
+two; it is no day of any year, and Org does not say so — it rolls the
+value over, to 2026-03-02 here and to 2027-02-14 for `2026-13-45',
+and writes that.  The call then has a success reporting a date it
+never named.
+
+So the value is read the way the write will read it and compared with
+what was sent.  `org-read-date' is that reader: `org-schedule' and
+`org-deadline' reach it through `org-add-planning-info', so what it
+makes of the string is what would land in the file.  Asking it is
+also what makes a rule about month lengths or leap years
+unnecessary, and what catches `0000-01-01', which is a real date in
+every component and which Org reads as the year 2000.
+
+A date carrying no time is compared as a date: `org-read-date' fills
+the time of day from the clock, and that is not something the call
+said.  One carrying a time is compared whole, because an hour Org
+rolls over need not take the day with it — `2026-03-27 10:99' is
+11:39 on the day it names."
   (unless
       (string-match-p
        "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\( [0-9]\\{2\\}:[0-9]\\{2\\}\\)?$"
        date-str)
     (org-mcp--tool-validation-error
      "Invalid date format '%s' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM"
-     date-str)))
+     date-str))
+  (let* ((timed (string-match-p " " date-str))
+         (format
+          (if timed
+              "%Y-%m-%d %H:%M"
+            "%Y-%m-%d"))
+         (read
+          (condition-case _
+              (format-time-string format (org-read-date t t date-str))
+            (error
+             (org-mcp--tool-validation-error
+              "Invalid date '%s' - Org cannot read it as one"
+              date-str)))))
+    (unless (string= read date-str)
+      (org-mcp--tool-validation-error
+       "Not a date: '%s'.  Org reads it as %s, which is not the \
+date the call named"
+       date-str read))))
 
 (defun org-mcp--validate-body-no-headlines (body level)
   "Validate that BODY doesn't contain headlines at LEVEL or higher.
@@ -5013,7 +5092,9 @@ MCP Parameters:
            read returns it, repeater and delay included (required)
            Example: \"<2026-06-20 Sat +1w -3d>\"
            Empty string asserts the heading has no SCHEDULED
-  after - ISO date string (required)
+  after - ISO date string (required), naming a date that exists:
+          2026-02-30 and 2026-13-45 are refused rather than
+          rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by before;
           \"\" is no date and is refused, and false is the
@@ -5049,7 +5130,9 @@ MCP Parameters:
            read returns it, repeater and delay included (required)
            Example: \"<2026-06-20 Sat +1w -3d>\"
            Empty string asserts the heading has no DEADLINE
-  after - ISO date string (required)
+  after - ISO date string (required), naming a date that exists:
+          2026-02-30 and 2026-13-45 are refused rather than
+          rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by before;
           \"\" is no date and is refused, and false is the
@@ -6065,7 +6148,8 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00)
+  start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00),
+          naming a time that exists
   resolve - true or \"true\" to delete dangling clocks before clocking
             in; false, \"false\" and null mean not to, and any other
             value is refused
@@ -6191,7 +6275,8 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00)
+  end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00),
+          naming a time that exists
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link
@@ -6295,8 +6380,10 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  start - ISO 8601 start time (e.g. 2026-03-23T14:30:00)
-  end - ISO 8601 end time (e.g. 2026-03-23T16:45:00)
+  start - ISO 8601 start time (e.g. 2026-03-23T14:30:00), naming a
+          time that exists; seconds are read and not recorded
+  end - ISO 8601 end time (e.g. 2026-03-23T16:45:00), naming a
+          time that exists; seconds are read and not recorded
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -6352,7 +6439,8 @@ MCP Parameters:
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  start - ISO 8601 start time of the clock entry to delete
+  start - ISO 8601 start time of the clock entry to delete,
+          naming a time that exists
           (e.g. 2026-03-23T14:30:00)
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -6991,7 +7079,9 @@ Parameters:
            \"<2026-06-20 Sat +1w -3d>\" - not the ISO shorthand
            after takes
            Empty string asserts the headline has no SCHEDULED
-  after - ISO date string (string, required)
+  after - ISO date string (string, required), naming a date that
+          exists: 2026-02-30 and 2026-13-45 are refused rather
+          than rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by what before
           says the headline carries.  \"\" is not a date and is
@@ -7034,7 +7124,9 @@ Parameters:
            \"<2026-06-20 Sat +1w -3d>\" - not the ISO shorthand
            after takes
            Empty string asserts the headline has no DEADLINE
-  after - ISO date string (string, required)
+  after - ISO date string (string, required), naming a date that
+          exists: 2026-02-30 and 2026-13-45 are refused rather
+          than rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by what before
           says the headline carries.  \"\" is not a date and is
@@ -7844,7 +7936,8 @@ Parameters:
   link - Link to the headline (string, required)
 "
      org-mcp--heading-link-formats
-     "  start - ISO 8601 start time of the clock entry to delete
+     "  start - ISO 8601 start time of the clock entry to delete,
+          naming a time that exists
           (string, required)
           Example: 2026-03-23T14:30:00
   files - Files and directories to look up an id: link in (array of
