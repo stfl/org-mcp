@@ -4667,6 +4667,33 @@ absent-mindedly can take a tag away."
     (org-mcp--missing-param-error name))
   (org-mcp--normalize-tags-to-list value))
 
+(defun org-mcp--tag-set-asserted (before)
+  "Return BEFORE, the set of tags a call asserts a heading carries.
+Every member is a tag name, by `org-mcp--validate-tag-names' — the
+one test of what a tag is, and the one the tags a call writes pass
+as well.  A member outside `org-tag-re' names a tag no heading
+could carry, so no version of the file satisfies the assertion: the
+refusal is unmarked, the validation class, and what has to change
+is the call.  A set of real names the heading does not carry is the
+other case and stays a conflict, since there is a heading to read
+again and a set to read off it.
+
+Mutual exclusivity is not checked here.  It is a rule about the
+tags a heading ends up carrying, and this set is what it carries
+already: a heading whose tags break a group was not written here,
+and refusing to assert what it plainly holds would report a
+conflict the caller did not cause.
+
+A digest is looked for first and refused in its own words by
+`org-mcp--assert-field-value'.  It is no tag name either, so the
+general refusal would reach it, and reaching it there would cost a
+client the sentence that says which of the two forms of `before'
+this tool takes."
+  (let ((asserted (org-mcp--tag-set-given before "before")))
+    (dolist (tag asserted)
+      (org-mcp--assert-field-value tag "Tags"))
+    (org-mcp--validate-tag-names asserted)))
+
 (defun org-mcp--tags-for-message (tags)
   "Return TAGS as the text of a refusal, or `(no tags)' when empty.
 Sorted, because what the message reports is a comparison of sets: a
@@ -4864,6 +4891,10 @@ one refusal.  The reason is the one that keeps the assertion local:
 a token covers a region, and a region takes in what this call
 cannot write — a descendant, an ancestor's tags, a clock line.
 
+Every other member of BEFORE is a tag name, checked as the tags in
+AFTER are; `org-mcp--tag-set-asserted' says why a value that is not
+one is a malformed call rather than a stale belief about the file.
+
 AFTER is the tags to write, `[]' to leave the headline carrying none
 of its own.  Inherited tags are untouched either way.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -4879,9 +4910,10 @@ MCP Parameters:
   before - The tags the headline carries itself now (string or
            array, required); the `local_tags' of a read, not its
            `tags'.  Send [] to assert that it carries none.  Order
-           makes no difference; any other set is refused as a
-           conflict and nothing is written.  A digest is no tag and
-           is refused wherever it appears in the set
+           makes no difference; any other set of tag names is
+           refused as a conflict and nothing is written.  A value
+           that is no tag name is a malformed call instead, and a
+           digest is no tag wherever in the set it appears
   after - Tags to write (string or array, required)
           Single tag: \"work\"
           Multiple tags: [\"work\", \"urgent\"]
@@ -4890,12 +4922,10 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let ((asserted (org-mcp--tag-set-given before "before"))
+  (let ((asserted (org-mcp--tag-set-asserted before))
         (wanted
          (org-mcp--validate-and-normalize-tags
           (org-mcp--tag-set-given after "after"))))
-    (dolist (tag asserted)
-      (org-mcp--assert-field-value tag "Tags"))
     (org-mcp--write-own-tags
      link files
      (lambda (own _effective)

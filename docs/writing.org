@@ -901,7 +901,7 @@ Example:
 - *Description:* Replace the tags written on an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here. A digest is no tag and is refused wherever in the set it appears (see [[*Knowing what you are about to change][Knowing what you are about to change]])
+  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here. Every member is a tag name, checked as the members of =after= are; a value that is no tag name is refused as a malformed call, and a digest is no tag wherever in the set it appears (see [[*Knowing what you are about to change][Knowing what you are about to change]])
   - =after= (string or array, required): Single tag ="work"= or array =["work", "urgent"]=. =[]= leaves the headline carrying no tags of its own. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
@@ -911,6 +911,23 @@ The call takes away every tag it does not list, so =before= asserts the entire
 prior set rather than the part of it you mean to change. A refusal names both
 sets, each written in one order, because what it reports is a comparison of sets
 and an order would invite you to look for a difference that is not there.
+
+What =before= holds decides which class refuses it. Org writes tags from
+=[[:alnum:]_@#%]=, so a value outside that set names a tag no headline could
+carry: no version of the file satisfies the assertion, and reading the file
+again would tell you nothing. It is refused as the malformed call it is,
+unmarked validation, and a digest among the members keeps the wording written
+for a digest — the sentence that says which of the two forms of =before= this
+tool takes:
+
+#+begin_example
+Invalid tag name: not a tag!
+Tags is asserted with the value it holds, not with a digest: 'sha256:…' covers a region and this call changes one field
+#+end_example
+
+A set of real tag names the headline does not carry is the other case, and it
+is the =conflict:= this assertion exists to report: there is a headline to read
+again and a set to read off it.
 
 Example:
 #+begin_src json
@@ -936,6 +953,11 @@ Example:
 # A headline that carries no tags of its own:
 {
   "error": "conflict: Tags mismatch: expected '(no tags)', found 'urgent, work'"
+}
+
+# A before that names no tag Org could write:
+{
+  "error": "Invalid tag name: not a tag!"
 }
 #+end_src
 

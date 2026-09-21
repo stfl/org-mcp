@@ -9486,6 +9486,57 @@ to look for a difference that is not there."
       "\\'")
      test-file)))
 
+(ert-deftest org-mcp-test-set-tags-refuses-a-before-that-is-no-tag-name ()
+  "What a `before' is decides which class refuses it.
+Org writes tags from `org-tag-re', so a value outside that set names
+a tag no heading could carry: the assertion cannot be satisfied by
+any version of the file, and calling it a conflict would send a
+client to read a file that has nothing to tell it.  It is refused as
+the malformed call it is, in the unmarked validation class, by the
+one test that says what a tag is — the test the tags in `after' pass
+as well.
+
+A set of real tag names the heading does not carry is the other
+case, and it stays the conflict this assertion exists to report:
+there is a heading to read again and a set to read off it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (pcase-dolist
+          (`(,before ,refusal)
+           '(("not a tag!" "Invalid tag name: not a tag!")
+             (["work" "a-b"] "Invalid tag name: a-b")
+             (["work" "personal"]
+              "conflict: Tags mismatch: expected 'personal, work', \
+found 'urgent, work'")))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ,before) (after . ["personal"]))
+         (concat "\\`" (regexp-quote refusal) "\\'")
+         test-file)))))
+
+(ert-deftest org-mcp-test-set-tags-token-in-before-keeps-the-digest-refusal ()
+  "A token in `before' is refused in the words written for a token.
+It is no tag name either, so the general refusal would cover it, and
+covering it there would cost a client the one sentence that says
+which of the two forms of `before' this tool takes.  The token is
+therefore looked for first, and the whole message it gets is pinned
+here."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (dolist (before '("sha256:3f9c2a1b8e4d7c05" ["work" "sha256:3f9c2a1b8e4d7c05"]))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ,before) (after . ["personal"]))
+         (concat
+          "\\`"
+          (regexp-quote
+           "Tags is asserted with the value it holds, not with a digest: \
+'sha256:3f9c2a1b8e4d7c05' covers a region and this call changes one field")
+          "\\'")
+         test-file)))))
+
 (ert-deftest org-mcp-test-set-tags-empty-before-asserts-no-own-tags ()
   "An empty prior set asserts that the heading carries none of its own.
 It is an assertion like any other, not a parameter left blank."
