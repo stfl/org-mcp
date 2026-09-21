@@ -946,7 +946,9 @@ nothing, see `org-mcp--text-param-given'.  An `after' takes null for
 \"make this nothing\", see `org-mcp--value-to-write', and \"\" only
 where the field has an empty value of its own — a body, a property
 line, and the tag set, which spells its empty value [], see
-`org-mcp--tag-set-given'."
+`org-mcp--tag-set-given'.  A property map reads `false' as the text
+`nil' Org stores, on either side of the call, see
+`org-mcp--validate-properties'."
   (member value '(nil "" [] :json-false)))
 
 (defun org-mcp--array-param (value what)
