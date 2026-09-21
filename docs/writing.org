@@ -733,8 +733,12 @@ from the call it already made:
 }
 #+end_src
 
-No =clock= means none was closed — the heading had no clock running, the
-keyword it reached is not a done one, or =org-clock-out-when-done= is off.
+No =clock= means this call closed none, which is the whole of what the field
+says. Org closes the clock only where it is the Emacs session's own, running in
+that heading, and the keyword reached is a done one under
+=org-clock-out-when-done=; anything short of that leaves the clock alone and
+the field out. An open CLOCK line the session is not clocking is one such case,
+and so is a clock left open by an earlier session.
 
 A repeat closes the clock all the same, which is the case worth knowing. Org
 closes it while the headline is done and moves the keyword back afterwards, so
