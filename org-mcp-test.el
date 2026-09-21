@@ -1073,7 +1073,10 @@ The created temp file is automatically added to `org-mcp-allowed-files'."
     (sem expected-state expected-final expected-type)
   "Check semantic SEM properties.
 EXPECTED-STATE is the TODO keyword.
-EXPECTED-FINAL is whether it's a final state.
+EXPECTED-FINAL is the decoded JSON value of `isFinal': t for a final
+state and :json-false for one before the bar.  It is the wire value
+rather than an elisp boolean because nil would also match a null,
+and a null is what a client testing `isFinal === false' trips on.
 EXPECTED-TYPE is the sequence type."
   (should (= (length sem) 3))
   (should (equal (alist-get 'state sem) expected-state))
@@ -1663,7 +1666,7 @@ afterwards so the clock state does not leak into other tests."
      (aref sequences 0) "sequence" ["TODO(t!)" "|" "DONE(d!)"])
     (should (= (length semantics) 2))
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 0) "TODO" nil "sequence")
+     (aref semantics 0) "TODO" :json-false "sequence")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 1) "DONE" t "sequence")))
 
@@ -1688,9 +1691,9 @@ afterwards so the clock state does not leak into other tests."
      ["TODO" "NEXT" "|" "DONE" "CANCELLED"])
     (should (= (length semantics) 4))
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 0) "TODO" nil "sequence")
+     (aref semantics 0) "TODO" :json-false "sequence")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 1) "NEXT" nil "sequence")
+     (aref semantics 1) "NEXT" :json-false "sequence")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 2) "DONE" t "sequence")
     (org-mcp-test--check-todo-config-semantic
@@ -1704,11 +1707,11 @@ afterwards so the clock state does not leak into other tests."
      (aref sequences 0) "type" ["Fred" "Sara" "Lucy" "|" "DONE"])
     (should (= (length semantics) 4))
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 0) "Fred" nil "type")
+     (aref semantics 0) "Fred" :json-false "type")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 1) "Sara" nil "type")
+     (aref semantics 1) "Sara" :json-false "type")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 2) "Lucy" nil "type")
+     (aref semantics 2) "Lucy" :json-false "type")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 3) "DONE" t "type")))
 
@@ -1726,13 +1729,14 @@ afterwards so the clock state does not leak into other tests."
     (should (= (length semantics) 5))
     ;; Semantics from first sequence
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 0) "TODO" nil "sequence")
+     (aref semantics 0) "TODO" :json-false "sequence")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 1) "DONE" t "sequence")
     ;; Semantics from second sequence
-    (org-mcp-test--check-todo-config-semantic (aref semantics 2) "BUG" nil "type")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 3) "FEATURE" nil "type")
+     (aref semantics 2) "BUG" :json-false "type")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 3) "FEATURE" :json-false "type")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 4) "FIXED" t "type")))
 
@@ -1744,9 +1748,9 @@ afterwards so the clock state does not leak into other tests."
      (aref sequences 0) "sequence" ["TODO" "NEXT" "|"])
     (should (= (length semantics) 2))
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 0) "TODO" nil "sequence")
+     (aref semantics 0) "TODO" :json-false "sequence")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 1) "NEXT" nil "sequence")))
+     (aref semantics 1) "NEXT" :json-false "sequence")))
 
 (ert-deftest org-mcp-test-tool-get-todo-config-type-no-separator ()
   "Test org-config-todo with type keywords and no separator."
@@ -1755,11 +1759,24 @@ afterwards so the clock state does not leak into other tests."
     (org-mcp-test--check-todo-config-sequence
      (aref sequences 0) "type" ["BUG" "FEATURE" "|" "ENHANCEMENT"])
     (should (= (length semantics) 3))
-    (org-mcp-test--check-todo-config-semantic (aref semantics 0) "BUG" nil "type")
     (org-mcp-test--check-todo-config-semantic
-     (aref semantics 1) "FEATURE" nil "type")
+     (aref semantics 0) "BUG" :json-false "type")
+    (org-mcp-test--check-todo-config-semantic
+     (aref semantics 1) "FEATURE" :json-false "type")
     (org-mcp-test--check-todo-config-semantic
      (aref semantics 2) "ENHANCEMENT" t "type")))
+
+(ert-deftest org-mcp-test-todo-config-sends-false-never-null ()
+  "A keyword before the bar reports `isFinal\=' as false, not null.
+The published description calls `isFinal\=' a boolean, and
+`json-encode\=' writes an elisp nil as null, so the value is spelled
+:json-false at the source.  A client asking whether a keyword is
+done tests the wire text against false, which is what this pins."
+  (let ((org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
+    (org-mcp-test--with-enabled
+     (let ((text (mcp-server-lib-ert-call-tool "org-config-todo" nil)))
+       (should (string-match-p "\"isFinal\":false" text))
+       (should-not (string-match-p ":null" text))))))
 
 (ert-deftest org-mcp-test-tool-get-tag-config-empty ()
   "Test org-config-tags with empty `org-tag-alist'."
@@ -8807,7 +8824,7 @@ written as given."
        (equal
         (alist-get 'properties_set result)
         ["EFFORT" "ENABLED" "LITERAL_T" "LITERAL_NIL"]))
-      (should-not (alist-get 'properties_deleted result))
+      (should (equal (alist-get 'properties_deleted result) []))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-booleans))))
 
@@ -8915,7 +8932,30 @@ asserts nor writes it, so it survives untouched."
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'properties_set result) ["EFFORT"]))
-      (should-not (alist-get 'properties_deleted result))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-set-properties-one-of-two))))
+
+(ert-deftest org-mcp-test-set-properties-sends-empty-arrays-never-null ()
+  "The half of the response a call does not fill arrives as [], not null.
+`properties_set\=' and `properties_deleted\=' are both published as
+arrays of names.  A call that only sets fills neither, and
+`json-encode\=' writes an elisp nil as null, so each is built with
+`vconcat\='.  A client reading the length of either reads the wire
+text, which is what this pins."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (let* ((link
+            (org-mcp-test--file-link
+             test-file "*Task with Two Properties"))
+           (text
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-properties"
+             `((link . ,link)
+               (before . ((EFFORT . "1:00")))
+               (after . ((EFFORT . "3:00")))))))
+      (should (string-match-p "\"properties_deleted\":\\[\\]" text))
+      (should-not (string-match-p ":null" text))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-one-of-two))))
 
@@ -9006,7 +9046,7 @@ destroys and the response records it."
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'properties_deleted result) ["EFFORT"]))
-      (should-not (alist-get 'properties_set result))
+      (should (equal (alist-get 'properties_set result) []))
       (should
        (equal (alist-get 'before result) '((EFFORT . "1:00"))))
       (should (equal (alist-get 'link result) link))
@@ -9112,9 +9152,10 @@ found '1:00'\\'"
   "Deleting a property that is not there is a no-op success.
 The empty `before\=' asserts the headline holds none of it, which it
 does, so the assertion holds: not a conflict, and not a write
-either.  The response names it under neither `properties_set\=' nor
-`properties_deleted\=', because nothing was set and nothing was
-deleted, and it echoes the assertion under `before\='."
+either.  The response leaves the name out of both `properties_set\='
+and `properties_deleted\=', which arrive empty, because nothing was
+set and nothing was deleted, and it echoes the assertion under
+`before\='."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((result
@@ -9127,8 +9168,8 @@ deleted, and it echoes the assertion under `before\='."
               (after . ((OWNER . ""))))
             test-file)))
       (should (equal (alist-get 'success result) t))
-      (should-not (alist-get 'properties_deleted result))
-      (should-not (alist-get 'properties_set result))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (should (equal (alist-get 'properties_set result) []))
       (should (equal (alist-get 'before result) '((OWNER . ""))))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
@@ -18074,7 +18115,7 @@ lines it replaces."
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'properties_set result) ["FOO"]))
-      (should-not (alist-get 'properties_deleted result))
+      (should (equal (alist-get 'properties_deleted result) []))
       (should (equal (alist-get 'before result) '((FOO . "one two"))))
       (should (equal (alist-get 'link result) link))
       (org-mcp-test--verify-file-matches

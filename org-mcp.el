@@ -3849,7 +3849,10 @@ fields, and the parsed siblings discard them."
                        .
                        ,(car (org-remove-keyword-keys (list kw))))
                       (isFinal
-                       . ,(or is-last-no-bar (not before-bar)))
+                       .
+                       ,(if (or is-last-no-bar (not before-bar))
+                            t
+                          :json-false))
                       (sequenceType . ,type-str))
                     sem-list)))
           (setq keyword-vec (vconcat keyword-vec (vector kw))))
@@ -4695,8 +4698,8 @@ MCP Parameters:
     (org-mcp--write-properties
      link files "set properties"
      (list
-      (cons 'properties_set (car touched))
-      (cons 'properties_deleted (cdr touched))
+      (cons 'properties_set (vconcat (car touched)))
+      (cons 'properties_deleted (vconcat (cdr touched)))
       (cons 'before asserted))
      asserted
      (lambda ()

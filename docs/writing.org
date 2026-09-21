@@ -642,6 +642,11 @@ Removing a property the headline does not hold is a no-op success. =before= of
 write, and the name appears in neither =properties_set= nor
 =properties_deleted=: nothing was set and nothing was deleted.
 
+Both arrays are always there. A call that only sets carries an empty
+=properties_deleted=, one that only removes an empty =properties_set=, and the
+no-op above carries both empty, so a client reads a length without first
+testing whether the field arrived.
+
 A drawer may spread one property over several lines, a =NAME+= line adding to
 what =NAME= holds (see [[file:reading.org::*Asking for properties][Asking for properties]]). The joined value is what
 =before= asserts and what =after= replaces, so a set writes the value you asked
@@ -682,6 +687,8 @@ Example:
   "success": true,
   "saved": true,
   "properties_set": ["EFFORT", "OWNER"],
+  "properties_deleted": [],
+  "before": { "EFFORT": "1:00", "OWNER": "ada" },
   "link": "id:abc-123"
 }
 

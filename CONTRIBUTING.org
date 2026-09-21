@@ -100,6 +100,28 @@ When an Org API is genuinely missing or unsuitable, say why in a comment next to
 the workaround, so the next person can re-evaluate it when Org moves on. Code
 that already duplicates Org is replaced rather than extended.
 
+** What a response field may hold
+
+=json-encode= writes an elisp =nil= as JSON =null=, and =null= is not a value
+this server sends. Every response field is a boolean, a list, or optional, and
+each has one spelling:
+
+| The field is            | Write it as             | Empty is |
+|-------------------------+-------------------------+----------|
+| a boolean               | =t= or =:json-false=    | =false=  |
+| a list                  | =vconcat= over the list | =[]=     |
+| a value a node may lack | left out of the alist   | absent   |
+
+A generalised boolean written bare reaches a client as =true= or =null=, which
+no client tests for, and a list written bare reaches it as =null=, which throws
+on anything that reads a length. The third row is the node builder's rule,
+stated for its readers in [[file:docs/reading.org][Reading Org content]]: a field the node has no value
+for is left out rather than sent as null, so an answer says what the node has.
+
+A field genuinely nullable — one whose meaning is /unknown/, as distinct from
+false, empty or absent — would need a row of its own here before it could be
+written. The surface has none.
+
 * Tests
 
 The suite lives in =org-mcp-test.el= and runs with =just test=.
