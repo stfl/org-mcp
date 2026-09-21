@@ -3210,19 +3210,6 @@ NEW-TITLE is the invalid new title that should be rejected."
     (alist-get 'inputSchema (org-mcp-test--registered-tool id)))
    nil))
 
-(defun org-mcp-test--registered-tool-required (id)
-  "Return the parameter names the published schema of tool ID requires."
-  (append
-   (alist-get
-    'required
-    (alist-get
-     'inputSchema
-     (cl-find
-      id (org-mcp-test--registered-tools)
-      :key (lambda (tool) (alist-get 'name tool))
-      :test #'string=)))
-   nil))
-
 (defun org-mcp-test--registered-tool-ids ()
   "Return the ids in the tools/list response, sorted.
 Sorted because `mcp-server-lib' leaves the response order
