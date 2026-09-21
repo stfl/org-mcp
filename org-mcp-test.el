@@ -25051,6 +25051,291 @@ plain apostrophes."
                   (car property)
                   (or (alist-get 'description (cdr property)) ""))))))))
 
+;;; Where a file's workflow comes from besides its own #+TODO: lines
+
+(defconst org-mcp-test--content-settings-setup-source
+  "#+TODO: WAIT(w) | KILL(k)\n"
+  "A file another file pulls a workflow in from with `#+SETUPFILE:'.")
+
+(defconst org-mcp-test--content-settings-pulling-a-setupfile
+  (concat
+   "#+SETUPFILE: %s\n"
+   "#+TODO: TODO(t) | DONE(d)\n"
+   "\n"
+   "* WAIT hear back\n"
+   "* TODO ship it\n")
+  "A file whose workflow is half its own and half a setup file's.
+The setup file's path exists only once the file does, so this is a
+format string rather than the content itself.")
+
+(defconst org-mcp-test--content-settings-setup-duplicate
+  "#+TODO: TODO WAIT | DONE\n"
+  "A setup file writing the very sequence the file pulling it in writes.")
+
+(defconst org-mcp-test--content-settings-duplicating-a-setupfile
+  (concat
+   "#+SETUPFILE: %s\n"
+   "#+TODO: TODO WAIT | DONE\n"
+   "\n"
+   "* WAIT ship it\n")
+  "A file writing its setup file's `#+TODO:' line a second time.
+Org reads the sequence twice and reaches the same keywords, so
+taking the file's own line away changes nothing about what its
+headings are.  A format string, as its sibling is.")
+
+(defun org-mcp-test--pattern-settings-setupfile-alone (setup-file)
+  "Return the pattern for a file left with its `#+SETUPFILE:' and no workflow.
+SETUP-FILE is the path the `#+SETUPFILE:' line names, which exists
+only at run time, so the whole-file pattern is built here."
+  (concat
+   "\\`#\\+SETUPFILE: "
+   (regexp-quote setup-file)
+   "\n"
+   "\n"
+   "\\* WAIT ship it\n\\'"))
+
+(defun org-mcp-test--pattern-settings-setupfile-kept (setup-file)
+  "Return the pattern after the own half of a split workflow is rewritten.
+SETUP-FILE is the path the `#+SETUPFILE:' line names."
+  (concat
+   "\\`#\\+SETUPFILE: "
+   (regexp-quote setup-file)
+   "\n"
+   "#\\+TODO: TODO(t) NEXT(n) | DONE(d)\n"
+   "\n"
+   "\\* WAIT hear back\n"
+   "\\* TODO ship it\n\\'"))
+
+(defun org-mcp-test--settings-file-pulling (main setup template)
+  "Write TEMPLATE into MAIN with SETUP filled in, and return MAIN's link.
+The file is written rather than created with its content because the
+path it names is the path of a file created beside it."
+  (with-temp-file main
+    (insert (format template setup)))
+  (concat "file:" (abbreviate-file-name main)))
+
+(defun org-mcp-test--settings-todo-of (file title)
+  "Return the TODO state a read gives the heading TITLE in FILE."
+  (alist-get
+   'todo
+   (json-read-from-string
+    (org-mcp-test--call-read (org-mcp-test--file-link file title)))))
+
+(ert-deftest org-mcp-test-file-set-setting-keeps-a-setupfile-sequence ()
+  "A keyword a setup file names is not orphaned by the file's own rewrite.
+The check asks what Org will reach, and Org reads a `#+SETUPFILE:'
+before it reads the file's own lines.  So the file may drop WAIT from
+its own sequence while the setup file goes on naming it, and the
+heading carrying WAIT is a WAIT heading afterwards."
+  (org-mcp-test--with-temp-org-files
+      ((setup-file org-mcp-test--content-settings-setup-source)
+       (test-file ""))
+    (let ((link
+           (org-mcp-test--settings-file-pulling
+            test-file setup-file
+            org-mcp-test--content-settings-pulling-a-setupfile)))
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-file-set-setting"
+           `((link . ,link)
+             (setting . "TODO")
+             (before . ["TODO(t) | DONE(d)"])
+             (after . ["TODO(t) NEXT(n) | DONE(d)"])))))
+        t))
+      (should
+       (equal (org-mcp-test--settings-todo-of test-file "*hear back")
+              "WAIT"))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (org-mcp-test--pattern-settings-setupfile-kept setup-file)))))
+
+(ert-deftest org-mcp-test-file-set-setting-counts-a-setupfile-line-once ()
+  "A setup file writing the same line as the file is not taken for it.
+`org-collect-keywords' answers with both copies, and only the file's
+own line is being replaced, so exactly one copy comes out of that
+answer.  Taking both would report the setup file's keywords as about
+to go and refuse a call that changes nothing about what the headings
+are: the file here keeps WAIT through its setup file, and the write
+that empties its own line is accepted."
+  (org-mcp-test--with-temp-org-files
+      ((setup-file org-mcp-test--content-settings-setup-duplicate)
+       (test-file ""))
+    (let ((link
+           (org-mcp-test--settings-file-pulling
+            test-file setup-file
+            org-mcp-test--content-settings-duplicating-a-setupfile)))
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-file-set-setting"
+           `((link . ,link)
+             (setting . "TODO")
+             (before . ["TODO WAIT | DONE"])
+             (after . [])))))
+        t))
+      (should
+       (equal (org-mcp-test--settings-todo-of test-file "*ship it")
+              "WAIT"))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (org-mcp-test--pattern-settings-setupfile-alone setup-file)))))
+
+(ert-deftest org-mcp-test-file-settings-reports-only-the-files-own-lines ()
+  "A workflow a setup file names is no line of this file, and reads as none.
+The two tools answer two questions.  `org-file-settings' says what
+this file writes, which is what a `before' can assert and a write
+can replace, so a file whose whole workflow comes from a setup file
+answers with the empty set.  `org-config-todo' says what Org reached,
+the setup file followed, which is the set a write to a heading is
+held to."
+  (org-mcp-test--with-temp-org-files
+      ((setup-file org-mcp-test--content-settings-setup-source)
+       (test-file ""))
+    (let ((link
+           (org-mcp-test--settings-file-pulling
+            test-file setup-file "#+SETUPFILE: %s\n* WAIT hear back\n")))
+      (should (equal (alist-get 'TODO (org-mcp-test--file-settings link)) []))
+      (should
+       (equal
+        (alist-get
+         'sequences
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-config-todo" `((link . ,link)))))
+        [((type . "sequence") (keywords . ["WAIT(w)" "|" "KILL(k)"]))])))))
+
+(defconst org-mcp-test--content-settings-seq-todo
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "#+SEQ_TODO: WAIT | KILL\n"
+   "* WAIT hear back\n")
+  "A file naming a second sequence with `#+SEQ_TODO:', Org's older spelling.")
+
+(defconst org-mcp-test--content-settings-typ-todo
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "#+TYP_TODO: WAIT | KILL\n"
+   "* WAIT hear back\n")
+  "A file naming a type sequence beside its own with `#+TYP_TODO:'.")
+
+(defconst org-mcp-test--content-settings-one-sequence-only
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "* WAIT hear back\n")
+  "A file naming one sequence, with a heading outside it.
+WAIT is no keyword here -- Org reads it as the first word of the
+title -- so a rewrite of the only sequence orphans nothing.")
+
+(ert-deftest org-mcp-test-file-set-setting-counts-the-other-todo-keywords ()
+  "`#+SEQ_TODO:' and `#+TYP_TODO:' name keywords the check counts.
+Org reads all three settings into one workflow, so a keyword either
+of them names survives a rewrite of `#+TODO:' that does not name it,
+and the heading carrying it stays a WAIT heading.  The third file
+names WAIT nowhere, so Org reads it as the first word of a title and
+the check does not count it: what is counted is the keywords Org
+reads, never the words that look like one."
+  (dolist (content
+           (list
+            org-mcp-test--content-settings-seq-todo
+            org-mcp-test--content-settings-typ-todo))
+    (org-mcp-test--with-temp-org-files ((test-file content))
+      (let ((link (concat "file:" (abbreviate-file-name test-file))))
+        (should
+         (equal
+          (alist-get
+           'success
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-file-set-setting"
+             `((link . ,link)
+               (setting . "TODO")
+               (before . ["TODO | DONE"])
+               (after . ["TODO NEXT | DONE"])))))
+          t))
+        (should
+         (equal (org-mcp-test--settings-todo-of test-file "*hear back")
+                "WAIT")))))
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-one-sequence-only))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-file-set-setting"
+           `((link . ,link)
+             (setting . "TODO")
+             (before . ["TODO | DONE"])
+             (after . ["TODO NEXT | DONE"])))))
+        t))
+      (should
+       (null (org-mcp-test--settings-todo-of test-file "*WAIT hear back"))))))
+
+(defconst org-mcp-test--content-settings-global-keyword
+  (concat
+   "#+TODO: TODO WAIT | DONE\n"
+   "* TODO ship it\n")
+  "A file whose own workflow the global one also names, heading and all.")
+
+(defconst org-mcp-test--pattern-settings-global-keyword
+  "\\`\\* TODO ship it\n\\'"
+  "Pattern after a file's only workflow line is taken away.
+Nothing else was on the line, so nothing else goes with it.")
+
+(defconst org-mcp-test--content-settings-beyond-the-global
+  (concat
+   "#+TODO: TODO WAIT | DONE\n"
+   "* WAIT hear back\n")
+  "A file whose heading carries a keyword only its own workflow names.")
+
+(ert-deftest org-mcp-test-file-set-setting-falls-back-to-the-global-workflow ()
+  "A file left naming no sequence is held to the global one, not to none.
+Taking the only `#+TODO:' line away is accepted while every keyword
+in use is one the global configuration names, and refused as soon as
+one is not: the fallback is what decides, and a check that read a
+file naming nothing as a file with no keywords would accept both."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-settings-global-keyword))
+      (let ((link (concat "file:" (abbreviate-file-name test-file))))
+        (should
+         (equal
+          (alist-get
+           'success
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-file-set-setting"
+             `((link . ,link)
+               (setting . "TODO")
+               (before . ["TODO WAIT | DONE"])
+               (after . [])))))
+          t))
+        (should
+         (equal (org-mcp-test--settings-todo-of test-file "*ship it")
+                "TODO"))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-settings-global-keyword)))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-settings-beyond-the-global))
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+         (setting . "TODO")
+         (before . ["TODO WAIT | DONE"])
+         (after . []))
+       "\\`#\\+TODO: would stop naming a keyword headings in this file \
+carry: WAIT on 1 heading\\."
+       test-file))))
+
 (defconst org-mcp-test--content-settings-two-waits
   (concat
    "#+TODO: TODO | DONE\n"
@@ -25467,19 +25752,28 @@ lines of one setting, so the two forms are not interchangeable."
 The refusal lists the settings that are in scope, as the `setting'
 parameter takes them rather than as the lines read, so a client that
 guessed at one outside them can send back what it is told.
-`#+PROPERTY:' is the one worth guessing at and it is not here: it
-belongs to the property surface."
+Four are worth guessing at and none of them is here.  `#+PROPERTY:'
+belongs to the property surface.  `#+SETUPFILE:' and `#+INCLUDE:'
+name another file, and a write here would change what this file
+means by editing what a file the call never named says.
+`#+SEQ_TODO:' and `#+TYP_TODO:' are read into the same workflow as
+`#+TODO:', so a client that found them there might send one."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-settings-gtd))
-    (org-mcp-test--call-tool-refused
-     "org-file-set-setting"
-     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
-       (setting . "PROPERTY")
-       (before . [])
-       (after . "OWNER ada"))
-     "\\`No such setting: 'PROPERTY' - this tool writes TITLE, TODO, \
-ARCHIVE, CATEGORY, FILETAGS, STARTUP\\'"
-     test-file)))
+    (dolist (setting
+             '("PROPERTY" "SETUPFILE" "INCLUDE" "SEQ_TODO" "TYP_TODO"))
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+         (setting . ,setting)
+         (before . [])
+         (after . "something"))
+       (concat
+        "\\`No such setting: '"
+        (regexp-quote setting)
+        "' - this tool writes TITLE, TODO, ARCHIVE, CATEGORY, \
+FILETAGS, STARTUP\\'")
+       test-file))))
 
 (ert-deftest org-mcp-test-file-set-setting-refuses-a-line-no-read-returns ()
   "A value Org would not read back off the line is refused.

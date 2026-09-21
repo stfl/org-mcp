@@ -6081,9 +6081,13 @@ A file left naming no sequence at all falls back to the global
 `org-todo-keywords', as Org falls back to it."
   (let* ((alist
           (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO")))
-         (kept (copy-sequence (cdr (assoc "TODO" alist)))))
+         (kept (cdr (assoc "TODO" alist))))
+    ;; One occurrence per line of OWN, not every line equal to it: a
+    ;; setup file may write the same sequence the file writes, and
+    ;; taking both copies out would report the setup file's keywords
+    ;; as about to go when only the file's own line is being replaced.
     (dolist (value own)
-      (setq kept (delete value kept)))
+      (setq kept (cl-remove value kept :count 1 :test #'equal)))
     (let ((sequences
            (or (org-mcp--todo-sequences-of
                 (list
