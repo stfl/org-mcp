@@ -4022,10 +4022,16 @@ MCP Parameters:
 Returns the new headline's link; no identifier is created, so the
 link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
-TODO is the TODO state from `org-todo-keywords'.  A state Org
-vetoes for the new heading, such as a done keyword under an ordered
-parent whose earlier siblings are unfinished, is refused and no
-heading is added; see `org-mcp--set-todo-state'.
+TODO is the TODO state from `org-todo-keywords', and it has to name
+one.  A read reports no TODO state at all for a heading carrying no
+keyword, so \"\" is no state this surface names: it is what a `before'
+asserts and an `after' takes away on `org-mcp--tool-node-set-todo',
+the tool that owns the field, and a creation asserts nothing and
+takes nothing away.  A heading with no keyword is made by creating
+one with a keyword and taking it off there.
+A state Org vetoes for the new heading, such as a done keyword under
+an ordered parent whose earlier siblings are unfinished, is refused
+and no heading is added; see `org-mcp--set-todo-state'.
 CONTENT is the optional body text.  A creation destroys nothing, and
 a body is the one thing a new heading plausibly has none of, so a
 blank CONTENT, see `org-mcp--blank-param-p', writes no body, as
@@ -4045,7 +4051,7 @@ up in; see `org-mcp--link-target'.  It applies to PARENT only.
 
 MCP Parameters:
   title - The headline text
-  todo - TODO state from `org-todo-keywords'
+  todo - TODO state from `org-todo-keywords'; it cannot be empty
   parent - Link to the parent item
            Formats:
              - id:{id}
@@ -4080,7 +4086,13 @@ MCP Parameters:
   files - Files and directories to look up an id: link of parent
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent"
+  (setq title (org-mcp--text-param-given title "title"))
   (org-mcp--validate-headline-title title)
+  (setq todo (org-mcp--text-param-given todo "todo"))
+  (when (string-empty-p todo)
+    (org-mcp--tool-validation-error
+     "TODO state cannot be empty: name a keyword to create the node \
+with, and take it off afterwards with org-node-set-todo"))
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
        ;; The body is inserted and checked as text, so a number, an
@@ -6576,6 +6588,9 @@ Parameters:
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo - TODO keyword from org-todo-keywords (string, required)
+         Cannot be empty: a heading with no keyword is made by
+         creating it with one and taking it off with
+         org-node-set-todo
   tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]
