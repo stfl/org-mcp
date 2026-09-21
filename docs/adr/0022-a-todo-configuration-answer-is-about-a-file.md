@@ -11,7 +11,7 @@ An Org file may define its own workflow in `#+TODO:`, and the writes are
 validated against that file's `org-todo-keywords-1`. A discovery tool that can
 only report the global configuration therefore names states the file refuses and
 omits the states it accepts, and leaves the refusal as a client's only route to
-the truth. A tool of its own for the per-file question was rejected: it is the
+the truth. We chose one tool over a second for the per-file question: it is the
 same question about a different subject, and two tools would drift into two
 answer shapes.
 
@@ -33,8 +33,8 @@ empty workflow, which is not what such a file has.
 The per-file answer is built by reading the file's own `#+TODO:`, `#+SEQ_TODO:`
 and `#+TYP_TODO:` settings through `org-collect-keywords` and assembling them
 the way `org-set-regexps-and-options` does, so a `#+SETUPFILE:` is followed and
-the sequences are ordered as Org orders them. Rebuilding the answer from the
-buffer-local variables Org derives instead was rejected: `org-todo-keywords-1`
+the sequences are ordered as Org orders them. We chose the settings over the
+buffer-local variables Org derives from them: `org-todo-keywords-1`
 drops each keyword's fast-access key and logging directives, and
 `org-todo-key-alist` carries a key for every keyword, including the ones
 `org-assign-fast-keys` invents for a sequence that named none — so that route
