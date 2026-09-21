@@ -754,8 +754,10 @@ today, so applying the repeater to the old date yourself is wrong for two of
 the three forms — and a plausible wrong date is worse than none. org-mcp reads
 the field back after Org has decided it, which is what the report is for.
 
-*=before_planning= guards the date, and you send it only where a date is at
-risk.* Every write that destroys something takes a =before= for the thing it
+*=before_planning= guards the date, and you are asked for it only where a date
+is at risk.* An accurate map is accepted wherever you send it, so a client that
+asserts the planning fields on every state change is never refused for it; what
+the headline decides is whether leaving it out is refused. Every write that destroys something takes a =before= for the thing it
 destroys and is refused when the file disagrees (see [[*Knowing what you are about to change]]).
 A repeat destroys a planning value, so the call asserts that value too — but
 only a repeat can, so an ordinary transition carries no assertion at all and
@@ -1009,12 +1011,14 @@ refused over its second property has not written its first.
 A drawer line is in one of three states, and a property map spells all three,
 on either side of the call:
 
-| Value          | =after= writes                  | =before= asserts             |
-|----------------+---------------------------------+------------------------------|
-| =null=         | the line goes                   | there is no such line        |
-| =""=           | =:FOO:=, a line with no value   | a line carrying no value     |
-| =false=, ="nil"= | =:FOO: nil=, the text =nil=   | the line holds the text =nil= |
-| any other string | =:FOO: that text=             | the line holds that text     |
+| State                | Spelled                    | =after= writes             | =before= asserts             |
+|----------------------+----------------------------+----------------------------+------------------------------|
+| no line              | =null=                     | the line goes              | there is no such line        |
+| a line with no value | =""=                       | =:FOO:=                    | a line carrying no value     |
+| a line holding text  | the text, or =false= for =nil= | =:FOO: that text=      | the line holds that text     |
+
+=false= and the string ="nil"= are two spellings of one state: both write the
+text =nil=, which is a line holding text like any other.
 
 A field is a value or nothing; a drawer line has a third state between the two,
 because =:FOO:= with nothing after the name is a line that is there, and a read
