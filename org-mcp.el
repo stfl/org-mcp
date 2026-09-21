@@ -3391,7 +3391,8 @@ refused like any other text that names no keyword: a heading with no
 keyword is asked for with null, which never reaches this."
   (unless (member state org-todo-keywords-1)
     (org-mcp--tool-validation-error
-     "Invalid TODO state: '%s' - valid states: %s"
+     "Invalid TODO state: '%s' - valid states: %s, or null for \
+no keyword"
      state (mapconcat #'identity org-todo-keywords-1 ", "))))
 
 (defun org-mcp--todo-block-reason (from to)
@@ -4426,9 +4427,9 @@ MCP Parameters:
 
 (defun org-mcp--tool-node-create
     (title
-     todo
      parent
      &optional
+     todo
      content
      tags
      previous_sibling
@@ -4438,14 +4439,11 @@ MCP Parameters:
 Returns the new headline's link; no identifier is created, so the
 link is `id:' only when PROPERTIES sets an ID.
 TITLE is the headline text.
-TODO is the TODO state from `org-todo-keywords', and it has to name
-one.  A read reports no TODO state at all for a heading carrying no
-keyword, so \"\" is no state this surface names, and
-`org-mcp--validate-todo-state' refuses it here as it refuses any
-other text that names no keyword.  A heading with no keyword is made
-by creating one with a keyword and taking it off with
-`org-mcp--tool-node-set-todo', whose `after' takes null for that.
-Null here is the parameter left out, never that ask.
+TODO is the TODO state from `org-todo-keywords'.  It is optional, and
+a blank one, see `org-mcp--blank-param-p', makes a heading carrying no
+keyword — a node that is not a task, which is the node a read reports
+by carrying no TODO state for it.  A value that is no keyword is
+refused, as it is on `org-mcp--tool-node-set-todo'.
 A state Org vetoes for the new heading, such as a done keyword under
 an ordered parent whose earlier siblings are unfinished, is refused
 and no heading is added; see `org-mcp--set-todo-state'.
@@ -4471,7 +4469,8 @@ MCP Parameters:
           trailing :tag:, a leading COMMENT, a leading TODO
           keyword and a leading [#A] are each refused, because
           Org would take them out of the title
-  todo - TODO state from `org-todo-keywords'; it cannot be empty
+  todo - TODO state from `org-todo-keywords', or blank for a
+         heading that is not a task
   parent - Link to the parent item
            Formats:
              - id:{id}
@@ -4511,7 +4510,9 @@ MCP Parameters:
           strings, optional); refused with any other parent"
   (setq title (org-mcp--text-param-given title "title"))
   (org-mcp--validate-headline-title title)
-  (setq todo (org-mcp--text-param-given todo "todo"))
+  (setq todo
+        (unless (org-mcp--blank-param-p todo)
+          (org-mcp--text-param-given todo "todo")))
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
        ;; The body is inserted and checked as text, so a number, an
@@ -4551,7 +4552,8 @@ MCP Parameters:
                                 (title . ,title))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
-      (org-mcp--validate-todo-state todo)
+      (when todo
+        (org-mcp--validate-todo-state todo))
       (let ((parent-level
              (org-mcp--navigate-to-parent-or-top parent-target)))
 
@@ -4575,7 +4577,10 @@ MCP Parameters:
         ;; Insert the new heading
         (org-mcp--insert-heading title parent-level)
 
-        (org-mcp--set-todo-state todo)
+        ;; A new heading carries no keyword, so naming no state asks
+        ;; for the state it is already in.
+        (when todo
+          (org-mcp--set-todo-state todo))
 
         (when tag-list
           (org-set-tags tag-list))
@@ -7108,20 +7113,20 @@ Returns JSON object:
     #'org-mcp--tool-node-create
     :id "org-node-create"
     :description
-    "Add a new TODO item to an Org file at a specified location.
-Creates the headline with TODO state, optional tags, optional body
-content, and optional properties.  No ID or CUSTOM_ID is created:
+    "Add a new node to an Org file at a specified location.
+Creates the headline with an optional TODO state, optional tags,
+optional body content, and optional properties.  A node that names no
+state is a heading rather than a task.  No ID or CUSTOM_ID is created:
 set one in properties to give the headline a stable link.
 
 Parameters:
   title - Headline text without TODO state or tags (string, required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
-  todo - TODO keyword from org-todo-keywords (string, required)
-         It has to name one.  \"\" is no state this surface names
-         and null is the parameter left out, so a heading with no
-         keyword is made by creating it with one and taking it off
-         with org-node-set-todo {\"after\": null}
+  todo - TODO keyword from org-todo-keywords (string, optional)
+         Left out, or null, false or \"\", makes a heading with no
+         keyword: a node that is not a task.  A value that names no
+         keyword is refused
   tags - Tags for the headline (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]

@@ -3597,7 +3597,11 @@ JSON's word for no value.  An empty string is a value, and this
 field has none — no state named in `org-todo-keywords\=' is \"\", and
 a read of a headline carrying no keyword reports no state at all
 rather than an empty one.  So \"\" reaches the field's own check and
-is refused there, naming the states there are."
+is refused there, naming the states there are and the null that
+asks for none.  The message can say that only because a blank
+`todo\=' means the same thing on `org-node-create\=': while the two
+callers of this check disagreed about null, it could name it for
+neither."
   (let ((test-content "* TODO Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
@@ -3608,7 +3612,7 @@ is refused there, naming the states there are."
          "org-node-set-todo"
          `((link . ,link) (before . "TODO") (after . ""))
          "\\`Invalid TODO state: '' - valid states: \
-TODO, IN-PROGRESS, DONE\\'"
+TODO, IN-PROGRESS, DONE, or null for no keyword\\'"
          test-file)
         (dolist (blank '(:json-false []))
           (org-mcp-test--call-tool-refused
@@ -4927,16 +4931,17 @@ level 3 sibling (via its ID)."
   "The whole file after a create that writes a heading and no body.")
 
 (ert-deftest org-mcp-test-node-create-publishes-its-required-parameters ()
-  "org-node-create asks for a title, a state and a place, and nothing else.
+  "org-node-create asks for a title and a place, and nothing else.
 The schema is where a client learns what a call has to carry, and
 the page tells a reader the same, so the two are pinned together
 here.  A creation destroys nothing, so nothing is guarded by
-insisting the caller name a body, a tag or a property it does not
-want."
+insisting the caller name a body, a tag, a property or a state it
+does not want; a node that names no state is a heading rather than
+a task."
   (org-mcp-test--with-enabled
     (should
      (equal (org-mcp-test--registered-tool-required "org-node-create")
-            '("title" "todo" "parent")))
+            '("title" "parent")))
     (should
      (equal
       (sort
@@ -4951,6 +4956,68 @@ want."
         "tags"
         "title"
         "todo")))))
+
+(defconst org-mcp-test--regex-heading-without-keyword "\\`\\* Task\n\\'"
+  "The whole file after a create that names no TODO state.")
+
+(ert-deftest org-mcp-test-node-create-makes-a-heading-without-a-keyword ()
+  "A create that names no state writes a heading that is not a task.
+`todo\=' is optional, so leaving it out and every spelling a client
+fills an unused parameter with mean one thing: this node is not a
+task.  A read of such a headline carries no `todo\=' key, so the
+response carries none either, and the file holds `* Task\=' with no
+keyword each time."
+  (dolist (params
+           '(()
+             ((todo . nil))
+             ((todo . ""))
+             ((todo . :json-false))
+             ((todo . []))))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . "Task")
+                 (parent . ,(concat "file:" test-file))
+                 ,@params)))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'title result) "Task"))
+        (should
+         (equal (alist-get 'link result)
+                (org-mcp-test--file-link test-file "*Task"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-heading-without-keyword))))
+
+(ert-deftest org-mcp-test-node-create-still-takes-a-keyword ()
+  "A named state still makes a task, and a state that is none is refused.
+The parameter going optional does not widen what a non-blank value
+may be: it is a keyword from `org-todo-keywords\=' or the call is
+refused, and the file is left as it was."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-create"
+             `((title . "Task")
+               (todo . "IN-PROGRESS")
+               (parent . ,(concat "file:" test-file)))))))
+      (should (equal (alist-get 'success result) t)))
+    (org-mcp-test--verify-file-matches
+     test-file "\\`\\* IN-PROGRESS Task\n\\'"))
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-tool-refused
+     "org-node-create"
+     `((title . "Task")
+       (todo . "NOTAKEYWORD")
+       (parent . ,(concat "file:" test-file)))
+     (concat "\\`Invalid TODO state: 'NOTAKEYWORD' - valid states: "
+             "TODO, IN-PROGRESS, DONE, or null for no keyword\\'")
+     test-file)))
 
 (ert-deftest org-mcp-test-node-create-writes-no-body-for-every-blank ()
   "A create that names no body writes the heading and nothing under it.
@@ -5000,43 +5067,6 @@ the file is left as it was."
          (parent . ,(concat "file:" test-file)))
        (concat "\\`content must be a string: " (cdr case) "\\'")
        test-file))))
-
-(ert-deftest org-mcp-test-node-create-refuses-a-blank-todo ()
-  "A create whose `todo\=' is blank is refused as a parameter left out.
-`todo\=' is required, so every spelling a client fills an unused
-parameter with means the same thing: the call did not name a state.
-The refusal names the parameter rather than the Elisp the JSON
-decoded to, and nothing is written."
-  (dolist (blank '(nil :json-false []))
-    (org-mcp-test--with-add-todo-setup test-file
-        org-mcp-test--content-empty
-      (org-mcp-test--call-tool-refused
-       "org-node-create"
-       `((title . "Task")
-         (todo . ,blank)
-         (parent . ,(concat "file:" test-file)))
-       "\\`Missing required parameter: todo\\'"
-       test-file))))
-
-(ert-deftest org-mcp-test-node-create-refuses-an-empty-todo ()
-  "A create is refused when `todo\=' is empty, and writes nothing.
-A read reports no `todo\=' at all for a heading that carries no
-keyword, so \"\" is no state the surface names and no state to create
-a node in.  It reaches the field's own validator and is refused
-there, naming the keywords there are, as it is on org-node-set-todo;
-a heading with no keyword is made by creating it with one and taking
-that off with a null `after\='."
-  (org-mcp-test--with-add-todo-setup test-file
-      org-mcp-test--content-empty
-    (org-mcp-test--call-tool-refused
-     "org-node-create"
-     `((title . "Task")
-       (todo . "")
-       (parent . ,(concat "file:" test-file)))
-     (concat
-      "\\`Invalid TODO state: '' - valid states: "
-      "TODO, IN-PROGRESS, DONE\\'")
-     test-file)))
 
 (ert-deftest org-mcp-test-node-create-refuses-a-blank-title ()
   "A create whose `title\=' is blank is refused as a parameter left out.
