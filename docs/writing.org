@@ -12,9 +12,11 @@ link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Li
 A write that replaces one value answers with =before= and =after=: the value the
 tool found and the value it left, under the same two words the call sends. A
 call that takes a field away answers the same way, with an empty =after=, so the
-response says what it destroyed. The property tools name what they touched
-instead — =properties_set= on =org-node-set-properties=, =properties_deleted= on
-=org-node-remove-properties= — and the clock tools report fields of their own.
+response says what it destroyed — and =org-node-remove-properties= reports the
+values it removed under =before= too, as a map. The property tools also name
+what they touched: =properties_set= on =org-node-set-properties=,
+=properties_deleted= on =org-node-remove-properties=. The clock tools report
+fields of their own.
 
 Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
 =org-clock-out=, =org-clock-add=, =org-clock-delete=, =org-node-add-tags=,
@@ -577,7 +579,7 @@ Example:
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (object, required): JSON object whose names are the properties this call removes and whose values are what each of them holds now. There is no second parameter naming them: what =before= names is what goes. An empty string asserts the property is absent, and the call then takes nothing away. Names are matched without regard to case, as Org reads them, and special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use the dedicated tools
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =properties_deleted= — the names removed, in the order =before= gave them — plus the headline's link
+- *Returns:* Success status, =saved= flag, =properties_deleted= — the names removed, in the order =before= gave them — =before=, the values removed under those names, plus the headline's link
 - *Refuses with:* =conflict:= when =before= is not the value a property holds, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
 
 One parameter carries both halves of the call: the names say what goes and the
@@ -586,6 +588,12 @@ first property is removed, so a call refused over its second has not taken its
 first away. A headline that never held the property is left byte for byte as it
 was — the empty =before= such a call sends is an honest assertion, so the call
 is accepted with nothing to do.
+
+The response carries those values back under =before=, the key the removals of
+one field report what they destroyed under. Once the call returns, nothing in
+the file records what the properties held, and the response is read by more
+than the client that sent the request — a log, a transcript, a second client —
+none of which has the request to read instead.
 
 Example:
 #+begin_src json
@@ -603,6 +611,10 @@ Example:
   "success": true,
   "saved": true,
   "properties_deleted": ["EFFORT", "OWNER"],
+  "before": {
+    "EFFORT": "1:00",
+    "OWNER": "ada"
+  },
   "link": "id:abc-123"
 }
 
