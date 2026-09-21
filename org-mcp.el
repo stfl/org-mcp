@@ -4301,7 +4301,7 @@ write"
          (caar unwritten))))))
 
 (defun org-mcp--write-properties
-    (link files action reported asserted apply)
+    (link files action response asserted apply)
   "Change the properties ASSERTED names on the heading LINK names.
 ASSERTED is the (NAME . VALUE) pairs the call vouches for, VALUE the
 string the property is asserted to hold and \"\" for none.  Every one
@@ -4310,20 +4310,18 @@ call cannot be refused after an earlier one has already been
 changed.  APPLY is then called at the heading, inside the change,
 and writes the properties.
 ACTION names what the call does, for the call site to read.
-REPORTED is the field the response lists the property names under,
-in the order ASSERTED gives them: `properties_set' for a write and
-`properties_deleted' for a removal.
+RESPONSE is the fields the call adds to its own response, which each
+tool builds from ASSERTED: the names it touched, and, for a removal,
+the values it destroyed.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 This is the whole of what writing properties and removing them
 share, and they differ only in what APPLY does."
   (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file))
-         (names (mapcar #'car asserted)))
+         (file-path (plist-get target :file)))
 
-    (org-mcp--modify-and-save file-path action
-                              (list (cons reported names))
+    (org-mcp--modify-and-save file-path action response
       (org-mcp--goto-heading target)
 
       (pcase-dolist (`(,key . ,val) asserted)
@@ -4375,7 +4373,11 @@ MCP Parameters:
           (org-mcp--asserted-property-values
            (org-mcp--property-assertions before "before") written)))
     (org-mcp--write-properties
-     link files "set properties" 'properties_set asserted
+     link
+     files
+     "set properties"
+     (list (cons 'properties_set (mapcar #'car asserted)))
+     asserted
      (lambda ()
        (pcase-dolist (`(,key . ,val) written)
          (org-set-property key val))))))
@@ -4386,7 +4388,11 @@ MCP Parameters:
 BEFORE is an alist whose names are the properties the call removes
 and whose values are what each one is asserted to hold, \"\" for
 none, so the removal names both what it takes away and what it
-believed was there.
+believed was there.  The response carries that map back under
+`before', as the removals of one field carry the value they
+destroyed: once the call returns, nothing in the file records what
+the properties held, and a reader of the response other than the
+client that sent it has no other copy.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4410,7 +4416,11 @@ MCP Parameters:
           refused with any other link"
   (let ((asserted (org-mcp--property-assertions before "before")))
     (org-mcp--write-properties
-     link files "remove properties" 'properties_deleted asserted
+     link files "remove properties"
+     (list
+      (cons 'properties_deleted (mapcar #'car asserted))
+      (cons 'before asserted))
+     asserted
      (lambda ()
        (pcase-dolist (`(,key . ,_val) asserted)
          (org-delete-property key))))))
@@ -6533,6 +6543,9 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   properties_deleted - Array of the property names removed
+  before - JSON object of the values removed, one entry per name
+           in properties_deleted; nothing in the file records them
+           once the call returns
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

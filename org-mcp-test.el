@@ -8280,6 +8280,8 @@ the call and its response both say what was destroyed."
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
       (should (equal (alist-get 'properties_deleted result) ["EFFORT"]))
+      (should
+       (equal (alist-get 'before result) '((EFFORT . "1:00"))))
       (should (equal (alist-get 'link result) link))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-set-properties-delete))))
@@ -8303,6 +8305,28 @@ the call and its response both say what was destroyed."
               ["EFFORT" "OWNER"]))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-remove-properties-both))))
+
+(ert-deftest org-mcp-test-remove-properties-reports-both-values ()
+  "A removal of two properties reports both values it destroyed.
+Nothing in the file records them once the call returns, so the
+response is where they exist, and it is read by more than the client
+that sent the request: the values come back under `before\=', the key
+the removals of one field report what they destroyed under."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-two-props))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-remove-properties"
+             `((link
+                .
+                ,(org-mcp-test--file-link
+                  test-file "*Task with Two Properties"))
+               (before . ((EFFORT . "1:00") (OWNER . "ada"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal (alist-get 'before result)
+              '((EFFORT . "1:00") (OWNER . "ada")))))))
 
 (ert-deftest org-mcp-test-remove-properties-refuses-a-stale-before ()
   "A value the headline does not hold refuses the removal."
@@ -8338,7 +8362,9 @@ found 'ada'\\'"
 (ert-deftest org-mcp-test-remove-properties-of-an-absent-property ()
   "Removing a property that is not there takes nothing away.
 The empty `before\=' asserts the headline holds none of it, which it
-does, so the assertion holds and the call is accepted."
+does, so the assertion holds and the call is accepted.  The response
+echoes that assertion, so it reports an emptiness destroyed rather
+than a value."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((result
@@ -8351,6 +8377,7 @@ does, so the assertion holds and the call is accepted."
             test-file)))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'properties_deleted result) ["OWNER"]))
+      (should (equal (alist-get 'before result) '((OWNER . ""))))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
 
