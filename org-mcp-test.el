@@ -5829,6 +5829,131 @@ The navigation function should find headlines even when they have TODO keywords.
       test-file
       org-mcp-test--regex-todo-keywords-after))))
 
+;;; A title is the title, not a line of Org grammar
+
+;; A title is written raw into the headline line, and that line has a
+;; grammar: a trailing `:word:' is tags, a leading COMMENT comments the
+;; heading out of export and the agenda, a leading keyword is the TODO
+;; state and a leading `[#A]' is the priority.  A title claimed by any
+;; of them is not the title the call named, and the response would
+;; report success.  So the line is parsed before it is written and a
+;; title Org reads as something else is refused.
+
+(defconst org-mcp-test--titles-org-would-claim
+  '(("Buy milk :fresh:" . "would become tags")
+    ("Buy milk :a:b:" . "would become tags")
+    ("Buy milk :fresh: " . "would become tags")
+    ("COMMENT the code" . "would comment")
+    ("COMMENT" . "would comment")
+    ("TODO buy milk" . "would become the TODO keyword")
+    ("[#A] buy milk" . "would become the priority"))
+  "Titles Org's headline grammar claims, each with what it claims.
+The cdr is the clause the refusal carries, which is what tells a
+client which part of the title it has to spell another way.")
+
+(defconst org-mcp-test--titles-org-leaves-alone
+  '("10:30 standup"
+    "Meeting: notes"
+    "Buy milk:fresh:"
+    "Buy milk :not a tag:"
+    "COMMENTARY on it"
+    "the COMMENT code"
+    "Buy milk :fresh:x")
+  "Titles carrying a colon, a bracket or the word COMMENT and no grammar.
+Each writes, and reads back exactly as it was sent.")
+
+(ert-deftest org-mcp-test-set-title-refuses-a-title-org-would-claim ()
+  "A title Org reads as something else is refused, and nothing is written.
+The refusal names what Org would have made of it, because that is the
+part a client cannot see from its own call."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Original\nBody.\n"))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (link (org-mcp-test--file-link test-file "*Original")))
+      (pcase-dolist (`(,title . ,clause)
+                     org-mcp-test--titles-org-would-claim)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-title"
+         `((link . ,link) (before . "Original") (after . ,title))
+         (concat "\\`Not a title: '" (regexp-quote title)
+                 "'\\.  It " (regexp-quote clause))
+         test-file)))))
+
+(ert-deftest org-mcp-test-node-create-refuses-a-title-org-would-claim ()
+  "org-node-create refuses the same titles through the same validator."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (pcase-dolist (`(,title . ,clause)
+                   org-mcp-test--titles-org-would-claim)
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . ,title)
+         (todo . "TODO")
+         (parent . ,(concat "file:" test-file)))
+       (concat "\\`Not a title: '" (regexp-quote title)
+               "'\\.  It " (regexp-quote clause))
+       test-file))))
+
+(ert-deftest org-mcp-test-set-title-takes-a-colon-that-is-no-tag ()
+  "A colon, a bracket or the word COMMENT inside a title is just text.
+The check is what Org makes of the whole headline line, not a rule
+about punctuation, so a title is refused exactly when Org would read
+it as something else.  Each of these is read back through the server
+as the title that was sent."
+  (dolist (title org-mcp-test--titles-org-leaves-alone)
+    (org-mcp-test--with-temp-org-files
+        ((test-file "* TODO Original\nBody.\n"))
+      (let* ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+             (link (org-mcp-test--file-link test-file "*Original"))
+             (result
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-node-set-title"
+                `((link . ,link)
+                  (before . "Original")
+                  (after . ,title))))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'before result) "Original"))
+        (should (equal (alist-get 'after result) title))
+        ;; What the server serves for the node is the title sent, so
+        ;; the round trip a client makes comes back whole.
+        (should
+         (equal
+          (alist-get
+           'title
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-read"
+             `((link
+                .
+                ,(org-mcp-test--file-link
+                  test-file (concat "*" title)))))))
+          title))))))
+
+(ert-deftest org-mcp-test-node-create-takes-a-colon-that-is-no-tag ()
+  "org-node-create writes the same titles and reads them back whole."
+  (dolist (title org-mcp-test--titles-org-leaves-alone)
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . ,title)
+                 (todo . "TODO")
+                 (parent . ,(concat "file:" test-file)))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (equal
+          (alist-get
+           'title
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-read"
+             `((link . ,(alist-get 'link result))))))
+          title))))))
+
 ;;; org-node-set-content tests
 
 (ert-deftest org-mcp-test-edit-body-single-line ()

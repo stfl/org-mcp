@@ -318,6 +318,44 @@ from the read you planned from, and the way forward is to read it again. A
 the value such a refusal reports — the state, the title, the date, the priority,
 the property — is a fact about the node, and it is yours to act on.
 
+* A title is the title, not a line of Org grammar
+
+A title is written into the headline line as you send it, and that line has a
+grammar of its own. Four parts of it would take a piece of your title away:
+
+| A title like        | Org reads it as                              |
+|---------------------+----------------------------------------------|
+| =Buy milk :fresh:=  | the title =Buy milk=, tagged =:fresh:=       |
+| =COMMENT the code=  | a heading commented out of export and agenda |
+| =TODO buy milk=     | the TODO keyword =TODO=, title =buy milk=    |
+| =[#A] buy milk=     | the priority =A=, title =buy milk=           |
+
+=org-node-create= and =org-node-set-title= refuse all four rather than writing
+a heading that does not carry the title you named. The refusal says what Org
+would have made of it:
+
+#+begin_example
+Not a title: 'Buy milk :fresh:'.  It would become tags, leaving the title "Buy milk"
+#+end_example
+
+Each has somewhere else to be said: a tag goes to [[*org-node-add-tags][org-node-add-tags]], a TODO
+keyword to =org-node-create='s own =todo= or to [[*org-node-set-todo][org-node-set-todo]], a priority
+to [[*org-node-set-priority][org-node-set-priority]]. For a title that has to read =COMMENT= or =TODO= at
+its start, reword it — Org has no spelling that keeps it there as text.
+
+The check is what Org makes of the whole headline line, not a rule about
+punctuation, so a title is refused exactly when it would be reinterpreted and
+not otherwise. These all write, and read back as you sent them:
+
+#+begin_example
+10:30 standup
+Meeting: notes
+Buy milk:fresh:
+Buy milk :not a tag:
+COMMENTARY on it
+the COMMENT code
+#+end_example
+
 * What a blank parameter means
 
 A blank parameter is one the call does not send. Clients fill a parameter they
@@ -559,7 +597,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
-  - =after= (string, required): New headline title (without TODO state or tags). =null=, =false= and =[]= are the parameter left out and are refused: a headline always has a title, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
+  - =after= (string, required): New headline title (without TODO state or tags), and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]]). =null=, =false= and =[]= are the parameter left out and are refused: a headline always has a title, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline
 - *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise — a blank =after=, and either parameter carrying something that is not text (see [[*How a refusal is classed]])
@@ -599,7 +637,7 @@ Example:
 ** org-node-create
 - *Description:* Add a new TODO item to an Org file
 - *Parameters:*
-  - =title= (string, required): The headline text
+  - =title= (string, required): The headline text, and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]])
   - =todo= (string, required): TODO state from =org-todo-keywords=. It has to name one: neither =""= nor =null= creates a heading without a keyword. A node is created as a task and stops being one with =org-node-set-todo=, =after: null= — the one place a heading moves into that state, and the only one with a prior state to assert
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"])
   - =content= (string, optional): Body text to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
