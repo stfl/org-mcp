@@ -9667,6 +9667,96 @@ itself on the other two, so none of them has a meaning without it."
        "org-node-set-tags" `((link . ,link) (after . ["personal"]))
        "\\`Missing required parameter: before\\'" test-file))))
 
+(defconst org-mcp-test--tag-members-that-are-no-string
+  '((1 "1")
+    (t "t")
+    (:json-false ":json-false")
+    (nil "nil")
+    (((a . "b")) "((a . \"b\"))")
+    (["inner"] "[\"inner\"]"))
+  "JSON values a tag set may not hold, each with how a refusal prints it.
+A number, true, false, null, an object and a nested array, as
+`json-read-from-string' decodes them.  The second element is the
+`%S' of the first, written out rather than computed, so that a
+message which changes has to be edited here instead of agreeing
+with whatever the code prints.")
+
+(ert-deftest org-mcp-test-tag-tools-refuse-a-member-that-is-no-string ()
+  "A tag set holds strings, and one place says so for every tool.
+`org-tag-re' is a test on text, so a member that is not text reaches
+it as a wrong type and crosses the boundary as an internal error --
+which names no parameter and tells a client nothing it can act on.
+The check sits where a tag set is decided, so every parameter that
+takes one inherits it: both parameters of `org-node-set-tags', the
+`after' of each delta, and the `tags' of `org-node-create'.
+
+A real tag rides beside the bad one in every set, so what is pinned
+is a test of each member and not of the parameter as a whole."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (pcase-dolist
+          (`(,member ,printed)
+           org-mcp-test--tag-members-that-are-no-string)
+        (let ((set (vector "work" member)))
+          (pcase-dolist
+              (`(,tool ,params)
+               `(("org-node-set-tags"
+                  ((link . ,link)
+                   (before . ,set)
+                   (after . ["personal"])))
+                 ("org-node-set-tags"
+                  ((link . ,link)
+                   (before . ["work" "urgent"])
+                   (after . ,set)))
+                 ("org-node-add-tags" ((link . ,link) (after . ,set)))
+                 ("org-node-remove-tags" ((link . ,link) (after . ,set)))
+                 ("org-node-create"
+                  ((title . "New Task")
+                   (todo . "TODO")
+                   (content . "Body.")
+                   (tags . ,set)
+                   (parent . ,(concat "file:" test-file))))))
+            (org-mcp-test--call-tool-refused
+             tool params
+             (concat
+              "\\`"
+              (regexp-quote
+               (concat "A tag must be a string: " printed))
+              "\\'")
+             test-file)))))))
+
+(ert-deftest org-mcp-test-tag-tools-refuse-a-set-that-is-no-tag-set ()
+  "A tag set arrives as a string or an array, and nothing else does.
+A number or a boolean is neither, and is refused as the format it
+is.  A JSON object decodes to a list of pairs, so it arrives as a
+list like any other by the time a tag set is read, and it is refused
+for the pair it holds, which is no tag.  Either way nothing is
+written, and the internal error a wrong type would raise is out of
+reach.
+
+That both parameters are covered from one place is pinned by
+`org-mcp-test-tag-tools-refuse-a-member-that-is-no-string'; what
+this test adds is the whole parameter rather than a member of it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-tags))
+    (let ((link (org-mcp-test--file-link test-file "*Task with Tags")))
+      (pcase-dolist
+          (`(,value ,refusal)
+           '((5 "Invalid tags format: 5")
+             (t "Invalid tags format: t")
+             (((a . "b")) "A tag must be a string: (a . \"b\")")))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ,value) (after . ["personal"]))
+         (concat "\\`" (regexp-quote refusal) "\\'")
+         test-file)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-tags"
+         `((link . ,link) (before . ["work" "urgent"]) (after . ,value))
+         (concat "\\`" (regexp-quote refusal) "\\'")
+         test-file)))))
+
 (ert-deftest org-mcp-test-tag-tools-publish-their-parameters-as-required ()
   "The schema says which tag parameters a call must carry.
 A client discovers them there and never from the handler, so a

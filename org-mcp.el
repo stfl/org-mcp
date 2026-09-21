@@ -3130,24 +3130,42 @@ Throws an MCP tool error if unbalanced blocks are found."
              block-type block-type))))))))
 
 (defun org-mcp--normalize-tags-to-list (tags)
-  "Normalize TAGS parameter to a list format.
-TAGS can be:
-- nil or empty list -> returns nil
-- vector (JSON array) -> converts to list
-- string -> wraps in list
-- list -> returns as-is
-Throws error for invalid types."
-  (cond
-   ((null tags)
-    nil) ; No tags (nil or empty list)
-   ((vectorp tags)
-    (append tags nil)) ; Convert JSON array (vector) to list
-   ((listp tags)
-    tags) ; Already a list
-   ((stringp tags)
-    (list tags)) ; Single tag string
-   (t
-    (org-mcp--tool-validation-error "Invalid tags format: %s" tags))))
+  "Return TAGS, a call's tag set, as a list of tag strings.
+One tag arrives as a string and several as a JSON array, which
+decodes to a vector; null and the empty array are the empty set.  A
+list comes back as it stands, so a set a tool has already read
+through `org-mcp--tag-set-given' passes here unchanged when it is
+handed on for validation.
+
+Every member is a string.  `org-tag-re' is a test on text, so a
+number, a boolean, an object or a nested array among the members
+would reach it as a wrong type and cross the MCP boundary as an
+internal error, which names no parameter and tells a client nothing
+it can act on.  A JSON object sent in place of the whole set is
+refused the same way and for the same reason: it decodes to a list
+of pairs, and a pair is no more a tag than a number is.
+
+This is the one place that says what a tag set is, so every
+parameter that takes one is covered by the check rather than each
+growing a guard of its own."
+  (let ((tag-list
+         (cond
+          ((null tags)
+           nil) ; No tags (nil or empty list)
+          ((vectorp tags)
+           (append tags nil)) ; Convert JSON array (vector) to list
+          ((listp tags)
+           tags) ; Already a list
+          ((stringp tags)
+           (list tags)) ; Single tag string
+          (t
+           (org-mcp--tool-validation-error "Invalid tags format: %s"
+                                           tags)))))
+    (dolist (tag tag-list)
+      (unless (stringp tag)
+        (org-mcp--tool-validation-error "A tag must be a string: %S"
+                                        tag)))
+    tag-list))
 
 (defun org-mcp--navigate-to-parent-or-top (parent)
   "Navigate to the parent headline PARENT names, or to the file's top level.
