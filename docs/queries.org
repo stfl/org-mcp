@@ -169,8 +169,8 @@ and =inbox=, which declares nothing, as =(my-inbox-query)=.
 A filter is always a name: a caller cannot send an expression of its own. That
 is the point of the list — a closed vocabulary can be refused with the valid
 names in the message, an open one cannot. =org-query= is where a caller writes
-a query of its own, and the only endpoint that reaches files outside the
-allowed ones.
+a query of its own, and one of the three endpoints whose =files= can reach
+outside the allowed ones; see [[file:file-access.org::*Querying other files][Querying other files]].
 
 =org-mcp-query-sort-fn= is passed to =org-ql-select= as =:sort=, so it decides
 the order =org-view= answers in. =org-query= is unsorted.
