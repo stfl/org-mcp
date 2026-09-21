@@ -5000,10 +5000,16 @@ back afterwards, so the not-done keyword the response reports is no
 sign the clock survived.  The response carries the date Org moved and
 the clock it closed together."
   (let ((stamp (org-mcp-test--clock-started-an-hour-ago))
+        ;; Tomorrow by the calendar and at midday, not by adding
+        ;; hours: a day is not 24 hours across a clock change, and a
+        ;; span in seconds lands on the day before or after it.
         (scheduled
          (format-time-string
           "<%Y-%m-%d %a +1w>"
-          (time-add (current-time) (seconds-to-time 86400)))))
+          (encode-time
+           (org-mcp-test--midday
+            (decoded-time-add
+             (decode-time) (make-decoded-time :day 1)))))))
     (org-mcp-test--with-temp-org-files
         ((test-file
           (format

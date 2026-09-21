@@ -714,9 +714,12 @@ A move to a done keyword closes the clock running in that headline, because
 Emacs's own clock stops with it.
 
 The response says so. A =clock= report is there only when the call closed one,
-carrying the =start=, =end= and =duration= an [[file:clocking.org::*org-clock-out][org-clock-out]] would have reported,
-so a client that was clocking the task it has just finished learns the close
-from the call it already made:
+carrying that close's =start=, =end= and =duration=, so a client that was
+clocking the task it has just finished learns the close from the call it
+already made. Both timestamps are bracketed, the way a CLOCK line spells an
+inactive timestamp and the way [[file:clocking.org::*org-clock-add][org-clock-add]] reports them; =org-clock-out= spells
+its own =start= without the brackets, so compare the two as instants rather
+than as strings:
 
 #+begin_src json
 {
@@ -1242,16 +1245,20 @@ Example:
 carry instead. Rescheduling a repeating entry keeps its repeater, which is one
 reason =before= is the whole Org string rather than a date.
 
-That inheritance stops where =after= brings a repeater or a warning period of
-its own. An =after= naming a date, a time of day or a span of the day leaves
-the repeater and the warning period where they are and moves the date under
-them; an =after= naming either of them replaces both, and the headline ends up
-carrying exactly what was sent. Against =<2026-06-20 Sat +1w -3d>=, an =after=
-of =2026-07-02= writes =<2026-07-02 Thu +1w -3d>= and an =after= of
-=2026-07-02 -2d= writes =<2026-07-02 Thu -2d>=, the repeater gone. Name the
-repeater alongside the warning — =2026-07-02 +1w -2d= — to move all three at
-once. The response reads the timestamp back from the file, so its =after=
-reports the whole of what the headline ended up with.
+That inheritance has one condition: the =after= brings neither a repeater nor a
+warning period of its own. Where it brings neither — a bare date, or one
+carrying a time of day or a span of the day — the headline's repeater and
+warning stay where they are and the date moves under them. Where it brings
+either, it replaces both, and the headline ends up carrying exactly what was
+sent. The same rule governs =org-node-set-deadline=.
+
+Against =<2026-06-20 Sat +1w -3d>=, an =after= of =2026-07-02= writes
+=<2026-07-02 Thu +1w -3d>=; an =after= of =2026-07-02 -2d= writes
+=<2026-07-02 Thu -2d>=, the repeater gone; and an =after= of =2026-07-02 +2w=
+writes =<2026-07-02 Thu +2w>=, the warning gone. Name the repeater alongside
+the warning — =2026-07-02 +1w -2d= — to move all three at once. The response
+reads the timestamp back from the file, so its =after= reports the whole of
+what the headline ended up with.
 
 A headline whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
@@ -1387,7 +1394,11 @@ Example:
 carry instead.
 
 A warning period is what a deadline says it early: =-3d= puts the headline in
-the agenda three days before the day it is due.
+the agenda three days before the day it is due. Sending one to a repeating
+deadline replaces its repeater, because an =after= carrying a repeater or a
+warning replaces both — name the repeater alongside the warning to keep it
+(see [[*org-node-set-scheduled][org-node-set-scheduled]], which states the rule
+for both tools).
 
 =org-log-redeadline= records both the move and the removal, as it does for a
 deadline you change by hand; see [[*What a write records in the LOGBOOK]].

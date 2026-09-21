@@ -7764,8 +7764,11 @@ Returns JSON object:
           on a repeat
   clock - Present only when the transition closed a clock running in
           the heading, which `org-clock-out-when-done' does on a move
-          to a done keyword (object): start, end and duration, the
-          three an org-clock-out reports
+          to a done keyword (object): the start, end and duration of
+          that close.  Both timestamps are bracketed, as a CLOCK line
+          spells an inactive timestamp and as org-clock-add reports
+          them; org-clock-out spells its own start without brackets,
+          so compare the two as instants, not as strings
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
