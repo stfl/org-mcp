@@ -934,9 +934,10 @@ blank takes its default and a required one is refused with
 
 `{}' decodes to nil, which is what null decodes to, so nothing after
 the decoder tells the two apart: `{}' means wherever it stands what
-null means there.  It is the parameter left out here, and on the
-fields whose `after' reads null as the ask to hold nothing it asks
-that, see `org-mcp--value-to-write'.
+null means there.  It is blank here, as null is; in an `after' that
+reads null as the ask to hold nothing it asks that, see
+`org-mcp--value-to-write', and in a `before' map it asserts the line
+is absent, see `org-mcp--assert-property'.
 
 A required parameter never means \"not sent\", which leaves the
 spellings that do mean something free to be read before this is

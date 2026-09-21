@@ -499,8 +499,10 @@ them:
 as nothing at all, which is what it reads =null= as, so nothing past it can
 tell the two apart: ={}= means, wherever it stands, what =null= means there. In
 an =after= on the four fields above it empties the field exactly as the table
-says, and in a property map's =after= it takes that line away; everywhere else
-it is the parameter left out and is refused as one.
+says, and in a property map's =after= it takes that line away. Everywhere else
+it is likewise what =null= is there: in a =before= map, the assertion that the
+drawer carries no such line; in any other required parameter, the parameter
+left out, and refused as one; in an optional one, the default.
 
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
