@@ -4741,7 +4741,7 @@ is where they are chosen between."
      `((sequences . ,(vconcat (nreverse seq-list)))
        (semantics . ,(vconcat (nreverse sem-list)))))))
 
-(defun org-mcp--tool-config-todo (&optional link)
+(defun org-mcp--tool-config-todo (&optional link files)
   "Return the TODO keyword configuration, LINK's file's or the global one.
 LINK, when the call sends one, names the file to answer for: the
 keywords a write to a heading in it is held to, which are the ones
@@ -4756,15 +4756,29 @@ them, which is what Org does with it; see
 Without a link the answer is the global `org-todo-keywords', which is
 what a client asking nothing about a file gets.
 
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.  Sent without a LINK it is refused rather
+than ignored: the answer would be the global one while the call named
+a file, which is the very confusion this parameter is here to end.
+
 MCP Parameters:
   link - Link to the file to answer for, or to a heading in it
-         (string, optional)"
-  (org-mcp--todo-config
-   (or (when-let* ((link (org-mcp--optional-link-given link))
-                   (target (org-mcp--link-target link "link")))
-         (org-mcp--with-org-file (plist-get target :file)
-           (org-mcp--file-todo-sequences)))
-       org-todo-keywords)))
+         (string, optional)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link, and with no link"
+  (let ((link (org-mcp--optional-link-given link)))
+    (when (and (not link) (org-mcp--files-given files))
+      (org-mcp--tool-validation-error
+       "files names where to look up an id: link, and this call sent \
+no link"))
+    (org-mcp--todo-config
+     (or (when-let* ((target
+                      (and link
+                           (org-mcp--link-target link "link" files))))
+           (org-mcp--with-org-file (plist-get target :file)
+             (org-mcp--file-todo-sequences)))
+         org-todo-keywords))))
 
 (defun org-mcp--tool-config-tags ()
   "Return the tag configuration as literal Elisp strings."
@@ -6067,9 +6081,13 @@ A file left naming no sequence at all falls back to the global
 `org-todo-keywords', as Org falls back to it."
   (let* ((alist
           (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO")))
-         (kept (copy-sequence (cdr (assoc "TODO" alist)))))
+         (kept (cdr (assoc "TODO" alist))))
+    ;; One occurrence per line of OWN, not every line equal to it: a
+    ;; setup file may write the same sequence the file writes, and
+    ;; taking both copies out would report the setup file's keywords
+    ;; as about to go when only the file's own line is being replaced.
     (dolist (value own)
-      (setq kept (delete value kept)))
+      (setq kept (cl-remove value kept :count 1 :test #'equal)))
     (let ((sequences
            (or (org-mcp--todo-sequences-of
                 (list
@@ -8256,6 +8274,9 @@ Parameters:
          `#+TYP_TODO:' setting of its own inherits the global
          sequences and is answered with them.
          Omitted, the answer is the global configuration.
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link, and with no link
 
 Returns JSON object with two arrays:
   sequences - Array of TODO keyword sequences, each containing:
