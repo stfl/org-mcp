@@ -6862,6 +6862,9 @@ Returns JSON object:
           keyword was taken off): the one asked for, unless Org
           made another of it, as it does when it repeats a
           repeating entry instead of finishing it
+          before and after are states the field was in and is in,
+          not values to write: send either back as the next call's
+          before, never as its after
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -7161,7 +7164,11 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous SCHEDULED value (string, empty if none)
-  after - New SCHEDULED value (string, empty when taken away)
+  after - The SCHEDULED the headline now carries (string, empty when
+          taken away)
+          before and after are states the field was in and is in,
+          not values to write: send either back as the next call's
+          before, never as its after
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -7206,7 +7213,11 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous DEADLINE value (string, empty if none)
-  after - New DEADLINE value (string, empty when taken away)
+  after - The DEADLINE the headline now carries (string, empty when
+          taken away)
+          before and after are states the field was in and is in,
+          not values to write: send either back as the next call's
+          before, never as its after
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -7371,7 +7382,11 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous priority (string, empty if none)
-  after - New priority (string, empty when taken away)
+  after - The priority the headline now carries (string, empty when
+          taken away)
+          before and after are states the field was in and is in,
+          not values to write: send either back as the next call's
+          before, never as its after
   link - Link to the headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
