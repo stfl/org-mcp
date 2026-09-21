@@ -20,6 +20,12 @@ refused. These settings are file-wide, so the heading adds nothing to the
 question, and a client that holds a heading's link should not have to take it
 apart to ask. The heading itself is never looked up.
 
+The link is resolved the way every other link on the surface is, `files`
+included, so an `id:` link into a file outside Emacs's ID index is reachable
+here as it is from a read or a write. A `files` sent without a `link` is refused
+rather than ignored: the answer would be the global one while the call named a
+file, which is the confusion this tool's `link` exists to end.
+
 A file naming no sequence of its own is answered with the global sequences,
 because that is the set Org gives it. Answering with nothing would describe an
 empty workflow, which is not what such a file has.

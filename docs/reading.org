@@ -562,6 +562,9 @@ a tool returns from it (see [[*The two digests][The two digests]]).
   - =link= (string, optional): the file to answer for, in any of the forms a
     link takes (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Omitted, the answer is the
     global Emacs configuration
+  - =files= (array of strings, optional): Files and directories to look up an
+    =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]. Refused
+    with no =link=, since there is none to look up
 - *Returns:* JSON object with =sequences= and =semantics=
 
 Example response:

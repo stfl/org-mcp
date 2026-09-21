@@ -108,6 +108,25 @@ Its sequence differs from Org's default in every part of the answer
 org-config-todo carries: the keywords, their fast-access keys, the
 logging directives and which keywords are done.")
 
+(defconst org-mcp-test--gtd-keywords-id
+  "4E0C5B2A-7F13-4D8E-9A62-1C3B5D7F9E20"
+  "ID of the heading in `org-mcp-test--content-gtd-keywords-with-id'.")
+
+(defconst org-mcp-test--content-gtd-keywords-with-id
+  (format
+   "#+TITLE: Agile GTD
+#+TODO: TODO(t) NEXT(n) WAIT(w@/!) PROJ(p) | DONE(d!) KILL(k@)
+
+* PROJ Ship the thing
+:PROPERTIES:
+:ID:       %s
+:END:
+** NEXT Draft the plan"
+   org-mcp-test--gtd-keywords-id)
+  "`org-mcp-test--content-gtd-keywords' with an ID on its heading.
+The ID is registered nowhere, so a call reaches it only by naming the
+file it is in.")
+
 (defconst org-mcp-test--content-two-sequences
   "#+TODO: BUG(b) | FIXED(f) WONTFIX(w)
 #+TYP_TODO: Fred Sara Lucy | DONE
@@ -1951,6 +1970,58 @@ shown.  This pins the two answering alike."
       (with-current-buffer (find-file-noselect file)
         (should (equal reported org-todo-keywords-1))
         (should (equal final org-done-keywords))))))
+
+(ert-deftest org-mcp-test-todo-config-file-id-in-files ()
+  "An `id:' link is looked up in the files the call names.
+Emacs's ID index is empty, so the same link without `files' finds
+nothing: the answer can only have come from the file named, which is
+what a client holding a link into an unindexed file needs."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (link (concat "id:" org-mcp-test--gtd-keywords-id)))
+    (org-mcp-test--with-temp-org-files
+        ((file org-mcp-test--content-gtd-keywords-with-id))
+      (org-mcp-test--with-id-tracking (list file) nil
+        (org-mcp-test--call-tool-refused
+         "org-config-todo"
+         `((link . ,link))
+         (concat
+          "\\`Cannot find ID '"
+          (regexp-quote org-mcp-test--gtd-keywords-id)
+          "'")
+         file)
+        (let* ((result
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-config-todo"
+                  `((link . ,link) (files . ,(vector file))))))
+               (sequences (cdr (assoc 'sequences result))))
+          (should (= (length sequences) 1))
+          (org-mcp-test--check-todo-config-sequence
+           (aref sequences 0)
+           "sequence"
+           ["TODO(t)"
+            "NEXT(n)"
+            "WAIT(w@/!)"
+            "PROJ(p)"
+            "|"
+            "DONE(d!)"
+            "KILL(k@)"]))))))
+
+(ert-deftest org-mcp-test-todo-config-files-without-a-link ()
+  "`files' sent without a link is refused rather than ignored.
+There is no link for it to look up, and answering the global question
+to a call that named a file is the confusion the link parameter
+exists to end: the client would read Org's default as that file's
+workflow."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+    (org-mcp-test--with-temp-org-files
+        ((file org-mcp-test--content-gtd-keywords))
+      (org-mcp-test--call-tool-refused
+       "org-config-todo"
+       `((files . ,(vector file)))
+       "\\`files names where to look up an id: link, and this call \
+sent no link\\'"
+       file))))
 
 (ert-deftest org-mcp-test-todo-config-no-link-ignores-files ()
   "Sent no link, org-config-todo answers from the global configuration.
@@ -18370,7 +18441,8 @@ Emacs's index, in an allowed file, and is not looked up there."
   "`files' applies only to an `id:' link; any other link refuses it.
 A `file:' link names its file already, and a custom ID search is no
 `id:' link.  Each is refused, before any file is opened, for a read, a
-write, and as the parent of org-node-create.  A path with an outline
+read of a file's configuration, a write, and as the parent of
+org-node-create.  A path with an outline
 path and a bare ID are no links, and are refused as such with `files'
 as without.  The file stays unchanged.  org-node-create's sibling never
 uses `files', so next to an `id:' parent it may be any link: a
@@ -18406,6 +18478,7 @@ and a bare ID is refused as no link, leaving its file unchanged."
                     "[[#task-slug]]"))
             (dolist (call
                      `(("org-node-text" (link . ,address))
+                       ("org-config-todo" (link . ,address))
                        ("org-node-set-todo"
                         (link . ,address)
                         (before . "TODO")
@@ -26152,6 +26225,7 @@ file:/home/user/notes.org::*Heading, or an id: link"
     "Link type 'file+%s' is not supported: %s"
     "Cannot find ID '%s' in files: %s"
     "files applies only to an id: link: %s"
+    "files names where to look up an id: link, and this call sent no link"
     "Link type '%s' is not supported: send an id: or file: link"
     "Regexp search is not supported in a link: %s"
     "Cannot resolve link %s: %s"
