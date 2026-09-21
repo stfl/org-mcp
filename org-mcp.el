@@ -4547,25 +4547,32 @@ by `org-mcp--validate-properties', which no property value may be."
    (lambda (pair) (cons (car pair) (or (cdr pair) "")))
    (org-mcp--validate-properties map what)))
 
-(defun org-mcp--properties-touched (written asserted)
+(defun org-mcp--properties-touched (written drawer)
   "Return what a property write sets and what it takes away.
 WRITTEN is the (NAME . VALUE) pairs the call writes, \"\" for a
-property it removes, and ASSERTED is what each of those properties
-holds now.  The result is (SET . REMOVED), each the names in the
-order the call gave them, which is what the response reports.
+property it removes, and DRAWER is what `org-mcp--drawer-at-point'
+read before the change.  The result is (SET . REMOVED), each the
+names in the order the call gave them, which is what the response
+reports.
 
-A name whose value is \"\" on a property that holds nothing already
-is in neither list.  The call is accepted — an honest assertion of
-absence is no conflict — and it takes nothing away, so naming it
-among the removed would report a deletion that did not happen."
+A name whose value is \"\" is removed when the drawer carried a line
+for it, and is in neither list when the drawer carried none: the call
+is accepted — an honest assertion of absence is no conflict — and it
+takes nothing away.
+
+The drawer decides, not the value `before\=' asserted.  A line written
+`:EMPTY:\' with nothing after it holds \"\", exactly as a property the
+drawer never carried asserts, so one `before\=' is honest about both
+and cannot tell them apart.  The file can: taking the line away
+changes it and taking away nothing does not, and the response is what
+says which happened."
   (let ((set nil)
         (removed nil))
     (pcase-dolist (`(,name . ,value) written)
       (cond
        ((not (string-empty-p value))
         (push name set))
-       ((not
-         (string-empty-p (alist-get name asserted "" nil #'equal)))
+       ((assoc (upcase name) drawer)
         (push name removed))))
     (cons (nreverse set) (nreverse removed))))
 
@@ -4614,22 +4621,28 @@ changed.  A name the drawer writes twice is refused before any of
 them, see `org-mcp--doubled-drawer-names'.  APPLY is then called at
 the heading, inside the change, and writes the properties.
 ACTION names what the call does, for the call site to read.
-RESPONSE is the fields the call adds to its own response, which each
-tool builds from ASSERTED: the names it touched, and, for a removal,
-the values it destroyed.
+RESPONSE is called with the drawer as it stood before the change and
+returns the fields the call adds to its own response: the names it
+touched, and, for a removal, the values it destroyed.  It takes the
+drawer rather than a ready-made alist because what a write took away
+is a fact about the file and not about the call: only the drawer
+tells a property carried with nothing in it from one the drawer never
+carried.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 This is the whole of what writing properties and removing them
 share, and they differ only in what APPLY does."
   (let* ((target (org-mcp--link-target link files))
-         (file-path (plist-get target :file)))
+         (file-path (plist-get target :file))
+         (drawer nil))
 
-    (org-mcp--modify-and-save file-path action response
+    (org-mcp--modify-and-save file-path action
+                              (funcall response drawer)
       (org-mcp--goto-heading target)
 
-      (let ((drawer (org-mcp--drawer-at-point))
-            (doubled (org-mcp--doubled-drawer-names)))
+      (setq drawer (org-mcp--drawer-at-point))
+      (let ((doubled (org-mcp--doubled-drawer-names)))
         (pcase-dolist (`(,key . ,val) asserted)
           (when (member (upcase key) doubled)
             (org-mcp--tool-blocked-error
@@ -4693,14 +4706,15 @@ MCP Parameters:
           (org-mcp--asserted-property-values
            (org-mcp--property-map-given
             before "before" "assert it holds none")
-           written))
-         (touched (org-mcp--properties-touched written asserted)))
+           written)))
     (org-mcp--write-properties
      link files "set properties"
-     (list
-      (cons 'properties_set (vconcat (car touched)))
-      (cons 'properties_deleted (vconcat (cdr touched)))
-      (cons 'before asserted))
+     (lambda (drawer)
+       (let ((touched (org-mcp--properties-touched written drawer)))
+         (list
+          (cons 'properties_set (vconcat (car touched)))
+          (cons 'properties_deleted (vconcat (cdr touched)))
+          (cons 'before asserted))))
      asserted
      (lambda ()
        (pcase-dolist (`(,key . ,val) written)
@@ -6778,8 +6792,9 @@ Returns JSON object:
           buffer, not on disk; tell the user it needs saving (boolean)
   properties_set - Array of property names that were set
   properties_deleted - Array of property names that were removed;
-          a property an empty after names but the headline did
-          not hold is in neither array
+          a property an empty after names but the drawer did not
+          carry is in neither array.  A line carrying nothing is
+          carried: taking it away is a removal and is named here
   before - JSON object of the values these properties held, one
            entry per name before asserted; nothing in the file
            records a removed value once the call returns

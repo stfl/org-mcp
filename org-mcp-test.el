@@ -4123,6 +4123,26 @@ Org carries the repeater and the delay to the new date.")
   (concat "\\`\\* TODO Simple Task\n" "Task body text\\.\n?\\'")
   "The bare task as it stands, nothing added and nothing taken away.")
 
+(defconst org-mcp-test--content-todo-with-empty-property
+  "* TODO Simple Task
+:PROPERTIES:
+:EMPTY:
+:OWNER:    ada
+:END:
+Task body text."
+  "A task whose drawer carries a line with nothing after the name.
+It reads back as \"\" exactly as a property the drawer does not carry
+asserts, and the two are told apart only by the file.")
+
+(defconst org-mcp-test--pattern-empty-property-removed
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:OWNER: +ada\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after the empty line goes and the drawer keeps OWNER.")
+
 (defconst org-mcp-test--pattern-remove-properties-both
   (concat
    "\\`\\* TODO Task with Two Properties\n" "Some body\\.\n?\\'")
@@ -9147,6 +9167,54 @@ destroy it: nothing is removed."
      "\\`conflict: Property 'EFFORT' mismatch: expected '', \
 found '1:00'\\'"
      test-file)))
+
+(ert-deftest org-mcp-test-set-properties-delete-of-an-empty-property ()
+  "Taking away a line that carries nothing is a write, and is reported.
+A drawer line written with nothing after its name reads back as \"\",
+the same as a property the drawer does not carry, so one `before\=' of
+\"\" is honest about either and cannot say which this is.  The file
+says it: the line goes, which changes the file, so the name belongs
+in `properties_deleted\='.  The sibling test below sends the same call
+against a name the drawer never carried, where nothing goes and
+nothing is reported."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-empty-property))
+    (let* ((link
+            (org-mcp-test--file-link test-file "*Simple Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((EMPTY . "")))
+                (after . ((EMPTY . ""))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'properties_deleted result) ["EMPTY"]))
+      (should (equal (alist-get 'properties_set result) []))
+      (should (equal (alist-get 'before result) '((EMPTY . ""))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-empty-property-removed))))
+
+(ert-deftest org-mcp-test-read-tells-an-empty-property-from-an-absent-one ()
+  "A drawer line carrying nothing is read; one the drawer lacks is not.
+`properties\=' names what the node has, so an empty line arrives under
+its name with \"\" and a name the drawer never carried arrives not at
+all, even when the call asked for it.  That is the distinction a
+`before\=' of \"\" cannot make, and it is why the write surface reads
+the drawer rather than the assertion."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-empty-property))
+    (let* ((link
+            (org-mcp-test--file-link test-file "*Simple Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-read"
+              `((link . ,link)
+                (fields . ["title"])
+                (properties . ["EMPTY" "NEVER_THERE"]))))))
+      (should
+       (equal (alist-get 'properties result) '((EMPTY . "")))))))
 
 (ert-deftest org-mcp-test-set-properties-delete-of-an-absent-property ()
   "Deleting a property that is not there is a no-op success.

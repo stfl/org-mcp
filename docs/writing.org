@@ -256,7 +256,8 @@ One accessor per field serves the read surface and the assertion, so a value a
 read handed you is a value an assertion accepts. It holds in the corners too:
 a SCHEDULED that is a date range is read whole and asserted whole, and a
 property written =:FLAGGED: nil= holds the value ="nil"=, which is what
-asserts it — the empty string says the drawer has no such property at all.
+asserts it — the empty string says the property holds nothing, which a drawer
+line carrying nothing and a property the drawer does not carry both do.
 
 A change that destroys nothing asserts nothing, and that is a fact about the
 call rather than a concession: adding a tag and removing one name what they
@@ -637,10 +638,18 @@ before gives no value for the property 'EFFORT': send "" to assert it holds none
 after gives no value for the property 'EFFORT': send "" to remove it
 #+end_example
 
-Removing a property the headline does not hold is a no-op success. =before= of
+Removing a property the drawer does not carry is a no-op success. =before= of
 =""= on it is an honest assertion, so the call is neither a conflict nor a
 write, and the name appears in neither =properties_set= nor
 =properties_deleted=: nothing was set and nothing was deleted.
+
+A drawer line written =:EMPTY:=, with nothing after the name, asserts the same
+way and is not the same thing. It holds nothing, so =""= is honest about it
+too, but the line is there and taking it away changes the file — so that call
+is a write, and the name comes back under =properties_deleted=. The response
+is what tells the two apart, since =before= cannot; a read tells them apart
+beforehand, because =properties= carries the name of an empty line and leaves
+out a name the drawer does not carry (see [[file:reading.org::*Asking for properties][Asking for properties]]).
 
 Both arrays are always there. A call that only sets carries an empty
 =properties_deleted=, one that only removes an empty =properties_set=, and the
