@@ -163,6 +163,20 @@ than the one the code performs covers nothing: =org-collect-keywords= follows a
 that subtracts a file's own lines from that reading has changed the operation
 the argument was about.
 
+The same distinction governs a claim about the suite rather than about the
+code. "Nothing covers this" is itself universal — /for every test, it does not
+cover this/ — and reading one test does not establish it. The claim is safe
+when it accompanies a defect that reproduces, because a misbehaviour and a
+green suite together entail that nothing pins the behaviour; there is no absent
+test to go looking for and no way to be wrong about it. It is unsafe when it
+accompanies behaviour that is correct: the suite then looks the same whether
+the test exists or not, so the claim rests entirely on having searched, and a
+docstring, a test name or a diff hunk is not a search. A census invites the
+mistake — a docstring that says every write tool but one, a table that runs ten
+of thirteen, and the remaining three pinned in a test of their own because they
+need a digest and do not fit the table. The behaviour is right, so nothing the
+suite prints says otherwise.
+
 Four shapes carry this hazard, and each is recognisable before any of the code
 is written:
 

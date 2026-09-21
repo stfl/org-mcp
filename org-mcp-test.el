@@ -3525,6 +3525,36 @@ NEW-TITLE is the invalid new title that should be rejected."
   "Return the description tools/list gives for the tool ID."
   (alist-get 'description (org-mcp-test--registered-tool id)))
 
+(defun org-mcp-test--node-write-tools-taking-a-link ()
+  "Return the org-node write tools whose `link' names the node, sorted.
+A tool qualifies when tools/list publishes it as not read-only and
+its schema carries a `link' parameter, which together are what it
+means for a call to name the node it changes.  `org-node-create' is
+therefore out: it takes a `parent' and no `link'.
+
+The set is read from the published schema so that a census over it
+stays a census.  A test listing the tools by hand states what its
+author knew, and the tool somebody adds afterwards is the one the
+list does not mention."
+  (sort
+   (delq
+    nil
+    (mapcar
+     (lambda (tool)
+       (let ((name (alist-get 'name tool)))
+         (and (string-prefix-p "org-node-" name)
+              (eq
+               (alist-get
+                'readOnlyHint (alist-get 'annotations tool))
+               :json-false)
+              (assq
+               'link
+               (alist-get
+                'properties (alist-get 'inputSchema tool)))
+              name)))
+     (org-mcp-test--registered-tools)))
+   #'string<))
+
 (defun org-mcp-test--registered-tool-required (id)
   "Return the required parameter names tools/list publishes for tool ID."
   (append
@@ -23277,12 +23307,22 @@ verb acts on that has to be a heading."
 
 (ert-deftest org-mcp-test-write-tools-refuse-a-link-naming-a-file ()
   "Every org-node write tool but set-properties refuses a file's link.
-Ten of the thirteen are here; `org-node-delete', `org-node-archive'
-and `org-node-refile' are in
-`org-mcp-test-node-verbs-refuse-a-link-naming-a-file', which asserts
-the same refusal against a digest they have to get past parameter
-validation first.  The two together are the census this docstring
-claims, and neither is it alone.
+The claim is over every org-node write tool whose `link' parameter
+names the node it acts on, and that set is read from the published
+schema rather than written down here, so a write tool added later
+fails this test until somebody decides what a file's link does to
+it.  `org-node-create' is outside the set: its `parent' takes a
+file's link and means that file's top level, and it has no `link'.
+
+`org-node-delete', `org-node-archive' and `org-node-refile' need a
+digest to get past parameter validation, so each is sent the one a
+read of the file node returned; a row without it would be refused
+for the wrong reason and prove nothing about the link.  They are
+covered again, as a family, in
+`org-mcp-test-node-verbs-refuse-a-link-naming-a-file', which is
+where their own guard is pinned; the overlap is deliberate, because
+a census that sends the reader elsewhere for a third of itself is
+one nobody checks.
 
 A file node is written where Org has a file construct to write, and
 that is its property drawer.  A TODO keyword, a priority cookie, a
@@ -23297,21 +23337,34 @@ headline, and a file's body is the preamble those keywords stand in,
 so replacing it against a digest would rewrite the settings of a file
 with nothing in the call naming one."
   (org-mcp-test--with-verbs-file test-file
-    (let ((file-link (concat "file:" test-file)))
-      (pcase-dolist
-          (`(,tool . ,params)
-           '(("org-node-set-todo" (before . "") (after . "TODO"))
-             ("org-node-set-title" (before . "x") (after . "y"))
-             ("org-node-set-content" (before . "") (after . "x"))
-             ("org-node-set-scheduled"
-              (before . "") (after . "2026-03-27"))
-             ("org-node-set-deadline"
-              (before . "") (after . "2026-03-27"))
-             ("org-node-set-priority" (before . "") (after . "A"))
-             ("org-node-add-tags" (after . "work"))
-             ("org-node-remove-tags" (after . "work"))
-             ("org-node-set-tags" (before . []) (after . ["work"]))
-             ("org-node-add-note" (note . "a note"))))
+    (let* ((file-link (concat "file:" test-file))
+           (digest (org-mcp-test--verbs-digest file-link))
+           (rows
+            `(("org-node-set-todo" (before . "") (after . "TODO"))
+              ("org-node-set-title" (before . "x") (after . "y"))
+              ("org-node-set-content" (before . "") (after . "x"))
+              ("org-node-set-scheduled"
+               (before . "") (after . "2026-03-27"))
+              ("org-node-set-deadline"
+               (before . "") (after . "2026-03-27"))
+              ("org-node-set-priority" (before . "") (after . "A"))
+              ("org-node-add-tags" (after . "work"))
+              ("org-node-remove-tags" (after . "work"))
+              ("org-node-set-tags" (before . []) (after . ["work"]))
+              ("org-node-add-note" (note . "a note"))
+              ("org-node-delete" (before . ,digest))
+              ("org-node-archive" (before . ,digest))
+              ("org-node-refile"
+               (before . ,digest)
+               (parent
+                . ,(org-mcp-test--file-link test-file "*Home"))))))
+      (should
+       (equal
+        (sort (mapcar #'car rows) #'string<)
+        (remove
+         "org-node-set-properties"
+         (org-mcp-test--node-write-tools-taking-a-link))))
+      (pcase-dolist (`(,tool . ,params) rows)
         (org-mcp-test--call-tool-refused
          tool
          (cons (cons 'link file-link) params)
