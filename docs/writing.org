@@ -289,8 +289,8 @@ the property — is a fact about the node, and it is yours to act on.
 * What a blank parameter means
 
 A blank parameter is one the call does not send. Clients fill a parameter they
-are not using with an empty value, so =null=, =false=, =[]= and ={}= all read
-that way, and what follows depends only on whether the parameter was required:
+are not using with an empty value, so =false=, =[]= and ={}= all read that way,
+and what follows depends only on whether the parameter was required:
 
 - *Optional and blank* is how you leave it out. =files=, =depth= and =fields=
   fall back to their defaults, and the optional parameters of
@@ -304,22 +304,40 @@ that way, and what follows depends only on whether the parameter was required:
 Missing required parameter: after
 #+end_example
 
-*On a required parameter that carries text, =""= is not blank.* It is the value
-the field takes for /nothing/, in the field's own vocabulary, and a call has to
-type it. A required parameter never means "not sent", which is what leaves =""=
-free to mean something: it is how a =before= asserts that a headline has no
-deadline, and it is how an =after= takes a value away.
+*=null= in an =after= is the ask for the field to hold nothing.* It is JSON's
+own word for no value, and it is the one spelling that takes a value away. Four
+fields have no value of their own that means nothing — a TODO keyword, a
+SCHEDULED, a DEADLINE and a priority are each a value or an absence, with
+nothing in between — so =null= is how you empty them:
 
 | To take away   | The call                  | Spelled                   |
 |----------------+---------------------------+---------------------------|
-| a TODO keyword | =org-node-set-todo=       | =after: ""=               |
-| a SCHEDULED    | =org-node-set-scheduled=  | =after: ""=               |
-| a DEADLINE     | =org-node-set-deadline=   | =after: ""=               |
-| a priority     | =org-node-set-priority=   | =after: ""=               |
+| a TODO keyword | =org-node-set-todo=       | =after: null=             |
+| a SCHEDULED    | =org-node-set-scheduled=  | =after: null=             |
+| a DEADLINE     | =org-node-set-deadline=   | =after: null=             |
+| a priority     | =org-node-set-priority=   | =after: null=             |
 | a property     | =org-node-set-properties= | that name's value =""=    |
 | the body       | =org-node-set-content=    | =after: ""=               |
 | a tag          | =org-node-remove-tags=    | the tags named in =after= |
 | every own tag  | =org-node-set-tags=       | =after: []=               |
+
+*=""= is a value, not a way of saying nothing.* It is accepted exactly where
+the field has an empty value: an empty body is a body, and a property line can
+stand present and empty. On the four fields above it is neither a value nor an
+ask, and it is refused with the message that names what the field does take:
+
+#+begin_example
+Invalid date format '' - expected YYYY-MM-DD or YYYY-MM-DD HH:MM
+Priority must be a single character, got ''
+Invalid TODO state: '' - valid states: TODO, IN-PROGRESS, DONE
+#+end_example
+
+A =before= is different, and deliberately so. It keeps =""= for /there was no
+value/ on every field, because an assertion names a *state the field was in* and
+"empty" is one of those states, while an =after= names a *value to put there*
+and a field with no empty value has none to name. So =before: ""= and
+=after: ""= stop meaning the same thing on those four fields. That is the point:
+only one of the two can name a state the field cannot hold.
 
 Every one of those removals is a required =before= away from being unguarded.
 You say what you believe the field holds, and the call is refused when the file
@@ -333,8 +351,8 @@ The tag delta is not on that list by accident. =org-node-remove-tags= names the
 tags it takes and leaves every other tag alone, so it destroys nothing unseen
 and asserts nothing (see [[*Three tools for one tag set]]); emptying the field is
 =org-node-set-tags= with =after: []=, which asserts the whole prior set. A tag
-set takes =[]= for the empty set the way a text field takes =""= for no value,
-and for the same reason.
+set has an empty value and spells it =[]=, the way a body spells its empty value
+="".
 
 * Write tools
 
@@ -343,7 +361,7 @@ and for the same reason.
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
-  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =""= takes the keyword off, so the headline stops being a task; =null= and =false= are the parameter left out and are refused
+  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after= and the link to the updated headline
@@ -405,7 +423,7 @@ Example:
 {
   "link": "file:/home/user/org/projects.org::*Project Alpha",
   "before": "IN-PROGRESS",
-  "after": ""
+  "after": null
 }
 
 # State mismatch error:
@@ -738,7 +756,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =""= takes the timestamp away, guarded by =before=; =null= and =false= are the parameter left out and are refused
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -786,7 +804,7 @@ Example:
 {
   "link": "id:abc-123",
   "before": "<2026-03-27 Fri>",
-  "after": ""
+  "after": null
 }
 
 # Success response for that call:
@@ -809,7 +827,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
-  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =""= takes the timestamp away, guarded by =before=; =null= and =false= are the parameter left out and are refused
+  - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -850,7 +868,7 @@ Example:
 {
   "link": "id:abc-123",
   "before": "<2026-04-15 Wed>",
-  "after": ""
+  "after": null
 }
 
 #+end_src
@@ -1028,7 +1046,7 @@ Example:
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =before= (string, required): the priority character the headline carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority
-  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. =""= takes the priority away, guarded by =before=; =null= and =false= are the parameter left out and are refused
+  - =after= (string, required): Single character in the configured range (default ="A"= to ="C"=). Use =org-config-priority= to check valid range. =null= takes the priority away, guarded by =before=. =""= is no character and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — a blank =after= among it (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
@@ -1062,7 +1080,7 @@ Example:
 {
   "link": "id:abc-123",
   "before": "A",
-  "after": ""
+  "after": null
 }
 
 # The priority has moved on since the read:

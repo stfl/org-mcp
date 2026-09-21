@@ -325,6 +325,37 @@ what the client sent rather than the field behind it."
      "%s must be a string, \"\" for no value: %S"
      name value))))
 
+(defun org-mcp--value-to-write (value name)
+  "Return VALUE, the required parameter NAME naming what to write.
+A string is the value to write.  JSON null is nil here, and asks for
+the field to hold nothing: null is JSON\='s word for no value, and
+these fields have none of their own.  \"\" is not a timestamp, a
+priority character or a TODO keyword, so it passes through as the
+string it is and the field\='s own validator refuses it, naming what
+the field does accept.
+
+Every other blank, see `org-mcp--blank-param-p', is a parameter the
+client filled but did not send, and is refused as one: false is a
+boolean and [] is an array, and neither is a way of saying nothing.
+
+This is the value side of `org-mcp--text-param-given', which reads a
+`before'.  The two differ on purpose.  A `before' names a state the
+field was in, and its states are the values plus the empty one, which
+\"\" names.  An `after' names a value to put in the field, and a
+field with no empty value has no such value to name — so the two stop
+being spelled alike exactly where the field stops having one."
+  (cond
+   ((null value)
+    nil)
+   ((stringp value)
+    value)
+   ((org-mcp--blank-param-p value)
+    (org-mcp--missing-param-error name))
+   (t
+    (org-mcp--tool-validation-error
+     "%s must be a string, or null to take the value away"
+     name))))
+
 (defun org-mcp--assert-before (before found context)
   "Refuse the call unless FOUND is the value BEFORE asserts.
 FOUND is what the heading holds, in the form a read hands back, and
@@ -839,12 +870,14 @@ false, \"\", [] and {}, which decodes to nil, all read that way: an
 optional parameter that is blank takes its default and a required
 one is refused with `org-mcp--missing-param-error'.
 
-A required parameter never means \"not sent\", which leaves each
-field free to name its own emptiness, and those are read before this
-is asked: a parameter carrying text takes \"\" for no value, which is
-how a `before' asserts a field held nothing and how an `after' takes
-one away, see `org-mcp--text-param-given'; a tag set takes [] for
-the empty set, see `org-mcp--tag-set-given'."
+A required parameter never means \"not sent\", which leaves the
+spellings that do mean something free to be read before this is
+asked.  A `before' takes \"\" for the state of a field that held
+nothing, see `org-mcp--text-param-given'.  An `after' takes null for
+\"make this nothing\", see `org-mcp--value-to-write', and \"\" only
+where the field has an empty value of its own — a body, a property
+line, and the tag set, which spells its empty value [], see
+`org-mcp--tag-set-given'."
   (member value '(nil "" [] :json-false)))
 
 (defun org-mcp--boolean-param (value name)
@@ -3213,18 +3246,16 @@ names no one of them, so delete the one you mean in Emacs"
       (org-mcp--clock-describe-ends matches)))))
 
 (defun org-mcp--validate-todo-state (state)
-  "Validate STATE is a valid TODO keyword, or \"\" for none.
+  "Validate STATE is a valid TODO keyword.
 Reads the buffer-local `org-todo-keywords-1', which Org populates
 from the user customization merged with any per-file `#+TODO:'
 directives.  Must be called from within an Org-mode buffer (e.g.
 inside `org-mcp--modify-and-save').
 
-\"\" is the state of a heading that is not a task, which is a state
-of the field like any other: it is what a read returns for such a
-heading and what an assertion sends back, so it is also what a call
-writes to make a heading one."
-  (unless (or (string-empty-p state)
-              (member state org-todo-keywords-1))
+Every STATE reaching here is a keyword the call asks for, so \"\" is
+refused like any other text that names no keyword: a heading with no
+keyword is asked for with null, which never reaches this."
+  (unless (member state org-todo-keywords-1)
     (org-mcp--tool-validation-error
      "Invalid TODO state: '%s' - valid states: %s"
      state (mapconcat #'identity org-todo-keywords-1 ", "))))
@@ -3274,6 +3305,8 @@ and not a place for side effects."
 
 (defun org-mcp--set-todo-state (state &optional note)
   "Set the TODO state of the heading at point to STATE, recording NOTE.
+STATE is the keyword to write, or nil to leave the heading with none,
+so that it stops being a task.
 Returns the state Org left the heading in, which is read back rather
 than assumed: `org-auto-repeat-maybe' resets a repeating entry moved
 to a done keyword to its not-done keyword, and `REPEAT_TO_STATE'
@@ -3296,15 +3329,18 @@ still recorded, as the state change org-mcp writes of its own accord."
       (org-mcp--tool-blocked-error
        "TODO state change from %s to %s blocked%s"
        (or previous "(no state)")
-       state
+       (or state "(no state)")
        (if (stringp blocker)
            (format " (by %s)" blocker)
          "")))
     (unless (org-mcp--logging-note note
-              (org-todo state))
+              ;; `org-todo' cycles to the next keyword when its
+              ;; argument is nil, so the ask for no keyword is spelled
+              ;; as the `none' Org names it, never as a missing one.
+              (org-todo (or state 'none)))
       (when (org-string-nw-p note)
         (org-mcp--insert-log-note note 'state
-                                  state
+                                  (or state "")
                                   (or previous ""))))
     ;; Read back through the accessor an assertion compares against,
     ;; so the state this response reports is one the client can send
@@ -4017,7 +4053,7 @@ is written; see `org-mcp--set-todo-state'.
 BEFORE is the TODO state the headline is asserted to hold, \"\" for
 a headline that has none.  A headline in any other state is a
 conflict and nothing is written.
-AFTER is the new TODO state to set, or \"\" to take the keyword off
+AFTER is the new TODO state to set, or null to take the keyword off
 so that the headline stops being a task.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
@@ -4034,8 +4070,9 @@ MCP Parameters:
            Send \"\" to assert that it has no TODO keyword; any
            other state is refused and nothing is written
   after - New TODO state (must be in `org-todo-keywords')
-          Empty string takes the keyword off, so the heading stops
-          being a task; null or false is the parameter left out
+          null takes the keyword off, so the heading stops being a
+          task; \"\" names no keyword and is refused, and false is
+          the parameter left out
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
@@ -4044,7 +4081,7 @@ MCP Parameters:
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
   (org-mcp--assert-field-value before "State")
-  (setq after (org-mcp--text-param-given after "after"))
+  (setq after (org-mcp--value-to-write after "after"))
 
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
@@ -4055,7 +4092,8 @@ MCP Parameters:
                                 (after . ,actual-new))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
-      (org-mcp--validate-todo-state after)
+      (when after
+        (org-mcp--validate-todo-state after))
       (org-mcp--goto-heading target)
 
       ;; Capture actual previous state
@@ -4851,7 +4889,7 @@ siblings — naming the field, the metadata key it is read through and
 how to write and remove it.
 BEFORE is what the call believes the field holds, checked before
 anything is written, so a refused call leaves the file as it was.
-AFTER is the value to put there, or \"\" to take the field away.
+AFTER is the value to put there, or nil to take the field away.
 ACTION names what the call does, for the call site to read.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -4862,9 +4900,9 @@ accessor a client\='s next `before' will be compared against, so the
 response is the record of what the call destroyed.
 
 A field that holds nothing already is left alone rather than written
-to: an empty AFTER on it asks for what is there, and Org\='s removers
-are written for a value that exists — `org-priority' refuses a
-heading with no cookie to take off."
+to: a nil AFTER on it asks for what is there, and Org\='s removers are
+written for a value that exists — `org-priority' refuses a heading
+with no cookie to take off."
   (let* ((target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          (key (plist-get field :key))
@@ -4884,36 +4922,33 @@ heading with no cookie to take off."
       ;; `org-log-reschedule' and `org-log-redeadline' ask for; it is
       ;; written here rather than left waiting on `post-command-hook'.
       (org-mcp--logging-note nil
-        (if (string-empty-p after)
-            (unless (string-empty-p previous)
-              (funcall (plist-get field :remove) previous))
-          (funcall (plist-get field :write) after)))
+        (if after
+            (funcall (plist-get field :write) after)
+          (unless (string-empty-p previous)
+            (funcall (plist-get field :remove) previous))))
       (setq current (org-mcp--asserted-value key)))))
 
 (defun org-mcp--date-to-write (value name)
-  "Return VALUE, the date parameter NAME of a call, validated.
-An ISO date string is a date to write.  \"\" is the field\='s own
-vocabulary for no date, typed deliberately, and takes the timestamp
-away; the required `before' says what that destroys.
-
-Every other blank, see `org-mcp--blank-param-p', is the parameter
-left out rather than a date, because that is what a client fills a
-parameter it is not using with; `org-mcp--text-param-given' draws
-the line."
-  (let ((date (org-mcp--text-param-given value name)))
-    (unless (string-empty-p date)
+  "Return VALUE, the date parameter NAME of a call, validated, or nil.
+An ISO date string is a date to write.  Null is nil, and takes the
+timestamp away; the required `before' says what that destroys.
+\"\" is not a date and is refused as one, because a timestamp has no
+empty value to press into service as a command; see
+`org-mcp--value-to-write'."
+  (let ((date (org-mcp--value-to-write value name)))
+    (when date
       (org-mcp--validate-date-string date))
     date))
 
 (defun org-mcp--priority-to-write (value name)
-  "Return VALUE, the priority parameter NAME of a call, validated.
+  "Return VALUE, the priority parameter NAME of a call, validated, or nil.
 One character within `org-priority-highest' and
-`org-priority-lowest' is a priority to write.  \"\" takes the
-priority away, guarded by the required `before', and every other
-blank is the parameter left out; see `org-mcp--date-to-write' for
+`org-priority-lowest' is a priority to write.  Null is nil, and
+takes the priority away, guarded by the required `before'.  \"\" is
+no character and is refused as one; see `org-mcp--date-to-write' for
 the same line drawn on a date."
-  (let ((priority (org-mcp--text-param-given value name)))
-    (unless (string-empty-p priority)
+  (let ((priority (org-mcp--value-to-write value name)))
+    (when priority
       (unless (= (length priority) 1)
         (org-mcp--tool-validation-error
          "Priority must be a single character, got '%s'"
@@ -4931,7 +4966,7 @@ the same line drawn on a date."
   "Move SCHEDULED on the headline LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is an ISO date string, or \"\" to take the timestamp away.
+AFTER is an ISO date string, or null to take the timestamp away.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4948,8 +4983,9 @@ MCP Parameters:
            Empty string asserts the heading has no SCHEDULED
   after - ISO date string (required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string takes the timestamp away, guarded by
-          before; null or false is the parameter left out
+          null takes the timestamp away, guarded by before;
+          \"\" is no date and is refused, and false is the
+          parameter left out
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -4966,7 +5002,7 @@ MCP Parameters:
   "Move DEADLINE on the headline LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is an ISO date string, or \"\" to take the timestamp away.
+AFTER is an ISO date string, or null to take the timestamp away.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -4983,8 +5019,9 @@ MCP Parameters:
            Empty string asserts the heading has no DEADLINE
   after - ISO date string (required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string takes the timestamp away, guarded by
-          before; null or false is the parameter left out
+          null takes the timestamp away, guarded by before;
+          \"\" is no date and is refused, and false is the
+          parameter left out
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -5287,7 +5324,7 @@ MCP Parameters:
   "Move the priority of the headline LINK names from BEFORE to AFTER.
 BEFORE is the priority character the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
-AFTER is a single-character string, or \"\" to take the priority
+AFTER is a single-character string, or null to take the priority
 away.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -5304,8 +5341,9 @@ MCP Parameters:
            Empty string asserts the heading has no priority
   after - Priority character (string, required)
           Must be within org-priority-highest to org-priority-lowest
-          Empty string takes the priority away, guarded by before;
-          null or false is the parameter left out
+          null takes the priority away, guarded by before; \"\"
+          is no character and is refused, and false is the
+          parameter left out
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -6602,7 +6640,7 @@ Use cases:
     :id "org-node-set-todo"
     :description
     (concat
-     "Move an Org headline's TODO state, or take it off.  An empty
+     "Move an Org headline's TODO state, or take it off.  A null
 after leaves the headline with no keyword, so it stops being a
 task.  The headline title, tags and properties are preserved
 either way.
@@ -6616,7 +6654,10 @@ Parameters:
            Any other state is refused as a conflict and nothing is
            written; read the headline again and re-plan
   after - New TODO state to set (string, required)
-          Must be valid keyword from org-todo-keywords
+          Must be a valid keyword from org-todo-keywords
+          null takes the keyword off, so the headline stops being
+          a task; \"\" is no keyword and is refused as one, and
+          false is the parameter left out
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
@@ -6630,14 +6671,18 @@ Example - starting a task:
 Example - giving a headline its first TODO keyword:
   {\"link\": \"id:abc-123\", \"before\": \"\", \"after\": \"TODO\"}
 
+Example - taking the keyword off, so it stops being a task:
+  {\"link\": \"id:abc-123\", \"before\": \"TODO\", \"after\": null}
+
 Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - The TODO state the headline held (string, empty for none)
-  after - The TODO state Org left it in (string): the one asked for,
-          unless Org made another of it, as it does when it repeats
-          a repeating entry instead of finishing it
+  after - The TODO state Org left it in (string, empty when the
+          keyword was taken off): the one asked for, unless Org
+          made another of it, as it does when it repeats a
+          repeating entry instead of finishing it
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
@@ -6915,9 +6960,9 @@ Parameters:
            Empty string asserts the headline has no SCHEDULED
   after - ISO date string (string, required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string takes the timestamp away, guarded by
-          what before says the headline carries; null or false
-          names no date and is refused as a parameter left out
+          null takes the timestamp away, guarded by what before
+          says the headline carries.  \"\" is not a date and is
+          refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -6958,9 +7003,9 @@ Parameters:
            Empty string asserts the headline has no DEADLINE
   after - ISO date string (string, required)
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
-          Empty string takes the timestamp away, guarded by
-          what before says the headline carries; null or false
-          names no date and is refused as a parameter left out
+          null takes the timestamp away, guarded by what before
+          says the headline carries.  \"\" is not a date and is
+          refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -7123,9 +7168,9 @@ Parameters:
   after - Priority character (string, required)
           Must be in the configured range (default \"A\" to \"C\")
           Use org-config-priority to check the valid range
-          Empty string takes the priority away, guarded by what
-          before says the headline carries; null or false names
-          no priority and is refused as a parameter left out
+          null takes the priority away, guarded by what before
+          says the headline carries.  \"\" is no character and is
+          refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
