@@ -4792,6 +4792,136 @@ level 3 sibling (via its ID)."
        test-file
        org-mcp-test--regex-todo-with-body))))
 
+(defconst org-mcp-test--regex-todo-without-body "\\`\\* TODO Task\n\\'"
+  "The whole file after a create that writes a heading and no body.")
+
+(ert-deftest org-mcp-test-node-create-publishes-its-required-parameters ()
+  "org-node-create asks for a title, a state and a place, and nothing else.
+The schema is where a client learns what a call has to carry, and
+the page tells a reader the same, so the two are pinned together
+here.  A creation destroys nothing, so nothing is guarded by
+insisting the caller name a body, a tag or a property it does not
+want."
+  (org-mcp-test--with-enabled
+    (should
+     (equal (org-mcp-test--registered-tool-required "org-node-create")
+            '("title" "todo" "parent")))
+    (should
+     (equal
+      (sort
+       (copy-sequence
+        (org-mcp-test--registered-tool-properties "org-node-create"))
+       #'string<)
+      '("content"
+        "files"
+        "parent"
+        "previous_sibling"
+        "properties"
+        "tags"
+        "title"
+        "todo")))))
+
+(ert-deftest org-mcp-test-node-create-writes-no-body-for-every-blank ()
+  "A create that names no body writes the heading and nothing under it.
+`content\=' is optional, so leaving it out and every spelling a client
+fills an unused parameter with mean one thing: a new heading has no
+body until something is written to it.  The file holds the heading
+alone each time, and the response reports the same node."
+  (dolist (params
+           '(()
+             ((content . nil))
+             ((content . ""))
+             ((content . :json-false))
+             ((content . []))))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . "Task")
+                 (todo . "TODO")
+                 (parent . ,(concat "file:" test-file))
+                 ,@params)))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'title result) "Task"))
+        (should
+         (equal (alist-get 'link result)
+                (org-mcp-test--file-link test-file "*Task"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-todo-without-body))))
+
+(ert-deftest org-mcp-test-node-create-refuses-a-content-that-is-not-a-string ()
+  "A create is refused when `content\=' is not text, and writes nothing.
+The body is inserted and checked as text, so a number or an array
+would reach that as a wrong type and cross the MCP boundary as an
+internal error, which names no parameter.  The refusal names it, and
+the file is left as it was."
+  (dolist (case '((42 . "42") (["a"] . "\\[\"a\"\\]")))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . "Task")
+         (todo . "TODO")
+         (content . ,(car case))
+         (parent . ,(concat "file:" test-file)))
+       (concat "\\`content must be a string: " (cdr case) "\\'")
+       test-file))))
+
+(defconst org-mcp-test--content-create-examples
+  "* Projects\n** Draft the plan\n* Plan the kickoff\n"
+  "A project with one child, and a second top-level heading after it.
+The before image for the two examples docs/writing.org gives for
+org-node-create, each of which names a sibling and no body.")
+
+(defconst org-mcp-test--regex-create-examples
+  (concat
+   "\\`\\* Projects\n"
+   "\\*\\* Draft the plan\n"
+   "\\*\\* TODO Review the budget\n"
+   "\\* TODO Plan the offsite\n"
+   "\\* Plan the kickoff\n"
+   "\\'")
+  "The whole file after both documented examples have run.
+The child lands after its sibling, and the top-level heading after
+the sibling's whole subtree.")
+
+(ert-deftest org-mcp-test-node-create-runs-the-documented-examples ()
+  "The two examples on the page name no body, and each creates a node.
+Each is a call a reader copies, so each runs here as it is written:
+a child after a sibling, then a top-level heading after a top-level
+heading and its subtree."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-create-examples
+    (dolist (case
+             (list
+              (list "Review the budget"
+                    (org-mcp-test--file-link test-file "*Projects")
+                    (org-mcp-test--file-link
+                     test-file "*Draft the plan"))
+              (list "Plan the offsite"
+                    (concat "file:" test-file)
+                    (org-mcp-test--file-link test-file "*Projects"))))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . ,(nth 0 case))
+                 (todo . "TODO")
+                 (parent . ,(nth 1 case))
+                 (previous_sibling . ,(nth 2 case)))))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'title result) (nth 0 case)))
+        (should
+         (equal (alist-get 'link result)
+                (org-mcp-test--file-link
+                 test-file (concat "*" (nth 0 case)))))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--regex-create-examples)))
+
 (ert-deftest org-mcp-test-add-todo-body-with-same-level-headline ()
   "Test that adding TODO with body containing same-level headline is rejected."
   (org-mcp-test--assert-add-todo-rejects-body-headline

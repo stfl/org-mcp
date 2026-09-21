@@ -3750,9 +3750,9 @@ MCP Parameters:
 (defun org-mcp--tool-node-create
     (title
      todo
-     content
      parent
      &optional
+     content
      tags
      previous_sibling
      properties
@@ -3765,7 +3765,10 @@ TODO is the TODO state from `org-todo-keywords'.  A state Org
 vetoes for the new heading, such as a done keyword under an ordered
 parent whose earlier siblings are unfinished, is refused and no
 heading is added; see `org-mcp--set-todo-state'.
-CONTENT is the optional body text.
+CONTENT is the optional body text.  A creation destroys nothing, and
+a body is the one thing a new heading plausibly has none of, so a
+blank CONTENT, see `org-mcp--blank-param-p', writes no body, as
+leaving it out does.  Anything else has to be text.
 PARENT is the link to the parent item, or to a whole file for
 its top level.
 TAGS is an optional single tag string or list of tag strings.
@@ -3782,7 +3785,6 @@ up in; see `org-mcp--link-target'.  It applies to PARENT only.
 MCP Parameters:
   title - The headline text
   todo - TODO state from `org-todo-keywords'
-  content - Optional body text
   parent - Link to the parent item
            Formats:
              - id:{id}
@@ -3792,6 +3794,8 @@ MCP Parameters:
              - id:{id} of the file-level property drawer (top level
                of the file)
              - any of these as [[link]] or [[link][description]]
+  content - Optional body text; null, false and \"\" write no body,
+            as leaving it out does
   tags - Tags to add (optional, single string or array of strings)
   previous_sibling - Link to the sibling to insert after (optional),
                      a direct child of the parent, or a top-level
@@ -3818,6 +3822,17 @@ MCP Parameters:
   (org-mcp--validate-headline-title title)
   (let*
       ((tag-list (org-mcp--validate-and-normalize-tags tags))
+       ;; The body is inserted and checked as text, so a number, an
+       ;; object or a non-empty array would reach that as a wrong type
+       ;; and cross the MCP boundary as an internal error, which names
+       ;; no parameter and tells a client nothing it can act on.
+       (body
+        (unless (org-mcp--blank-param-p content)
+          (unless (stringp content)
+            (org-mcp--tool-validation-error
+             "content must be a string: %S"
+             content))
+          content))
        (property-list
         (unless (org-mcp--blank-param-p properties)
           (org-mcp--validate-properties properties "properties")))
@@ -3858,9 +3873,9 @@ MCP Parameters:
                  1)))
 
           ;; Validate body content if provided
-          (when content
-            (org-mcp--validate-body-no-headlines content target-level)
-            (org-mcp--validate-body-no-unbalanced-blocks content)))
+          (when body
+            (org-mcp--validate-body-no-headlines body target-level)
+            (org-mcp--validate-body-no-unbalanced-blocks body)))
 
         ;; Insert the new heading
         (org-mcp--insert-heading title parent-level)
@@ -3871,11 +3886,11 @@ MCP Parameters:
           (org-set-tags tag-list))
 
         ;; Add body if provided
-        (if content
+        (if body
             (progn
               (end-of-line)
-              (insert "\n" content)
-              (unless (string-suffix-p "\n" content)
+              (insert "\n" body)
+              (unless (string-suffix-p "\n" body)
                 (insert "\n"))
               ;; Move back to the heading, where the properties go
               (org-back-to-heading t))
@@ -6341,6 +6356,7 @@ Parameters:
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
   content - Body content under the headline (string, optional)
+            Left out, or null, false or \"\", writes no body
             Cannot contain headlines at same or higher level as new
             item
             If #+BEGIN/#+END blocks are present, they must be balanced
