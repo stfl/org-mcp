@@ -3385,6 +3385,22 @@ here."
          'clock
          (lambda (clock) (and (funcall predicate clock) clock)))))))
 
+(defun org-mcp--clock-open-start ()
+  "Return the start time of the open CLOCK line of the heading at point.
+Nil when the heading has none.  Point must be at a heading and is not
+moved.
+
+This is the reading taken before a write that Org may close a clock
+on its way through, so that afterwards the line can be found again by
+the one thing about it that does not change; see
+`org-mcp--clock-closed-moves'."
+  (when-let* ((open
+               (org-mcp--clock-entries-matching
+                (lambda (clock)
+                  (eq
+                   (org-element-property :status clock) 'running)))))
+    (org-mcp--clock-element-start-time (car open))))
+
 (defun org-mcp--clock-entries-starting-at (start-time)
   "Return the CLOCK elements of the heading at point starting at START-TIME.
 Point must be at a heading and is not moved.  START-TIME is an Emacs
@@ -3398,6 +3414,37 @@ caller's to decide."
      (lambda (clock)
        (= (float-time (org-mcp--clock-element-start-time clock))
           target)))))
+
+(defun org-mcp--clock-closed-moves (start)
+  "Return the response field for a clock START the call closed, or nil.
+START is `org-mcp--clock-open-start' read before the write, and nil
+when no clock was running in the heading, which is most calls.  Point
+must be at the heading and is not moved.
+
+The field is there only when this call closed that clock, so its
+presence is the statement — the shape `org-mcp--planning-moves' uses
+for a planning field a call moved without being asked to.  It reports
+what `org-clock-out' reports, because a client that was clocking the
+task it has just finished is owed what the call it did not have to
+make would have told it.
+
+Org closes the line in place, so it is found again by its start.  Two
+lines of one heading may share a start, and the last of them is taken:
+Org appends, so the one a clock was running in is the later."
+  (when-let* ((start)
+              (closed
+               (seq-filter
+                #'org-mcp--clock-element-end-time
+                (org-mcp--clock-entries-starting-at start)))
+              (end
+               (org-mcp--clock-element-end-time (car (last closed)))))
+    `((clock
+       (start . ,(org-mcp--clock-format-timestamp start))
+       (end . ,(org-mcp--clock-format-timestamp end))
+       (duration
+        .
+        ,(org-mcp--clock-duration-string
+          (float-time (time-subtract end start))))))))
 
 (defun org-mcp--clock-describe-ends (clocks)
   "Describe CLOCKS by the ends that tell entries of one start apart.
@@ -4600,6 +4647,7 @@ MCP Parameters:
          (file-path (plist-get target :file))
          (actual-prev nil)
          (actual-new nil)
+         (clock-start nil)
          (planning-prev nil)
          (planning-new nil))
     (org-mcp--modify-and-save file-path "update"
@@ -4607,7 +4655,9 @@ MCP Parameters:
                                `((before . ,actual-prev)
                                  (after . ,actual-new))
                                (org-mcp--planning-moves
-                                planning-prev planning-new))
+                                planning-prev planning-new)
+                               (org-mcp--clock-closed-moves
+                                clock-start))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
       (when after
@@ -4620,6 +4670,12 @@ MCP Parameters:
       ;; way to the keyword the call asked for; see
       ;; `org-mcp--planning-moves'.
       (setq planning-prev (org-mcp--planning-at-point))
+      ;; A clock running in this heading is the other thing the
+      ;; keyword can take with it: `org-clock-out-when-done' closes
+      ;; one when the heading reaches a done keyword.  The start is
+      ;; read here because afterwards it is what finds the line again;
+      ;; see `org-mcp--clock-closed-moves'.
+      (setq clock-start (org-mcp--clock-open-start))
 
       ;; Check current state matches
       (unless (string= actual-prev before)
@@ -7672,6 +7728,10 @@ Returns JSON object:
           CLOSED is reported like the other two and asserted like
           neither: Org writes it on a done transition and clears it
           on a repeat
+  clock - Present only when the transition closed a clock running in
+          the heading, which `org-clock-out-when-done' does on a move
+          to a done keyword (object): start, end and duration, the
+          three an org-clock-out reports
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

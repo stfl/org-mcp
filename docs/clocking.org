@@ -320,6 +320,19 @@ Example response:
 }
 #+end_src
 
+* A clock can stop without a clock tool
+
+=org-clock-out= is not the only call that closes a clock. Moving a headline to
+a done keyword does too, because =org-clock-out-when-done= is on by default:
+=org-node-set-todo= finishes the task and Org stops the clock running in it,
+exactly as it does for the =C-c C-t= you would have typed. A repeating task is
+the same, even though it comes back in a not-done keyword.
+
+That call reports the close in a =clock= field of its own response, so a client
+finishing the task it was clocking learns the =start=, =end= and =duration=
+without calling =org-clock-out=. What the field holds and when it is there is
+in [[file:writing.org::*A done keyword can close the clock][A done keyword can close the clock]].
+
 * Configuring Clock Tracking
 ** =org-mcp-clock-continuous-threshold=
 

@@ -4776,6 +4776,179 @@ what these call asks nothing at all."
                  (before . ,(org-mcp-test--verbs-digest)))))))
         (should (equal (alist-get 'success result) t))))))
 
+(defun org-mcp-test--clock-started-an-hour-ago ()
+  "Return the inactive Org timestamp of an hour before now.
+A clock start is computed rather than typed into the fixture: a fixed
+one sits further in the past every day the suite runs, and the
+duration a close reports would drift with it."
+  (org-mcp--clock-format-timestamp
+   (time-subtract (current-time) (seconds-to-time 3600))))
+
+(defun org-mcp-test--content-clocked-task ()
+  "Return a TODO task with a clock open since an hour ago."
+  (format
+   "* TODO Clocked Task\n:LOGBOOK:\nCLOCK: %s\n:END:\nTask body text.\n"
+   (org-mcp-test--clock-started-an-hour-ago)))
+
+(defconst org-mcp-test--pattern-clock-closed-by-done
+  (concat
+   "\\`\\* DONE Clocked Task\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[[^]\n]+\\]--\\[[^]\n]+\\] =>[ \t]+[0-9]+:[0-9][0-9]\n"
+   ":END:\n"
+   "Task body text\\.\n\\'")
+  "Pattern after a done keyword closed the clock running in the task.")
+
+(defconst org-mcp-test--pattern-clock-still-open
+  (concat
+   "\\`\\* NEXT Clocked Task\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[[^]\n]+\\]\n"
+   ":END:\n"
+   "Task body text\\.\n\\'")
+  "Pattern after a keyword that is not done left the clock running.")
+
+(defconst org-mcp-test--pattern-repeat-closed-the-clock
+  (concat
+   "\\`\\* TODO Weekly\n"
+   "SCHEDULED: <[^>\n]+ \\+1w>\n"
+   ":PROPERTIES:\n"
+   ":LAST_REPEAT: \\[[^]\n]+\\]\n"
+   ":END:\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[[^]\n]+\\]--\\[[^]\n]+\\] =>[ \t]+[0-9]+:[0-9][0-9]\n"
+   ":END:\n\\'")
+  "Pattern after a repeat moved the date and closed the clock.")
+
+(ert-deftest org-mcp-test-set-todo-reports-the-clock-a-done-keyword-closed ()
+  "A clock Org closes on the way to a done keyword is reported.
+`org-clock-out-when-done\=' closes the clock running in a heading that
+reaches a done keyword, which the call never asked for and the client
+has no other way to learn.  The field carries what `org-clock-out\='
+reports, so a client that was clocking the task it has just finished
+is told what the call it did not have to make would have told it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file (org-mcp-test--content-clocked-task)))
+    (let ((org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE")))
+          (org-clock-out-when-done t))
+      (org-mcp-test--with-session-clock test-file
+        (let* ((result
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-node-set-todo"
+                  `((link
+                     .
+                     ,(org-mcp-test--file-link
+                       test-file "*Clocked Task"))
+                    (before . "TODO")
+                    (after . "DONE")))))
+               (clock (alist-get 'clock result)))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) "DONE"))
+          (should clock)
+          (should
+           (equal (alist-get 'start clock)
+                  (org-mcp-test--clock-started-an-hour-ago)))
+          (should
+           (string-match-p "\\`\\[[^]\n]+\\]\\'"
+                           (alist-get 'end clock)))
+          (should
+           (string-match-p "\\`[0-9]+:[0-9][0-9]\\'"
+                           (alist-get 'duration clock))))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-clock-closed-by-done)))))
+
+(ert-deftest org-mcp-test-set-todo-reports-no-clock-it-left-running ()
+  "A keyword that is not done leaves the clock alone and says nothing.
+The field is there only when the call closed a clock, so its absence
+is as much a statement as its presence: the clock the client started
+is still running."
+  (org-mcp-test--with-temp-org-files
+      ((test-file (org-mcp-test--content-clocked-task)))
+    (let ((org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE")))
+          (org-clock-out-when-done t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-set-todo"
+                 `((link
+                    .
+                    ,(org-mcp-test--file-link
+                      test-file "*Clocked Task"))
+                   (before . "TODO")
+                   (after . "NEXT"))))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) "NEXT"))
+          (should-not (alist-get 'clock result)))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-clock-still-open)))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-closes-the-clock-too ()
+  "A repeat comes back not-done and its clock is closed all the same.
+Org closes the clock while the headline is done and moves the keyword
+back afterwards, so the not-done keyword the response reports is no
+sign the clock survived.  The response carries the date Org moved and
+the clock it closed together."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (format
+         "* TODO Weekly\nSCHEDULED: %s\n:LOGBOOK:\nCLOCK: %s\n:END:\n"
+         (format-time-string
+          "<%Y-%m-%d %a +1w>"
+          (time-add (current-time) (seconds-to-time 86400)))
+         (org-mcp-test--clock-started-an-hour-ago))))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-repeat nil)
+          (org-clock-out-when-done t))
+      (org-mcp-test--with-session-clock test-file
+        (let* ((scheduled
+                (format-time-string
+                 "<%Y-%m-%d %a +1w>"
+                 (time-add (current-time) (seconds-to-time 86400))))
+               (result
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-node-set-todo"
+                  `((link
+                     .
+                     ,(org-mcp-test--file-link test-file "*Weekly"))
+                    (before . "TODO")
+                    (after . "DONE")
+                    (before_planning . ((scheduled . ,scheduled)))))))
+               (clock (alist-get 'clock result)))
+          (should (equal (alist-get 'success result) t))
+          ;; The repeat put the keyword back, and the clock stopped.
+          (should (equal (alist-get 'after result) "TODO"))
+          (should (alist-get 'scheduled result))
+          (should clock)
+          (should
+           (equal (alist-get 'start clock)
+                  (org-mcp-test--clock-started-an-hour-ago)))
+          (should
+           (string-match-p "\\`[0-9]+:[0-9][0-9]\\'"
+                           (alist-get 'duration clock))))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-repeat-closed-the-clock)))))
+
+(ert-deftest org-mcp-test-set-todo-reports-no-clock-when-none-ran ()
+  "A done keyword on a heading with no clock reports no clock."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-clock-out-when-done t))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-todo"
+               `((link
+                  .
+                  ,(org-mcp-test--file-link test-file "*Simple Task"))
+                 (before . "TODO")
+                 (after . "DONE"))))))
+        (should (equal (alist-get 'success result) t))
+        (should-not (alist-get 'clock result))))))
+
 (ert-deftest org-mcp-test-set-todo-repeat-reports-a-restarted-date ()
   "A `.+' repeater restarts from today, and that is reported.
 The date the file ends up with is today plus the interval, which no
