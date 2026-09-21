@@ -26315,7 +26315,15 @@ straight; a symbol reference needs no escape at all.
 Both spellings are valid strings and byte-compile without a word, so
 the difference shows only in the rendered text, which is what this
 reads.  A defcustom is read here too: its docstring is what the
-customize buffer shows."
+customize buffer shows.
+
+An MCP Parameters block is read like the rest of the docstring.  The
+published schema takes those lines verbatim, so they carry a plain
+apostrophe and no escape at all, which
+`org-mcp-test-tool-schemas-carry-no-docstring-escapes' pins by reading
+the schema.  That check cannot see the half-written escape, which
+leaves no backslash in the string for it to find; this one sees it
+there, and the two divide the block between them."
   (dolist (site (org-mcp-test--rendered-docstrings))
     (let ((rendered (format "%s: %s" (car site) (cdr site))))
       (should-not (string-match-p "=’" rendered))
@@ -26329,7 +26337,11 @@ drops it and the = is left behind as text, wherever it stood: before a
 quote, where the rendered check beside this one sees it, and before
 anything else, where nothing rendered shows it at all.  The string
 that results says nothing about having been meant as an escape, so the
-sources are read here instead."
+sources are read here instead.
+
+An MCP Parameters block is no exception.  The escape belongs there in
+neither spelling, and the half-written one puts the stray = in what a
+client reads as well as in what Emacs renders."
   (dolist (library '("org-mcp" "org-mcp-test"))
     (let ((source (find-library-name library)))
       (with-temp-buffer
