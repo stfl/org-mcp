@@ -25610,42 +25610,37 @@ same dates whatever was sent is asserted to name the same dates.")
     values))
 
 (defconst org-mcp-test--dates-carrying-unread-text
-  '(("<2026-03-27 Fri 09:00 +1w typo>" . accepted)
-    ("<2026-02-30 Fri typo>" . accepted)
-    ("<2026-03-27 Fri +1w --3d typo>" . refused)
-    ("<0050-03-27 Mon +1w typo>" . refused))
-  "Dates carrying text Org reads past, and what becomes of the date named.
+  '("<2026-03-27 Fri 09:00 +1w typo>" "<2050-06-15 Wed nonsense>")
+  "Dates carrying text Org reads past, one per date the refusal names.
 The refusal names Org\\='s rendering of what it did read, so the date
-it recommends is the call\\='s own and differs with every call: the
-first two here are recommendations a client can obey and the last
-two are recommendations org-mcp itself refuses, one for the delay
-beside a repeater it leaves in and one for the year it rolls back.
-Sending one input is no guard over a refusal whose advice is built
-out of what arrived.")
+it recommends is built out of the call\\='s own value and is a
+different date on every call.  One of these would show only that the
+recommendation was one to follow for the value somebody picked.")
 
 (defun org-mcp-test--advertisement-date-without-unread-text ()
   "The date the refusal of a timestamp carrying unread text names."
   (let ((values nil))
-    (dolist (provocation org-mcp-test--dates-carrying-unread-text)
-      (when (eq (cdr provocation) 'accepted)
-        (let ((named
-               (org-mcp-test--advertised
-                (org-mcp-test--advertised-date-refusal (car provocation))
-                "Org would write '\\(.*\\)' without it\\'")))
-          (mapc #'org-mcp-test--advertised-scheduled-accepted named)
-          (setq values (append values named)))))
+    (dolist (sent org-mcp-test--dates-carrying-unread-text)
+      (let ((named
+             (org-mcp-test--advertised
+              (org-mcp-test--advertised-date-refusal sent)
+              "Org would write '\\(.*\\)' without it\\'")))
+        (mapc #'org-mcp-test--advertised-scheduled-accepted named)
+        (setq values (append values named))))
     values))
 
 (defconst org-mcp-test--dates-the-calendar-has-not-got
   '(("2026-02-30" . accepted)
     ("<2026-11-31 Mon 09:00>" . accepted)
+    ("<2026-02-30 Fri typo>" . accepted)
     ("<2026-02-30 Fri +1w --3d>" . refused))
   "Days no month has, and what becomes of the day Org reads instead.
 The refusal names Org\\='s reading of the call\\='s own value, repeater
-and delay included, so what it recommends is a recommendation
-org-mcp refuses wherever the value carried something a later check
-refuses.  See `org-mcp-test--dates-carrying-unread-text', which is
-the same shape on a different refusal.")
+and delay included, so what it recommends is built out of what
+arrived and is a different date on every call.  Three of these
+recommend a date a client can send.  The last recommends one org-mcp
+refuses in its turn, for the first-only delay it carries over from
+the value, and the test below pins it.")
 
 (defun org-mcp-test--advertisement-date-org-reads-instead ()
   "The date the refusal of a day the calendar has not got names."
@@ -26329,37 +26324,28 @@ the call is has to name them twice over."
             1))))))
 
 (ert-deftest org-mcp-test-a-date-a-refusal-names-is-not-always-one-to-send ()
-  "Two date refusals name a date org-mcp itself refuses, for some calls.
-Each builds its advice out of the value the call sent -- one the
-rendering of what Org read before the unread text, the other the day
-Org resolves an impossible one to -- and each is written before the
-checks that follow it have run.  Where the value carried something a
-later check refuses, the advice carries it too and cannot be obeyed.
+  "The refusal of a day the calendar has not got names one org-mcp refuses.
+It recommends Org\\='s reading of the value that arrived, repeater and
+delay and all, and it is written before the check that refuses a
+first-only delay beside a repeater has run.  A value carrying one of
+those is answered with a recommendation carrying it too, which the
+next call is refused for.
 
 This is not the guard passing.  It is the failure the guard exists
 to find, pinned so that it cannot be lost again between one input
-and the next, and it belongs to the refusals rather than to this
-file.  When one of them is answered, this test fails on the value
-that now goes through: move that value to `accepted' in the table
-beside it, where the guard above will send it, and take it out of
-here."
+and the next, and it belongs to the refusal rather than to this
+file.  When it is answered, this test fails on the value that now
+goes through: move that value to `accepted' in the table beside it,
+where the guard above will send it, and take it out of here."
   (let ((org-mcp-test--advertisements-provoked nil))
-    (dolist (source
-             (list
-              (cons
-               org-mcp-test--dates-carrying-unread-text
-               "Org would write '\\(.*\\)' without it\\'")
-              (cons
-               org-mcp-test--dates-the-calendar-has-not-got
-               "Org reads it as '\\(.*\\)'\\'")))
-      (dolist (provocation (car source))
-        (when (eq (cdr provocation) 'refused)
-          (ert-info ((car provocation) :prefix "Sent: ")
-            (mapc
-             #'org-mcp-test--advertised-scheduled-refused
-             (org-mcp-test--advertised
-              (org-mcp-test--advertised-date-refusal (car provocation))
-              (cdr source)))))))))
+    (dolist (provocation org-mcp-test--dates-the-calendar-has-not-got)
+      (when (eq (cdr provocation) 'refused)
+        (ert-info ((car provocation) :prefix "Sent: ")
+          (mapc
+           #'org-mcp-test--advertised-scheduled-refused
+           (org-mcp-test--advertised
+            (org-mcp-test--advertised-date-refusal (car provocation))
+            "Org reads it as '\\(.*\\)'\\'")))))))
 
 ;;; Every refusal, classed
 
