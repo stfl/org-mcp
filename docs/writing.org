@@ -99,11 +99,11 @@ speaks carries none, and the =org://{link}= resource hands on the very message
 the tool refused with. The class a client acts on is therefore a marker at the
 front of the message, and it reads the same whichever path carried it.
 
-| Marker      | Says                                  | Recovery                           |
-|-------------+---------------------------------------+------------------------------------|
-| =conflict:= | the file is not as you believed it is | read it again and re-plan          |
-| =blocked:=  | Org itself refused the change         | tell the user why Org said no      |
-| /unmarked/  | the call was malformed                | correct the call and send it again |
+| Marker      | Says                                  | Recovery                             |
+|-------------+---------------------------------------+--------------------------------------|
+| =conflict:= | the file is not as you believed it is | read it again and re-plan            |
+| =blocked:=  | the change cannot be made here        | tell the user what stands in the way |
+| /unmarked/  | the call was malformed                | correct the call and send it again   |
 
 Unmarked is the default, and it is the largest class: a link org-mcp does not
 take, a state that is no TODO keyword, a timestamp that will not parse, a
@@ -116,13 +116,25 @@ and the =clock_out= of a running clock, are the assertions org-mcp checks, and
 a conflict names what it found instead, so the recovery is to read the heading
 or the active clock again and decide afresh.
 
-A =blocked:= is not the client's to fix. Org's own rules — a TODO dependency,
-an unchecked checkbox, an ordered subtree — refused the change, nothing was
-written, and the refusal carries Org's reason where Org names one:
+A =blocked:= is not the client's to fix, and not the file's to settle by
+moving on. Org's own rules — a TODO dependency, an unchecked checkbox, an
+ordered subtree — refused the change, nothing was written, and the refusal
+carries Org's reason where Org names one:
 
 #+begin_example
 blocked: TODO state change from TODO to DONE blocked (by "TODO Write the tests")
 blocked: TODO state change from TODO to DONE blocked (by contained checkboxes)
+#+end_example
+
+A file Org reads two ways is blocked for the same reason: sending the call
+again gets the same answer and so does reading first, because there is nothing
+to learn from the read. A property drawer writing one name on two lines is the
+case that arises — Org's readers disagree about which line the property is, so
+the value can be neither asserted nor replaced, and the refusal names it for
+whoever can open the file and repair it:
+
+#+begin_example
+blocked: Property 'OWNER' is written twice in this drawer, so it holds no one value; repair the drawer in Emacs
 #+end_example
 
 Two refusals stay unmarked on purpose. A link that resolves to no heading —
@@ -194,10 +206,16 @@ parameter left out: it asserts the field held nothing (see
 [[*What a blank parameter means]]). That is how you say "this heading has no
 deadline", and if one has appeared since you read it the write is refused
 rather than quietly replacing it. Send the field as a read returned it — for a
-timestamp that is the raw Org string, brackets, repeater and delay included,
-and not the ISO shorthand =after= also takes, because comparing an input
-spelling against a stored one would refuse writes over a difference the file
-does not have.
+timestamp that is the raw Org string, brackets, repeater, delay and date range
+included, and not the ISO shorthand =after= also takes, because comparing an
+input spelling against a stored one would refuse writes over a difference the
+file does not have.
+
+One accessor per field serves the read surface and the assertion, so a value a
+read handed you is a value an assertion accepts. It holds in the corners too:
+a SCHEDULED that is a date range is read whole and asserted whole, and a
+property written =:FLAGGED: nil= holds the value ="nil"=, which is what
+asserts it — the empty string says the drawer has no such property at all.
 
 A change that destroys nothing asserts nothing, and that is a fact about the
 call rather than a concession: adding a tag and removing one name what they
@@ -536,7 +554,7 @@ Example:
   - =after= (object, required): JSON object of property name-value pairs, each a value to write. String values set the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =properties_set= — the names written — plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and an =after= entry carrying no value (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and an =after= entry carrying no value (see [[*How a refusal is classed]])
 
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
@@ -597,7 +615,7 @@ Example:
   - =before= (object, required): JSON object whose names are the properties this call removes and whose values are what each of them holds now. There is no second parameter naming them: what =before= names is what goes. An empty string asserts the property is absent, and the call then takes nothing away. Names are matched without regard to case, as Org reads them, and special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use the dedicated tools
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =properties_deleted= — the names removed, in the order =before= gave them — =before=, the values removed under those names, plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the value a property holds, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the value a property holds, =blocked:= when the drawer writes that name on two lines; nothing is removed either way; unmarked validation otherwise (see [[*How a refusal is classed]])
 
 One parameter carries both halves of the call: the names say what goes and the
 values say what you believed was there. Every assertion is checked before the
@@ -645,7 +663,7 @@ Example:
 - *Description:* Move the SCHEDULED timestamp of an Org headline from one date to another
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater and delay included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
+  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no SCHEDULED
   - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). A blank names no date and is refused; [[*org-node-remove-scheduled][org-node-remove-scheduled]] takes a date away
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
@@ -655,6 +673,12 @@ Example:
 =before= is the date the headline carries today and =after= the date it is to
 carry instead. Rescheduling a repeating entry keeps its repeater, which is one
 reason =before= is the whole Org string rather than a date.
+
+A headline whose SCHEDULED is itself a date range —
+=<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
+=after= replaces the range with the one date it names. =after= is an ISO date
+and has no spelling for a range, so this tool reads and replaces one but never
+writes one; [[*org-node-remove-scheduled][org-node-remove-scheduled]] takes a range away whole.
 
 Example:
 #+begin_src json
@@ -691,7 +715,7 @@ Example:
 - *Description:* Take the SCHEDULED timestamp off an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the SCHEDULED timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater and delay included, such as =<2026-06-20 Sat +1w -3d>=. An empty string asserts the headline has no SCHEDULED, and the call then takes nothing away
+  - =before= (string, required): the SCHEDULED timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. An empty string asserts the headline has no SCHEDULED, and the call then takes nothing away
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before= — the timestamp removed — =after=, always empty, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])
@@ -727,7 +751,7 @@ Example:
 - *Description:* Move the DEADLINE timestamp of an Org headline from one date to another
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater and delay included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
+  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=, and not the ISO shorthand =after= takes. An empty string asserts the headline has no DEADLINE
   - =after= (string, required): ISO date string (e.g. ="2026-03-27"= or ="2026-03-27 09:00"=). A blank names no date and is refused; [[*org-node-remove-deadline][org-node-remove-deadline]] takes a date away
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link
@@ -768,7 +792,7 @@ Example:
 - *Description:* Take the DEADLINE timestamp off an Org headline
 - *Parameters:*
   - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the DEADLINE timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater and delay included. An empty string asserts the headline has no DEADLINE, and the call then takes nothing away
+  - =before= (string, required): the DEADLINE timestamp this call destroys, as a read returns it — the raw Org string, brackets, repeater, delay and date range included. An empty string asserts the headline has no DEADLINE, and the call then takes nothing away
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, =before= — the timestamp removed — =after=, always empty, and the headline's link
 - *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, and nothing is removed; unmarked validation otherwise (see [[*How a refusal is classed]])

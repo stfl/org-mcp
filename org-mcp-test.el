@@ -16406,6 +16406,344 @@ is written as it stands."
       (org-mcp-test--verify-file-matches
        named org-mcp-test--regex-cookie-title-replaced))))
 
+;;; One accessor for every asserted field
+
+(defconst org-mcp-test--content-every-asserted-field
+  "* TODO [#B] Every Field :work:
+SCHEDULED: <2026-06-20 Sat>--<2026-06-21 Sun> DEADLINE: <2026-07-01 Wed>
+:PROPERTIES:
+:FOO: nil
+:END:
+Body line.
+"
+  "A heading carrying every field a read returns and a write asserts.
+Each one is spelled the way a second accessor gets wrong: the
+SCHEDULED is a date range, which stops at the first `>' when a
+planning line is read as an entry property, and the drawer holds a
+property whose text is `nil', which reads as no property at all
+unless the text is taken literally.  The title, the TODO keyword,
+the priority and the heading's own tags round out the list.")
+
+(defconst org-mcp-test--asserted-fields
+  '((title "org-node-set-title" "Renamed")
+    (todo "org-node-set-todo" "DONE")
+    (priority "org-node-set-priority" "C")
+    (scheduled "org-node-set-scheduled" "2026-08-01")
+    (deadline "org-node-set-deadline" "2026-08-02")
+    (local_tags "org-node-set-tags" ["home"])
+    (properties "org-node-set-properties" ((FOO . "bar"))))
+  "Every field of a node that a read returns and a write asserts.
+Each entry is the key a read returns the field under, the tool whose
+`before' asserts it, and an `after' that tool writes.  A field that
+gains both a read and an assertion belongs here: the test over this
+table is what fails when the two paths are pointed at two accessors
+again.
+
+`content' and the two digests are not fields of this kind.  Their
+assertion is a substring or a `sha256:' token rather than the value
+a read returns, and both paths already take their region from
+`org-mcp--body-bounds' and `org-mcp--subtree-bounds'.")
+
+(ert-deftest org-mcp-test-a-read-value-is-an-assertion-that-holds ()
+  "Every field a read returns is a `before' its own setter accepts.
+One named accessor per field serves the read surface and the
+assertion path, so what a read hands back is what an assertion is
+compared against.  Two accessors refused a true belief for good: a
+date range read whole and truncated on comparison, a property read
+as the text `nil' and compared as absence.
+
+Each field is asserted against its own freshly read node, so a write
+that realigns the heading cannot make the next assertion hold by
+accident."
+  (pcase-dolist (`(,field ,tool ,after) org-mcp-test--asserted-fields)
+    (ert-info ((symbol-name field) :prefix "field: ")
+      (org-mcp-test--with-temp-org-files
+          ((test-file org-mcp-test--content-every-asserted-field))
+        (let* ((link
+                (org-mcp-test--file-link test-file "*Every Field"))
+               (node
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-node-read"
+                  `((link . ,link) (properties . ["FOO"])))))
+               (before (alist-get field node))
+               (result
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  tool
+                  `((link . ,link)
+                    (before . ,before)
+                    (after . ,after))))))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t)))))))
+
+(defconst org-mcp-test--content-property-text-nil
+  "* TODO Flagged Task
+:PROPERTIES:
+:FOO: nil
+:END:
+Body line.
+"
+  "A heading whose property holds the text org-node-set-properties
+writes for JSON false.")
+
+(defconst org-mcp-test--regex-property-text-nil-replaced
+  "\\`\\* TODO Flagged Task\n:PROPERTIES:\n:FOO: +bar\n:END:\nBody line\\.\n\\'"
+  "Regex matching the file once FOO holds bar instead of the text nil.")
+
+(defconst org-mcp-test--regex-property-text-nil-removed
+  "\\`\\* TODO Flagged Task\nBody line\\.\n\\'"
+  "Regex matching the file once FOO is gone, drawer and all.")
+
+(ert-deftest org-mcp-test-a-property-whose-text-is-nil-asserts-as-nil ()
+  "The text `nil' is asserted as itself and never as an absent property.
+org-node-set-properties writes `nil' for JSON false, so the text is
+one this server creates, and a read hands it back.  Sending it back
+holds; asserting the property absent is the stale belief the guard
+exists to refuse, and it takes nothing away."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-property-text-nil))
+    (let ((link (org-mcp-test--file-link test-file "*Flagged Task")))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-read"
+           `((link . ,link) (properties . ["FOO"])))))
+        '((FOO . "nil"))))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-properties"
+       `((link . ,link) (before . ((FOO . ""))) (after . ((FOO . "bar"))))
+       "\\`conflict: Property 'FOO' mismatch: expected '', \
+found 'nil'\\'"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-remove-properties"
+       `((link . ,link) (before . ((FOO . ""))))
+       "\\`conflict: Property 'FOO' mismatch: expected '', \
+found 'nil'\\'"
+       test-file)
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-properties"
+               `((link . ,link)
+                 (before . ((FOO . "nil")))
+                 (after . ((FOO . "bar"))))))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'properties_set result) ["FOO"]))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--regex-property-text-nil-replaced)))))
+
+(ert-deftest org-mcp-test-removing-a-property-whose-text-is-nil ()
+  "A removal names the text `nil' it destroys and records it.
+The response is the only record left once the property is gone, so
+it carries the value under `before' rather than the empty string a
+second accessor reported."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-property-text-nil))
+    (let* ((link (org-mcp-test--file-link test-file "*Flagged Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-remove-properties"
+              `((link . ,link) (before . ((FOO . "nil"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'properties_deleted result) ["FOO"]))
+      (should (equal (alist-get 'before result) '((FOO . "nil"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-property-text-nil-removed))))
+
+(defconst org-mcp-test--content-scheduled-range
+  "* TODO Ranged Task
+SCHEDULED: <2026-06-20 Sat>--<2026-06-21 Sun>
+Body line.
+"
+  "A heading whose SCHEDULED is a date range.")
+
+(defconst org-mcp-test--content-deadline-range
+  "* TODO Ranged Task
+DEADLINE: <2026-07-01 Wed>--<2026-07-03 Fri>
+Body line.
+"
+  "A heading whose DEADLINE is a date range.")
+
+(defconst org-mcp-test--regex-range-removed
+  "\\`\\* TODO Ranged Task\nBody line\\.\n\\'"
+  "Regex matching the ranged file once the planning line is gone.
+No half of the range is left behind: Org's own remover matches one
+timestamp, so a range would leave `--<…>' on a line of its own where
+the client reads it as body text.")
+
+(defconst org-mcp-test--content-both-ranges
+  "* TODO Ranged Task
+SCHEDULED: <2026-06-20 Sat>--<2026-06-21 Sun> DEADLINE: <2026-07-01 Wed>--<2026-07-03 Fri>
+Body line.
+"
+  "A heading whose SCHEDULED and DEADLINE are both date ranges.")
+
+(defconst org-mcp-test--regex-deadline-range-kept
+  "\\`\\* TODO Ranged Task\nDEADLINE: <2026-07-01 Wed>--<2026-07-03 Fri>\nBody line\\.\n\\'"
+  "Regex matching the file once the ranged SCHEDULED alone is gone.")
+
+(ert-deftest org-mcp-test-remove-scheduled-takes-a-whole-range-off ()
+  "A ranged SCHEDULED is asserted whole and removed whole.
+The timestamp a read returns is the range, so that is what `before'
+carries, and the removal leaves no half of it behind."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-scheduled-range))
+    (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
+           (before "<2026-06-20 Sat>--<2026-06-21 Sun>")
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-remove-scheduled"
+              `((link . ,link) (before . ,before))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) before))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-range-removed))))
+
+(ert-deftest org-mcp-test-remove-deadline-takes-a-whole-range-off ()
+  "A ranged DEADLINE is asserted whole and removed whole.
+Shaped like the SCHEDULED case, over the other planning keyword."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-deadline-range))
+    (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
+           (before "<2026-07-01 Wed>--<2026-07-03 Fri>")
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-remove-deadline"
+              `((link . ,link) (before . ,before))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'before result) before))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-range-removed))))
+
+(ert-deftest org-mcp-test-remove-scheduled-leaves-the-deadline-alone ()
+  "Removing one ranged planning entry leaves the other where it was.
+Both keywords share a line, so a removal that ran past its own entry
+would take the neighbour with it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-both-ranges))
+    (let* ((link (org-mcp-test--file-link test-file "*Ranged Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-remove-scheduled"
+              `((link . ,link)
+                (before . "<2026-06-20 Sat>--<2026-06-21 Sun>"))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'after result) ""))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-deadline-range-kept))))
+
+(defconst org-mcp-test--content-accumulating-property
+  "* TODO Joined Up
+:PROPERTIES:
+:FOO: one
+:FOO+: two
+:END:
+Body line.
+"
+  "A drawer whose second line adds to the property the first writes.
+Org joins them, so the node carries one property holding `one two'.")
+
+(defconst org-mcp-test--regex-accumulating-property-removed
+  "\\`\\* TODO Joined Up\nBody line\\.\n\\'"
+  "Regex matching the joined-up file once the property is gone.")
+
+(ert-deftest org-mcp-test-an-accumulating-property-is-one-property ()
+  "A `NAME+' line adds to NAME rather than writing it a second time.
+Org joins the two lines into the one value a read returns, so there
+is a value to assert and a value to destroy.  It is not the drawer
+that writes one name twice, which has neither."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-accumulating-property))
+    (let ((link (org-mcp-test--file-link test-file "*Joined Up")))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-read"
+           `((link . ,link) (properties . ["FOO"])))))
+        '((FOO . "one two"))))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-remove-properties"
+               `((link . ,link) (before . ((FOO . "one two"))))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'properties_deleted result) ["FOO"]))
+        (should (equal (alist-get 'before result) '((FOO . "one two"))))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--regex-accumulating-property-removed)))))
+
+(defconst org-mcp-test--content-duplicate-property
+  "* TODO Twice Told
+:PROPERTIES:
+:FOO: one
+:FOO: two
+:END:
+Body line.
+"
+  "A drawer writing one property name on two lines.
+Malformed Org: Org's own readers disagree about which line the
+property is, so the value a call asserts cannot be pinned down.")
+
+(defconst org-mcp-test--content-duplicate-and-accumulator
+  "* TODO Twice Told
+:PROPERTIES:
+:FOO: one
+:FOO+: two
+:FOO: three
+:END:
+Body line.
+"
+  "A drawer writing one name twice with an accumulator between them.
+The accumulator is legitimate; the second plain line is what makes
+the drawer malformed, and it is still malformed with one there.")
+
+(ert-deftest org-mcp-test-a-property-written-twice-refuses-legibly ()
+  "A property written on two drawer lines refuses, naming the property.
+Org reads such a drawer two ways — a scan reports the first line, a
+lookup the last — so no assertion can be checked against it and no
+write can say which line it lands on.  The refusal says what is
+wrong with the file rather than reporting a mismatch the client
+cannot resolve by reading again.
+
+A `NAME+' line among them changes nothing: it adds to the name
+rather than writing it, so it is neither what makes the drawer
+malformed nor what excuses it."
+  (org-mcp-test--with-temp-org-files
+      ((plain org-mcp-test--content-duplicate-property)
+       (mixed org-mcp-test--content-duplicate-and-accumulator))
+    (dolist (test-file (list plain mixed))
+      (let ((link (org-mcp-test--file-link test-file "*Twice Told")))
+        (dolist (call
+                 `(("org-node-set-properties"
+                    ((link . ,link)
+                     (before . ((FOO . "one")))
+                     (after . ((FOO . "three")))))
+                   ("org-node-remove-properties"
+                    ((link . ,link) (before . ((FOO . "one")))))))
+          (org-mcp-test--call-tool-refused
+           (car call) (cadr call)
+           "\\`blocked: Property 'FOO' is written twice"
+           test-file))))))
+
 ;;; Taking a whole node away
 
 ;; org-node-delete, org-node-archive and org-node-refile each take a
