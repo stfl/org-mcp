@@ -514,21 +514,21 @@ Example:
 #+end_src
 
 ** org-node-set-content
-- *Description:* Replace or empty the body content of an Org node, either a unique substring of the body or the body entire, whichever =before= names
+- *Description:* Replace or empty the body content of an Org headline, either a unique substring of the body or the body entire, whichever =before= names
 - *Parameters:*
-  - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Every other blank is the parameter left out (see [[*What a blank parameter means]])
+  - =link= (string, required): link to the headline to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a whole file is refused: this verb acts on headings
+  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The headline's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to a headline whose body is empty. Every other blank is the parameter left out (see [[*What a blank parameter means]])
   - =after= (string, required): The replacement text; =""= leaves nothing in the place of what =before= named, which over a =content_digest= empties the body. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and the link to the updated node
+- *Returns:* Success status, =saved= flag, and the link to the updated headline
 - *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= or an =after= that was never sent, and otherwise (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
-- *Special behavior:* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
+- *Special behavior:* An empty =before= asserts the headline has no content. That is how initial content reaches a headline that has none; a headline that already has some is refused, and the refusal asks for the part of the content to replace
 
 Every body write is a transition: =before= is what the body holds and =after= is
 what takes its place. How much of the body =after= takes the place of follows
 the form =before= arrives in, and nothing else — there is no flag to set. A
 substring names a part of the body and replaces that part. The =content_digest=
-a read of the node returned names the region entire and replaces the region,
+a read of the headline returned names the region entire and replaces the region,
 which is how a body too long to echo back is rewritten. The =sha256:= prefix is
 the whole of what tells the two apart, because a short body could itself be
 sixteen hexadecimal characters and a client must still be able to assert it.
@@ -559,12 +559,12 @@ conflict: Content mismatch: expected 'sha256:…'; the body has changed since th
 
 Each of them answers a =before= you believed you read: the body you planned
 against is not the body the file holds, whether the part you named has gone,
-has been duplicated, was never there because the node has no body, or the whole
-region has moved. The recovery is the same one every conflict has — read the
-node again and plan against what it holds now — so they carry the marker that
-says it. A digest is a stricter assertion than a substring, not a different
-kind of one: it asserts the region rather than a part of it, and it fails on a
-change a substring would have written straight through.
+has been duplicated, was never there because the headline has no body, or the
+whole region has moved. The recovery is the same one every conflict has — read
+the headline again and plan against what it holds now — so they carry the
+marker that says it. A digest is a stricter assertion than a substring, not a
+different kind of one: it asserts the region rather than a part of it, and it
+fails on a change a substring would have written straight through.
 
 A =before= that was never sent is a different matter and reads differently. It
 says nothing about the file, so there is nothing to conflict with, and it is
@@ -605,7 +605,7 @@ Example:
   "after": "The whole body, written afresh."
 }
 
-# Adding content to empty node:
+# Adding content to a headline whose body is empty:
 {
   "link": "file:/home/user/org/projects.org::*New task",
   "before": "",
@@ -628,10 +628,12 @@ refused over its second property has not written its first.
 
 =null= in a value is the entry left unfilled, on either side, and is refused
 rather than read as emptiness — a client that fills an entry it is not using
-would otherwise delete a property it never named (see [[*What a blank parameter
-means]]):
+would otherwise vouch for an absence it never saw, or delete a property it
+never named (see [[*What a blank parameter means]]). Each side's refusal names
+the spelling that side wanted instead:
 
 #+begin_example
+before gives no value for the property 'EFFORT': send "" to assert it holds none
 after gives no value for the property 'EFFORT': send "" to remove it
 #+end_example
 
@@ -715,6 +717,11 @@ Example:
 # The call writes a property it did not assert:
 {
   "error": "before does not name the property 'OWNER' this call writes"
+}
+
+# before vouches for a property the call does not write:
+{
+  "error": "before names the property 'OWNER', which this call does not write"
 }
 #+end_src
 
@@ -1090,6 +1097,13 @@ takes an =after= (see [[*Knowing what you are about to change]]). The assertion
 covers the whole subtree whatever depth the read that produced the token asked
 for, so a change to any descendant — a clock line among them — refuses the call
 and nothing is written.
+
+A =before= in any other form matches no subtree at all, and the refusal names
+the form it wanted and echoes what arrived:
+
+#+begin_example
+before must be the digest a read of this node returned, starting `sha256:': "Task A"
+#+end_example
 
 They cost very different things to get wrong, and that is how to choose between
 them:
