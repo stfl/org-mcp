@@ -6338,6 +6338,67 @@ signalling, and a character inside it is written."
        test-file
        "\\`#\\+PRIORITIES: A E C\n\\* TODO \\[#D\\] Task\n\\'"))))
 
+(defconst org-mcp-test--titles-that-read-as-nothing
+  '("[%]" "[0/0]" "[1/3]" " [0/0] ")
+  "Titles Org normalizes away to nothing.
+Each is a statistics cookie and no more, and the heading it would
+make carries no title for a `::*title\=' link to address.")
+
+(ert-deftest org-mcp-test-set-title-refuses-a-title-that-reads-as-nothing ()
+  "A title that normalizes to nothing is refused, and nothing is written.
+Org takes a statistics cookie out of a heading before reporting it,
+so a title that is only a cookie makes a heading a read returns with
+an empty title and a link that addresses whichever heading
+normalizes to nothing.  The check asks the normalized title, which
+is the title this server reports everywhere else."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* Original\nBody.\n"))
+    (let ((link (org-mcp-test--file-link test-file "*Original")))
+      (dolist (title org-mcp-test--titles-that-read-as-nothing)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-title"
+         `((link . ,link) (before . "Original") (after . ,title))
+         (concat "\\`Headline title reads as nothing: '"
+                 (regexp-quote title)
+                 "'\\.  Org takes a statistics cookie out of a "
+                 "heading, so nothing would be left to name it by\\'")
+         test-file)))))
+
+(ert-deftest org-mcp-test-node-create-refuses-a-title-that-reads-as-nothing ()
+  "org-node-create refuses the same titles through the same check."
+  (org-mcp-test--with-temp-org-files
+      ((test-file ""))
+    (dolist (title org-mcp-test--titles-that-read-as-nothing)
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . ,title) (parent . ,(concat "file:" test-file)))
+       (concat "\\`Headline title reads as nothing: '"
+               (regexp-quote title)
+               "'\\.  Org takes a statistics cookie out of a "
+               "heading, so nothing would be left to name it by\\'")
+       test-file))))
+
+(ert-deftest org-mcp-test-set-title-checks-the-text-before-the-file ()
+  "A title that is no text at all is refused before any file is read.
+What a headline's grammar claims is the target file's answer, so
+that half of the check waits until the file is open.  Whether the
+title is text at all is not: it is the same answer for every file,
+and asking it first keeps a malformed call from reaching a link
+resolution it cannot use.  The link here names no heading, and the
+refusal is still about the title."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* Original\nBody.\n"))
+    (let ((missing
+           (org-mcp-test--file-link test-file "*No Such Heading")))
+      (dolist (case '(("" . "cannot be empty or contain only whitespace")
+                      ("   " . "cannot be empty or contain only whitespace")
+                      ("two\nlines" . "cannot contain newlines")))
+        (org-mcp-test--call-tool-refused
+         "org-node-set-title"
+         `((link . ,missing) (before . "Original") (after . ,(car case)))
+         (concat "\\`Headline title " (regexp-quote (cdr case)))
+         test-file)))))
+
 (ert-deftest org-mcp-test-set-title-refuses-a-title-org-would-claim ()
   "A title Org reads as something else is refused, and nothing is written.
 The refusal names what Org would have made of it, because that is the

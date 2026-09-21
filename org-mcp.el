@@ -3701,23 +3701,25 @@ builds the line in; see `org-mcp--headline-grammar-settings'."
          ((not (equal parsed title))
           (format "would be read as the title %S" parsed)))))))
 
-(defun org-mcp--validate-headline-title (title)
-  "Validate that TITLE is a title and not a line of Org grammar.
-Throws an MCP tool error if validation fails.
+(defun org-mcp--validate-title-text (title)
+  "Refuse TITLE unless it is text that could name a heading.
+Throws an MCP tool error if it is not.
 
-A title has to be non-empty, hold no newline \u2014 one would make a
-second line, and the headline is one line \u2014 and survive being written
-into a headline, which `org-mcp--title-claimed-by-org' decides.
+Nothing asked here depends on the file the title is going into, so
+this runs before one is opened and a refusal reads nothing and
+touches nothing.  Whether Org\='s headline grammar would claim part of
+the title is the file\='s own answer and is asked later, by
+`org-mcp--validate-title-grammar\='.
 
-A title Org would claim is refused rather than escaped.  Escaping
-would let a call name a heading anything, at the cost of the file
-holding something other than what was sent and a read handing back
-something other than what was asked for, which is the failure this
-refusal exists to prevent.  The refusal names what Org would make of
-the title instead, so the client can spell that part another way: a
-tag belongs in `org-node-add-tags', a TODO keyword in the call's own
-`todo' or in `org-node-set-todo', a priority in
-`org-node-set-priority', and the rest is reworded."
+A title has to be non-empty and hold no newline \u2014 one would make a
+second line, and the headline is one line.  It also has to survive
+the normalization every read and every precondition sees it through,
+`org-link--normalize-string\=', with something left: that is what
+`org-mcp--title-at-point\=' reports a heading as, and what a
+`::*title\=' link matches against.  A statistics cookie is the case
+that arises \u2014 Org takes one out of a heading, so `[0/0]\=' is a whole
+title that reads as none, and the heading it would make has nothing
+to address it by."
   (when (or (string-empty-p title)
             (string-match-p "^[[:space:]]*$" title)
             ;; Explicitly match NBSP for Emacs 27.2 compatibility
@@ -3728,6 +3730,30 @@ tag belongs in `org-node-add-tags', a TODO keyword in the call's own
   (when (string-match-p "[\n\r]" title)
     (org-mcp--tool-validation-error
      "Headline title cannot contain newlines"))
+  (when (string-empty-p (org-link--normalize-string title))
+    (org-mcp--tool-validation-error
+     "Headline title reads as nothing: '%s'.  Org takes a \
+statistics cookie out of a heading, so nothing would be left to \
+name it by"
+     title)))
+
+(defun org-mcp--validate-title-grammar (title)
+  "Refuse TITLE unless Org would keep the whole of it as a title.
+Throws an MCP tool error if it would not.
+
+Runs with the target buffer current, because which words are TODO
+keywords and which characters are priorities is that file\='s answer;
+`org-mcp--title-claimed-by-org\=' asks it there.
+
+A title Org would claim is refused rather than escaped.  Escaping
+would let a call name a heading anything, at the cost of the file
+holding something other than what was sent and a read handing back
+something other than what was asked for, which is the failure this
+refusal exists to prevent.  The refusal names what Org would make of
+the title instead, so the client can spell that part another way: a
+tag belongs in `org-node-add-tags\=', a TODO keyword in the call\='s own
+`todo\=' or in `org-node-set-todo\=', a priority in
+`org-node-set-priority\=', and the rest is reworded."
   (when-let* ((claimed (org-mcp--title-claimed-by-org title)))
     (org-mcp--tool-validation-error "Not a title: '%s'.  It %s"
                                     title
@@ -4609,6 +4635,7 @@ MCP Parameters:
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent"
   (setq title (org-mcp--text-param-given title "title"))
+  (org-mcp--validate-title-text title)
   (setq todo
         (unless (org-mcp--blank-param-p todo)
           (org-mcp--text-param-given todo "todo")))
@@ -4652,11 +4679,13 @@ MCP Parameters:
                                 (title . ,written))
       ;; Validate inside the Org buffer so `org-todo-keywords-1' and
       ;; the priority bounds are the file's, per-file `#+TODO:' and
-      ;; `#+PRIORITIES:' lines included.  Nothing is written until
-      ;; both pass, so a refusal leaves the file as it was.
+      ;; `#+PRIORITIES:' lines included.  What the title has to be
+      ;; whatever file it lands in was asked before any of this.
+      ;; Nothing is written until both pass, so a refusal leaves the
+      ;; file as it was.
       (when todo
         (org-mcp--validate-todo-state todo))
-      (org-mcp--validate-headline-title title)
+      (org-mcp--validate-title-grammar title)
       (let ((parent-level
              (org-mcp--navigate-to-parent-or-top parent-target)))
 
@@ -4815,6 +4844,7 @@ MCP Parameters:
           refused with any other link"
   (setq before (org-mcp--text-param-given before "before"))
   (setq after (org-mcp--text-param-given after "after"))
+  (org-mcp--validate-title-text after)
   (org-mcp--assert-field-value before "Title")
 
   (let* ((target (org-mcp--link-target link "link" files))
@@ -4829,10 +4859,10 @@ MCP Parameters:
       (org-mcp--goto-heading target)
 
       ;; The file's own keywords and priority bounds decide what its
-      ;; headline grammar claims, so the title is checked here rather
-      ;; than before the buffer exists.  Nothing is written yet, so a
-      ;; refusal leaves the file as it was.
-      (org-mcp--validate-headline-title after)
+      ;; headline grammar claims, so that half of the check is made
+      ;; here rather than before the buffer exists.  Nothing is
+      ;; written yet, so a refusal leaves the file as it was.
+      (org-mcp--validate-title-grammar after)
 
       ;; Verify current title matches
       (setq found (org-mcp--asserted-value :title))

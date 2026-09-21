@@ -406,6 +406,26 @@ COMMENTARY on it
 the COMMENT code
 #+end_example
 
+A fifth is refused for a different reason: a title that reads as *nothing*. Org
+takes a statistics cookie out of a heading before reporting it, so =[0/0]= and
+=[%]= are whole titles that leave none behind — the heading would come back from
+a read with an empty title, and a =::*title= link would address whichever
+heading normalizes to nothing rather than that one:
+
+#+begin_example
+Headline title reads as nothing: '[0/0]'.  Org takes a statistics cookie out of a heading, so nothing would be left to name it by
+#+end_example
+
+A cookie beside text is fine and is kept: =Ship v3 [2/5]= is the title =Ship v3=
+with a cookie Org refreshes. It is only a title with nothing else in it that
+has nothing left to be addressed by.
+
+This half of the check, and the refusals for an empty title and for one holding
+a newline, are the same answer whatever file the title is going into, so they
+are made before any file is read. What the headline grammar claims is the
+file's own answer and is asked once the file is open; either way a refused call
+leaves it byte for byte as it was.
+
 * What a blank parameter means
 
 A blank parameter is one the call does not send. Clients fill a parameter they
