@@ -82,6 +82,29 @@ A link that org-mcp takes but cannot resolve, =Cannot find ID '...'= among
 them, is refused in the unmarked default class; see [[file:writing.org::*How a refusal is classed][How a refusal is classed]]
 for what the classes are and why this one carries no marker.
 
+** A link parameter left blank
+
+A link parameter is blank when it carries =null=, =false=, =""= or nothing but
+whitespace — the values a client fills a parameter it is not using with (see
+[[file:writing.org::*What a blank parameter means][What a blank parameter means]]). What that means depends on whether the
+parameter is required, and it is the same on every tool that takes a link:
+
+- *Required and blank* is a call that did not send it, and the refusal names
+  it rather than the value:
+
+  #+begin_example
+  Missing required parameter: link
+  #+end_example
+
+  =link= on every read, write and clock tool is required, and so is =parent= on
+  =org-node-create= and =org-node-refile=. The parameter is read before its
+  file is opened, so nothing is looked up and nothing is written.
+
+- *Optional and blank* means the call names no link, which each parameter has
+  its own sense of: =previous_sibling= puts the new node last among its
+  parent's children, and =clock_out= says the call has no running clock to
+  close. Neither is refused.
+
 * Stable links
 
 A title link, =file:<path>::*<title>=, is a convenience. It resolves as it
