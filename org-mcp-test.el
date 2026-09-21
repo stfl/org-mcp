@@ -4822,6 +4822,13 @@ side of a minute boundary do not agree."
    "* TODO Clocked Task\n:LOGBOOK:\nCLOCK: %s\n:END:\nTask body text.\n"
    stamp))
 
+(defconst org-mcp-test--content-task-to-clock
+  "* TODO Clocked Task\nTask body text.\n"
+  "A TODO task with no clock, for a test that clocks it in through a tool.
+The CLOCK line a test asserts is the one `org-clock-in' wrote, so the
+fixture carries none: a line typed here would be indistinguishable
+from it, and the point of the test is which writer made it.")
+
 (defun org-mcp-test--content-clocked-task-sharing-a-start (stamp)
   "Return a task whose open clock shares STAMP with a line already closed.
 `org-clock-rounding-minutes' makes two CLOCK lines of one heading
@@ -4868,6 +4875,17 @@ minutes.")
    ":END:\n"
    "Task body text\\.\n\\'")
   "Pattern after a done keyword closed the clock running in the task.")
+
+(defconst org-mcp-test--pattern-clock-left-open-by-done
+  (concat
+   "\\`\\* DONE Clocked Task\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[[^]\n]+\\]\n"
+   ":END:\n"
+   "Task body text\\.\n\\'")
+  "Pattern after a done keyword left open the clock `org-clock-in' wrote.
+The keyword moved and the CLOCK line still has no end, which is the
+whole difference from `org-mcp-test--pattern-clock-closed-by-done'.")
 
 (defconst org-mcp-test--pattern-clock-still-open
   (concat
@@ -4926,6 +4944,38 @@ is told what the call it did not have to make would have told it."
                              (alist-get 'duration clock))))
           (org-mcp-test--verify-file-matches
            test-file org-mcp-test--pattern-clock-closed-by-done))))))
+
+(ert-deftest org-mcp-test-set-todo-leaves-open-a-clock-org-mcp-started ()
+  "A clock org-mcp started is not Emacs's, so a done keyword keeps it open.
+`org-mcp--clock-insert-entry' writes the CLOCK line rather than
+starting the Emacs session's clock, so `org-clock-out-when-done' finds
+none to stop: the line keeps its open end and the response carries no
+clock.  This is the pair of
+`org-mcp-test-set-todo-reports-the-clock-a-done-keyword-closed', where
+the same transition over the session's own clock closes and reports
+it, and it is the sequence a client performs — clock a task in through
+the server, then finish it.  `org-clock-out' is what closes the line."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-to-clock))
+    (let* ((org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE")))
+           (org-clock-out-when-done t)
+           (link (org-mcp-test--file-link test-file "*Clocked Task")))
+      (mcp-server-lib-ert-call-tool "org-clock-in" `((link . ,link)))
+      ;; The clock-in left no running clock behind for Org to find,
+      ;; which is the whole reason the keyword closes nothing.
+      (should-not (org-clock-is-active))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-todo"
+               `((link . ,link)
+                 (before . "TODO")
+                 (after . "DONE"))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'after result) "DONE"))
+        (should-not (alist-get 'clock result)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-clock-left-open-by-done))))
 
 (ert-deftest org-mcp-test-set-todo-reports-no-clock-it-left-running ()
   "A keyword that is not done leaves the clock alone and says nothing.
