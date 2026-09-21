@@ -4925,6 +4925,67 @@ the file is left as it was."
        (concat "\\`content must be a string: " (cdr case) "\\'")
        test-file))))
 
+(ert-deftest org-mcp-test-node-create-refuses-a-blank-todo ()
+  "A create whose `todo\=' is blank is refused as a parameter left out.
+`todo\=' is required, so every spelling a client fills an unused
+parameter with means the same thing: the call did not name a state.
+The refusal names the parameter rather than the Elisp the JSON
+decoded to, and nothing is written."
+  (dolist (blank '(nil :json-false []))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . "Task")
+         (todo . ,blank)
+         (parent . ,(concat "file:" test-file)))
+       "\\`Missing required parameter: todo\\'"
+       test-file))))
+
+(ert-deftest org-mcp-test-node-create-refuses-an-empty-todo ()
+  "A create is refused when `todo\=' is empty, and writes nothing.
+A read reports no `todo\=' at all for a heading that carries no
+keyword, so \"\" is no state the surface names; it is what a `before\='
+asserts and an `after\=' takes away on org-node-set-todo, the tool that
+owns the field.  A create asserts nothing and takes nothing away, so
+it names a keyword, and the refusal says where the other one lives."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-tool-refused
+     "org-node-create"
+     `((title . "Task")
+       (todo . "")
+       (parent . ,(concat "file:" test-file)))
+     (concat
+      "\\`TODO state cannot be empty: name a keyword to create the "
+      "node with, and take it off afterwards with org-node-set-todo\\'")
+     test-file)))
+
+(ert-deftest org-mcp-test-node-create-refuses-a-blank-title ()
+  "A create whose `title\=' is blank is refused as a parameter left out.
+An empty `title\=' is not blank -- it is text, and the title validator
+refuses it in its own words -- so the two are told apart, and neither
+crosses the MCP boundary as an internal error naming no parameter."
+  (dolist (blank '(nil :json-false []))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (org-mcp-test--call-tool-refused
+       "org-node-create"
+       `((title . ,blank)
+         (todo . "TODO")
+         (parent . ,(concat "file:" test-file)))
+       "\\`Missing required parameter: title\\'"
+       test-file)))
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-tool-refused
+     "org-node-create"
+     `((title . "")
+       (todo . "TODO")
+       (parent . ,(concat "file:" test-file)))
+     "\\`Headline title cannot be empty or contain only whitespace\\'"
+     test-file)))
+
 (defconst org-mcp-test--content-create-examples
   "* Projects\n** Draft the plan\n* Plan the kickoff\n"
   "A project with one child, and a second top-level heading after it.
