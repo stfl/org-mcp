@@ -1376,7 +1376,7 @@ NEW-TITLE is the new title to set.
 TEST-FILE is the file to verify content after rename.
 EXPECTED-CONTENT-REGEX is an anchored regex that matches the complete buffer.
 FOUND-TITLE is the title the file held, which the response reports as
-`before\='; it defaults to CURRENT-TITLE, and differs from it where
+`before'; it defaults to CURRENT-TITLE, and differs from it where
 the assertion accepted a spelling the heading does not carry.
 The response must link to the renamed heading: by LINK itself when it
 is an `id:' link with no search part, else by its new title."
@@ -1598,7 +1598,7 @@ holds ON-DISK, and BUFFER is still the user's to save."
     (content tool params fields served)
   "Call TOOL over a buffer of CONTENT the user has unsaved edits in.
 CONTENT is what the file holds before the call.  PARAMS is a function
-of that file, called once the buffer is dirty, returning the tool\='s
+of that file, called once the buffer is dirty, returning the tool\\='s
 parameters; an endpoint asserting a digest reads it there, from the
 buffer, as a client planning the call does.  FIELDS is an alist of
 response fields the call is to answer with, beside the `success' and
@@ -1827,9 +1827,9 @@ afterwards so the clock state does not leak into other tests."
      (aref semantics 2) "ENHANCEMENT" t "type")))
 
 (ert-deftest org-mcp-test-todo-config-sends-false-never-null ()
-  "A keyword before the bar reports `isFinal\=' as false, not null.
-The published description calls `isFinal\=' a boolean, and
-`json-encode\=' writes an elisp nil as null, so the value is spelled
+  "A keyword before the bar reports `isFinal' as false, not null.
+The published description calls `isFinal' a boolean, and
+`json-encode' writes an elisp nil as null, so the value is spelled
 :json-false at the source.  A client asking whether a keyword is
 done tests the wire text against false, which is what this pins."
   (let ((org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
@@ -2440,13 +2440,13 @@ way, which is what a client acts on."
 (defun org-mcp-test--call-tool-refused
     (tool-name params expected-message &optional file)
   "Call TOOL-NAME with PARAMS and assert it is refused.
-The refusal\='s message must match the regexp EXPECTED-MESSAGE.  When
+The refusal\\='s message must match the regexp EXPECTED-MESSAGE.  When
 FILE is non-nil, it must be byte-for-byte unchanged afterwards.
 
-A buffer holding the user\='s unsaved edits must be unchanged too, and
+A buffer holding the user\\='s unsaved edits must be unchanged too, and
 the file alone cannot say so: a refusal that damaged such a buffer
 leaves the file exactly as it found it, and the damage reaches disk
-at the user\='s next save.  So while a modified buffer visits FILE,
+at the user\\='s next save.  So while a modified buffer visits FILE,
 what the server serves for it is pinned across the call as well.  An
 unmodified buffer holds what FILE holds, which the bytes already say."
   (let* ((before (and file (org-mcp-test--read-file-raw file)))
@@ -3485,7 +3485,7 @@ control."
    #'string<))
 
 (ert-deftest org-mcp-test-guarded-writes-publish-before-as-required ()
-  "Every guarded write tool publishes `before\=' among its required parameters.
+  "Every guarded write tool publishes `before' among its required parameters.
 A client discovers the guard from the schema and never from the
 handler, so a parameter published as optional is a guard that is
 off, whatever the handler then does with it."
@@ -3776,11 +3776,11 @@ before any lookup, and the file is left alone."
            org-mcp-test--expected-timestamp-id-done-regex))))))
 
 (ert-deftest org-mcp-test-set-todo-null-after-takes-the-keyword-off ()
-  "A null `after\=' leaves the headline with no TODO keyword.
+  "A null `after' leaves the headline with no TODO keyword.
 The heading stops being a task and keeps its title, and the response
-reports the keyword destroyed under `before\='.  Its `after\=' is \"\",
+reports the keyword destroyed under `before'.  Its `after' is \"\",
 the state the field is now in; a read of the headline carries no
-`todo\=' key at all, which is why \"\" is no keyword to ask for."
+`todo' key at all, which is why \"\" is no keyword to ask for."
   (let ((test-content "* TODO Task One\nTask description."))
     (org-mcp-test--with-temp-org-files
         ((test-file test-content))
@@ -3820,12 +3820,12 @@ found 'TODO'\\'"
   "\"\" is no TODO keyword and is refused as one; false is left out.
 Null is the one spelling that takes a keyword off, because null is
 JSON's word for no value.  An empty string is a value, and this
-field has none — no state named in `org-todo-keywords\=' is \"\", and
+field has none — no state named in `org-todo-keywords' is \"\", and
 a read of a headline carrying no keyword reports no state at all
 rather than an empty one.  So \"\" reaches the field's own check and
 is refused there, naming the states there are and the null that
 asks for none.  The message can say that only because a blank
-`todo\=' means the same thing on `org-node-create\=': while the two
+`todo' means the same thing on `org-node-create': while the two
 callers of this check disagreed about null, it could name it for
 neither."
   (let ((test-content "* TODO Task One\nTask description."))
@@ -6352,10 +6352,10 @@ a task."
 
 (ert-deftest org-mcp-test-node-create-makes-a-heading-without-a-keyword ()
   "A create that names no state writes a heading that is not a task.
-`todo\=' is optional, so leaving it out and every spelling a client
+`todo' is optional, so leaving it out and every spelling a client
 fills an unused parameter with mean one thing: this node is not a
-task.  A read of such a headline carries no `todo\=' key, so the
-response carries none either, and the file holds `* Task\=' with no
+task.  A read of such a headline carries no `todo' key, so the
+response carries none either, and the file holds `* Task' with no
 keyword each time."
   (dolist (params
            '(()
@@ -6384,7 +6384,7 @@ keyword each time."
 (ert-deftest org-mcp-test-node-create-still-takes-a-keyword ()
   "A named state still makes a task, and a state that is none is refused.
 The parameter going optional does not widen what a non-blank value
-may be: it is a keyword from `org-todo-keywords\=' or the call is
+may be: it is a keyword from `org-todo-keywords' or the call is
 refused, and the file is left as it was."
   (org-mcp-test--with-add-todo-setup test-file
       org-mcp-test--content-empty
@@ -6411,7 +6411,7 @@ refused, and the file is left as it was."
 
 (ert-deftest org-mcp-test-node-create-writes-no-body-for-every-blank ()
   "A create that names no body writes the heading and nothing under it.
-`content\=' is optional, so leaving it out and every spelling a client
+`content' is optional, so leaving it out and every spelling a client
 fills an unused parameter with mean one thing: a new heading has no
 body until something is written to it.  The file holds the heading
 alone each time, and the response reports the same node."
@@ -6441,7 +6441,7 @@ alone each time, and the response reports the same node."
        test-file org-mcp-test--regex-todo-without-body))))
 
 (ert-deftest org-mcp-test-node-create-refuses-a-content-that-is-not-a-string ()
-  "A create is refused when `content\=' is not text, and writes nothing.
+  "A create is refused when `content' is not text, and writes nothing.
 The body is inserted and checked as text, so a number or an array
 would reach that as a wrong type and cross the MCP boundary as an
 internal error, which names no parameter.  The refusal names it, and
@@ -6459,8 +6459,8 @@ the file is left as it was."
        test-file))))
 
 (ert-deftest org-mcp-test-node-create-refuses-a-blank-title ()
-  "A create whose `title\=' is blank is refused as a parameter left out.
-An empty `title\=' is not blank -- it is text, and the title validator
+  "A create whose `title' is blank is refused as a parameter left out.
+An empty `title' is not blank -- it is text, and the title validator
 refuses it in its own words -- so the two are told apart, and neither
 crosses the MCP boundary as an internal error naming no parameter."
   (dolist (blank '(nil :json-false []))
@@ -7294,7 +7294,7 @@ Each writes, and reads back exactly as it was sent.")
   "The headline grammar is the target file's, not the session's.
 A word the file names as a keyword claims the front of a title, and
 a word only the global setting names does not: the check is run
-where the file's `#+TODO:\=' is in force, so it answers for the file
+where the file's `#+TODO:' is in force, so it answers for the file
 the title is going into."
   (let ((org-todo-keywords '((sequence "TODO" "|" "DONE"))))
     (org-mcp-test--with-temp-org-files
@@ -7354,8 +7354,8 @@ the title is going into."
 Org normalizes the whitespace of a headline when it reads one back,
 so a title sent with doubled spaces is not the title the file
 reports.  The response carries what a read would return — which is
-what the `link\=' beside it already named — so a client can send it
-back as the next call's `before\='."
+what the `link' beside it already named — so a client can send it
+back as the next call's `before'."
   (org-mcp-test--with-temp-org-files
       ((test-file "* Task one\nBody.\n"))
     (let* ((link (org-mcp-test--file-link test-file "*Task one"))
@@ -7373,7 +7373,7 @@ back as the next call's `before\='."
               (org-mcp-test--file-link test-file "*Two spaces here"))))))
 
 (ert-deftest org-mcp-test-set-title-reports-the-before-it-found ()
-  "`before\=' in the response is the title the heading held.
+  "`before' in the response is the title the heading held.
 The assertion accepts every title that would reach the heading
 through a link, so a call may asserts one spelling where the file
 holds another.  The response is the record of what was destroyed, so
@@ -7394,9 +7394,9 @@ it carries the file's spelling rather than the call's."
 
 (ert-deftest org-mcp-test-set-priority-reads-the-file-s-range ()
   "The priority range is the target file's, not the session's.
-A `#+PRIORITIES:\=' line moves the bounds, and the check is made where
+A `#+PRIORITIES:' line moves the bounds, and the check is made where
 that line is in force: a character outside the file's range is
-refused rather than reaching `org-priority\=', which answers one by
+refused rather than reaching `org-priority', which answers one by
 signalling, and a character inside it is written."
   (let ((org-priority-highest ?A)
         (org-priority-lowest ?C)
@@ -7429,7 +7429,7 @@ signalling, and a character inside it is written."
   '("[%]" "[0/0]" "[1/3]" " [0/0] ")
   "Titles Org normalizes away to nothing.
 Each is a statistics cookie and no more, and the heading it would
-make carries no title for a `::*title\=' link to address.")
+make carries no title for a `::*title' link to address.")
 
 (ert-deftest org-mcp-test-set-title-refuses-a-title-that-reads-as-nothing ()
   "A title that normalizes to nothing is refused, and nothing is written.
@@ -9387,7 +9387,7 @@ heading gets it here as they would from a clock-out by hand."
   "The prose these tests send as a clock-out's `note'.")
 
 (ert-deftest org-mcp-test-clock-out-publishes-note-as-optional ()
-  "org-clock-out publishes `note\=' as a parameter a call may carry.
+  "org-clock-out publishes `note' as a parameter a call may carry.
 A client discovers the note from the schema and never from the
 handler, so prose no published parameter carries is prose nothing
 will ever send.  It is optional: a close says nothing unless the
@@ -9864,9 +9864,9 @@ Ask the user to clock out of it in Emacs\\'"
           (should (= (marker-position org-clock-marker) position)))))))
 
 (ert-deftest org-mcp-test-clock-out-publishes-link-as-required ()
-  "org-clock-out publishes `link\=' as the one parameter a call must carry.
+  "org-clock-out publishes `link' as the one parameter a call must carry.
 A clock operation asserts which clock it changes rather than a value
-it overwrites, so `link\=' is this tool\='s guard.  A client discovers a
+it overwrites, so `link' is this tool\\='s guard.  A client discovers a
 guard from the schema and never from the handler, so one published as
 optional is a guard that is off."
   (org-mcp-test--with-enabled
@@ -9876,7 +9876,7 @@ optional is a guard that is off."
 
 (ert-deftest org-mcp-test-clock-out-refuses-without-a-link ()
   "A clock-out that names no clock closes none.
-Without `link\=' the call would close whichever clock happens to be
+Without `link' the call would close whichever clock happens to be
 running, which may be one the user started in Emacs and the client
 never saw.  The refusal comes before any clock is found, so the file,
 the buffer and the running clock are all left as they were."
@@ -9894,8 +9894,8 @@ the buffer and the running clock are all left as they were."
         (should (= (marker-position org-clock-marker) position))))))
 
 (ert-deftest org-mcp-test-clock-out-refuses-a-link-naming-another-heading ()
-  "A clock-out is refused when `link\=' names a heading no clock runs on.
-The heading named sits in the running clock\='s own file, so matching
+  "A clock-out is refused when `link' names a heading no clock runs on.
+The heading named sits in the running clock\\='s own file, so matching
 the file alone would close a clock the call never named.  The client
 believed the clock ran where it did not, so the refusal is a conflict
 and names the clock that is running; nothing is closed."
@@ -9922,7 +9922,7 @@ and names the clock that is running; nothing is closed."
         (should (= (marker-position org-clock-marker) position))))))
 
 (ert-deftest org-mcp-test-clock-out-refuses-a-whole-file-link ()
-  "A clock-out is refused when `link\=' names a file rather than a heading.
+  "A clock-out is refused when `link' names a file rather than a heading.
 A file holds any number of headings and so names no one clock.  The
 guard is which clock, so the call is refused as one naming another
 heading is, and the file keeps its open CLOCK line."
@@ -9956,7 +9956,7 @@ wrong heading shows here.")
 
 (ert-deftest org-mcp-test-clock-out-accepts-the-link-of-the-running-clock ()
   "A clock-out that names the running clock closes it and reports it.
-The link `org-clock-active\=' hands back for the running clock is what
+The link `org-clock-active' hands back for the running clock is what
 a client echoes here, and the response names the same heading and
 link it did."
   (org-mcp-test--with-temp-org-files
@@ -9982,8 +9982,8 @@ link it did."
      org-mcp-test--clock-out-close-same-file-expected-regex)))
 
 (ert-deftest org-mcp-test-clock-out-accepts-an-id-link ()
-  "A clock-out names the running clock by `id\=:' as readily as by title.
-`org-clock-active\=' hands back an `id:' link for a heading that has an
+  "A clock-out names the running clock by `id:' as readily as by title.
+`org-clock-active' hands back an `id:' link for a heading that has an
 ID, so that is the form a client echoes most often.  It is looked up
 the way any other `id:' link is, and the guard finds the same heading
 through it."
@@ -10527,16 +10527,16 @@ found; the buffer stays narrowed to Task Two."
     ("2026-02-29" . "2026-03-01 [^ >]+"))
   "Dates whose fields name no day, each with the day Org reads instead.
 The day Org reads is written as a regexp, because the day name in it
-is Org\='s to choose.  The last is a leap day of a year that has none;
-`2024-02-29\=' is the same date in a year that does, and it writes.
+is Org\\='s to choose.  The last is a leap day of a year that has none;
+`2024-02-29' is the same date in a year that does, and it writes.
 A year below 100 is refused for its own reason and is not here; see
-`org-mcp-test-set-scheduled-refuses-a-two-digit-year\='.")
+`org-mcp-test-set-scheduled-refuses-a-two-digit-year'.")
 
 (defconst org-mcp-test--times-that-are-not-times
   '(("2026-03-27 25:99" . "2026-03-28 [^ >]+ 02:39")
     ("2026-03-27 10:99" . "2026-03-27 [^ >]+ 11:39"))
   "Times whose fields name no minute, each with the one Org reads.
-Written as regexps, because the day name in them is Org\='s to choose.
+Written as regexps, because the day name in them is Org\\='s to choose.
 The second rolls the hour without rolling the day, so a check
 comparing dates alone would let it through.")
 
@@ -11219,10 +11219,10 @@ asserts nor writes it, so it survives untouched."
 
 (ert-deftest org-mcp-test-set-properties-sends-empty-arrays-never-null ()
   "The half of the response a call does not fill arrives as [], not null.
-`properties_set\=' and `properties_deleted\=' are both published as
+`properties_set' and `properties_deleted' are both published as
 arrays of names.  A call that only sets fills neither, and
-`json-encode\=' writes an elisp nil as null, so each is built with
-`vconcat\='.  A client reading the length of either reads the wire
+`json-encode' writes an elisp nil as null, so each is built with
+`vconcat'.  A client reading the length of either reads the wire
 text, which is what this pins."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-two-props))
@@ -11259,7 +11259,7 @@ found 'ada'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-properties-null-before-asserts-absent ()
-  "A null `before\=' asserts the property is not on the heading.
+  "A null `before' asserts the property is not on the heading.
 The refusal names the state it expected rather than showing it as an
 empty value, because \"\" is the neighbouring state and a client has
 to be able to tell which of the two its assertion missed."
@@ -11276,11 +11276,11 @@ found '1:00'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-properties-empty-before-asserts-a-blank-line ()
-  "An empty `before\=' asserts a line that carries nothing, not absence.
+  "An empty `before' asserts a line that carries nothing, not absence.
 The heading holds EFFORT with a value, so the assertion is stale
 either way; what this pins is which stale belief the refusal reports
 back.  Its sibling above sends null against the same heading and is
-told `(absent)\='."
+told `(absent)'."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
     (org-mcp-test--call-tool-refused
@@ -11294,7 +11294,7 @@ found '1:00'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-properties-before-names-every-write ()
-  "A property the call writes and `before\=' omits refuses the call.
+  "A property the call writes and `before' omits refuses the call.
 The write would destroy a value no one vouched for, which is the one
 thing the assertion exists to stop."
   (org-mcp-test--with-temp-org-files
@@ -11312,7 +11312,7 @@ writes\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-properties-before-names-nothing-else ()
-  "A property `before\=' names and the call does not write refuses it.
+  "A property `before' names and the call does not write refuses it.
 Asserting a property the call leaves alone misstates what the call
 can touch."
   (org-mcp-test--with-temp-org-files
@@ -11332,8 +11332,8 @@ not write\\'"
 ;;; Removing a property through org-node-set-properties
 
 (ert-deftest org-mcp-test-set-properties-null-after-deletes ()
-  "A null `after\=' value takes the property off the headline.
-`before\=' names the value that goes with it, so the call says what it
+  "A null `after' value takes the property off the headline.
+`before' names the value that goes with it, so the call says what it
 destroys and the response records it.  Null is the deleting spelling
 because it is the one state a line cannot be in: \"\" is a line
 carrying nothing, which is a line."
@@ -11382,7 +11382,7 @@ carrying nothing, which is a line."
   "A call that deletes two properties reports both values it destroyed.
 Nothing in the file records them once the call returns, so the
 response is where they exist, and it is read by more than the client
-that sent the request: the values come back under `before\=', the key
+that sent the request: the values come back under `before', the key
 a field setter reports what it destroyed under."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-two-props))
@@ -11435,7 +11435,7 @@ found 'ada'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-properties-delete-refuses-a-blank-before ()
-  "A `before\=' naming no value refuses the deletion, in either spelling.
+  "A `before' naming no value refuses the deletion, in either spelling.
 Asserting that a property holds nothing when it holds something is
 the stale belief the guard exists to catch, and it matters most on
 the call that would destroy it: nothing is removed either time, and
@@ -11459,8 +11459,8 @@ found '1:00'\\'"
 
 (ert-deftest org-mcp-test-a-null-after-takes-a-blank-line-away ()
   "Null takes away a line carrying nothing, and the removal is reported.
-The `before\=' of \"\" asserts the line as the read returned it, and the
-`after\=' of null asks for the state a line cannot be in.  It is the
+The `before' of \"\" asserts the line as the read returned it, and the
+`after' of null asks for the state a line cannot be in.  It is the
 only spelling that empties the drawer of the name, since \"\" would
 put the line back where it stood."
   (org-mcp-test--with-temp-org-files
@@ -11482,9 +11482,9 @@ put the line back where it stood."
        test-file org-mcp-test--pattern-empty-property-removed))))
 
 (ert-deftest org-mcp-test-an-empty-after-writes-a-blank-line ()
-  "An empty `after\=' puts a line in the drawer that carries no value.
-The heading has no such property, so `before\=' is null; the call
-writes `:BLANK:\=' and reports it set, because a line is what it put
+  "An empty `after' puts a line in the drawer that carries no value.
+The heading has no such property, so `before' is null; the call
+writes `:BLANK:' and reports it set, because a line is what it put
 there.  A read then returns it as \"\", which is the state this
 spelling exists to reach."
   (org-mcp-test--with-temp-org-files
@@ -11513,10 +11513,10 @@ spelling exists to reach."
 
 (ert-deftest org-mcp-test-read-tells-an-empty-property-from-an-absent-one ()
   "A drawer line carrying nothing is read; one the drawer lacks is not.
-`properties\=' names what the node has, so an empty line arrives under
+`properties' names what the node has, so an empty line arrives under
 its name with \"\" and a name the drawer never carried arrives not at
 all, even when the call asked for it.  That is the distinction a
-`before\=' of \"\" cannot make, and it is why the write surface reads
+`before' of \"\" cannot make, and it is why the write surface reads
 the drawer rather than the assertion."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-empty-property))
@@ -11534,12 +11534,12 @@ the drawer rather than the assertion."
 
 (ert-deftest org-mcp-test-set-properties-delete-of-an-absent-property ()
   "Deleting a property that is not there is a no-op success.
-The empty `before\=' asserts the headline holds none of it, which it
+The empty `before' asserts the headline holds none of it, which it
 does, so the assertion holds: not a conflict, and not a write
-either.  The response leaves the name out of both `properties_set\='
-and `properties_deleted\=', which arrive empty, because nothing was
+either.  The response leaves the name out of both `properties_set'
+and `properties_deleted', which arrive empty, because nothing was
 set and nothing was deleted, and it echoes the assertion under
-`before\='."
+`before'."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((result
@@ -11595,8 +11595,8 @@ and the blank line is the one most easily lost to a tool that reads
 (ert-deftest org-mcp-test-a-blank-property-round-trips-read-assert-write ()
   "What a read hands back for a blank line is what a write puts back.
 The three states go round the loop the guard is for: a read returns
-EMPTY as \"\", that value is the `before\=' the next call asserts with,
-and an `after\=' of \"\" leaves the line where it stood.  A tool that
+EMPTY as \"\", that value is the `before' the next call asserts with,
+and an `after' of \"\" leaves the line where it stood.  A tool that
 read \"\" as absence would break this at the assertion; one that wrote
 \"\" as a deletion would break it at the write."
   (org-mcp-test--with-temp-org-files
@@ -12430,7 +12430,7 @@ does when the clock is closed, so both files hold their change."
      (should (equal (alist-get 'link result) link)))))
 
 (ert-deftest org-mcp-test-set-scheduled-before-is-the-raw-org-timestamp ()
-  "`before\=' is the raw Org SCHEDULED, repeater and delay included.
+  "`before' is the raw Org SCHEDULED, repeater and delay included.
 The string a read hands back is the string the assertion takes, so a
 repeating entry is rescheduled without the client reconstructing
 anything.  Org carries the repeater on to the new date."
@@ -12457,8 +12457,8 @@ anything.  Org carries the repeater on to the new date."
        test-file org-mcp-test--pattern-repeating-scheduled-moved))))
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-iso-shorthand-in-before ()
-  "`before\=' compares as the stored Org string, never the ISO shorthand.
-The same date written the way `after\=' takes it is not what the file
+  "`before' compares as the stored Org string, never the ISO shorthand.
+The same date written the way `after' takes it is not what the file
 holds, and org-mcp says so rather than accepting a second spelling:
 comparing an input format against a stored one manufactures conflicts
 on headings nobody touched."
@@ -12487,7 +12487,7 @@ found '<2026-03-01 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-scheduled-empty-before-asserts-none ()
-  "An empty `before\=' asserts the heading carries no SCHEDULED.
+  "An empty `before' asserts the heading carries no SCHEDULED.
 It is a value the assertion takes, never a parameter the call left
 out, so a heading that does carry one refuses the write."
   (org-mcp-test--with-temp-org-files
@@ -12504,8 +12504,8 @@ found '<2026-03-01 Sun>'\\'"
 ;;; Removing SCHEDULED through org-node-set-scheduled
 
 (ert-deftest org-mcp-test-set-scheduled-null-after-takes-it-off ()
-  "A null `after\=' takes the SCHEDULED timestamp away.
-`before\=' is the timestamp destroyed and the response reports it,
+  "A null `after' takes the SCHEDULED timestamp away.
+`before' is the timestamp destroyed and the response reports it,
 because the response is the only record the call leaves of what was
 there."
   (org-mcp-test--with-temp-org-files
@@ -12542,8 +12542,8 @@ found '<2026-03-01 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-scheduled-null-after-on-a-headline-without-one ()
-  "A null `after\=' on a headline carrying no SCHEDULED writes nothing.
-The empty `before\=' asserts the headline carries none, which it
+  "A null `after' on a headline carrying no SCHEDULED writes nothing.
+The empty `before' asserts the headline carries none, which it
 does, so the assertion holds and the call is accepted with nothing
 to do."
   (org-mcp-test--with-temp-org-files
@@ -12678,7 +12678,7 @@ found '<2026-03-15 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-deadline-empty-before-asserts-none ()
-  "An empty `before\=' asserts the heading carries no DEADLINE."
+  "An empty `before' asserts the heading carries no DEADLINE."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
     (org-mcp-test--call-tool-refused
@@ -12693,8 +12693,8 @@ found '<2026-03-15 Sun>'\\'"
 ;;; Removing DEADLINE through org-node-set-deadline
 
 (ert-deftest org-mcp-test-set-deadline-null-after-takes-it-off ()
-  "A null `after\=' takes the DEADLINE timestamp away.
-`before\=' is the timestamp destroyed and the response reports it,
+  "A null `after' takes the DEADLINE timestamp away.
+`before' is the timestamp destroyed and the response reports it,
 because the response is the only record the call leaves of what was
 there."
   (org-mcp-test--with-temp-org-files
@@ -12731,8 +12731,8 @@ found '<2026-03-15 Sun>'\\'"
      test-file)))
 
 (ert-deftest org-mcp-test-set-deadline-null-after-on-a-headline-without-one ()
-  "A null `after\=' on a headline carrying no DEADLINE writes nothing.
-The empty `before\=' asserts the headline carries none, which it
+  "A null `after' on a headline carrying no DEADLINE writes nothing.
+The empty `before' asserts the headline carries none, which it
 does, so the assertion holds and the call is accepted with nothing
 to do."
   (org-mcp-test--with-temp-org-files
@@ -12981,7 +12981,7 @@ restart form `.+'."
        org-mcp-test--pattern-deadline-with-repeater-and-warning))))
 
 (ert-deftest org-mcp-test-set-scheduled-round-trips-what-a-read-returns ()
-  "The raw Org string a read returns is a value `after\=' takes.
+  "The raw Org string a read returns is a value `after' takes.
 A client that read a repeating SCHEDULED can send it back unchanged
 — to restore it, or to write it on another heading — without taking
 the string apart first."
@@ -13007,7 +13007,7 @@ the string apart first."
 
 (ert-deftest org-mcp-test-set-deadline-date-only-change-keeps-the-repeater ()
   "Moving the date of a repeating DEADLINE leaves its repeater alone.
-`after\=' names a date and nothing else, and the repeater and the
+`after' names a date and nothing else, and the repeater and the
 warning period the heading carried are carried to it."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-repeating-deadline))
@@ -13032,8 +13032,8 @@ warning period the heading carried are carried to it."
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-a-date-range ()
   "A date range is read and asserted but never written.
-Org\='s planning writer keeps the first half of a range and drops the
-second, so a range in `after\=' is refused rather than written short."
+Org\\='s planning writer keeps the first half of a range and drops the
+second, so a range in `after' is refused rather than written short."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-scheduled))
     (org-mcp-test--call-tool-refused
@@ -13049,9 +13049,9 @@ name the one date the field is to carry\\'"
   '("<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>"
     "2026-03-27 09:00--2026-03-27 10:00")
   "Ranges whose two halves name one day, written the two ways Org takes.
-The first joins two bracketed timestamps with Org\='s range separator,
-and Org\='s planning writer keeps the first of them.  The second puts
-the separator inside one pair of brackets, where Org\='s parser reads
+The first joins two bracketed timestamps with Org\\='s range separator,
+and Org\\='s planning writer keeps the first of them.  The second puts
+the separator inside one pair of brackets, where Org\\='s parser reads
 up to it and no further.  Neither reaches the file whole, so how
 close the halves fall decides nothing.")
 
@@ -13077,7 +13077,7 @@ the same message."
 
 (ert-deftest org-mcp-test-set-scheduled-writes-a-span-of-the-day ()
   "A span written inside one timestamp is a date and is written whole.
-`09:00-10:00\=' carries no range separator, and Org\='s planning writer
+`09:00-10:00' carries no range separator, and Org\\='s planning writer
 puts the whole of it in the file, so it is a value the field holds
 rather than the range that is refused."
   (org-mcp-test--with-temp-org-files
@@ -13125,14 +13125,14 @@ only where Org would put something else in the file."
 (defconst org-mcp-test--first-only-delays
   '("<2026-03-27 Fri --3d>" "2026-03-27 --3d")
   "A first-only warning delay standing alone, in both spellings.
-Org writes a warning that fires before every repeat `-3d\=' and one
-that fires only before the first `--3d\=', so the doubled hyphen after
+Org writes a warning that fires before every repeat `-3d' and one
+that fires only before the first `--3d', so the doubled hyphen after
 a date says which warning it is rather than joining two timestamps.")
 
 (ert-deftest org-mcp-test-set-scheduled-writes-a-first-only-delay ()
-  "A `--3d\=' delay is a warning period and is written, not refused.
+  "A `--3d' delay is a warning period and is written, not refused.
 It carries the same doubled hyphen a date range is joined by, and
-Org\='s planning writer puts the whole of it in the file, so what a
+Org\\='s planning writer puts the whole of it in the file, so what a
 range is told apart by cannot be the hyphen alone."
   (dolist (date org-mcp-test--first-only-delays)
     (org-mcp-test--with-temp-org-files
@@ -13180,8 +13180,8 @@ delay is not the only thing standing after the date.")
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-a-delay-with-a-repeater ()
   "A first-only delay beside a repeater refuses the call.
-Org\\='s planning writer carries a repeater and a `-3d\\=' warning
-together, and carries a `--3d\\=' delay standing alone, but writes the
+Org\\='s planning writer carries a repeater and a `-3d' warning
+together, and carries a `--3d' delay standing alone, but writes the
 repeater by itself when the two arrive together — so the field would
 hold a heading repeating with the warning the call asked for gone,
 under a success.
@@ -13226,7 +13226,7 @@ refusal names, spelled the way a call spells them.")
   "The every-repeat warning a refusal offers is written whole.
 A refusal is worth nothing if the value it tells a client to send is
 refused in its turn, and this pairing is the one a client arrives at
-by fixing the refused one.  Org carries a repeater and a `-3d\\='
+by fixing the refused one.  Org carries a repeater and a `-3d'
 warning together whichever way the repeater steps."
   (pcase-dolist (`(,date ,written)
                  org-mcp-test--every-repeat-warnings-with-a-repeater)
@@ -13437,7 +13437,7 @@ written, and the response says which."
 
 (ert-deftest org-mcp-test-set-scheduled-writes-a-date-past-2037 ()
   "A date beyond the 32-bit era is written as it was sent.
-Org\='s date reader pulls a year outside 1970-2037 into that range,
+Org\\='s date reader pulls a year outside 1970-2037 into that range,
 which would land the write thirteen years early; org-mcp writes the
 year the call named."
   (org-mcp-test--with-temp-org-files
@@ -13899,7 +13899,7 @@ either: the setting is the whole decision."
        test-file org-mcp-test--pattern-scheduled-update))))
 
 (ert-deftest org-mcp-test-set-scheduled-null-after-logs-the-removal ()
-  "`org-log-reschedule' records the removal a null `after\=' makes.
+  "`org-log-reschedule' records the removal a null `after' makes.
 The entry names the timestamp destroyed, which is the record Org
 writes when a person takes a SCHEDULED off by hand."
   (org-mcp-test--with-temp-org-files
@@ -13969,7 +13969,7 @@ writes when a person takes a SCHEDULED off by hand."
        test-file org-mcp-test--pattern-deadline-update))))
 
 (ert-deftest org-mcp-test-set-deadline-null-after-logs-the-removal ()
-  "`org-log-redeadline' records the removal a null `after\=' makes."
+  "`org-log-redeadline' records the removal a null `after' makes."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
     (let ((org-log-redeadline 'note)
@@ -14074,7 +14074,7 @@ The entry Org sets up is written here rather than left on
        test-file org-mcp-test--pattern-task-one-closing-note))))
 
 (ert-deftest org-mcp-test-set-todo-note-rides-the-entry-org-sets-up ()
-  "A `note\=' becomes the prose of the entry Org set up, not a second entry.
+  "A `note' becomes the prose of the entry Org set up, not a second entry.
 The client asked for one record of one transition, so the note goes
 under the heading line Org chose for it."
   (org-mcp-test--with-temp-org-files
@@ -14845,7 +14845,7 @@ this test adds is the whole parameter rather than a member of it."
   "Every required link parameter on the surface, with a call around it.
 Each entry is the tool, the parameter that names a link, and the rest
 of a call that would otherwise be well formed, so that what a refusal
-answers is the blank link and nothing else.  The symbol `real-link\='
+answers is the blank link and nothing else.  The symbol `real-link'
 stands for a link the test file answers to, since a second link that
 resolves to nothing would be refused before the blank one is read.
 The list is the sweep:
@@ -14855,10 +14855,10 @@ blank was never checked.")
 (ert-deftest org-mcp-test-a-blank-link-names-the-parameter-it-arrived-in ()
   "A required link parameter left blank refuses as the parameter it is.
 A blank that reached the parser instead would come back as `Not an Org
-link: nil\=' -- the Elisp reader\='s spelling of the client\='s own JSON
+link: nil' -- the Elisp reader\\='s spelling of the client\\='s own JSON
 null, in a message naming no parameter of the call.  Every link a call
-sends is resolved through `org-mcp--link-target\=', which reads it with
-`org-mcp--link-given\=' first, so the refusal is the same on every tool
+sends is resolved through `org-mcp--link-target', which reads it with
+`org-mcp--link-given' first, so the refusal is the same on every tool
 and in every spelling a client fills an unused parameter with."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
@@ -14882,9 +14882,9 @@ and in every spelling a client fills an unused parameter with."
 
 (ert-deftest org-mcp-test-a-blank-optional-link-still-means-none ()
   "An optional link parameter keeps its meaning for every blank.
-`previous_sibling\=' means the new node goes last, and `clock_out\='
+`previous_sibling' means the new node goes last, and `clock_out'
 means there is no clock the call has to close.  Both are read by
-`org-mcp--optional-link-given\=', which answers nil where the required
+`org-mcp--optional-link-given', which answers nil where the required
 reader refuses, so a sweep over the required ones cannot take these
 with it."
   (dolist (blank (list nil :json-false "" "   "))
@@ -14914,11 +14914,11 @@ with it."
         (org-clock-out nil t)))))
 
 (ert-deftest org-mcp-test-a-refusal-names-a-value-in-json ()
-  "A refusal that shows a value shows it in the client\='s own language.
-`json-read-from-string\=' makes an alist of an object, nil of null and
-`:json-false\=' of false, and a refusal that printed those back handed
+  "A refusal that shows a value shows it in the client\\='s own language.
+`json-read-from-string' makes an alist of an object, nil of null and
+`:json-false' of false, and a refusal that printed those back handed
 the client the spelling of its own value in another language.
-`org-mcp--json-name\=' is the one definition of how a JSON value is
+`org-mcp--json-name' is the one definition of how a JSON value is
 named in a message, and this covers every parameter reader that names
 one."
   (org-mcp-test--with-temp-org-files
@@ -15218,7 +15218,7 @@ and a call that only takes tags away cannot break it."
      test-file)))
 
 (ert-deftest org-mcp-test-set-priority-non-string-before-is-malformed ()
-  "A `before\=' that is no kind of value is a malformed call.
+  "A `before' that is no kind of value is a malformed call.
 It is refused as validation and not as a conflict: reading the file
 again would not help, because nothing about the file is in question."
   (org-mcp-test--with-temp-org-files
@@ -15232,12 +15232,12 @@ again would not help, because nothing about the file is in question."
      test-file)))
 
 (ert-deftest org-mcp-test-a-refusal-names-json-in-json ()
-  "A refusal names what arrived in the client\='s own language.
-`json-read-from-string\=' is what turns a call into Lisp, so printing
+  "A refusal names what arrived in the client\\='s own language.
+`json-read-from-string' is what turns a call into Lisp, so printing
 its result back would answer a client in the spelling of another
-language: an object would read as an alist and true as `t\='.  Both
+language: an object would read as an alist and true as `t'.  Both
 readers of a required text parameter name the value by its JSON
-kind instead, and the `after\=' side names null among what it takes,
+kind instead, and the `after' side names null among what it takes,
 because there it means something."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
@@ -15264,7 +15264,7 @@ because there it means something."
          test-file)))))
 
 (ert-deftest org-mcp-test-set-priority-empty-before-asserts-none ()
-  "An empty `before\=' asserts the heading carries no priority."
+  "An empty `before' asserts the heading carries no priority."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
     (org-mcp-test--call-tool-refused
@@ -15278,8 +15278,8 @@ because there it means something."
 ;;; Removing the priority through org-node-set-priority
 
 (ert-deftest org-mcp-test-set-priority-null-after-takes-it-off ()
-  "A null `after\=' takes the priority away.
-`before\=' is the character destroyed and the response reports it,
+  "A null `after' takes the priority away.
+`before' is the character destroyed and the response reports it,
 because the response is the only record the call leaves of what was
 there."
   (org-mcp-test--with-temp-org-files
@@ -15311,7 +15311,7 @@ there."
      test-file)))
 
 (ert-deftest org-mcp-test-set-priority-null-after-without-a-priority ()
-  "A null `after\=' on a headline carrying no priority writes nothing."
+  "A null `after' on a headline carrying no priority writes nothing."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-bare-todo))
     (let ((result
@@ -19864,7 +19864,7 @@ org-node-read."
 ;;; Null and false are the parameter left out
 
 (ert-deftest org-mcp-test-null-before-is-a-parameter-left-out ()
-  "A blank `before\=' asserts nothing; it is the parameter left out.
+  "A blank `before' asserts nothing; it is the parameter left out.
 Clients fill a parameter they are not using with a blank, so reading
 null as \"the field held nothing\" would let such a client vouch for
 an emptiness it never saw and go on to destroy what was there.  The
@@ -19947,7 +19947,7 @@ assertion of absence is the empty string, which a call has to type."
          test-file)))))
 
 (ert-deftest org-mcp-test-a-null-before-is-honoured-when-it-is-true ()
-  "A null `before\=' on a property the drawer lacks lets the write through.
+  "A null `before' on a property the drawer lacks lets the write through.
 The refused sibling asserts null against a property that is there.
 This is the same assertion where it holds: the drawer carries no
 NEWPROP, so the call writes one, which is how a client creates a
@@ -19968,7 +19968,7 @@ property it has read the heading and found nothing for."
       (should (equal (alist-get 'before result) '((NEWPROP)))))))
 
 (ert-deftest org-mcp-test-no-field-clearing-tools-are-published ()
-  "Removing a field is a setter with an empty `after\=', not a tool.
+  "Removing a field is a setter with an empty `after', not a tool.
 One tool per field is the surface convention, and a client that
 found a second id for the same field would have two spellings of one
 change to choose between.  The ids are absent from the schema, and a
@@ -20082,7 +20082,7 @@ body with nothing in it, and a body is emptied by sending it."
            test-file))))))
 
 (ert-deftest org-mcp-test-non-string-after-on-set-content-is-malformed ()
-  "An `after\=' that is no kind of text is a malformed call.
+  "An `after' that is no kind of text is a malformed call.
 It is refused as validation and not as a conflict: nothing about the
 file is in question, so reading the node again would not help."
   (org-mcp-test--with-set-content-file test-file
@@ -20095,7 +20095,7 @@ file is in question, so reading the node again would not help."
      test-file)))
 
 (ert-deftest org-mcp-test-every-body-write-reads-its-before ()
-  "Every way to change a body reads `before\=', so none writes unguarded.
+  "Every way to change a body reads `before', so none writes unguarded.
 The parameter is required, and a blank one refuses the call rather
 than reaching a path that has no use for it.  A body is added to by
 asserting what it holds and sending it back with the addition in,
@@ -21843,7 +21843,7 @@ list the call names as it does for the default."
 (ert-deftest org-mcp-test-depth-expanded-child-carries-every-namespace ()
   "An expanded child carries the drawer and computed values too.
 A node answers in three namespaces -- its fields, its Org drawer and
-what the configured functions work out -- and `depth\=' expands nodes,
+what the configured functions work out -- and `depth' expands nodes,
 not field lists.  A child expanded under a call that asked for
 properties therefore answers with them, and equals a read of its own
 link asking for the same, which is what \"indistinguishable from a
@@ -22221,11 +22221,11 @@ round trip through the two calls leaves.")
   "Regex matching the file once FOO is gone, drawer and all.")
 
 (ert-deftest org-mcp-test-a-property-whose-text-is-nil-asserts-as-nil ()
-  "The text `nil\=' is asserted as itself and never as an absent property.
+  "The text `nil' is asserted as itself and never as an absent property.
 The whole way round in one test: org-node-set-properties writes the
-text `nil\=' for JSON false, so the value is one this server creates
+text `nil' for JSON false, so the value is one this server creates
 rather than one the file was seeded with; a read hands it back; and
-that value, exactly as the read returned it, is the `before\=' the
+that value, exactly as the read returned it, is the `before' the
 next write asserts with.
 
 Asserting the property absent is the stale belief the guard exists
@@ -22283,8 +22283,8 @@ found 'nil'\\'"
            org-mcp-test--regex-property-text-nil-replaced))))))
 
 (ert-deftest org-mcp-test-removing-a-property-whose-text-is-nil ()
-  "A deletion names the text `nil\=' it destroys and records it.
-Its `before\=' is the map a read returned, sent back unchanged.  The
+  "A deletion names the text `nil' it destroys and records it.
+Its `before' is the map a read returned, sent back unchanged.  The
 response is the only record left once the property is gone, so it
 carries that value rather than the empty string a second accessor
 reported for it."
@@ -22347,7 +22347,7 @@ Body line.
 
 (defun org-mcp-test--planning-read-back (link field)
   "Return FIELD of the node LINK names, as org-node-read returns it.
-FIELD is `scheduled\=' or `deadline\='.  A test asserts with what this
+FIELD is `scheduled' or `deadline'.  A test asserts with what this
 returned rather than with a string of its own, so it fails if the
 read and the assertion are ever pointed at different accessors."
   (alist-get
@@ -22357,7 +22357,7 @@ read and the assertion are ever pointed at different accessors."
 
 (ert-deftest org-mcp-test-set-scheduled-removes-a-whole-range ()
   "A ranged SCHEDULED is read whole, asserted whole and removed whole.
-`before\=' is the string the read returned, not one the test composed,
+`before' is the string the read returned, not one the test composed,
 and the removal leaves no half of the range behind as body text."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-scheduled-range))

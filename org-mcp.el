@@ -303,7 +303,7 @@ empty value into it."
 
 (defun org-mcp--json-name (value)
   "Return the JSON spelling of VALUE, for a refusal to name it by.
-VALUE is what `json-read-from-string' made of a client\='s JSON, and a
+VALUE is what `json-read-from-string' made of a client\\='s JSON, and a
 refusal that printed that back would hand the client the spelling of
 its own value in another language: an object reads as an alist,
 false as `:json-false', null as nil.  A string and a number are
@@ -338,9 +338,9 @@ otherwise be read as asserting that a field was empty, or as asking
 for a body of no text, and either way go on to destroy what was
 there.  Anything else is a malformed call.
 
-What \"\" then says is the parameter\='s own business and not this
-one\='s: it asserts that a field held nothing in a `before\=', it is a
-body of no text on `org-node-set-content\=', and it is refused as no
+What \"\" then says is the parameter\\='s own business and not this
+one\\='s: it asserts that a field held nothing in a `before', it is a
+body of no text on `org-node-set-content', and it is refused as no
 value by the fields that have none, see `org-mcp--value-to-write'.
 So the refusal here says only that text was wanted.
 
@@ -390,10 +390,10 @@ down with it."
 (defun org-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
 A string is the value to write.  JSON null is nil here, and asks for
-the field to hold nothing: null is JSON\='s word for no value, and
+the field to hold nothing: null is JSON\\='s word for no value, and
 these fields have none of their own.  \"\" is not a timestamp, a
 priority character or a TODO keyword, so it passes through as the
-string it is and the field\='s own validator refuses it, naming what
+string it is and the field\\='s own validator refuses it, naming what
 the field does accept and the null that asks for none.
 
 Every other blank, see `org-mcp--blank-param-p', is a parameter the
@@ -1054,8 +1054,8 @@ optional one is, see `org-mcp--optional-link-given': JSON null, false
 and a string holding nothing but whitespace.
 
 A blank is read here rather than left to `org-mcp--link-parse', which
-has no parameter to name and would answer a JSON null with `nil\=',
-the Elisp reader\='s spelling of the client\='s own value.  Anything
+has no parameter to name and would answer a JSON null with `nil',
+the Elisp reader\\='s spelling of the client\\='s own value.  Anything
 that is not blank is returned for that parser to check, which is where
 a string that is no link is refused."
   (or (org-mcp--optional-link-given link)
@@ -2257,11 +2257,11 @@ FIELDS is a list of node field names, in the order the node lists
 them; `org-mcp--node-fields' names every one there is.  A field the
 node has no value for -- no TODO state, no tag of its own, an empty
 body -- is left out rather than sent as null.  PROPERTIES and
-COMPUTED are the node\='s two other namespaces, see
-`org-mcp--projected-node-at-point\='.
+COMPUTED are the node\\='s two other namespaces, see
+`org-mcp--projected-node-at-point'.
 
 DEPTH is how many generations of children the `children' field
-expands in place; see `org-mcp--child-projection\=' for what each
+expands in place; see `org-mcp--child-projection' for what each
 generation carries.
 
 FILE-NODE non-nil builds the node of the file the buffer visits: a
@@ -2270,7 +2270,7 @@ its preamble as its content.  The caller says which of the two it
 asked for, because point cannot: a file that opens on a heading has
 no position before that heading.
 
-BUDGET is the walk\='s, which `org-mcp--spend-node\=' spends one node
+BUDGET is the walk\\='s, which `org-mcp--spend-node' spends one node
 of per node built, this one included.  Every caller is given its own,
 `org-mcp-read-max-nodes' nodes to spend, so a list of matches is
 bounded one match at a time."
@@ -2366,28 +2366,28 @@ bounded one match at a time."
 (defun org-mcp--projected-node-at-point
     (fields properties computed &optional depth file-node)
   "Return the node at point as a call asking for it receives it.
-FIELDS is the node\='s own fields and DEPTH how many generations of
-children it expands, see `org-mcp--node-at-point\='; FILE-NODE says
-the node is the file\='s, as it does there.  PROPERTIES is the node\='s
-Org drawer, see `org-mcp--node-properties\='.  COMPUTED is what the
-configured functions answer for it, see `org-mcp--node-computed\='.
+FIELDS is the node\\='s own fields and DEPTH how many generations of
+children it expands, see `org-mcp--node-at-point'; FILE-NODE says
+the node is the file\\='s, as it does there.  PROPERTIES is the node\\='s
+Org drawer, see `org-mcp--node-properties'.  COMPUTED is what the
+configured functions answer for it, see `org-mcp--node-computed'.
 
 The three are three namespaces and arrive as three.  A field is a
-key of the node; the drawer is one key, `properties\=', holding the
+key of the node; the drawer is one key, `properties', holding the
 names the user wrote in the file; the answers are one key,
-`computed\='.  A property called TITLE therefore cannot collide with
-the field `title\='.
+`computed'.  A property called TITLE therefore cannot collide with
+the field `title'.
 
 Keeping the last two apart is what tells a client which values a
-write can put back: `properties\=' is in the file and survives the
-round trip, `computed\=' is this server\='s answer at this moment and
+write can put back: `properties' is in the file and survives the
+round trip, `computed' is this server\\='s answer at this moment and
 belongs to no drawer.  Merged into one object they would be
 indistinguishable without reading the configuration, and a client
-would write this server\='s opinion into the user\='s file.
+would write this server\\='s opinion into the user\\='s file.
 
 All three reach every generation DEPTH expands, so an expanded child
 is the node a read of its link returns; see
-`org-mcp--child-projection\='."
+`org-mcp--child-projection'."
   (org-mcp--node-at-point
    fields
    properties
@@ -3905,17 +3905,17 @@ Throws an MCP tool error if it is not.
 
 Nothing asked here depends on the file the title is going into, so
 this runs before one is opened and a refusal reads nothing and
-touches nothing.  Whether Org\='s headline grammar would claim part of
-the title is the file\='s own answer and is asked later, by
-`org-mcp--validate-title-grammar\='.
+touches nothing.  Whether Org\\='s headline grammar would claim part of
+the title is the file\\='s own answer and is asked later, by
+`org-mcp--validate-title-grammar'.
 
 A title has to be non-empty and hold no newline \u2014 one would make a
 second line, and the headline is one line.  It also has to survive
 the normalization every read and every precondition sees it through,
-`org-link--normalize-string\=', with something left: that is what
-`org-mcp--title-at-point\=' reports a heading as, and what a
-`::*title\=' link matches against.  A statistics cookie is the case
-that arises \u2014 Org takes one out of a heading, so `[0/0]\=' is a whole
+`org-link--normalize-string', with something left: that is what
+`org-mcp--title-at-point' reports a heading as, and what a
+`::*title' link matches against.  A statistics cookie is the case
+that arises \u2014 Org takes one out of a heading, so `[0/0]' is a whole
 title that reads as none, and the heading it would make has nothing
 to address it by."
   (when (or (string-empty-p title)
@@ -3940,8 +3940,8 @@ name it by"
 Throws an MCP tool error if it would not.
 
 Runs with the target buffer current, because which words are TODO
-keywords and which characters are priorities is that file\='s answer;
-`org-mcp--title-claimed-by-org\=' asks it there.
+keywords and which characters are priorities is that file\\='s answer;
+`org-mcp--title-claimed-by-org' asks it there.
 
 A title Org would claim is refused rather than escaped.  Escaping
 would let a call name a heading anything, at the cost of the file
@@ -3949,9 +3949,9 @@ holding something other than what was sent and a read handing back
 something other than what was asked for, which is the failure this
 refusal exists to prevent.  The refusal names what Org would make of
 the title instead, so the client can spell that part another way: a
-tag belongs in `org-node-add-tags\=', a TODO keyword in the call\='s own
-`todo\=' or in `org-node-set-todo\=', a priority in
-`org-node-set-priority\=', and the rest is reworded."
+tag belongs in `org-node-add-tags', a TODO keyword in the call\\='s own
+`todo' or in `org-node-set-todo', a priority in
+`org-node-set-priority', and the rest is reworded."
   (when-let* ((claimed (org-mcp--title-claimed-by-org title)))
     (org-mcp--tool-validation-error "Not a title: '%s'.  It %s"
                                     title
@@ -6303,7 +6303,7 @@ Shaped like `org-mcp--field-scheduled'.")
 Shaped like `org-mcp--field-scheduled' but for its `:write' and
 `:remove': no tool writes CLOSED.  Org writes it when a heading
 reaches a done keyword and clears it when the heading leaves one, so
-what it holds is Org\='s record of the transition rather than anything
+what it holds is Org\\='s record of the transition rather than anything
 a client chose.  Having no writer is what keeps it out of
 `org-mcp--write-field' and out of every assertion.
 
@@ -6317,7 +6317,7 @@ after either the response is the only record of what it held.")
    (cons 'scheduled org-mcp--field-scheduled)
    (cons 'deadline org-mcp--field-deadline)
    (cons 'closed org-mcp--field-closed))
-  "Org\='s planning fields, under the names the wire spells them by.
+  "Org\\='s planning fields, under the names the wire spells them by.
 Each entry pairs that name with the field record holding the metadata
 key it is read through and the label a refusal names it by, so the
 parameter, the assertion and the response reach one field through one
@@ -6457,7 +6457,7 @@ there is a value there to move, so those two together are what makes
 the assertion necessary -- and a call without one is refused exactly
 there.
 
-Whether the entry repeats is Org\='s question and `org-get-repeat'
+Whether the entry repeats is Org\\='s question and `org-get-repeat'
 answers it, over the whole entry rather than over the planning line.
 That is wider than it looks and has to be: a repeater on a plain
 timestamp in the body makes Org take away a SCHEDULED that carries no
@@ -6479,7 +6479,7 @@ A call that asserted nothing is refused when the heading is one whose
 state change would move a planning value, and the refusal names what
 the heading holds so the next call can assert it without reading
 again.  Otherwise the first field the two disagree on is a conflict,
-named by its record\='s label."
+named by its record\\='s label."
   (if (null asserted)
       (when (org-mcp--planning-assertion-required-p found)
         (org-mcp--tool-validation-error
@@ -6507,7 +6507,7 @@ that field at the top, as the `before' and `after' of the call.  What
 is named here is what the call moved without being asked to, which is
 what a client has no other way to learn.  A field that moved is named, carrying the state it was in and
 the state it is in now, the way every write answers about the field
-it writes, so the response\='s value is the next call's `before'.
+it writes, so the response\\='s value is the next call's `before'.
 
 Naming only what moved is what makes the report a statement rather
 than something to infer.  A write asks Org for a keyword and Org may
@@ -6557,7 +6557,7 @@ see `org-mcp--link-target'.
 
 The response reports the value the field held as `before' and the
 value it holds afterwards as `after', both read through the one
-accessor a client\='s next `before' will be compared against, so the
+accessor a client\\='s next `before' will be compared against, so the
 response is the record of what the call destroyed.
 
 A planning field the call did not name is reported under its own name
@@ -6569,7 +6569,7 @@ repairing what an Org primitive does to the line would part the file
 from what the same command produces in the user's own Emacs.
 
 A field that holds nothing already is left alone rather than written
-to: a nil AFTER on it asks for what is there, and Org\='s removers are
+to: a nil AFTER on it asks for what is there, and Org\\='s removers are
 written for a value that exists — `org-priority' refuses a heading
 with no cookie to take off."
   (let* ((target (org-mcp--link-target link "link" files))
@@ -9461,11 +9461,11 @@ Returns JSON object:
 "
      org-mcp--node-description)
     :read-only t))
-  "Specs for the tools org-mcp registers on every `org-mcp-enable\='.
-Each element is a `mcp-server-lib-register-server\=' `:tools\=' spec,
-`(HANDLER :id STR :description STR [:read-only BOOL])\='.  The clock
-tools live in `org-mcp--clock-tool-specs\=' and the tools that depend
-on configuration in `org-mcp--view-tool-specs\='.")
+  "Specs for the tools org-mcp registers on every `org-mcp-enable'.
+Each element is a `mcp-server-lib-register-server' `:tools' spec,
+`(HANDLER :id STR :description STR [:read-only BOOL])'.  The clock
+tools live in `org-mcp--clock-tool-specs' and the tools that depend
+on configuration in `org-mcp--view-tool-specs'.")
 
 (defun org-mcp--view-catalogue ()
   "Return the configured views as lines of the org-view description.
@@ -9836,7 +9836,7 @@ Returns JSON object:
   total - Number of open clocks found (number)")
     :read-only t))
   "Specs for the clock tools, registered after org-view.
-Same spec format as `org-mcp--core-tool-specs\='.")
+Same spec format as `org-mcp--core-tool-specs'.")
 
 (defconst org-mcp--resource-specs
   (list
@@ -9876,9 +9876,9 @@ The file must be in the allowed files, or permitted by
 org-mcp-file-scope-override."
     :mime-type "application/json"))
   "Specs for the resources org-mcp registers.
-Each element is a `mcp-server-lib-register-server\=' `:resources\=' spec,
-`(URI HANDLER :name STR [:description STR] [:mime-type STR])\='.  The
-`{link}\=' in the URI makes it a resource template.")
+Each element is a `mcp-server-lib-register-server' `:resources' spec,
+`(URI HANDLER :name STR [:description STR] [:mime-type STR])'.  The
+`{link}' in the URI makes it a resource template.")
 
 (defun org-mcp-enable ()
   "Enable the org-mcp server.
