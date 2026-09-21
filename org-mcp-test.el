@@ -25040,7 +25040,7 @@ moved to; KILL keeps its place in it and stays one."
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'after result) "HOLD"))))))
 
-(ert-deftest org-mcp-test-file-set-setting-refuses-orphaning-a-keyword ()
+(ert-deftest org-mcp-test-file-set-setting-refuses-dropping-a-keyword ()
   "A `#+TODO:' write that would unmake a keyword in use is refused.
 Org reads a keyword its sequences no longer name as the first word
 of the heading's title, so the headings carrying it would be
@@ -25058,8 +25058,8 @@ moved to the keyword the refused call would have taken away."
        (setting . "TODO")
        (before . ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"])
        (after . ["TODO(t) NEXT(n) | DONE(d)"]))
-     "\\`#\\+TODO: would stop naming a keyword headings in this file \
-carry: WAIT on 1 heading\\."
+     "\\`#\\+TODO: would change what Org reads headings in this file \
+as: WAIT stops being a keyword on 1 heading\\."
      test-file)
     (should
      (equal
@@ -25161,7 +25161,7 @@ path it names is the path of a file created beside it."
     (org-mcp-test--call-read (org-mcp-test--file-link file title)))))
 
 (ert-deftest org-mcp-test-file-set-setting-keeps-a-setupfile-sequence ()
-  "A keyword a setup file names is not orphaned by the file's own rewrite.
+  "A keyword a setup file names is not dropped by the file's own rewrite.
 The check asks what Org will reach, and Org reads a `#+SETUPFILE:'
 before it reads the file's own lines.  So the file may drop WAIT from
 its own sequence while the setup file goes on naming it, and the
@@ -25371,8 +25371,8 @@ file naming nothing as a file with no keywords would accept both."
          (setting . "TODO")
          (before . ["TODO WAIT | DONE"])
          (after . []))
-       "\\`#\\+TODO: would stop naming a keyword headings in this file \
-carry: WAIT on 1 heading\\."
+       "\\`#\\+TODO: would change what Org reads headings in this file \
+as: WAIT stops being a keyword on 1 heading\\."
        test-file))))
 
 (defconst org-mcp-test--content-settings-two-waits
@@ -25385,7 +25385,7 @@ carry: WAIT on 1 heading\\."
   "A file two of whose headings carry the same keyword.")
 
 (ert-deftest org-mcp-test-file-set-setting-counts-the-headings-it-would-retitle ()
-  "The orphan refusal counts each keyword's headings and names them once.
+  "The refusal counts each keyword's headings and names them once.
 The count is what says how much work the remedy is, so a keyword on
 two headings is reported once with two, and KILL, on one heading of
 its own, is reported beside it."
@@ -25397,9 +25397,125 @@ its own, is reported beside it."
        (setting . "TODO")
        (before . ["TODO | DONE" "WAIT | KILL"])
        (after . ["TODO | DONE"]))
-     "\\`#\\+TODO: would stop naming a keyword headings in this file \
-carry: WAIT on 2 headings, KILL on 1 heading\\."
+     "\\`#\\+TODO: would change what Org reads headings in this file \
+as: WAIT stops being a keyword on 2 headings, KILL stops being a \
+keyword on 1 heading\\."
      test-file)))
+
+(defconst org-mcp-test--content-settings-word-in-a-title
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "* WAIT for the parts\n"
+   "* TODO real task\n")
+  "A file with a heading whose title opens on a word no sequence names.
+Naming that word would make it the heading's keyword and leave the
+heading titled `for the parts'.")
+
+(defconst org-mcp-test--content-settings-words-org-leaves-alone
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "* [#A] WAIT behind a cookie\n"
+   "* WAITING is another word\n"
+   "* TODO real task\n")
+  "A file whose titles begin with a word only a reader would mistake.
+Org takes a keyword in the slot before the priority cookie and
+takes a whole word, so neither heading changes when a sequence
+starts naming WAIT.")
+
+(defconst org-mcp-test--pattern-settings-words-left-alone
+  (concat
+   "\\`#\\+TODO: TODO WAIT | DONE\n"
+   "\\* \\[#A\\] WAIT behind a cookie\n"
+   "\\* WAITING is another word\n"
+   "\\* TODO real task\n\\'")
+  "Pattern after a sequence starts naming a word neither heading carries.")
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-claiming-a-title ()
+  "A `#+TODO:' write that would make a title's first word a keyword is refused.
+Org takes a heading's first word for its keyword when the sequences
+name that word, so naming WAIT retitles `* WAIT for the parts' to a
+WAIT heading titled `for the parts' and its `::*title' link with it.
+Nothing in the file records what it was, and the call named no
+heading -- which is the whole of the reason the other direction is
+refused, so this one is refused too.  The refusal says which way the
+reading moves."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-word-in-a-title))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "TODO")
+       (before . ["TODO | DONE"])
+       (after . ["TODO WAIT | DONE"]))
+     "\\`#\\+TODO: would change what Org reads headings in this file \
+as: WAIT becomes the keyword of 1 heading\\."
+     test-file)
+    (should
+     (equal (org-mcp-test--settings-todo-of test-file "*WAIT for the parts")
+            nil))))
+
+(ert-deftest org-mcp-test-file-set-setting-leaves-a-refused-buffer-alone ()
+  "A refused `#+TODO:' write leaves the user's unsaved buffer as it found it.
+The check reads the headings after the write, because what a heading
+is is Org's reading of it, so the write lands and the change group
+takes it back.  A buffer the user is editing is never saved by
+org-mcp, so the file alone cannot say the rollback was clean: what
+the server serves for that file has to be unchanged too, and a
+write to a heading in it has to go on being held to the workflow the
+file still names."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-word-in-a-title))
+    (org-mcp-test--with-dirty-buffer (buffer on-disk) test-file
+      (ignore buffer)
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+         (setting . "TODO")
+         (before . ["TODO | DONE"])
+         (after . ["TODO WAIT | DONE"]))
+       "\\`#\\+TODO: would change what Org reads headings in this file"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-set-todo"
+       `((link . ,(org-mcp-test--file-link test-file "*real task"))
+         (before . "TODO")
+         (after . "WAIT"))
+       "\\`Invalid TODO state: 'WAIT'"
+       test-file)
+      (should (string= (org-mcp-test--read-file test-file) on-disk)))))
+
+(ert-deftest org-mcp-test-file-set-setting-reads-a-heading-as-org-does ()
+  "Only the headings Org would read differently stand in the way.
+A word in the slot after a priority cookie is no keyword whatever
+the sequences name, and a sequence naming WAIT says nothing about
+WAITING, so neither heading here is changed by a write that names
+WAIT -- and the write is accepted.  Deciding that from the first
+word of a title would refuse both."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-words-org-leaves-alone))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-file-set-setting"
+           `((link . ,link)
+             (setting . "TODO")
+             (before . ["TODO | DONE"])
+             (after . ["TODO WAIT | DONE"])))))
+        t))
+      (should
+       (equal
+        (org-mcp-test--settings-todo-of test-file "*WAIT behind a cookie")
+        nil))
+      (should
+       (equal
+        (org-mcp-test--settings-todo-of test-file "*WAITING is another word")
+        nil))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-words-left-alone))))
 
 (defconst org-mcp-test--content-settings-with-an-archive
   (concat
@@ -25515,7 +25631,7 @@ names no location of its own."
           (delete-file archive))))))
 
 (ert-deftest org-mcp-test-file-set-setting-retires-a-keyword-in-two-steps ()
-  "The remedy the orphan refusal names is one the tools can carry out.
+  "The remedy the refusal names is one the tools can carry out.
 The new sequence is written beside the old one, the heading is
 moved while both keywords are valid, and the sequence is then
 written again without the old one.  A refusal with no remedy inside
@@ -26733,10 +26849,12 @@ in Emacs"
     "A settings line carries no space around its value: '%s'"
     "A setting is one line, and this value is two or more: '%s'"
     "#+%s: mismatch: expected %s, found %s"
-    "#+TODO: would stop naming a keyword headings in this file carry: %s.  Org reads such a \
-keyword as the first word of the heading's title, so the headings would be retitled rather \
-than refused.  Write sequences that still name it, or add the new sequences beside the old \
-ones, move those headings with org-node-set-todo, and write the sequences again without it"
+    "#+TODO: would change what Org reads headings in this file as: %s.  Org takes a heading's \
+first word for its keyword when the sequences name that word and for the start of its title \
+when they do not, so these headings are rewritten by a call that names none of them.  Write \
+sequences that leave them as they are, or move each heading first -- org-node-set-todo off a \
+keyword that is going, org-node-set-title off a title that would become one -- and write the \
+sequences again"
    )
   "Every refusal that hands a client no value to send.
 Four kinds are here.  Most name nothing at all, or name only what
@@ -26749,8 +26867,8 @@ value rather than a type, because it asks a field to hold nothing,
 and the refusals naming it are in the list above.
 
 The last kind names a course to take rather than a value to send.
-The `#+TODO:' rewrite that would orphan a keyword is the one: the
-keyword it names is what stands in the way, not something a call
+The `#+TODO:' rewrite that would rewrite headings is the one: the
+keywords it names are what stands in the way, not something a call
 carries, and what it recommends is a sequence of calls no regexp can
 lift out of the text.  A row of `org-mcp-test--advertisements' would
 have nothing to send back, so the route it recommends is pinned by a
