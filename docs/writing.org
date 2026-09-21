@@ -495,6 +495,13 @@ them:
 | a tag          | =org-node-remove-tags=    | the tags named in =after= |
 | every own tag  | =org-node-set-tags=       | =after: []=               |
 
+*={}= is =null= written another way.* The JSON decoder reads an empty object
+as nothing at all, which is what it reads =null= as, so nothing past it can
+tell the two apart: ={}= means, wherever it stands, what =null= means there. In
+an =after= on the four fields above it empties the field exactly as the table
+says, and in a property map's =after= it takes that line away; everywhere else
+it is the parameter left out and is refused as one.
+
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
 stand present and empty. On the four fields above it is neither a value nor an

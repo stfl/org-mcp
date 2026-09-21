@@ -10,15 +10,17 @@ present and empty, so `""` is meaningful there; a TODO keyword, a SCHEDULED, a
 DEADLINE and a priority are each a value or an absence with nothing in between,
 so on those `""` names no state the field can hold and is refused with the
 message that says what the field does take and the null that takes a value away.
-Every other blank — `false`, `[]`, `{}` — is a parameter the client filled but
-did not send, and is refused as one, so nothing is destroyed by a parameter
-nobody meant to fill. We chose this over spelling every removal `after: ""`,
-which we shipped first: that made an *invalid input* into a command, and it only
-looked uniform because one spelling was applied across fields whose value sets
-differ. We chose it over a named removal tool per field, which we also shipped
-first and reversed, because `before` is required and already says what a removal
-destroys, so four extra ids bought nothing on a surface whose convention is one
-tool per field.
+Every other blank — `false`, `[]` — is a parameter the client filled but did not
+send, and is refused as one, so nothing is destroyed by a parameter nobody meant
+to fill. `{}` decodes to the same nothing `null` does, so no code past the
+decoder tells them apart and it means wherever it stands what `null` means
+there. We chose this over spelling every removal `after: ""`, which we shipped
+first: that made an *invalid input* into a command, and it only looked uniform
+because one spelling was applied across fields whose value sets differ. We chose
+it over a named removal tool per field, which we also shipped first and
+reversed, because `before` is required and already says what a removal destroys,
+so four extra ids bought nothing on a surface whose convention is one tool per
+field.
 
 A `before` keeps `""` for *there was no value*, on every field, and that
 asymmetry with `after` is deliberate rather than tolerated. An assertion names a

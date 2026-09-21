@@ -3337,6 +3337,35 @@ off, whatever the handler then does with it."
              (org-mcp-test--registered-tool-required
               "org-node-set-todo")))))
 
+(ert-deftest org-mcp-test-set-properties-description-spells-a-removal-null ()
+  "The published description of a property removal spells it `null'.
+A client plans its call from the description the registry serves, not
+from a page it never opens, so the rule has to be right in the text
+it reads.  An empty `after' is no removal anywhere on this surface:
+on a property map it is the parameter left out and is refused as one,
+so a description naming it would send a client into a refusal.
+
+The description is read back through `tools/list' rather than grepped
+out of the source, because what a client acts on is the text the
+registry serves."
+  (org-mcp-test--with-enabled
+    (let ((description
+           (replace-regexp-in-string
+            "[ \t\n]+" " "
+            (org-mcp-test--registered-tool-description
+             "org-node-set-properties"))))
+      (should
+       (string-match-p
+        (regexp-quote
+         "a property that a null after names but the drawer did not \
+carry is in neither array.")
+        description))
+      (should
+       (string-match-p
+        (regexp-quote "null takes the property line away")
+        description))
+      (should-not (string-match-p "empty after" description)))))
+
 (ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
   (let ((org-mcp-views nil))
