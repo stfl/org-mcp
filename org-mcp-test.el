@@ -5844,6 +5844,16 @@ has no body, which is a region with a token of its own.")
    "\\* Sibling\n\\'")
   "The complete file after one line of Target's body is replaced.")
 
+(defconst org-mcp-test--set-content-appended
+  (concat
+   org-mcp-test--set-content-heading
+   "First line of the body\\.\n"
+   "Second line of the body\\.\n"
+   "Appended line\\.\n"
+   "\\*\\* Child\n"
+   "\\* Sibling\n\\'")
+  "The complete file after a line is appended to Target's body.")
+
 (defconst org-mcp-test--set-content-sibling-filled
   (concat
    org-mcp-test--set-content-heading
@@ -14457,6 +14467,56 @@ before names."
         (should (member "before" required))
         (should-not (member "after" required))
         (should-not (member "files" required))))))
+
+(ert-deftest org-mcp-test-blank-before-on-set-content-is-left-out ()
+  "A blank body precondition is the parameter left out, body or none.
+org-node-set-content asserts a body the way every other write
+asserts a field, so a node with nothing in its body answers a blank
+the same as a node with something in it: nothing is written either
+way, and the refusal names the parameter that never arrived rather
+than reporting on a file the call said nothing about.
+
+The empty string is not among the blanks.  It is the value naming a
+body with nothing in it, the assertion a client has to type, and it
+keeps the refusal it has always had."
+  (org-mcp-test--with-set-content-file test-file
+    (let ((target (org-mcp-test--set-content-link))
+          (bare (org-mcp-test--file-link test-file "*Sibling"))
+          (missing "\\`Missing required parameter: before\\'"))
+      (dolist (blank '(nil :json-false []))
+        (dolist (link (list target bare))
+          (org-mcp-test--call-tool-refused
+           "org-node-set-content"
+           `((link . ,link) (before . ,blank) (after . "Rewritten."))
+           missing
+           test-file)))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-content"
+       `((link . ,target) (before . "") (after . "Rewritten."))
+       "\\`conflict: An empty before asserts the node has no content,"
+       test-file))))
+
+(ert-deftest org-mcp-test-append-reads-no-before-at-all ()
+  "Append takes no precondition, so no spelling of one can refuse it.
+Appending destroys nothing and asserts nothing, and the rule that
+refuses a blank precondition is a rule about preconditions.  The
+schema asks for the parameter, because one tool publishes one
+parameter list and replace mode needs it, and a blank sent into it
+here reaches nothing and refuses nothing."
+  (org-mcp-test--with-enabled
+    (should
+     (member
+      "before"
+      (org-mcp-test--registered-tool-required "org-node-set-content"))))
+  (org-mcp-test--with-set-content-file test-file
+    (org-mcp-test--call-edit-body-and-check
+     test-file
+     (org-mcp-test--set-content-link)
+     nil
+     "Appended line."
+     org-mcp-test--set-content-appended
+     t
+     (org-mcp-test--set-content-link))))
 
 ;;; Refusal class tests
 

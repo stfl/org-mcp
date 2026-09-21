@@ -4085,11 +4085,18 @@ entire, and anything else is a substring of the body and replaces
 that substring.  The prefix is the whole of the discrimination, so a
 client that means to rewrite the body says so by asserting the
 region rather than by setting a flag.
+
+BEFORE reaches both forms through `org-mcp--before-given', so a body
+is asserted by the rule every other precondition follows: \"\" is
+the value naming an empty body, and the rest of
+`org-mcp--blank-param-p' is a parameter the call did not send.
+Append mode reads no precondition at all and never comes here.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'."
   (org-mcp--validate-body-no-unbalanced-blocks after)
 
-  (let* ((target (org-mcp--link-target link files))
+  (let* ((asserted (org-mcp--before-given before))
+         (target (org-mcp--link-target link files))
          (file-path (plist-get target :file))
          ;; The replacement leaves point at the end of the new body,
          ;; which is the first child's heading when there is one; the
@@ -4103,9 +4110,9 @@ see `org-mcp--link-target'."
       (org-mcp--validate-body-no-headlines after (org-current-level))
 
       (let ((bounds (org-mcp--body-bounds)))
-        (if (org-mcp--digest-form-p before)
-            (org-mcp--replace-whole-body bounds before after)
-          (org-mcp--replace-body-substring bounds before after)))
+        (if (org-mcp--digest-form-p asserted)
+            (org-mcp--replace-whole-body bounds asserted after)
+          (org-mcp--replace-body-substring bounds asserted after)))
 
       (goto-char heading)
       (set-marker heading nil))))
@@ -6408,7 +6415,10 @@ Parameters:
            and all, and take it from the read you planned this
            call from rather than from a list you kept
            Use empty string \"\" only for adding to empty nodes
-           Append mode does not read it; send \"\"
+           Every other blank - null, false, [] - is the parameter
+           left out and is refused as one
+           Append mode reads no precondition; the schema requires
+           the parameter all the same, so send \"\"
   after - Replacement or appended text (string, required)
           Cannot introduce headlines at same or higher level
           Must maintain balanced #+BEGIN/#+END blocks
@@ -6454,12 +6464,15 @@ Special behavior - Append mode:
   send the replace against the body it holds now.
 
 Refusals (replace mode):
-  Every refusal over before is marked conflict:, whichever form
-  it took - the substring is not there, is there more than once,
-  the node has no body, the node has one where \"\" said it had
-  none, or the digest is not the body's.  Each answers a before
-  the client believed it read, so the recovery is the same: read
-  the node again and plan against what it holds now.")
+  Every refusal over the value before asserts is marked
+  conflict:, whichever form it took - the substring is not there,
+  is there more than once, the node has no body, the node has one
+  where \"\" said it had none, or the digest is not the body's.
+  Each answers a before the client believed it read, so the
+  recovery is the same: read the node again and plan against what
+  it holds now.  A before that was never sent says nothing about
+  the file and is refused unmarked, as the missing parameter it
+  is.")
     :read-only nil)
    ;; Entry update tools
    (list

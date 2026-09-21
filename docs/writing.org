@@ -432,12 +432,12 @@ Example:
 - *Description:* Edit or append to the body content of an Org node. In replace mode (default), replaces either a unique substring of the body or the body entire, whichever =before= names. In append mode, inserts content after existing body but before child headlines
 - *Parameters:*
   - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Append mode does not read it, and still expects the parameter: send ""
+  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to an empty node. Every other blank is the parameter left out (see [[*What a blank parameter means]]). Append mode reads no precondition, and the schema requires the parameter all the same: send ""
   - =after= (string, required): Replacement or appended text. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). In append mode it is the content to append and cannot be empty or whitespace-only
   - =append= (=true= / =false= or ="true"= / ="false"=, optional, default false): When true, append =after= to end of body instead of replacing. =false=, ="false"=, =null=, =""= and =[]= mean replace; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and the link to the updated node
-- *Refuses with:* =conflict:= for every refusal over =before=, in either form, and unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= that was never sent, and otherwise (see [[*How a refusal is classed]])
 - *Special behavior (replace mode):* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
 Replace mode is a transition: =before= is what the body holds and =after= is
@@ -459,7 +459,8 @@ held, and the call goes through whatever has happened to the node since it was
 read. It is therefore not a way to retry a replace that was refused — read the
 node again and send the replace against the body it holds now.
 
-Every refusal over =before= is a conflict, whichever form it took:
+Every refusal over the value =before= asserts is a conflict, whichever form
+it took:
 
 #+begin_example
 conflict: Body text not found: This is a placeholder.
@@ -477,6 +478,14 @@ node again and plan against what it holds now — so they carry the marker that
 says it. A digest is a stricter assertion than a substring, not a different
 kind of one: it asserts the region rather than a part of it, and it fails on a
 change a substring would have written straight through.
+
+A =before= that was never sent is a different matter and reads differently. It
+says nothing about the file, so there is nothing to conflict with, and it is
+refused unmarked as the parameter it is:
+
+#+begin_example
+Missing required parameter: before
+#+end_example
 
 Example:
 #+begin_src json
