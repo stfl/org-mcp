@@ -640,6 +640,49 @@ and asserts nothing (see [[*Three tools for one tag set]]); emptying the field i
 set has an empty value and spells it =[]=, the way a body spells its empty value
 ="".
 
+* Which tools a file's link reaches
+
+A node is a file or a heading, and a read answers for either. A write does not:
+most of what a write changes is a heading construct that a file has no
+counterpart for, so the tool a file's link reaches is the tool whose construct
+Org keeps at file level too.
+
+| Tool                      | What a link naming a whole file does       |
+|---------------------------+--------------------------------------------|
+| =org-node-set-properties= | writes that file's own property drawer     |
+| =org-node-create=         | as =parent=: the file's top level          |
+| =org-node-refile=         | as =parent=: the file's top level          |
+| every other write tool    | refused: the link has to name a heading    |
+
+A TODO keyword, a priority cookie, a SCHEDULED or DEADLINE line, a heading's
+own tags and a LOGBOOK note are written on a headline, and a file has no
+headline. =org-node-set-title= renames a headline; a file's title is its
+=#+TITLE:= line, a keyword and not a headline, and this tool does not write
+one. =org-node-set-content= replaces a heading's body; a file's body is its
+preamble, which is where those =#+= lines live. And =org-node-delete=,
+=org-node-archive= and =org-node-refile= take a whole node away or move it,
+which for a file would mean deleting or moving the file: no tool here does
+that, so the node those three act on is a heading. =org-node-refile= still
+takes a file as the /destination/, where it names that file's top level.
+
+That leaves the property drawer, which Org keeps on a heading and at the top of
+a file alike, with the same syntax and the same accessors — so
+=org-node-set-properties= takes either, under one contract (see
+[[*A file's own property drawer]]).
+
+The refusal reads =Link does not point to a heading=, except from
+=org-clock-out=, whose =link= is its assertion of which clock is running: a
+file's link names no running clock, so that tool answers with the conflict it
+answers any other wrong link with (see [[file:clocking.org::*org-clock-out][org-clock-out]]).
+
+*A file property is two different things.* A =#+PROPERTY:= line and a property
+drawer before the first heading are both called one, and they are not the same.
+=#+PROPERTY: OWNER ada= is a value every heading in the file inherits and no
+node carries itself, so no =properties= answer reports it and no call here
+writes it; the drawer holds the file node's own properties, which a read of the
+file returns and this tool writes. This page is about the drawer. No write tool
+writes a =#+PROPERTY:=, a =#+TITLE:= or any other =#+= line.
+
 * Write tools
 
 ** org-node-set-todo
@@ -1083,13 +1126,13 @@ Example:
 #+end_src
 
 ** org-node-set-properties
-- *Description:* Set or remove properties on an Org headline's PROPERTIES drawer
+- *Description:* Set or remove properties in the PROPERTIES drawer of an Org headline or of a whole file
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the headline, or to a whole file for its own drawer (see [[file:links.org::*Addressing headings with links][Addressing headings with links]] and [[*A file's own property drawer]])
   - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. =null= asserts the drawer carries no such line, =""= asserts a line carrying no value, and any other string asserts the line holds that text (see [[*The three states of a drawer line]]). Names are matched without regard to case, as Org reads them
   - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= writes a line carrying no value, and =null= takes the line away, guarded by what =before= says it holds (see [[*The three states of a drawer line]]). =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead — and so is a name ending in =+=
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =properties_set= and =properties_deleted= — the names written and the names removed — =before=, the values they held, plus the headline's link
+- *Returns:* Success status, =saved= flag, =properties_set= and =properties_deleted= — the names written and the names removed — =before=, the values they held, plus the node's link
 - *Refuses with:* =conflict:= when the drawer does not hold for a property what =before= says it holds, =blocked:= when the drawer writes that name on two lines, unmarked validation otherwise — a =before= naming other properties than =after= writes among them, and a name ending in =+= (see [[*How a refusal is classed]])
 
 Every assertion is checked before the first property is written, so a call
@@ -1247,6 +1290,72 @@ Example:
   "error": "before names the property 'OWNER', which this call does not write"
 }
 #+end_src
+
+*** A file's own property drawer
+
+A file is a node, and its properties live in the drawer Org reads at the top of
+the file: above =#+TITLE:=, =#+TODO:= and every other setting, and before the
+first heading. That is where org-roam keeps the =ID= of a file node. A =file:=
+link with no search part names that node, and so does an =id:= link whose =ID=
+sits in that drawer (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
+
+Org gives a file's drawer the same syntax and the same accessors as a
+heading's, so this tool gives it the same contract. Everything above holds for
+it unchanged: the three states, the rule that =before= names exactly the
+properties =after= writes, the =blocked:= refusal for a name written on two
+lines, and the special properties that are refused.
+
+*=before= asserts what it asserts for a heading:* the state each named property
+was in. A file has no subtree to take a digest of, and this write needs none —
+it replaces one field at a time, and a field is guarded by the value it held
+(see [[*Knowing what you are about to change]]). The verbs that do take a digest
+act on a whole node, and they refuse a file's link (see [[*Which tools a file's link reaches]]).
+
+*The drawer is made when the file has none.* Org creates a heading's drawer for
+a write that needs one, and a file's is created the same way — at the very top,
+above the settings, because a drawer written under a =#+= line is read as no
+drawer at all and the property would never be found again. A file that opens on
+a comment line, such as the =# -*- mode: org -*-= a file-local variables line is
+written as, keeps that line above the drawer: that is where Org puts one.
+
+A file whose very first line is a heading has nowhere to put a drawer at all,
+and the write makes room above that heading. Nothing of the heading is touched.
+Until then such a file carries no properties of its own — a read of it returns
+none, an assertion of =null= on any property holds, and a removal takes nothing
+away rather than reaching into the heading below:
+
+#+begin_src json
+# The file opens on "* TODO Ship v2", whose own drawer holds :EFFORT: 1:00.
+# The file node carries nothing, so null is the true assertion, and the write
+# gives the file a drawer above the heading:
+{
+  "link": "file:/home/you/notes.org",
+  "before": { "OWNER": null },
+  "after": { "OWNER": "ada" }
+}
+
+# Asserting the heading's EFFORT on the file node is a conflict, and the
+# refusal names absence rather than the heading's value: two nodes, two
+# drawers
+{
+  "error": "conflict: Property 'EFFORT' mismatch: expected '1:00', found (absent)"
+}
+#+end_src
+
+#+begin_example
+:PROPERTIES:
+:OWNER:    ada
+:END:
+,* TODO Ship v2
+:PROPERTIES:
+:EFFORT:   1:00
+:END:
+#+end_example
+
+*The link the response carries* is the file's: =id:<id>= when its drawer holds
+one and =file:<path>= otherwise (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]). Writing an =ID=
+into a file's drawer therefore changes the link the next response reports, and
+taking it away changes it back.
 
 ** org-node-set-scheduled
 - *Description:* Move the SCHEDULED timestamp of an Org headline, or take it off

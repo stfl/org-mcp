@@ -2050,6 +2050,25 @@ that declines."
     (org-mcp--tool-validation-error
      "The clock is running in this node: close it with org-clock-out first; nothing was deleted")))
 
+(defun org-mcp--file-drawer-region-p ()
+  "Return non-nil when the buffer has a region for the file's own drawer.
+A file's property drawer is the one Org reads at the top of the
+buffer: before the first heading, and above the in-buffer settings,
+since a drawer under a #+ keyword line is read as no drawer at all.
+
+A file whose first line is a heading has no region there.  Every Org
+property accessor starts from `org-back-to-heading-or-point-min',
+which lands on that heading, so the drawer Org reads at `point-min'
+is the heading's own: reading it would report another node's
+properties as the file's, and `org-entry-delete' would take a line
+out of it.  `org-mcp--file-link' keeps the two apart the same way,
+by asking Org's parser for the file's ID rather than `org-entry-get'.
+
+Point does not move."
+  (save-excursion
+    (goto-char (point-min))
+    (org-before-first-heading-p)))
+
 (defun org-mcp--drawer-at-point ()
   "Return the Org property drawer of the node at point as an alist.
 Names are upcased, as `org-entry-properties' returns them, and a
@@ -2133,16 +2152,22 @@ the drawer."
         (set-marker end nil))))
   (org-set-property name value))
 
-(defun org-mcp--node-properties (names)
+(defun org-mcp--node-properties (names file-node)
   "Return the Org property drawer of the node at point, or nil.
 NAMES is `all' for the whole drawer or the upcased names to take
 from it, as `org-mcp--node-properties-given' resolved them; nil
 takes nothing, and a name the drawer does not hold contributes
 nothing, the way a field with no value does.
 
+FILE-NODE non-nil means the node is the file the buffer visits, whose
+drawer is the one before its first heading.  A file that opens on a
+heading has none, see `org-mcp--file-drawer-region-p', and answers
+with no drawer rather than with that heading's.
+
 The drawer itself comes from `org-mcp--drawer-at-point', which the
 assertion path reads too."
-  (when names
+  (when (and names
+             (or (not file-node) (org-mcp--file-drawer-region-p)))
     (cl-remove-if-not
      (lambda (pair)
        (or (eq names 'all) (member (car pair) names)))
@@ -2332,7 +2357,8 @@ bounded one match at a time."
           (push (cons field value) node))))
     (append
      (nreverse node)
-     (when-let* ((drawer (org-mcp--node-properties properties)))
+     (when-let* ((drawer
+                  (org-mcp--node-properties properties file-node)))
        (list (cons 'properties drawer)))
      (when-let* ((values (org-mcp--node-computed computed)))
        (list (cons 'computed values))))))
@@ -5433,9 +5459,43 @@ that names one value."
        (org-mcp--property-state-text asserted)
        (org-mcp--property-state-text found)))))
 
+(defun org-mcp--goto-node-drawer (target file-node)
+  "Move point to the property drawer of the node TARGET names.
+FILE-NODE non-nil means TARGET names a whole file, see
+`org-mcp--target-heading-p'; otherwise it names a heading, which
+`org-mcp--goto-heading' goes to and which always has a drawer to
+read and to write.
+
+A file's own drawer is the one Org reads at the top of the buffer,
+so point goes to `point-min'.  The value is non-nil when the node has
+a region there: a file whose first line is a heading has none, see
+`org-mcp--file-drawer-region-p', and `point-min' is inside that
+heading, where neither its drawer nor a write belongs."
+  (if file-node
+      (progn
+        (goto-char (point-min))
+        (org-mcp--file-drawer-region-p))
+    (org-mcp--goto-heading target)
+    t))
+
+(defun org-mcp--make-file-drawer ()
+  "Make the region a file's own property drawer lives in, at point-min.
+The two lines `org-insert-property-drawer' writes are written here
+instead of by it: its placement rule starts at
+`org-back-to-heading-or-point-min', which in a file whose first line
+is a heading is that heading, so Org has no call that makes a file
+one.  They go above everything, which is the only place Org reads a
+file's own drawer, see `org-mcp--file-drawer-region-p'.  Point is
+left at `point-min', in the drawer's entry."
+  (goto-char (point-min))
+  (insert ":PROPERTIES:\n:END:\n")
+  (goto-char (point-min)))
+
 (defun org-mcp--write-properties
-    (link files action response asserted apply)
-  "Change the properties ASSERTED names on the heading LINK names.
+    (link files action response asserted sets apply)
+  "Change the properties ASSERTED names on the node LINK names.
+LINK names a heading or a whole file, and a file's own drawer is
+written the way a heading's is; see `org-mcp--goto-node-drawer'.
 ASSERTED is the (NAME . VALUE) pairs the call vouches for, VALUE the
 three states a drawer line has: nil for no line, \"\" for a line
 carrying nothing, and the text the line holds otherwise.  Every one
@@ -5443,7 +5503,7 @@ is checked before APPLY runs, so that a property named later in the
 call cannot be refused after an earlier one has already been
 changed.  A name the drawer writes twice is refused before any of
 them, see `org-mcp--doubled-drawer-names'.  APPLY is then called at
-the heading, inside the change, and writes the properties.
+the node, inside the change, and writes the properties.
 ACTION names what the call does, for the call site to read.
 RESPONSE is called with the drawer as it stood before the change and
 returns the fields the call adds to its own response: the names it
@@ -5452,6 +5512,13 @@ drawer rather than a ready-made alist because what a write took away
 is a fact about the file and not about the call: only the drawer
 tells a property carried with nothing in it from one the drawer never
 carried.
+SETS is non-nil when APPLY writes a property rather than only taking
+properties away.  It decides what happens to a file that opens on a
+heading and so has nowhere to keep a drawer: a set makes the region
+first, as `org-set-property' makes a drawer, and a removal makes
+nothing, as `org-entry-delete' makes nothing.  The removal has
+nothing to take away either — every assertion it passed was of
+absence — so the call succeeds having left the file alone.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
@@ -5459,27 +5526,44 @@ This is the whole of what writing properties and removing them
 share, and they differ only in what APPLY does."
   (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
-         (drawer nil))
+         (drawer nil)
+         (file-node nil))
 
+    ;; A file node names its own link, read after the write, which
+    ;; may have given the file an ID or taken one away.  The link
+    ;; `org-mcp--link-at-point' makes before the first heading can
+    ;; be a `file:PATH::LINE' search, which org-mcp cannot resolve.
     (org-mcp--modify-and-save file-path action
-                              (funcall response drawer)
-      (org-mcp--goto-heading target)
+                              (append
+                               (funcall response drawer)
+                               (when file-node
+                                 (list
+                                  (cons 'link (org-mcp--file-link)))))
+      (setq file-node (not (org-mcp--target-heading-p target)))
+      (let ((in-drawer (org-mcp--goto-node-drawer target file-node)))
 
-      (setq drawer (org-mcp--drawer-at-point))
-      (let ((doubled (org-mcp--doubled-drawer-names)))
-        (pcase-dolist (`(,key . ,val) asserted)
-          (when (member (upcase key) doubled)
-            (org-mcp--tool-blocked-error
-             "Property '%s' is written twice in this drawer, so it \
+        (setq drawer (and in-drawer (org-mcp--drawer-at-point)))
+        (let ((doubled
+               (and in-drawer (org-mcp--doubled-drawer-names))))
+          (pcase-dolist (`(,key . ,val) asserted)
+            (when (member (upcase key) doubled)
+              (org-mcp--tool-blocked-error
+               "Property '%s' is written twice in this drawer, so it \
 holds no one value; repair the drawer in Emacs"
-             key))
-          (org-mcp--assert-property val drawer key)))
+               key))
+            (org-mcp--assert-property val drawer key)))
 
-      (funcall apply))))
+        (when (or in-drawer sets)
+          (unless in-drawer
+            (org-mcp--make-file-drawer))
+          (funcall apply))))))
 
 (defun org-mcp--tool-node-set-properties
     (link before after &optional files)
-  "Set or remove properties on the headline LINK names.
+  "Set or remove properties on the node LINK names.
+LINK names a heading or a whole file: a file's own drawer, the one
+before its first heading, is a drawer like any other and takes the
+same three states on either side of the call.
 BEFORE is an alist naming each property AFTER writes and the state it
 was in: null for no line, \"\" for a line carrying nothing, and the
 text the line holds otherwise.
@@ -5493,11 +5577,14 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the headline, or to a whole file for its own
+         property drawer
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
+           - file:{absolute-path} (the file's own drawer)
+           - id:{id} of a file's own drawer (that file)
            - any of these as [[link]] or [[link][description]]
   before - JSON object of the values these properties hold now
            (required)
@@ -5528,7 +5615,8 @@ MCP Parameters:
   (let* ((written (org-mcp--property-map-given after "after"))
          (asserted
           (org-mcp--asserted-property-values
-           (org-mcp--property-map-given before "before") written)))
+           (org-mcp--property-map-given before "before") written))
+         (sets (and (cl-find-if #'cdr written) t)))
     (org-mcp--write-properties
      link files "set properties"
      (lambda (drawer)
@@ -5537,7 +5625,7 @@ MCP Parameters:
           (cons 'properties_set (vconcat (car touched)))
           (cons 'properties_deleted (vconcat (cdr touched)))
           (cons 'before asserted))))
-     asserted
+     asserted sets
      (lambda ()
        (pcase-dolist (`(,key . ,val) written)
          ;; `org-delete-property' takes the `NAME+' lines with the
@@ -7386,7 +7474,7 @@ MCP Parameters:
   "The link forms of a `link' parameter naming a heading.
 Tool descriptions `concat' it after the parameter's first line.")
 
-(defconst org-mcp--read-link-formats
+(defconst org-mcp--node-link-formats
   "         Formats:
          - id:{id} - heading with that ID
          - file:/path/to/file.org::#{custom-id} - heading with that
@@ -7397,8 +7485,10 @@ Tool descriptions `concat' it after the parameter's first line.")
          - id:{id} of the file-level property drawer - whole file
          - any of these as [[link]] or [[link][description]]
 "
-  "The link forms of a read tool's `link' parameter.
-Tool descriptions `concat' it after the parameter's first line.")
+  "The link forms of a `link' parameter naming a node.
+A node is a heading or a whole file, so these are the forms of the
+tools that take either.  Tool descriptions `concat' it after the
+parameter's first line.")
 
 (defconst org-mcp--files-set-description
   "          Each entry is an absolute path to an Org file or a
@@ -7988,16 +8078,25 @@ Refusals:
     :id "org-node-set-properties"
     :description
     (concat
-     "Set or remove properties on an Org headline.  Updates the
-PROPERTIES drawer: a value writes the property and null takes it
-away, guarded by what before says it holds.  Setting ID or
+     "Set or remove properties on an Org headline or on a whole file.
+Updates the PROPERTIES drawer: a value writes the property and null
+takes it away, guarded by what before says it holds.  Setting ID or
 CUSTOM_ID gives the headline a stable link; org-mcp creates neither
 itself.
 
+A link naming a whole file writes that file's own drawer, the one
+above its #+ settings and before its first heading, which is where
+Org reads a file's properties.  It is made when the file has none.
+A file whose very first line is a heading has nowhere for one, and
+the drawer is made above that heading.  No other write tool takes a
+link naming a file; a file's #+TITLE, #+TODO and #+FILETAGS are not
+properties and are not reached here.
+
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the headline, or to a whole file for its own
+         property drawer (string, required)
 "
-     org-mcp--heading-link-formats
+     org-mcp--node-link-formats
      "  before - JSON object of what those properties hold now
            (required)
            One entry per property after writes, and no other: a
@@ -8037,9 +8136,10 @@ Returns JSON object:
   before - JSON object of the values these properties held, one
            entry per name before asserted; nothing in the file
            records a removed value once the call returns
-  link - Link to the headline (string): id:{id} when it has
-         an ID, else file:{path}::#{custom-id} when it has a
-         CUSTOM_ID, else file:{path}::*{title}")
+  link - Link to the node (string): for a headline, id:{id} when it
+         has an ID, else file:{path}::#{custom-id} when it has a
+         CUSTOM_ID, else file:{path}::*{title}; for a file, id:{id}
+         of its own drawer when it has one, else file:{path}")
     :read-only nil)
    (list
     #'org-mcp--tool-node-set-scheduled
@@ -8489,7 +8589,7 @@ Returns JSON object:
 Parameters:
   link - Link to a heading or a file (string, required)
 "
-     org-mcp--read-link-formats
+     org-mcp--node-link-formats
      "         Any other string, such as a bare ID, a bare path or an
          org:// resource URI, is refused.
   fields - How much of the node to return (array of strings, or a
@@ -8566,7 +8666,7 @@ nested subheadings.
 Parameters:
   link - Link to a heading or a file (string, required)
 "
-     org-mcp--read-link-formats
+     org-mcp--node-link-formats
      "         Any other string is refused, as in org-node-read.
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read

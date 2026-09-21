@@ -11396,6 +11396,403 @@ read \"\" as absence would break this at the assertion; one that wrote
         (org-mcp-test--verify-file-matches
          test-file org-mcp-test--pattern-blank-line-intact)))))
 
+;;; A file's own drawer through org-node-set-properties
+
+(defconst org-mcp-test--file-own-drawer-id
+  "11111111-2222-3333-4444-555555555555"
+  "The ID in the file-level drawer of `org-mcp-test--content-file-own-drawer'.")
+
+(defconst org-mcp-test--content-file-settings
+  (concat
+   "#+TITLE: A file\n"
+   "#+TODO: TODO NEXT | DONE\n"
+   "\n"
+   "Preamble.\n"
+   "\n"
+   "* TODO Simple Task\n"
+   "Task body text.\n")
+  "A file carrying in-buffer settings and no drawer of its own.")
+
+(defconst org-mcp-test--pattern-file-drawer-made
+  (concat
+   "\\` *:PROPERTIES:\n"
+   " *:CAT: +inbox\n"
+   " *:END:\n"
+   "#\\+TITLE: A file\n"
+   "#\\+TODO: TODO NEXT | DONE\n"
+   "\n"
+   "Preamble\\.\n"
+   "\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a file with settings and no drawer is given one.
+The drawer is above the settings, which is the only place Org reads
+a file's own: one written under a `#+' line is read as no drawer.")
+
+(defconst org-mcp-test--content-file-own-drawer
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--file-own-drawer-id "\n"
+   ":CAT:      inbox\n"
+   ":END:\n"
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Simple Task\n"
+   "Task body text.\n")
+  "A file whose own drawer carries an ID and a property beside it.")
+
+(defconst org-mcp-test--pattern-file-drawer-written
+  (concat
+   "\\` *:PROPERTIES:\n"
+   " *:ID: +" org-mcp-test--file-own-drawer-id "\n"
+   " *:OWNER: +ada\n"
+   " *:END:\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after one property of a file's drawer is set and one removed.")
+
+(defconst org-mcp-test--pattern-file-drawer-updated
+  (concat
+   "\\` *:PROPERTIES:\n"
+   " *:ID: +" org-mcp-test--file-own-drawer-id "\n"
+   " *:CAT: +next\n"
+   " *:END:\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a property of a file's drawer is written afresh.")
+
+(defconst org-mcp-test--pattern-file-drawer-without-its-id
+  (concat
+   "\\` *:PROPERTIES:\n"
+   " *:CAT: +next\n"
+   " *:END:\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a file's own ID is taken out of its drawer.")
+
+(defconst org-mcp-test--content-opens-on-a-heading
+  (concat
+   "* TODO Simple Task\n"
+   ":PROPERTIES:\n"
+   ":EFFORT:   1:00\n"
+   ":END:\n"
+   "Task body text.\n")
+  "A file whose very first line is a heading, so it has no drawer region.
+The heading carries a drawer, which is the one every Org property
+accessor answers with at `point-min'.")
+
+(defconst org-mcp-test--content-file-comment-first
+  (concat
+   "# -*- mode: org -*-\n"
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Simple Task\n"
+   "Task body text.\n")
+  "A file opening on the comment line Emacs reads file-local variables from.")
+
+(defconst org-mcp-test--pattern-file-drawer-under-a-comment
+  (concat
+   "\\`# -\\*- mode: org -\\*-\n"
+   " *:PROPERTIES:\n"
+   " *:CAT: +inbox\n"
+   " *:END:\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* TODO Simple Task\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a file opening on a comment line is given a drawer.
+Org steps over the comment and keeps the drawer above the settings.")
+
+(defconst org-mcp-test--content-file-doubled-name
+  (concat
+   ":PROPERTIES:\n"
+   ":CAT:      inbox\n"
+   ":CAT:      next\n"
+   ":END:\n"
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Simple Task\n"
+   "Task body text.\n")
+  "A file whose own drawer writes one property name on two lines.")
+
+(defconst org-mcp-test--pattern-drawer-above-a-heading
+  (concat
+   "\\` *:PROPERTIES:\n"
+   " *:CAT: +inbox\n"
+   " *:END:\n"
+   "\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:EFFORT: +1:00\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern after a file opening on a heading is given a drawer of its own.
+It is above the heading, and the heading keeps its own drawer.")
+
+(ert-deftest org-mcp-test-set-properties-makes-a-file-drawer ()
+  "A file is a node for a write as it is for a read.
+The file carries in-buffer settings and no drawer, so the call makes
+one, and Org makes it above them: a drawer under a `#+' line is read
+as no drawer at all, so that is the only place the property would be
+found again.  The response is the one a heading's write returns,
+with the file's own link."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-settings))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((CAT)))
+                (after . ((CAT . "inbox"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'properties_set result) ["CAT"]))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (should (equal (alist-get 'before result) '((CAT))))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-file-drawer-made))))
+
+(ert-deftest org-mcp-test-set-properties-writes-a-file-drawer ()
+  "A file's drawer takes a set and a removal in one call, as a heading's does.
+The file's own ID names it, so the response links it by that ID, and
+the values destroyed come back under `before' the way they do for a
+heading."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-own-drawer))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-properties"
+             `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+               (before . ((OWNER) (CAT . "inbox")))
+               (after . ((OWNER . "ada") (CAT))))))))
+      (should (equal (alist-get 'properties_set result) ["OWNER"]))
+      (should (equal (alist-get 'properties_deleted result) ["CAT"]))
+      (should (equal (alist-get 'before result) '((OWNER) (CAT . "inbox"))))
+      (should
+       (equal
+        (alist-get 'link result)
+        (concat "id:" org-mcp-test--file-own-drawer-id)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-file-drawer-written))))
+
+(ert-deftest org-mcp-test-set-properties-file-drawer-round-trips ()
+  "What a read returns for a file's drawer is what a write asserts.
+The read hands back the file node's properties, those values are the
+`before' of the next call, and the call is accepted.  Read and write
+answer for one drawer, which is what the two sides disagreeing about
+where a file's drawer is would break."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-own-drawer))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (read-back
+            (alist-get 'properties
+                       (org-mcp-test--read-properties link ["CAT"])))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ,read-back)
+                (after . ((CAT . "next"))))))))
+      (should (equal read-back '((CAT . "inbox"))))
+      (should (equal (alist-get 'properties_set result) ["CAT"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-file-drawer-updated))))
+
+(ert-deftest org-mcp-test-set-properties-file-drawer-refuses-a-stale-before ()
+  "A file's drawer is guarded the way a heading's is, property by property.
+A file has no subtree to take a digest of, and it needs none: the
+write replaces one field, so the assertion is the value that field
+held, per the rule every setter follows."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-own-drawer))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (before . ((CAT . "next")))
+       (after . ((CAT . "done"))))
+     "\\`conflict: Property 'CAT' mismatch: expected 'next', found \
+'inbox'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-file-drawer-needs-a-before ()
+  "The file node's write is guarded from the schema up, as a heading's is.
+`before' is required, so a call that omits it never reaches the file."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-own-drawer))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (after . ((CAT . "next"))))
+     "before"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-makes-a-drawer-above-a-heading ()
+  "A file that opens on a heading is given a drawer above that heading.
+There is no region before the first heading to hold one, and Org has
+no call that makes it: `org-set-property' at `point-min' writes the
+heading's drawer instead.  The property goes where Org reads a
+file's, and the heading keeps its own untouched."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-opens-on-a-heading))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((CAT)))
+                (after . ((CAT . "inbox"))))))))
+      (should (equal (alist-get 'properties_set result) ["CAT"]))
+      (should (equal (alist-get 'link result) link))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-drawer-above-a-heading)
+      (should
+       (equal
+        (alist-get 'properties
+                   (org-mcp-test--read-properties link "all"))
+        '((CAT . "inbox"))))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (org-mcp-test--read-properties
+          (org-mcp-test--file-link test-file "*Simple Task") "all"))
+        '((EFFORT . "1:00")))))))
+
+(ert-deftest org-mcp-test-set-properties-file-removal-spares-a-heading ()
+  "A removal on a file with no drawer writes nothing and saves nothing.
+The heading carries EFFORT and the file carries nothing, so the
+`before' of null is an honest assertion of absence and the call is a
+no-op success.  Org's own accessors would answer for the heading
+here, and `org-entry-delete' would take its line away.
+
+No drawer is made for it either.  Making one and letting
+`org-entry-delete' tidy the empty drawer away again leaves the same
+bytes, so the file cannot tell the two apart; the save can.  A no-op
+success writes nothing, and it does not rest on Org cleaning up after
+a drawer org-mcp had no reason to make."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-opens-on-a-heading))
+    (let ((buffer (find-file-noselect test-file))
+          (saves 0))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (add-hook 'after-save-hook
+                        (lambda () (setq saves (1+ saves)))
+                        nil t))
+            (let ((result
+                   (org-mcp-test--call-tool-leaving-file
+                    "org-node-set-properties"
+                    `((link
+                       .
+                       ,(concat
+                         "file:" (abbreviate-file-name test-file)))
+                      (before . ((EFFORT)))
+                      (after . ((EFFORT))))
+                    test-file)))
+              (should (equal (alist-get 'success result) t))
+              (should (equal (alist-get 'properties_set result) []))
+              (should (equal (alist-get 'properties_deleted result) [])))
+            (should (= saves 0))
+            (with-current-buffer buffer
+              (kill-local-variable 'after-save-hook)))
+        (kill-buffer buffer)))))
+
+(ert-deftest org-mcp-test-set-properties-file-with-no-drawer-asserts-absence ()
+  "A file with no drawer holds none of its first heading's properties.
+Asserting the heading's EFFORT on the file node is a conflict, and it
+names absence rather than the value the heading carries: the two
+nodes are two drawers."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-opens-on-a-heading))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (before . ((EFFORT . "1:00")))
+       (after . ((EFFORT . "2:00"))))
+     "\\`conflict: Property 'EFFORT' mismatch: expected '1:00', found \
+(absent)\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-file-drawer-goes-under-a-comment ()
+  "A leading comment line keeps its place above the drawer Org makes.
+Org's placement rule for a file's drawer steps over the comment lines
+a file opens with, such as the file-local variables line, and puts
+the drawer after them.  The drawer is still above the `#+' settings,
+which is what decides whether Org reads it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-comment-first))
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-properties"
+             `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+               (before . ((CAT)))
+               (after . ((CAT . "inbox"))))))))
+      (should (equal (alist-get 'properties_set result) ["CAT"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-file-drawer-under-a-comment))))
+
+(ert-deftest org-mcp-test-set-properties-file-drawer-refuses-a-doubled-name ()
+  "A file's drawer writing one name twice is refused as a heading's is.
+Org's readers disagree about which line such a property is, wherever
+the drawer sits, so there is no value to assert and none to replace."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-file-doubled-name))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (before . ((CAT . "inbox")))
+       (after . ((CAT . "next"))))
+     "\\`blocked: Property 'CAT' is written twice in this drawer, so \
+it holds no one value; repair the drawer in Emacs\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-through-an-id-naming-a-file ()
+  "An `id:' link resolving before the first heading names the file too.
+It is the ID org-roam gives a file node, and a read answers with the
+file for it; so does a write.  Taking that ID away leaves the file
+addressed by its path, which the response reports."
+  (org-mcp-test--with-id-setup
+      test-file org-mcp-test--content-file-own-drawer
+      (list org-mcp-test--file-own-drawer-id)
+    (let* ((link (concat "id:" org-mcp-test--file-own-drawer-id))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((CAT . "inbox")))
+                (after . ((CAT . "next"))))))))
+      (should (equal (alist-get 'properties_set result) ["CAT"]))
+      (should (equal (alist-get 'link result) link))
+      (let ((removed
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-properties"
+               `((link . ,link)
+                 (before . ((ID . ,org-mcp-test--file-own-drawer-id)))
+                 (after . ((ID))))))))
+        (should (equal (alist-get 'properties_deleted removed) ["ID"]))
+        (should
+         (equal
+          (alist-get 'link removed)
+          (concat "file:" (abbreviate-file-name test-file))))
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--pattern-file-drawer-without-its-id)))))
+
 ;;; Tests for failed writes and the saved flag
 
 (defconst org-mcp-test--pattern-set-first-property
@@ -20419,6 +20816,27 @@ drawer the way it reaches a heading's."
       `((title . ,(file-name-nondirectory test-file))
         (properties
          . ((ID . ,org-mcp-test--node-shape-file-id))))))))
+
+(ert-deftest org-mcp-test-properties-a-file-opening-on-a-heading-has-none ()
+  "A file whose first line is a heading carries no drawer of its own.
+A file's drawer is the one Org reads above everything, before the
+first heading, and that file has no region for one.  The heading's
+drawer is the heading's: reported for the file node it would name
+another node's properties as this one's, and a write asserting them
+would act on that heading."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-opens-on-a-heading))
+    (should
+     (equal
+      (org-mcp-test--read-properties
+       (concat "file:" (abbreviate-file-name test-file)) "all")
+      `((title . ,(file-name-nondirectory test-file)))))
+    (should
+     (equal
+      (org-mcp-test--read-properties
+       (org-mcp-test--file-link test-file "*Simple Task") "all")
+      '((title . "Simple Task")
+        (properties . ((EFFORT . "1:00"))))))))
 
 (ert-deftest org-mcp-test-properties-default-is-the-endpoint-s ()
   "What a call carries unasked is what that endpoint is for.
