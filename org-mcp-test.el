@@ -26274,5 +26274,70 @@ hands a client a value and whether a row of
     (should (equal (seq-difference written classed) nil))
     (should (equal (seq-difference classed written) nil))))
 
+(defun org-mcp-test--rendered-docstrings ()
+  "Return (LABEL . TEXT) for every docstring org-mcp defines, as read.
+TEXT is what `substitute-command-keys' makes of the docstring: what
+an Emacs user sees in `C-h f' and `C-h v', what the customize buffer
+shows for a `defcustom', and what `ert-describe-test' shows for a
+test.  The symbols are walked rather than listed, so anything added to
+org-mcp is in the set from the moment it is written."
+  (let ((text-quoting-style 'curve)
+        (found nil))
+    (mapatoms
+     (lambda (symbol)
+       (when (string-prefix-p "org-mcp" (symbol-name symbol))
+         (when (fboundp symbol)
+           (let ((doc (documentation symbol)))
+             (when (stringp doc)
+               (push (cons (symbol-name symbol) doc) found))))
+         (dolist (property '(variable-documentation group-documentation))
+           (let ((doc (documentation-property symbol property)))
+             (when (stringp doc)
+               (push (cons (format "%s (%s)" symbol property) doc) found)))))))
+    (dolist (test (ert-select-tests t t) found)
+      (let ((doc (ert-test-documentation test)))
+        (when (and (stringp doc)
+                   (string-prefix-p "org-mcp" (symbol-name (ert-test-name test))))
+          (push (cons (format "%s (test)" (ert-test-name test))
+                      (substitute-command-keys doc))
+                found))))))
+
+(ert-deftest org-mcp-test-no-docstring-renders-a-stray-equals ()
+  "No docstring renders a stray = where an apostrophe was meant.
+The escape that stops `substitute-command-keys' curling an apostrophe
+is spelled with two backslashes in the source.  One backslash is no
+Elisp string escape, so the reader drops it and leaves the = to reach
+the reader in place of the escape, in a possessive and in a symbol
+reference alike.  The mirror mistake is two backslashes on a symbol
+reference, which curls the opening quote and leaves the closing one
+straight; a symbol reference needs no escape at all.
+
+Both spellings are valid strings and byte-compile without a word, so
+the difference shows only in the rendered text, which is what this
+reads.  A defcustom is read here too: its docstring is what the
+customize buffer shows."
+  (dolist (site (org-mcp-test--rendered-docstrings))
+    (let ((rendered (format "%s: %s" (car site) (cdr site))))
+      (should-not (string-match-p "=’" rendered))
+      (should-not (string-match-p "‘[^‘’\n]*'" rendered)))))
+
+(ert-deftest org-mcp-test-no-source-spells-an-escape-with-one-backslash ()
+  "No docstring escape in the sources is written with one backslash.
+The string holds the backslash the escape needs only when the source
+spells it with two.  One backslash is no string escape, so the reader
+drops it and the = is left behind as text, wherever it stood: before a
+quote, where the rendered check beside this one sees it, and before
+anything else, where nothing rendered shows it at all.  The string
+that results says nothing about having been meant as an escape, so the
+sources are read here instead."
+  (dolist (library '("org-mcp" "org-mcp-test"))
+    (let ((source (find-library-name library)))
+      (with-temp-buffer
+        (insert-file-contents source)
+        (goto-char (point-min))
+        (should-not
+         (and (re-search-forward "\\(?:\\`\\|[^\\\\]\\)\\\\=" nil t)
+              (format "%s:%d" source (line-number-at-pos))))))))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
