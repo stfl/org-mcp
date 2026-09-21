@@ -4134,6 +4134,35 @@ Task body text."
 It reads back as \"\" exactly as a property the drawer does not carry
 asserts, and the two are told apart only by the file.")
 
+(defconst org-mcp-test--pattern-blank-line-kept
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:EMPTY:\n"
+   " *:OWNER: +grace\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern once OWNER is rewritten and the blank EMPTY line stands.")
+
+(defconst org-mcp-test--pattern-blank-line-intact
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:EMPTY:\n"
+   " *:OWNER: +ada\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern once a call has written the blank line back as it found it.")
+
+(defconst org-mcp-test--pattern-blank-line-written
+  (concat
+   "\\`\\* TODO Simple Task\n"
+   " *:PROPERTIES:\n"
+   " *:BLANK:\n"
+   " *:END:\n"
+   "Task body text\\.\n?\\'")
+  "Pattern once a line carrying no value is written into a bare task.")
+
 (defconst org-mcp-test--pattern-empty-property-removed
   (concat
    "\\`\\* TODO Simple Task\n"
@@ -5464,7 +5493,7 @@ fails and leaves the file unchanged."
      test-file org-mcp-test--pattern-flagged-task-and-bare-todo)
     (org-mcp-test--call-set-properties-expecting-error
      test-file (org-mcp-test--file-link test-file "*Simple Task")
-     '((ITEMS . ["a" "b"])) '((ITEMS . "")))))
+     '((ITEMS . ["a" "b"])) '((ITEMS)))))
 
 (ert-deftest org-mcp-test-rename-headline-simple ()
   "Test renaming a simple TODO headline."
@@ -8786,7 +8815,7 @@ naming that start is refused and the file keeps both."
       ((test-file org-mcp-test--content-bare-todo))
     (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
            (params `((link . ,link)
-                     (before . ((EFFORT . "")))
+                     (before . ((EFFORT)))
                      (after . ((EFFORT . "2:00")))))
            (result-text
             (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -8828,9 +8857,9 @@ written as given."
               (before
                .
                ((EFFORT . "1:00")
-                (ENABLED . "")
-                (LITERAL_T . "")
-                (LITERAL_NIL . "")))
+                (ENABLED)
+                (LITERAL_T)
+                (LITERAL_NIL)))
               (after
                .
                ((EFFORT . :json-false)
@@ -8859,7 +8888,7 @@ written as given."
                (mcp-server-lib-create-tools-call-request
                 "org-node-set-properties" 1
                 `((link . ,link)
-                  (before . ((TODO . "")))
+                  (before . ((TODO)))
                   (after . ((TODO . "DONE"))))))
               (response (mcp-server-lib-process-jsonrpc-parsed
                          request mcp-server-lib-ert-server-id))
@@ -8874,7 +8903,7 @@ written as given."
    `(,org-mcp-test--crud-test-id)
    (let* ((link (concat "id:" org-mcp-test--crud-test-id))
           (params `((link . ,link)
-                    (before . ((EFFORT . "")))
+                    (before . ((EFFORT)))
                     (after . ((EFFORT . "1:00")))))
           (result-text
            (mcp-server-lib-ert-call-tool "org-node-set-properties" params))
@@ -8892,7 +8921,7 @@ addresses it by that ID, and the ID is not added to
     (org-mcp-test--with-id-tracking (list test-file) nil
       (let* ((params
               `((link . ,(org-mcp-test--file-link test-file "*Simple Task"))
-                (before . ((ID . "") (CUSTOM_ID . "")))
+                (before . ((ID) (CUSTOM_ID)))
                 (after
                  .
                  ((ID . ,org-mcp-test--client-id)
@@ -8923,7 +8952,7 @@ with one is refused all the same."
     (with-syntax-table emacs-lisp-mode-syntax-table
       (org-mcp-test--call-set-properties-expecting-error
        test-file (org-mcp-test--file-link test-file "*Simple Task")
-       '((OK . "1") ("A\nB" . "v")) '((OK . "") ("A\nB" . ""))))))
+       '((OK . "1") ("A\nB" . "v")) '((OK) ("A\nB" . ""))))))
 
 (ert-deftest org-mcp-test-set-properties-multiline-value ()
   "Test a line break in a property value refuses the call."
@@ -8931,7 +8960,7 @@ with one is refused all the same."
       ((test-file org-mcp-test--content-bare-todo))
     (org-mcp-test--call-set-properties-expecting-error
      test-file (org-mcp-test--file-link test-file "*Simple Task")
-     '((FOO . "x\r* Injected heading")) '((FOO . "")))))
+     '((FOO . "x\r* Injected heading")) '((FOO)))))
 
 (ert-deftest org-mcp-test-set-properties-asserts-only-what-it-writes ()
   "A call names the one property it writes and leaves the other alone.
@@ -8997,8 +9026,29 @@ checked before the first write, so EFFORT is not written either."
 found 'ada'\\'"
      test-file)))
 
-(ert-deftest org-mcp-test-set-properties-empty-before-asserts-absent ()
-  "An empty `before\=' asserts the property is not on the heading."
+(ert-deftest org-mcp-test-set-properties-null-before-asserts-absent ()
+  "A null `before\=' asserts the property is not on the heading.
+The refusal names the state it expected rather than showing it as an
+empty value, because \"\" is the neighbouring state and a client has
+to be able to tell which of the two its assertion missed."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-props))
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        . ,(org-mcp-test--file-link test-file "*Task with Properties"))
+       (before . ((EFFORT)))
+       (after . ((EFFORT . "3:00"))))
+     "\\`conflict: Property 'EFFORT' mismatch: expected (absent), \
+found '1:00'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-set-properties-empty-before-asserts-a-blank-line ()
+  "An empty `before\=' asserts a line that carries nothing, not absence.
+The heading holds EFFORT with a value, so the assertion is stale
+either way; what this pins is which stale belief the refusal reports
+back.  Its sibling above sends null against the same heading and is
+told `(absent)\='."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
     (org-mcp-test--call-tool-refused
@@ -9049,16 +9099,18 @@ not write\\'"
 
 ;;; Removing a property through org-node-set-properties
 
-(ert-deftest org-mcp-test-set-properties-empty-after-deletes ()
-  "An empty `after\=' value takes the property off the headline.
+(ert-deftest org-mcp-test-set-properties-null-after-deletes ()
+  "A null `after\=' value takes the property off the headline.
 `before\=' names the value that goes with it, so the call says what it
-destroys and the response records it."
+destroys and the response records it.  Null is the deleting spelling
+because it is the one state a line cannot be in: \"\" is a line
+carrying nothing, which is a line."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
     (let* ((link (org-mcp-test--file-link test-file "*Task with Properties"))
            (params `((link . ,link)
                      (before . ((EFFORT . "1:00")))
-                     (after . ((EFFORT . "")))))
+                     (after . ((EFFORT)))))
            (result-text
             (mcp-server-lib-ert-call-tool
              "org-node-set-properties" params))
@@ -9086,7 +9138,7 @@ destroys and the response records it."
               "org-node-set-properties"
               `((link . ,link)
                 (before . ((EFFORT . "1:00") (OWNER . "ada")))
-                (after . ((EFFORT . "") (OWNER . ""))))))))
+                (after . ((EFFORT) (OWNER))))))))
       (should (equal (alist-get 'success result) t))
       (should
        (equal (alist-get 'properties_deleted result)
@@ -9111,7 +9163,7 @@ a field setter reports what it destroyed under."
                 ,(org-mcp-test--file-link
                   test-file "*Task with Two Properties"))
                (before . ((EFFORT . "1:00") (OWNER . "ada")))
-               (after . ((EFFORT . "") (OWNER . ""))))))))
+               (after . ((EFFORT) (OWNER))))))))
       (should (equal (alist-get 'success result) t))
       (should
        (equal (alist-get 'before result)
@@ -9127,7 +9179,7 @@ a field setter reports what it destroyed under."
         .
         ,(org-mcp-test--file-link test-file "*Task with Properties"))
        (before . ((EFFORT . "3:00")))
-       (after . ((EFFORT . ""))))
+       (after . ((EFFORT))))
      "\\`conflict: Property 'EFFORT' mismatch: expected '3:00', \
 found '1:00'\\'"
      test-file)))
@@ -9145,38 +9197,40 @@ refused over its second has not taken its first away."
         ,(org-mcp-test--file-link
           test-file "*Task with Two Properties"))
        (before . ((EFFORT . "1:00") (OWNER . "bob")))
-       (after . ((EFFORT . "") (OWNER . ""))))
+       (after . ((EFFORT) (OWNER))))
      "\\`conflict: Property 'OWNER' mismatch: expected 'bob', \
 found 'ada'\\'"
      test-file)))
 
-(ert-deftest org-mcp-test-set-properties-delete-refuses-empty-before ()
-  "An empty `before\=' on a property the headline holds refuses the deletion.
-Asserting absence of a value that is there is the stale belief the
-guard exists to catch, and it matters most on the call that would
-destroy it: nothing is removed."
+(ert-deftest org-mcp-test-set-properties-delete-refuses-a-blank-before ()
+  "A `before\=' naming no value refuses the deletion, in either spelling.
+Asserting that a property holds nothing when it holds something is
+the stale belief the guard exists to catch, and it matters most on
+the call that would destroy it: nothing is removed either time, and
+the refusal says which of the two blanks arrived."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
-    (org-mcp-test--call-tool-refused
-     "org-node-set-properties"
-     `((link
-        .
-        ,(org-mcp-test--file-link test-file "*Task with Properties"))
-       (before . ((EFFORT . "")))
-       (after . ((EFFORT . ""))))
-     "\\`conflict: Property 'EFFORT' mismatch: expected '', \
+    (let ((link
+           (org-mcp-test--file-link test-file "*Task with Properties")))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-properties"
+       `((link . ,link) (before . ((EFFORT))) (after . ((EFFORT))))
+       "\\`conflict: Property 'EFFORT' mismatch: expected (absent), \
 found '1:00'\\'"
-     test-file)))
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-node-set-properties"
+       `((link . ,link) (before . ((EFFORT . ""))) (after . ((EFFORT))))
+       "\\`conflict: Property 'EFFORT' mismatch: expected '', \
+found '1:00'\\'"
+       test-file))))
 
-(ert-deftest org-mcp-test-set-properties-delete-of-an-empty-property ()
-  "Taking away a line that carries nothing is a write, and is reported.
-A drawer line written with nothing after its name reads back as \"\",
-the same as a property the drawer does not carry, so one `before\=' of
-\"\" is honest about either and cannot say which this is.  The file
-says it: the line goes, which changes the file, so the name belongs
-in `properties_deleted\='.  The sibling test below sends the same call
-against a name the drawer never carried, where nothing goes and
-nothing is reported."
+(ert-deftest org-mcp-test-a-null-after-takes-a-blank-line-away ()
+  "Null takes away a line carrying nothing, and the removal is reported.
+The `before\=' of \"\" asserts the line as the read returned it, and the
+`after\=' of null asks for the state a line cannot be in.  It is the
+only spelling that empties the drawer of the name, since \"\" would
+put the line back where it stood."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-empty-property))
     (let* ((link
@@ -9187,13 +9241,43 @@ nothing is reported."
               "org-node-set-properties"
               `((link . ,link)
                 (before . ((EMPTY . "")))
-                (after . ((EMPTY . ""))))))))
+                (after . ((EMPTY))))))))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'properties_deleted result) ["EMPTY"]))
       (should (equal (alist-get 'properties_set result) []))
       (should (equal (alist-get 'before result) '((EMPTY . ""))))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-empty-property-removed))))
+
+(ert-deftest org-mcp-test-an-empty-after-writes-a-blank-line ()
+  "An empty `after\=' puts a line in the drawer that carries no value.
+The heading has no such property, so `before\=' is null; the call
+writes `:BLANK:\=' and reports it set, because a line is what it put
+there.  A read then returns it as \"\", which is the state this
+spelling exists to reach."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((BLANK)))
+                (after . ((BLANK . ""))))))))
+      (should (equal (alist-get 'properties_set result) ["BLANK"]))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-blank-line-written)
+      (should
+       (equal
+        (alist-get
+         'properties
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-read"
+           `((link . ,link) (properties . ["BLANK"])))))
+        '((BLANK . "")))))))
 
 (ert-deftest org-mcp-test-read-tells-an-empty-property-from-an-absent-one ()
   "A drawer line carrying nothing is read; one the drawer lacks is not.
@@ -9232,13 +9316,13 @@ set and nothing was deleted, and it echoes the assertion under
             `((link
                .
                ,(org-mcp-test--file-link test-file "*Simple Task"))
-              (before . ((OWNER . "")))
-              (after . ((OWNER . ""))))
+              (before . ((OWNER)))
+              (after . ((OWNER))))
             test-file)))
       (should (equal (alist-get 'success result) t))
       (should (equal (alist-get 'properties_deleted result) []))
       (should (equal (alist-get 'properties_set result) []))
-      (should (equal (alist-get 'before result) '((OWNER . ""))))
+      (should (equal (alist-get 'before result) '((OWNER))))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
 
@@ -9250,31 +9334,62 @@ set and nothing was deleted, and it echoes the assertion under
      "org-node-set-properties"
      `((link . ,(org-mcp-test--file-link test-file "*Scheduled Task"))
        (before . ((SCHEDULED . "<2026-03-01 Sun>")))
-       (after . ((SCHEDULED . ""))))
+       (after . ((SCHEDULED))))
      "\\`Cannot set special property 'SCHEDULED' - use the dedicated \
 tool\\'"
      test-file)))
 
-(ert-deftest org-mcp-test-set-properties-null-value-takes-nothing-away ()
-  "A null value in `after\=' is the entry left unfilled, not a deletion.
-Clients fill an entry they are not using with null, so reading it as
-a deletion would let a well-behaved client destroy a property it
-never named.  The refusal says which spelling deletes.  JSON false
-is not blank in a property value: with true it writes the text Org
-stores, so it is a value like any other."
+(ert-deftest org-mcp-test-a-blank-line-survives-a-call-that-passes-over-it ()
+  "A property carrying nothing is untouched by a call that does not name it.
+The drawer holds EMPTY and OWNER; the call writes OWNER and names
+only OWNER.  A property a call does not name is none of its business,
+and the blank line is the one most easily lost to a tool that reads
+\"\" as absence, so this is where that is pinned."
   (org-mcp-test--with-temp-org-files
-      ((test-file org-mcp-test--content-todo-with-props))
-    (progn
-      (org-mcp-test--call-tool-refused
-       "org-node-set-properties"
-       `((link
-          .
-          ,(org-mcp-test--file-link test-file "*Task with Properties"))
-         (before . ((EFFORT . "1:00")))
-         (after . ((EFFORT))))
-       "\\`after gives no value for the property 'EFFORT': send \
-\"\" to remove it\\'"
-       test-file))))
+      ((test-file org-mcp-test--content-todo-with-empty-property))
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((OWNER . "ada")))
+                (after . ((OWNER . "grace"))))))))
+      (should (equal (alist-get 'properties_set result) ["OWNER"]))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-blank-line-kept))))
+
+(ert-deftest org-mcp-test-a-blank-property-round-trips-read-assert-write ()
+  "What a read hands back for a blank line is what a write puts back.
+The three states go round the loop the guard is for: a read returns
+EMPTY as \"\", that value is the `before\=' the next call asserts with,
+and an `after\=' of \"\" leaves the line where it stood.  A tool that
+read \"\" as absence would break this at the assertion; one that wrote
+\"\" as a deletion would break it at the write."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-todo-with-empty-property))
+    (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+           (read-back
+            (alist-get
+             'properties
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-read"
+               `((link . ,link) (properties . ["EMPTY"])))))))
+      (should (equal read-back '((EMPTY . ""))))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-set-properties"
+               `((link . ,link)
+                 (before . ((EMPTY . ,(alist-get 'EMPTY read-back))))
+                 (after . ((EMPTY . ,(alist-get 'EMPTY read-back)))))))))
+        (should (equal (alist-get 'properties_set result) ["EMPTY"]))
+        (should (equal (alist-get 'properties_deleted result) []))
+        (should (equal (alist-get 'before result) '((EMPTY . ""))))
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--pattern-blank-line-intact)))))
 
 ;;; Tests for failed writes and the saved flag
 
@@ -9356,7 +9471,7 @@ either buffer reads unmodified afterwards with its undo setting kept."
                "org-node-set-properties"
                `((link
                   . ,(org-mcp-test--file-link test-file "*Simple Task"))
-                 (before . ((FIRST . "") (SECOND . "")))
+                 (before . ((FIRST) (SECOND)))
                  (after . ((FIRST . "1") (SECOND . "2"))))
                "Property hook failed" test-file)
               (with-current-buffer buffer
@@ -9385,7 +9500,7 @@ and the file is unchanged."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
-               (before . ((FIRST . "") (SECOND . "")))
+               (before . ((FIRST) (SECOND)))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed" test-file)
             (org-mcp-test--verify-buffer-matches
@@ -9409,7 +9524,7 @@ edits of its own when the next call arrives, and that call saves it."
               (org-mcp-test--call-tool-refused
                "org-node-set-properties"
                `((link . ,link)
-                 (before . ((FIRST . "") (SECOND . "")))
+                 (before . ((FIRST) (SECOND)))
                  (after . ((FIRST . "1") (SECOND . "2"))))
                "Property hook failed" test-file))
             (let ((result
@@ -9417,7 +9532,7 @@ edits of its own when the next call arrives, and that call saves it."
                     (mcp-server-lib-ert-call-tool
                      "org-node-set-properties"
                      `((link . ,link)
-                       (before . ((FIRST . "")))
+                       (before . ((FIRST)))
                        (after . ((FIRST . "1"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
@@ -9441,7 +9556,7 @@ unmodified and holds no edit a later call would take for the user's."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
-               (before . ((FIRST . "")))
+               (before . ((FIRST)))
                (after . ((FIRST . "1"))))
              "Save failed" test-file)
             (with-current-buffer buffer
@@ -9467,7 +9582,7 @@ the buffer reads unmodified."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
-               (before . ((FIRST . "") (SECOND . "")))
+               (before . ((FIRST) (SECOND)))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed" test-file)
             (with-current-buffer buffer
@@ -9498,7 +9613,7 @@ save it again, so the file keeps what the hook wrote."
              "org-node-set-properties"
              `((link
                 . ,(org-mcp-test--file-link test-file "*Simple Task"))
-               (before . ((FIRST . "") (SECOND . "")))
+               (before . ((FIRST) (SECOND)))
                (after . ((FIRST . "1") (SECOND . "2"))))
              "Property hook failed")
             (org-mcp-test--verify-buffer-matches
@@ -9529,7 +9644,7 @@ it.  Once the hook is gone, the next write reports `saved' true."
             (org-mcp-test--call-tool-refused
              "org-node-set-properties"
              `((link . ,link)
-               (before . ((FIRST . "")))
+               (before . ((FIRST)))
                (after . ((FIRST . "1"))))
              "\\`The change was made and saved, but .*Save hook failed")
             (org-mcp-test--verify-file-matches
@@ -9544,7 +9659,7 @@ it.  Once the hook is gone, the next write reports `saved' true."
                     (mcp-server-lib-ert-call-tool
                      "org-node-set-properties"
                      `((link . ,link)
-                       (before . ((SECOND . "")))
+                       (before . ((SECOND)))
                        (after . ((SECOND . "2"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
@@ -9577,7 +9692,7 @@ on disk, and the response says so."
                          .
                          ,(org-mcp-test--file-link
                            test-file "*Simple Task"))
-                        (before . ((FIRST . "")))
+                        (before . ((FIRST)))
                         (after . ((FIRST . "1"))))))))
               (should (eq (alist-get 'saved result) t)))
             (org-mcp-test--verify-file-matches
@@ -13103,7 +13218,7 @@ file, the buffer of the running clock, nor the running clock changes."
   "Every other tool that changes a heading accepts a link."
   (dolist (case
            '(("org-node-set-properties"
-              (before . ((FOO . "")))
+              (before . ((FOO)))
               (after . ((FOO . "bar"))))
              ("org-node-set-scheduled" (before . "") (after . "2026-03-27"))
              ("org-node-set-deadline" (before . "") (after . "2026-03-27"))
@@ -14392,7 +14507,7 @@ up in the parent's file."
                         (after . "Beta body rewritten."))
                        ("org-node-set-properties"
                         (link . ,link)
-                        (before . ((EFFORT . "")))
+                        (before . ((EFFORT)))
                         (after . ((EFFORT . "1:00"))))
                        ("org-node-set-scheduled"
                         (link . ,link) (before . "") (after . "2026-03-27"))
@@ -15108,7 +15223,7 @@ Other Task's heading line ends with a target.")
    (mcp-server-lib-ert-call-tool
     "org-node-set-properties"
     `((link . ,link)
-      (before . ((SEEN . "")))
+      (before . ((SEEN)))
       (after . ((SEEN . "yes")))))))
 
 (defun org-mcp-test--links-in (value)
@@ -15847,29 +15962,26 @@ assertion of absence is the empty string, which a call has to type."
          "\\`Missing required parameter: after\\'"
          test-file)))))
 
-(ert-deftest org-mcp-test-null-property-value-asserts-nothing ()
-  "A null value inside a `before\=' map asserts nothing about that property.
-An entry a client left unfilled must not vouch for absence, so the
-refusal says which spelling does."
+(ert-deftest org-mcp-test-a-null-before-is-honoured-when-it-is-true ()
+  "A null `before\=' on a property the drawer lacks lets the write through.
+The refused sibling asserts null against a property that is there.
+This is the same assertion where it holds: the drawer carries no
+NEWPROP, so the call writes one, which is how a client creates a
+property it has read the heading and found nothing for."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-props))
-    (let ((link
-           (org-mcp-test--file-link test-file "*Task with Properties"))
-          (message
-           "\\`before gives no value for the property 'EFFORT': send \
-\"\" to assert it holds none\\'"))
-      (org-mcp-test--call-tool-refused
-       "org-node-set-properties"
-       `((link . ,link)
-         (before . ((EFFORT)))
-         (after . ((EFFORT . "2:00"))))
-       message test-file)
-      (org-mcp-test--call-tool-refused
-       "org-node-set-properties"
-       `((link . ,link)
-         (before . ((EFFORT)))
-         (after . ((EFFORT . ""))))
-       message test-file))))
+    (let* ((link
+            (org-mcp-test--file-link test-file "*Task with Properties"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,link)
+                (before . ((NEWPROP)))
+                (after . ((NEWPROP . "written"))))))))
+      (should (equal (alist-get 'properties_set result) ["NEWPROP"]))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (should (equal (alist-get 'before result) '((NEWPROP)))))))
 
 (ert-deftest org-mcp-test-no-field-clearing-tools-are-published ()
   "Removing a field is a setter with an empty `after\=', not a tool.
@@ -17930,7 +18042,7 @@ to refuse, and it takes nothing away."
           (mcp-server-lib-ert-call-tool
            "org-node-set-properties"
            `((link . ,link)
-             (before . ((FOO . "")))
+             (before . ((FOO)))
              (after . ((FOO . :json-false)))))))
         ["FOO"]))
       (let ((read-back
@@ -17944,17 +18056,17 @@ to refuse, and it takes nothing away."
         (org-mcp-test--call-tool-refused
          "org-node-set-properties"
          `((link . ,link)
-           (before . ((FOO . "")))
+           (before . ((FOO)))
            (after . ((FOO . "bar"))))
-         "\\`conflict: Property 'FOO' mismatch: expected '', \
+         "\\`conflict: Property 'FOO' mismatch: expected (absent), \
 found 'nil'\\'"
          test-file)
         (org-mcp-test--call-tool-refused
          "org-node-set-properties"
          `((link . ,link)
-           (before . ((FOO . "")))
-           (after . ((FOO . ""))))
-         "\\`conflict: Property 'FOO' mismatch: expected '', \
+           (before . ((FOO)))
+           (after . ((FOO))))
+         "\\`conflict: Property 'FOO' mismatch: expected (absent), \
 found 'nil'\\'"
          test-file)
         (let ((result
@@ -17993,7 +18105,7 @@ reported for it."
               "org-node-set-properties"
               `((link . ,link)
                 (before . ,read-back)
-                (after . ((FOO . ""))))))))
+                (after . ((FOO))))))))
       (should (equal read-back '((FOO . "nil"))))
       (should (equal (alist-get 'success result) t))
       (should (eq (alist-get 'saved result) t))
@@ -18144,7 +18256,7 @@ that writes one name twice, which has neither."
                "org-node-set-properties"
                `((link . ,link)
                  (before . ((FOO . "one two")))
-                 (after . ((FOO . ""))))))))
+                 (after . ((FOO))))))))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'properties_deleted result) ["FOO"]))
         (should (equal (alist-get 'before result) '((FOO . "one two"))))
@@ -18229,7 +18341,7 @@ the drawer is left alone."
         (org-mcp-test--call-tool-refused
          "org-node-set-properties"
          `((link . ,link)
-           (before . (("FOO+" . "")))
+           (before . (("FOO+")))
            (after . (("FOO+" . ,value))))
          "\\`Not a property name: FOO\\+\\."
          test-file))
@@ -18288,7 +18400,7 @@ malformed nor what excuses it."
                    ("org-node-set-properties"
                     ((link . ,link)
                      (before . ((FOO . "one")))
-                     (after . ((FOO . "")))))))
+                     (after . ((FOO)))))))
           (org-mcp-test--call-tool-refused
            (car call) (cadr call)
            "\\`blocked: Property 'FOO' is written twice"
@@ -19610,7 +19722,7 @@ a replacement that took the whole body with it shows here.")
    "org-node-set-properties"
    (lambda (file)
      `((link . ,(org-mcp-test--file-link file "*Simple Task"))
-       (before . ((FIRST . "")))
+       (before . ((FIRST)))
        (after . ((FIRST . "1")))))
    '((properties_set . ["FIRST"]))
    org-mcp-test--dirty-property-regex))
@@ -19657,7 +19769,7 @@ The drawer goes with the last property in it.")
    (lambda (file)
      `((link . ,(org-mcp-test--file-link file "*Simple Task"))
        (before . ((OWNER . "ada")))
-       (after . ((OWNER . "")))))
+       (after . ((OWNER)))))
    '((properties_deleted . ["OWNER"]) (before . ((OWNER . "ada"))))
    org-mcp-test--dirty-properties-removed-regex))
 
@@ -19917,13 +20029,13 @@ its way out would be visible."
      "\\`conflict: Body text not found: ")
     ("org-node-set-properties"
      ((link . ,link)
-      (before . ((TODO . "")))
+      (before . ((TODO)))
       (after . ((TODO . "DONE"))))
      "\\`Cannot set special property 'TODO'")
     ("org-node-set-properties"
      ((link . ,link)
       (before . ((OWNER . "ada")))
-      (after . ((OWNER . ""))))
+      (after . ((OWNER))))
      "\\`conflict: Property 'OWNER' mismatch: ")
     ("org-node-set-scheduled"
      ((link . ,link) (before . "") (after . "not-a-date"))

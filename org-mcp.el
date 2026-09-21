@@ -4072,9 +4072,12 @@ MCP Parameters:
                          [[link][description]]
   properties - JSON object of properties for the new headline
                (optional), such as ID or CUSTOM_ID
-               Values are single-line strings or numbers, written as
-               given, or booleans: true or false writes the text t
-               or nil; null or empty values are skipped
+               Values take the three states a drawer line has, as
+               in org-node-set-properties: a single-line string or
+               number is written as given, \"\" writes a line
+               carrying no value, and null writes nothing at all,
+               there being no line on a new headline to take away.
+               true or false writes the text t or nil
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
                properties itself given as null, false, \"\" or {}
@@ -4455,9 +4458,9 @@ property the way the call spelled it."
 WHAT names the parameter PROPERTIES arrived in, so that a call
 carrying two property maps says which of them is malformed.
 PROPERTIES is the alist a JSON object decodes to.  NAME is a string.
-VALUE is a string, or nil for a JSON null or an empty string; a JSON
-number becomes its decimal text, and JSON true and false become \"t\"
-and \"nil\".  Throws a validation error when PROPERTIES is not a
+VALUE is nil for a JSON null, the property absent, and the string the
+property holds otherwise, \"\" among them; a JSON number becomes its
+decimal text, and JSON true and false become \"t\" and \"nil\".  Throws a validation error when PROPERTIES is not a
 non-empty object, when a name is not a valid Org property name or is
 a special property, which has its own tool, or when a value is an
 array or object or spans several lines.  Org property values are
@@ -4491,13 +4494,14 @@ here."
        (cons
         name
         (cond
-         ((or (null value) (equal value ""))
-          nil)
          ;; mcp-server-lib decodes JSON with `json-read-from-string':
-         ;; true is t, false is :json-false and null is nil, so false
-         ;; writes a value where null deletes.  `org-entry-put' writes
-         ;; the text "nil" as given, and `org-entry-get' reads it back
-         ;; as nil.
+         ;; true is t, false is :json-false and null is nil.  Null is
+         ;; the only value carrying no text, and "" falls through to
+         ;; the last clause, because a line carrying nothing is a
+         ;; state of its own.  `org-entry-put' writes the text "nil"
+         ;; as given, and `org-entry-get' reads it back as nil.
+         ((null value)
+          nil)
          ((eq value t)
           "t")
          ((eq value :json-false)
@@ -4516,61 +4520,65 @@ here."
           value)))))
    properties))
 
-(defun org-mcp--property-map-given (map what meaning)
+(defun org-mcp--property-map-given (map what)
   "Return MAP, the required property-map parameter WHAT, as pairs.
-The result is (NAME . VALUE) pairs, VALUE the string the entry
-carries and \"\" for none.  MEANING names, as a clause, what \"\"
-says in this map, so a refusal tells the client the spelling it
-wanted: in a `before' it asserts the property holds nothing, and in
-an `after' it takes the property away.
+The result is (NAME . VALUE) pairs, VALUE nil where the entry is JSON
+null and the string the entry carries otherwise, "
+  " among them.
 
-An empty string is a value in a property's own vocabulary, typed
-deliberately, here as everywhere a required parameter carries text;
-see `org-mcp--text-param-given'.  JSON null is the entry the call
-left unfilled and is refused rather than read as emptiness: a client
-that writes it into a value it is not using would otherwise vouch
-for an absence it never saw, or delete a property it never named.
+A drawer entry has three states where a field has two, and the map
+spells all three, on either side of the call.  Null is the property
+absent: as an `after\=' it takes the line away, as a `before\=' it
+asserts there is none.  "
+  " is a line carrying nothing, `:FOO:' with
+nothing after the name, which `org-entry-properties' reads back as "
+  "
+and which a call can therefore assert as readily as write.  Any other
+string is the text the line holds.
 
-A property value\='s vocabulary is wider than a field\='s, so `false'
-is not blank here: with `true' it writes the text Org stores, `nil',
-which is a value like any other.  An array or an object is refused
-by `org-mcp--validate-properties', which no property value may be."
+Each field spells its own emptiness, and a property has one more
+state to spell than a deadline has; see `org-mcp--text-param-given'
+for the two-state form the fields take.  A property value\\='s
+vocabulary is wider still, so `false' is not blank here: with `true'
+it writes the text Org stores, `nil', which is a value like any
+other.  An array or an object is refused by
+`org-mcp--validate-properties', which no property value may be.
+
+The map is itself the call\\='s statement of what it means to touch,
+which is what makes a destructive null safe here where an unfilled
+parameter would not be: a key carrying null is a key the call chose
+to send, and `org-mcp--asserted-property-values' requires `before\='
+to name every property `after\=' writes, so the deletion still asserts
+what it destroys.  A blank MAP, see `org-mcp--blank-param-p', is the
+parameter left out."
   (when (org-mcp--blank-param-p map)
     (org-mcp--missing-param-error what))
-  (when (listp map)
-    (pcase-dolist (`(,name . ,value) map)
-      (when (null value)
-        (org-mcp--tool-validation-error
-         "%s gives no value for the property '%s': send \"\" to %s"
-         what (org-mcp--property-name-text name) meaning))))
-  (mapcar
-   (lambda (pair) (cons (car pair) (or (cdr pair) "")))
-   (org-mcp--validate-properties map what)))
+  (org-mcp--validate-properties map what))
 
 (defun org-mcp--properties-touched (written drawer)
   "Return what a property write sets and what it takes away.
-WRITTEN is the (NAME . VALUE) pairs the call writes, \"\" for a
-property it removes, and DRAWER is what `org-mcp--drawer-at-point'
+WRITTEN is the (NAME . VALUE) pairs the call writes, nil for a
+property it takes away, and DRAWER is what `org-mcp--drawer-at-point'
 read before the change.  The result is (SET . REMOVED), each the
 names in the order the call gave them, which is what the response
 reports.
 
-A name whose value is \"\" is removed when the drawer carried a line
-for it, and is in neither list when the drawer carried none: the call
-is accepted — an honest assertion of absence is no conflict — and it
-takes nothing away.
+A name carrying a string is set, "
+  " among them: writing `:FOO:' puts
+a line in the drawer as surely as writing a value does.  A name
+carrying nil takes its line away, and is removed when the drawer
+carried one, in neither list when it did not — the call is accepted,
+an honest assertion of absence being no conflict, and it takes
+nothing away.
 
-The drawer decides, not the value `before\=' asserted.  A line written
-`:EMPTY:\' with nothing after it holds \"\", exactly as a property the
-drawer never carried asserts, so one `before\=' is honest about both
-and cannot tell them apart.  The file can: taking the line away
-changes it and taking away nothing does not, and the response is what
-says which happened."
+The drawer decides that last part, not the value `before\=' asserted,
+because what a write took away is a fact about the file rather than
+about the call."
   (let ((set nil)
         (removed nil))
     (pcase-dolist (`(,name . ,value) written)
       (cond
-       ((not (string-empty-p value))
+       (value
         (push name set))
        ((assoc (upcase name) drawer)
         (push name removed))))
@@ -4580,8 +4588,9 @@ says which happened."
   "Return what BEFORE asserts, in the order AFTER writes it.
 BEFORE and AFTER are the two property maps of one call, each read
 through `org-mcp--property-map-given'.  The result holds one pair per property AFTER
-writes, NAME as AFTER spells it and VALUE the string BEFORE says
-that property held, \"\" for none.
+writes, NAME as AFTER spells it and VALUE what BEFORE says that
+property held: nil for absent, \"\" for a line carrying nothing, and
+the text otherwise.
 
 A call asserts exactly what it changes: a property AFTER writes and
 BEFORE does not name is refused, because the write would destroy a
@@ -4602,13 +4611,54 @@ Names compare without regard to case, as Org reads them."
 call writes"
                    name))
                 (setq unwritten (delq asserted unwritten))
-                (cons name (or (cdr asserted) ""))))
+                (cons name (cdr asserted))))
             after)
       (when unwritten
         (org-mcp--tool-validation-error
          "before names the property '%s', which this call does not \
 write"
          (caar unwritten))))))
+
+(defun org-mcp--property-state-text (value)
+  "Return VALUE, one state of a drawer entry, as a refusal names it.
+VALUE is nil for a property the drawer does not carry and the text
+the line holds otherwise.  An absent property is named rather than
+shown as an empty value, because "
+  " is the neighbouring state: a line
+carrying nothing.  A refusal that showed both as '' would tell a
+client its assertion failed without telling it what it read."
+  (if value
+      (format "'%s'" value)
+    "(absent)"))
+
+(defun org-mcp--assert-property (asserted drawer name)
+  "Refuse the call unless DRAWER holds for NAME what ASSERTED says.
+ASSERTED is one of the three states `org-mcp--property-map-given'
+reads: nil for the property absent, "
+  " for a line carrying nothing,
+and the text the line holds otherwise.  DRAWER is what
+`org-mcp--drawer-at-point' read.
+
+Absence is compared by whether the drawer carries the name at all,
+not through `org-mcp--drawer-value', which answers "
+  " for a name it
+lacks and for a line carrying nothing alike: the two are the states
+this assertion exists to keep apart.
+
+A disagreement is a conflict, the drawer not being as the client
+believed, so the recovery is to read the node again.  A digest in
+`before' is a malformed call instead, which
+`org-mcp--assert-field-value' refuses on behalf of every assertion
+that names one value."
+  (let ((context (format "Property '%s'" name))
+        (found (cdr (assoc (upcase name) drawer))))
+    (org-mcp--assert-field-value asserted context)
+    (unless (equal asserted found)
+      (org-mcp--tool-conflict-error
+       "%s mismatch: expected %s, found %s"
+       context
+       (org-mcp--property-state-text asserted)
+       (org-mcp--property-state-text found)))))
 
 (defun org-mcp--write-properties
     (link files action response asserted apply)
@@ -4649,10 +4699,7 @@ share, and they differ only in what APPLY does."
              "Property '%s' is written twice in this drawer, so it \
 holds no one value; repair the drawer in Emacs"
              key))
-          (org-mcp--assert-before
-           val
-           (org-mcp--drawer-value drawer key)
-           (format "Property '%s'" key))))
+          (org-mcp--assert-property val drawer key)))
 
       (funcall apply))))
 
@@ -4682,14 +4729,17 @@ MCP Parameters:
            One entry per property after writes, and no other:
            a property after writes and before omits is refused,
            and so is one before names and after leaves alone
-           Empty string asserts the property is absent
+           null asserts the drawer carries no such line
+           \"\" asserts a line carrying no value
+           Any other string asserts the line holds that text
   after - JSON object of property name-value pairs (required)
           String or number value: set property to that value;
           it must be a single line
           true or false: set property to the text t or nil
-          Empty string removes the property, guarded by what
-          before says it holds; null or false is the entry left
-          unfilled and is refused
+          Empty string writes a line carrying no value, which a
+          read returns as \"\"
+          null takes the property line away, guarded by what
+          before says it holds
           A property the drawer spreads over a NAME and a NAME+
           line holds the lines joined; a set writes the value
           given and takes the NAME+ lines with the old one
@@ -4700,13 +4750,10 @@ MCP Parameters:
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
-  (let* ((written
-          (org-mcp--property-map-given after "after" "remove it"))
+  (let* ((written (org-mcp--property-map-given after "after"))
          (asserted
           (org-mcp--asserted-property-values
-           (org-mcp--property-map-given
-            before "before" "assert it holds none")
-           written)))
+           (org-mcp--property-map-given before "before") written)))
     (org-mcp--write-properties
      link files "set properties"
      (lambda (drawer)
@@ -4721,7 +4768,7 @@ MCP Parameters:
          ;; `org-delete-property' takes the `NAME+' lines with the
          ;; plain one, and `org-mcp--set-property' supersedes them, so
          ;; a property ends up holding what the call said either way.
-         (if (string-empty-p val)
+         (if (null val)
              (org-delete-property key)
            (org-mcp--set-property key val)))))))
 
@@ -6604,9 +6651,13 @@ Parameters:
                accepted) on a single line, written as given and
                not otherwise checked; an ID is not added to Org's
                ID index
-               true or false writes the text t or nil (false writes
-               the property; null skips it)
-               null or empty values are skipped
+               Values take the three states a drawer line has, as
+               in org-node-set-properties: a string or number is
+               written as given, \"\" writes a line carrying no
+               value, which a read returns as \"\", and null writes
+               nothing, a new headline having no line to take away
+               true or false writes the text t or nil, so false
+               writes the property where null passes it over
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
                DEADLINE, etc.) are forbidden - use the other
                parameters and dedicated tools
@@ -6753,8 +6804,8 @@ Refusals:
     :description
     (concat
      "Set or remove properties on an Org headline.  Updates the
-PROPERTIES drawer: a value writes the property and an empty one
-takes it away, guarded by what before says it holds.  Setting ID or
+PROPERTIES drawer: a value writes the property and null takes it
+away, guarded by what before says it holds.  Setting ID or
 CUSTOM_ID gives the headline a stable link; org-mcp creates neither
 itself.
 
@@ -6769,15 +6820,18 @@ Parameters:
            so is one before names and after leaves alone
            Read the values from org-node-read rather than
            assuming them
-           Empty string asserts the property is absent
-           Values take the same forms after takes
+           A drawer line has three states and before spells all
+           three: null asserts there is no such line, \"\" asserts
+           a line carrying no value, and any other string asserts
+           the line holds that text
   after - JSON object of property name-value pairs (required)
           String value (numbers and booleans are accepted):
           set the property; it must be a single line
           true or false writes the text t or nil
-          Empty string removes that property, guarded by what
-          before says it holds; null or false names no value and
-          is refused as an entry left unfilled
+          Empty string writes a line carrying no value, the
+          state org-node-read returns as \"\"
+          null takes the property line away, guarded by what
+          before says it holds
           ID and CUSTOM_ID can be set; values are written as
           given and not otherwise checked, and an ID is not
           added to Org's ID index
