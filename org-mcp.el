@@ -3361,33 +3361,43 @@ etc.)."
             (when drawer-pos
               (org-remove-empty-drawer-at drawer-pos))))))))
 
+(defun org-mcp--clock-entries-matching (predicate)
+  "Return the CLOCK elements of the heading at point PREDICATE keeps.
+Point must be at a heading and is not moved.  PREDICATE is called with
+one CLOCK element at a time, and every element it keeps comes back, in
+the order they are written.
+
+The search is bounded by `org-entry-end-position', so it covers that
+heading's own entry and not its subtree.  A CLOCK line under a
+descendant is that descendant's, named by a link of its own, and a
+call naming an ancestor is not the one entitled to destroy it.  That
+bound is one fact about which lines are this heading's, so it is
+asked in one place and every question about them is put through
+here."
+  (save-excursion
+    (org-back-to-heading t)
+    (let ((entry-begin (point))
+          (entry-end (org-entry-end-position)))
+      (save-restriction
+        (narrow-to-region entry-begin entry-end)
+        (org-element-map
+         (org-element-parse-buffer 'element)
+         'clock
+         (lambda (clock) (and (funcall predicate clock) clock)))))))
+
 (defun org-mcp--clock-entries-starting-at (start-time)
   "Return the CLOCK elements of the heading at point starting at START-TIME.
 Point must be at a heading and is not moved.  START-TIME is an Emacs
 time value.
 
-The search is bounded by `org-entry-end-position', so it covers that
-heading's own entry and not its subtree.  A CLOCK line under a
-descendant is that descendant's, named by a link of its own, and a
-call naming an ancestor is not the one entitled to destroy it.
-
 Several CLOCK lines may share a start, so every match comes back, in
 the order they are written; what an ambiguous START-TIME means is the
 caller's to decide."
-  (save-excursion
-    (org-back-to-heading t)
-    (let ((entry-begin (point))
-          (entry-end (org-entry-end-position))
-          (target (float-time start-time)))
-      (save-restriction
-        (narrow-to-region entry-begin entry-end)
-        (org-element-map
-         (org-element-parse-buffer 'element) 'clock
-         (lambda (clock)
-           (when (= (float-time
-                     (org-mcp--clock-element-start-time clock))
-                    target)
-             clock)))))))
+  (let ((target (float-time start-time)))
+    (org-mcp--clock-entries-matching
+     (lambda (clock)
+       (= (float-time (org-mcp--clock-element-start-time clock))
+          target)))))
 
 (defun org-mcp--clock-describe-ends (clocks)
   "Describe CLOCKS by the ends that tell entries of one start apart.
