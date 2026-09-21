@@ -147,7 +147,7 @@ Date '2026-02-29' does not exist - Org reads it as '<2026-03-01 Sun>'
 Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
 Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
 Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
-Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
+Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
 #+end_example
 
 =2028-02-29= is a day and is written: the question is whether the year in hand
@@ -475,11 +475,12 @@ them:
 *=""= is a value, not a way of saying nothing.* It is accepted exactly where
 the field has an empty value: an empty body is a body, and a property line can
 stand present and empty. On the four fields above it is neither a value nor an
-ask, and it is refused with the message that names what the field does take:
+ask, and it is refused with the message that names what the field does take and
+the null that takes a value away:
 
 #+begin_example
-Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
-Priority must be a single character, got ''
+Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
+Invalid priority '' - expected a single character, or null for no priority
 Invalid TODO state: '' - valid states: TODO, IN-PROGRESS, DONE, or null for no keyword
 #+end_example
 
@@ -562,10 +563,10 @@ pair at the top already reports.
 #+end_src
 
 Send it back as an =after= instead and the field's own validator sees the =""=,
-so the refusal is about dates and says nothing about the mistake:
+so the refusal is about dates — but it names the spelling that was wanted:
 
 #+begin_example
-Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, or an Org timestamp such as <2026-06-20 Sat +1w -3d>
+Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
 #+end_example
 
 To repeat a removal rather than assert one, send =null= again. It is the ask,

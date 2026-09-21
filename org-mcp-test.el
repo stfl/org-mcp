@@ -11630,17 +11630,20 @@ to do."
 Null is the one spelling that takes a value away, because null is
 JSON's word for no value.  An empty string is a value, and this
 field has none — so it reaches the field's own check and is refused
-there, naming what the field does accept.  False and [] are what a
-client fills a parameter it is not using with, and are refused as
-the parameter left out."
+there, naming what the field does accept and the null that asks for
+none.  False and [] are what a client fills a parameter it is not
+using with, and are refused as the parameter left out."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-scheduled))
     (let ((link (org-mcp-test--file-link test-file "*Scheduled Task")))
       (org-mcp-test--call-tool-refused
        "org-node-set-scheduled"
        `((link . ,link) (before . "<2026-03-01 Sun>") (after . ""))
-       "\\`Invalid date '' - expected 2026-03-27, \
-2026-03-27 09:00, or an Org timestamp"
+       (concat "\\`"
+               (regexp-quote
+                "Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, \
+an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date")
+               "\\'")
        test-file)
       (dolist (blank '(:json-false []))
         (org-mcp-test--call-tool-refused
@@ -11816,17 +11819,20 @@ to do."
 Null is the one spelling that takes a value away, because null is
 JSON's word for no value.  An empty string is a value, and this
 field has none — so it reaches the field's own check and is refused
-there, naming what the field does accept.  False and [] are what a
-client fills a parameter it is not using with, and are refused as
-the parameter left out."
+there, naming what the field does accept and the null that asks for
+none.  False and [] are what a client fills a parameter it is not
+using with, and are refused as the parameter left out."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-deadline))
     (let ((link (org-mcp-test--file-link test-file "*Deadline Task")))
       (org-mcp-test--call-tool-refused
        "org-node-set-deadline"
        `((link . ,link) (before . "<2026-03-15 Sun>") (after . ""))
-       "\\`Invalid date '' - expected 2026-03-27, \
-2026-03-27 09:00, or an Org timestamp"
+       (concat "\\`"
+               (regexp-quote
+                "Invalid date '' - expected 2026-03-27, 2026-03-27 09:00, \
+an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date")
+               "\\'")
        test-file)
       (dolist (blank '(:json-false []))
         (org-mcp-test--call-tool-refused
@@ -14048,16 +14054,19 @@ there."
 Null is the one spelling that takes a value away, because null is
 JSON's word for no value.  An empty string is a value, and this
 field has none — so it reaches the field's own check and is refused
-there, naming what the field does accept.  False and [] are what a
-client fills a parameter it is not using with, and are refused as
-the parameter left out."
+there, naming what the field does accept and the null that asks for
+none.  False and [] are what a client fills a parameter it is not
+using with, and are refused as the parameter left out."
   (org-mcp-test--with-temp-org-files
       ((test-file org-mcp-test--content-todo-with-priority))
     (let ((link (org-mcp-test--file-link test-file "*Priority Task")))
       (org-mcp-test--call-tool-refused
        "org-node-set-priority"
        `((link . ,link) (before . "B") (after . ""))
-       "\\`Priority must be a single character, got ''\\'"
+       (concat "\\`"
+               (regexp-quote
+                "Invalid priority '' - expected a single character, or null for no priority")
+               "\\'")
        test-file)
       (dolist (blank '(:json-false []))
         (org-mcp-test--call-tool-refused

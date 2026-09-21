@@ -3806,7 +3806,8 @@ form `org-schedule' and `org-deadline' carry through whole; see
     (unless timestamp
       (org-mcp--tool-validation-error
        "Invalid date '%s' - expected 2026-03-27, 2026-03-27 09:00, \
-or an Org timestamp such as <2026-06-20 Sat +1w -3d>"
+an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no \
+date"
        date-str))
     (when (memq
            (org-element-property :type timestamp)
@@ -5776,7 +5777,8 @@ in force."
     (when priority
       (unless (= (length priority) 1)
         (org-mcp--tool-validation-error
-         "Priority must be a single character, got '%s'"
+         "Invalid priority '%s' - expected a single character, or \
+null for no priority"
          priority)))
     priority))
 
