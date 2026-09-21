@@ -8510,6 +8510,13 @@ are both sets of tags.  #+ARCHIVE: and #+CATEGORY: are the exception
 - Org reads the first line and ignores the rest - and this tool
 reports every line either way, because the file carries them.
 
+TODO here is the #+TODO: lines and those alone.  A file may name
+sequences in #+SEQ_TODO: or #+TYP_TODO: as well, or pull them in
+through a #+SETUPFILE:, and none of the three is reported here or
+replaced by writing TODO: ask org-config-todo for the keywords a
+write to a heading in this file is actually held to, and expect it
+to name states this answer does not.
+
 Use this before org-file-set-setting: its before is the array this
 answers with.")
     :read-only t)

@@ -524,17 +524,17 @@ that means nothing — a TODO keyword, a SCHEDULED, a DEADLINE and a priority ar
 each a value or an absence, with nothing in between — so =null= is how you empty
 them:
 
-| To take away   | The call                  | Spelled                   |
-|----------------+---------------------------+---------------------------|
-| a TODO keyword | =org-node-set-todo=       | =after: null=             |
-| a SCHEDULED    | =org-node-set-scheduled=  | =after: null=             |
-| a DEADLINE     | =org-node-set-deadline=   | =after: null=             |
-| a priority     | =org-node-set-priority=   | =after: null=             |
-| a property     | =org-node-set-properties= | that name's value =null=  |
-| the body       | =org-node-set-content=    | =after: ""=               |
-| a tag          | =org-node-remove-tags=    | the tags named in =after= |
-| every own tag  | =org-node-set-tags=       | =after: []=               |
-| a whole setting | =org-file-set-setting=   | =after: []=               |
+| To take away    | The call                  | Spelled                   |
+|-----------------+---------------------------+---------------------------|
+| a TODO keyword  | =org-node-set-todo=       | =after: null=             |
+| a SCHEDULED     | =org-node-set-scheduled=  | =after: null=             |
+| a DEADLINE      | =org-node-set-deadline=   | =after: null=             |
+| a priority      | =org-node-set-priority=   | =after: null=             |
+| a property      | =org-node-set-properties= | that name's value =null=  |
+| the body        | =org-node-set-content=    | =after: ""=               |
+| a tag           | =org-node-remove-tags=    | the tags named in =after= |
+| every own tag   | =org-node-set-tags=       | =after: []=               |
+| a whole setting | =org-file-set-setting=    | =after: []=               |
 
 *={}= is =null= written another way.* The JSON decoder reads an empty object
 as nothing at all, which is what it reads =null= as, so nothing past it can
