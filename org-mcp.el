@@ -394,7 +394,7 @@ the field to hold nothing: null is JSON\='s word for no value, and
 these fields have none of their own.  \"\" is not a timestamp, a
 priority character or a TODO keyword, so it passes through as the
 string it is and the field\='s own validator refuses it, naming what
-the field does accept.
+the field does accept and the null that asks for none.
 
 Every other blank, see `org-mcp--blank-param-p', is a parameter the
 client filled but did not send, and is refused as one: false is a
@@ -3847,7 +3847,8 @@ form `org-schedule' and `org-deadline' carry through whole; see
     (unless timestamp
       (org-mcp--tool-validation-error
        "Invalid date '%s' - expected 2026-03-27, 2026-03-27 09:00, \
-or an Org timestamp such as <2026-06-20 Sat +1w -3d>"
+an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no \
+date"
        date-str))
     (when (memq
            (org-element-property :type timestamp)
@@ -5821,7 +5822,8 @@ in force."
     (when priority
       (unless (= (length priority) 1)
         (org-mcp--tool-validation-error
-         "Priority must be a single character, got '%s'"
+         "Invalid priority '%s' - expected a single character, or \
+null for no priority"
          priority)))
     priority))
 
