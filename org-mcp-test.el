@@ -3412,6 +3412,8 @@ NEW-TITLE is the invalid new title that should be rejected."
     "org-config-tag-candidates"
     "org-config-tags"
     "org-config-todo"
+    "org-file-set-setting"
+    "org-file-settings"
     "org-node-add-note"
     "org-node-add-tags"
     "org-node-archive"
@@ -23037,13 +23039,19 @@ verb acts on that has to be a heading."
        test-file))))
 
 (ert-deftest org-mcp-test-write-tools-refuse-a-link-naming-a-file ()
-  "org-node-set-properties is the only write tool a file's link reaches.
+  "Every org-node write tool but set-properties refuses a file's link.
 A file node is written where Org has a file construct to write, and
 that is its property drawer.  A TODO keyword, a priority cookie, a
 planning line, a heading's own tags and a LOGBOOK note are heading
-constructs, and a file's title is a `#+TITLE:' keyword rather than a
-headline, so each of these refuses the link and leaves the file as it
-was."
+constructs, so each of these refuses the link and leaves the file as
+it was.
+
+`org-node-set-title' and `org-node-set-content' refuse it although a
+file has a title and a body, and both belong to `org-file-set-setting'
+instead: a file's title is a `#+TITLE:' keyword rather than a
+headline, and a file's body is the preamble those keywords stand in,
+so replacing it against a digest would rewrite the settings of a file
+with nothing in the call naming one."
   (org-mcp-test--with-verbs-file test-file
     (let ((file-link (concat "file:" test-file)))
       (pcase-dolist
@@ -24511,6 +24519,828 @@ is told that an invisible one is where the caller means."
      test-file
      org-mcp-test--folded-made-under-parent)))
 
+;;; A file's in-buffer settings
+
+(defconst org-mcp-test--settings-file-id
+  "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  "The ID in the file-level drawer of `org-mcp-test--content-settings-gtd'.")
+
+(defconst org-mcp-test--content-settings-gtd
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " org-mcp-test--settings-file-id "\n"
+   ":END:\n"
+   "#+TITLE: Getting things done\n"
+   "#+TODO: TODO(t) NEXT(n) | DONE(d)\n"
+   "#+TODO: WAIT(w) | KILL(k)\n"
+   "#+FILETAGS: :gtd:\n"
+   "\n"
+   "* TODO Write the brief\n"
+   "* WAIT Hear back\n"
+   "* NEXT Book the room\n")
+  "A file whose own workflow stands on two `#+TODO:' lines.
+Its property drawer sits above the settings, which is where Org
+reads a file's own, and three of its headings carry a keyword the
+file itself names.")
+
+(defconst org-mcp-test--pattern-settings-one-sequence
+  (concat
+   "\\`:PROPERTIES:\n"
+   ":ID: +" org-mcp-test--settings-file-id "\n"
+   ":END:\n"
+   "#\\+TITLE: Getting things done\n"
+   "#\\+TODO: TODO(t) NEXT(n) WAIT(w) HOLD(h) | DONE(d) KILL(k)\n"
+   "#\\+FILETAGS: :gtd:\n"
+   "\n"
+   "\\* TODO Write the brief\n"
+   "\\* WAIT Hear back\n"
+   "\\* NEXT Book the room\n\\'")
+  "Pattern after two `#+TODO:' lines are replaced by one naming them all.
+Both old lines are gone and the new one stands where the first of
+them stood, so the drawer above and the settings below are where
+they were.")
+
+(defconst org-mcp-test--pattern-settings-no-filetags
+  (concat
+   "\\`:PROPERTIES:\n"
+   ":ID: +" org-mcp-test--settings-file-id "\n"
+   ":END:\n"
+   "#\\+TITLE: Getting things done\n"
+   "#\\+TODO: TODO(t) NEXT(n) | DONE(d)\n"
+   "#\\+TODO: WAIT(w) | KILL(k)\n"
+   "\n"
+   "\\* TODO Write the brief\n"
+   "\\* WAIT Hear back\n"
+   "\\* NEXT Book the room\n\\'")
+  "Pattern after the file's only `#+FILETAGS:' line is taken away.")
+
+(defconst org-mcp-test--pattern-settings-two-filetags
+  (concat
+   "\\`:PROPERTIES:\n"
+   ":ID: +" org-mcp-test--settings-file-id "\n"
+   ":END:\n"
+   "#\\+TITLE: Getting things done\n"
+   "#\\+TODO: TODO(t) NEXT(n) | DONE(d)\n"
+   "#\\+TODO: WAIT(w) | KILL(k)\n"
+   "#\\+FILETAGS: :gtd:\n"
+   "#\\+FILETAGS: :work:\n"
+   "\n"
+   "\\* TODO Write the brief\n"
+   "\\* WAIT Hear back\n"
+   "\\* NEXT Book the room\n\\'")
+  "Pattern after a second `#+FILETAGS:' line is written beside the first.")
+
+(defconst org-mcp-test--content-settings-comment-first
+  (concat
+   "# -*- mode: org -*-\n"
+   ":PROPERTIES:\n"
+   ":CAT:      inbox\n"
+   ":END:\n"
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Simple Task\n")
+  "A file whose settings stand under a comment line and a drawer of its own.")
+
+(defconst org-mcp-test--pattern-settings-joined-the-settings
+  (concat
+   "\\`# -\\*- mode: org -\\*-\n"
+   ":PROPERTIES:\n"
+   ":CAT: +inbox\n"
+   ":END:\n"
+   "#\\+CATEGORY: gtd\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* TODO Simple Task\n\\'")
+  "Pattern after a setting the file wrote on no line is written.
+It joins the settings the file already has rather than going above
+the comment line or the drawer, both of which Org keeps above the
+settings.")
+
+(defconst org-mcp-test--content-settings-comment-only
+  (concat
+   "# -*- mode: org -*-\n"
+   "* TODO Simple Task\n")
+  "A file whose only preamble is the line Emacs reads its locals from.")
+
+(defconst org-mcp-test--pattern-settings-under-the-comment
+  (concat
+   "\\`# -\\*- mode: org -\\*-\n"
+   "#\\+CATEGORY: gtd\n"
+   "\\* TODO Simple Task\n\\'")
+  "Pattern after the first setting of a file with only a comment is written.
+The comment stays on the first line, where Emacs reads a file-local
+variables line and where Org puts a file's own property drawer under
+it rather than over it.")
+
+(defconst org-mcp-test--content-settings-drawer-only
+  (concat
+   ":PROPERTIES:\n"
+   ":CAT:      inbox\n"
+   ":END:\n"
+   "* TODO Simple Task\n")
+  "A file with a property drawer of its own and no settings at all.")
+
+(defconst org-mcp-test--pattern-settings-under-the-drawer
+  (concat
+   "\\`:PROPERTIES:\n"
+   ":CAT: +inbox\n"
+   ":END:\n"
+   "#\\+TITLE: A file\n"
+   "\\* TODO Simple Task\n\\'")
+  "Pattern after the first setting of a file with only a drawer is written.
+The drawer stays at the top: Org reads a file's own drawer only
+above the settings, so a setting written above it would put the
+properties out of reach.")
+
+(defconst org-mcp-test--content-settings-opens-on-a-heading
+  (concat
+   "* TODO Simple Task\n"
+   ":PROPERTIES:\n"
+   ":EFFORT:   1:00\n"
+   ":END:\n"
+   "Task body text.\n")
+  "A file whose very first line is a heading, so it has no preamble.")
+
+(defconst org-mcp-test--pattern-settings-above-a-heading
+  (concat
+   "\\`#\\+CATEGORY: gtd\n"
+   "\\* TODO Simple Task\n"
+   ":PROPERTIES:\n"
+   ":EFFORT: +1:00\n"
+   ":END:\n"
+   "Task body text\\.\n\\'")
+  "Pattern after a file opening on a heading is given a setting.
+The line goes above that heading, where a drawer of the file's own
+would go, and nothing of the heading is touched.")
+
+(defconst org-mcp-test--content-settings-untitled
+  "* TODO Write the brief\n"
+  "A file that writes no setting of any kind.")
+
+(defun org-mcp-test--pattern-settings-title-is-the-file-name (file)
+  "Return the pattern for FILE once its `#+TITLE:' is FILE's own name.
+The name is known only once the temporary file exists, so the
+whole-file pattern is built from it here rather than written out as
+a constant."
+  (concat
+   "\\`#\\+TITLE: "
+   (regexp-quote (file-name-nondirectory file))
+   "\n"
+   "\\* TODO Write the brief\n\\'"))
+
+(defun org-mcp-test--file-settings (link)
+  "Return the `settings' of the file LINK names, as org-file-settings gives it."
+  (alist-get
+   'settings
+   (json-read-from-string
+    (mcp-server-lib-ert-call-tool "org-file-settings" `((link . ,link))))))
+
+(ert-deftest org-mcp-test-file-settings-reports-every-line ()
+  "A setting written on two lines comes back as two, in the file's order.
+Org makes a sequence of each `#+TODO:' line and keeps them all, so
+the value of a setting is the set of lines and not one of them.  A
+setting the file writes on no line comes back as the empty set,
+which is what tells it from one written to a value that looks like
+a default."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-file-settings" `((link . ,link)))))
+           (settings (alist-get 'settings result)))
+      (should
+       (equal (alist-get 'link result)
+              (concat "id:" org-mcp-test--settings-file-id)))
+      (should (equal (alist-get 'TITLE settings) ["Getting things done"]))
+      (should
+       (equal (alist-get 'TODO settings)
+              ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"]))
+      (should (equal (alist-get 'FILETAGS settings) [":gtd:"]))
+      (should (equal (alist-get 'ARCHIVE settings) []))
+      (should (equal (alist-get 'CATEGORY settings) []))
+      (should (equal (alist-get 'STARTUP settings) [])))))
+
+(ert-deftest org-mcp-test-file-settings-answers-for-a-headings-file ()
+  "A link naming a heading answers for the heading's file.
+These settings are file-wide, so the heading decides nothing, and a
+client holding a heading's link does not have to take it apart."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (should
+     (equal
+      (alist-get
+       'TITLE
+       (org-mcp-test--file-settings
+        (org-mcp-test--file-link test-file "*Hear back")))
+      ["Getting things done"]))))
+
+(ert-deftest org-mcp-test-file-settings-tells-unset-from-default-looking ()
+  "A read of the settings says what a read of the node's title cannot.
+A file node's `title' is its `#+TITLE:' when it writes one and its
+own file name when it writes none, so a title equal to the file
+name answers the same either way.  The settings answer the question
+the title conflates: [] is a file writing no `#+TITLE:' line, and
+the same name in an array is a file writing one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-untitled))
+    (let ((link (concat "file:" (abbreviate-file-name test-file)))
+          (name (file-name-nondirectory test-file)))
+      (should
+       (equal
+        (alist-get 'title (json-read-from-string
+                           (org-mcp-test--call-read link)))
+        name))
+      (should (equal (alist-get 'TITLE (org-mcp-test--file-settings link)) []))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-file-set-setting"
+               `((link . ,link)
+                 (setting . "TITLE")
+                 (before . [])
+                 (after . ,name))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'setting result) "TITLE"))
+        (should (equal (alist-get 'before result) []))
+        (should (equal (alist-get 'after result) (vector name))))
+      (should
+       (equal
+        (alist-get 'title (json-read-from-string
+                           (org-mcp-test--call-read link)))
+        name))
+      (should
+       (equal (alist-get 'TITLE (org-mcp-test--file-settings link))
+              (vector name)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (org-mcp-test--pattern-settings-title-is-the-file-name test-file)))))
+
+(ert-deftest org-mcp-test-file-set-setting-replaces-the-whole-set ()
+  "A write asserts every line of the setting and writes every line of it.
+Two `#+TODO:' lines become one naming all six keywords: the call
+takes away the lines it does not list, so the assertion covers them
+all.  The new line stands where the first of the old ones stood,
+and the rest of the file is untouched."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-file-set-setting"
+              `((link . ,link)
+                (setting . "TODO")
+                (before
+                 . ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"])
+                (after
+                 .
+                 ["TODO(t) NEXT(n) WAIT(w) HOLD(h) | DONE(d) KILL(k)"]))))))
+      (should (equal (alist-get 'success result) t))
+      (should (eq (alist-get 'saved result) t))
+      (should (equal (alist-get 'setting result) "TODO"))
+      (should
+       (equal (alist-get 'before result)
+              ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"]))
+      (should
+       (equal (alist-get 'after result)
+              ["TODO(t) NEXT(n) WAIT(w) HOLD(h) | DONE(d) KILL(k)"]))
+      (should
+       (equal (alist-get 'link result)
+              (concat "id:" org-mcp-test--settings-file-id)))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-one-sequence))))
+
+(ert-deftest org-mcp-test-file-set-setting-rereads-the-workflow ()
+  "The keywords a later write is held to are the ones the call wrote.
+Org derives them from the settings once, when it reads the file, so
+a buffer left with the set it had would refuse the keyword the call
+had just made valid and accept one it had just taken away.  HOLD is
+written into the sequence and is then a state a heading can be
+moved to; KILL keeps its place in it and stays one."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TODO")
+         (before . ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"])
+         (after . ["TODO(t) NEXT(n) WAIT(w) HOLD(h) | DONE(d) KILL(k)"])))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Hear back")
+              "HOLD" "WAIT")))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'after result) "HOLD"))))))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-orphaning-a-keyword ()
+  "A `#+TODO:' write that would unmake a keyword in use is refused.
+Org reads a keyword its sequences no longer name as the first word
+of the heading's title, so the headings carrying it would be
+retitled by a call that named none of them.  The refusal names the
+keyword and counts the headings, and says nothing of KILL, which
+the sequences also stop naming but no heading carries.  The file is
+left byte for byte as it was, and so is the workflow the buffer
+holds: the check runs before the write, so a heading can still be
+moved to the keyword the refused call would have taken away."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "TODO")
+       (before . ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"])
+       (after . ["TODO(t) NEXT(n) | DONE(d)"]))
+     "\\`#\\+TODO: would stop naming a keyword headings in this file \
+carry: WAIT on 1 heading\\."
+     test-file)
+    (should
+     (equal
+      (alist-get
+       'success
+       (org-mcp-test--call-update-todo-state
+        (org-mcp-test--file-link test-file "*Book the room") "WAIT" "NEXT"))
+      t))))
+
+(ert-deftest org-mcp-test-tool-schemas-carry-no-docstring-escapes ()
+  "No parameter description a client reads carries a docstring escape.
+The schema takes each description out of the handler's docstring
+verbatim, while an Emacs user reads that docstring through
+`substitute-command-keys', which turns the backslash escape for an
+apostrophe into one.  An escape written inside the MCP Parameters
+block therefore reads correctly in Emacs and reaches a client as the
+two characters it is spelled with, so those blocks are written with
+plain apostrophes."
+  (org-mcp-test--with-enabled
+    (dolist (tool (org-mcp-test--registered-tools))
+      (dolist (property
+               (alist-get 'properties (alist-get 'inputSchema tool)))
+        (should-not
+         (string-match-p
+          "\\\\="
+          (format "%s %s: %s"
+                  (alist-get 'name tool)
+                  (car property)
+                  (or (alist-get 'description (cdr property)) ""))))))))
+
+(defconst org-mcp-test--content-settings-two-waits
+  (concat
+   "#+TODO: TODO | DONE\n"
+   "#+TODO: WAIT | KILL\n"
+   "* WAIT Hear back\n"
+   "* WAIT Hear back again\n"
+   "* KILL Dropped\n")
+  "A file two of whose headings carry the same keyword.")
+
+(ert-deftest org-mcp-test-file-set-setting-counts-the-headings-it-would-retitle ()
+  "The orphan refusal counts each keyword's headings and names them once.
+The count is what says how much work the remedy is, so a keyword on
+two headings is reported once with two, and KILL, on one heading of
+its own, is reported beside it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-two-waits))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "TODO")
+       (before . ["TODO | DONE" "WAIT | KILL"])
+       (after . ["TODO | DONE"]))
+     "\\`#\\+TODO: would stop naming a keyword headings in this file \
+carry: WAIT on 2 headings, KILL on 1 heading\\."
+     test-file)))
+
+(defconst org-mcp-test--content-settings-with-an-archive
+  (concat
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Write the brief\n"
+   "* Archive\n")
+  "A file with a heading an archive setting can send a subtree to.")
+
+(defconst org-mcp-test--content-settings-archiving-in-place
+  (concat
+   "#+ARCHIVE: ::* Archive\n"
+   "#+TITLE: A file\n"
+   "\n"
+   "* TODO Write the brief\n"
+   "* Archive\n")
+  "A file whose archive setting keeps archived subtrees inside it.")
+
+(defconst org-mcp-test--pattern-settings-archive-gone
+  (concat
+   "\\`#\\+TITLE: A file\n"
+   "\n"
+   "\\* Archive\n\\'")
+  "Pattern after the archive setting is taken away and a subtree archived.
+The subtree went to the file Org archives to when a file names no
+location of its own, so the Archive heading is still empty.")
+
+(defconst org-mcp-test--pattern-settings-archived-in-place
+  (concat
+   "\\`#\\+ARCHIVE: ::\\* Archive\n"
+   "#\\+TITLE: A file\n"
+   "\n"
+   "\\* Archive\n"
+   "\n"
+   "\\*\\* TODO Write the brief\n"
+   " *:PROPERTIES:\n"
+   "\\(?: *:ARCHIVE_[A-Z]+:[^\n]*\n\\)+"
+   " *:END:\n"
+   "\n?\\'")
+  "Pattern after the brief is archived under the file's own Archive heading.
+The lines of the drawer Org writes into the archived subtree are
+`org-archive-save-context-info's business and carry this machine's
+paths and clock, so they are matched by shape; what is pinned is
+that the subtree went under the file's own Archive heading and that
+everything above it stayed where it was.")
+
+(ert-deftest org-mcp-test-file-set-setting-redirects-the-archive ()
+  "Writing `#+ARCHIVE:' changes where org-node-archive sends a subtree.
+The setting reaches past the line it stands on, as `#+TODO:' does,
+and it is not refused for it: everything already written goes on
+meaning what it meant, and only the next archive goes somewhere
+else.  Org acts on the new location straight away, which it does
+only because the buffer reads its settings again."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-with-an-archive))
+    (let ((link (concat "file:" (abbreviate-file-name test-file)))
+          (heading (org-mcp-test--file-link test-file "*Write the brief")))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "ARCHIVE")
+         (before . [])
+         (after . "::* Archive")))
+      (mcp-server-lib-ert-call-tool
+       "org-node-archive"
+       `((link . ,heading)
+         (before
+          . ,(alist-get 'digest
+                        (org-mcp-test--read-fields heading ["digest"])))))
+      (should-not (file-exists-p (concat test-file "_archive")))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-archived-in-place))))
+
+(ert-deftest org-mcp-test-file-set-setting-gives-the-archive-back ()
+  "Taking the last `#+ARCHIVE:' line away puts the default back in force.
+Org sets the archive location from a line it finds and leaves it
+alone when it finds none, so a buffer that kept the value its
+removed line had set would go on archiving where the file no longer
+says.  The subtree goes to the file Org archives to when a file
+names no location of its own."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-archiving-in-place))
+    (let ((link (concat "file:" (abbreviate-file-name test-file)))
+          (heading (org-mcp-test--file-link test-file "*Write the brief"))
+          (archive (concat test-file "_archive")))
+      (unwind-protect
+          (progn
+            (mcp-server-lib-ert-call-tool
+             "org-file-set-setting"
+             `((link . ,link)
+               (setting . "ARCHIVE")
+               (before . "::* Archive")
+               (after . [])))
+            (mcp-server-lib-ert-call-tool
+             "org-node-archive"
+             `((link . ,heading)
+               (before
+                . ,(alist-get
+                    'digest
+                    (org-mcp-test--read-fields heading ["digest"])))))
+            (should (file-exists-p archive))
+            (should
+             (string-match-p
+              "\\* TODO Write the brief"
+              (org-mcp-test--read-file archive)))
+            (org-mcp-test--verify-file-matches
+             test-file org-mcp-test--pattern-settings-archive-gone))
+        (when (file-exists-p archive)
+          (let ((buffer (find-buffer-visiting archive)))
+            (when buffer
+              (with-current-buffer buffer (set-buffer-modified-p nil))
+              (kill-buffer buffer)))
+          (delete-file archive))))))
+
+(ert-deftest org-mcp-test-file-set-setting-retires-a-keyword-in-two-steps ()
+  "The remedy the orphan refusal names is one the tools can carry out.
+The new sequence is written beside the old one, the heading is
+moved while both keywords are valid, and the sequence is then
+written again without the old one.  A refusal with no remedy inside
+the server would be a dead end, so the route is pinned here."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TODO")
+         (before . ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"])
+         (after
+          . ["TODO(t) NEXT(n) HOLD(h) | DONE(d)" "WAIT(w) | KILL(k)"])))
+      (org-mcp-test--call-update-todo-state
+       (org-mcp-test--file-link test-file "*Hear back") "HOLD" "WAIT")
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-file-set-setting"
+               `((link . ,link)
+                 (setting . "TODO")
+                 (before
+                  . ["TODO(t) NEXT(n) HOLD(h) | DONE(d)"
+                     "WAIT(w) | KILL(k)"])
+                 (after . ["TODO(t) NEXT(n) HOLD(h) | DONE(d)"]))))))
+        (should (equal (alist-get 'success result) t))
+        (should
+         (equal (alist-get 'TODO (org-mcp-test--file-settings link))
+                ["TODO(t) NEXT(n) HOLD(h) | DONE(d)"]))))))
+
+(ert-deftest org-mcp-test-file-set-setting-takes-every-line-away ()
+  "An empty `after' leaves the file writing the setting on no line.
+The tags the file gave every heading go with the line, which is the
+reach this setting has and the reason the write is guarded."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (heading (org-mcp-test--file-link test-file "*Hear back")))
+      (should
+       (equal
+        (alist-get 'tags
+                   (json-read-from-string
+                    (org-mcp-test--call-read heading)))
+        ["gtd"]))
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-file-set-setting"
+               `((link . ,link)
+                 (setting . "FILETAGS")
+                 (before . ":gtd:")
+                 (after . []))))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'before result) [":gtd:"]))
+        (should (equal (alist-get 'after result) [])))
+      (should (equal (alist-get 'FILETAGS (org-mcp-test--file-settings link))
+                     []))
+      (should
+       (null
+        (assq 'tags
+              (json-read-from-string (org-mcp-test--call-read heading)))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-no-filetags))))
+
+(ert-deftest org-mcp-test-file-set-setting-writes-a-second-line ()
+  "A setting Org reads on several lines takes several, in the order given.
+Both `#+FILETAGS:' lines are in effect afterwards, and the new one
+stands under the one the file already wrote."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let ((link (concat "file:" (abbreviate-file-name test-file)))
+          (heading (org-mcp-test--file-link test-file "*Hear back")))
+      (should
+       (equal
+        (alist-get 'success
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-file-set-setting"
+                     `((link . ,link)
+                       (setting . "FILETAGS")
+                       (before . [":gtd:"])
+                       (after . [":gtd:" ":work:"])))))
+        t))
+      (should
+       (equal
+        (alist-get 'tags
+                   (json-read-from-string
+                    (org-mcp-test--call-read heading)))
+        ["gtd" "work"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-two-filetags))))
+
+(ert-deftest org-mcp-test-file-set-setting-round-trips ()
+  "What a read of the settings returns is what a write asserts.
+The array under the setting's name is the `before' of the next
+call, sent back as it came, and the call is accepted."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (read-back (alist-get 'TODO (org-mcp-test--file-settings link)))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-file-set-setting"
+              `((link . ,link)
+                (setting . "TODO")
+                (before . ,read-back)
+                (after
+                 .
+                 ["TODO(t) NEXT(n) WAIT(w) HOLD(h) | DONE(d) KILL(k)"]))))))
+      (should
+       (equal read-back
+              ["TODO(t) NEXT(n) | DONE(d)" "WAIT(w) | KILL(k)"]))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-one-sequence))))
+
+(ert-deftest org-mcp-test-file-set-setting-joins-the-settings ()
+  "A setting the file writes on no line joins the settings it does write.
+The comment line Emacs reads file-local variables from and the
+file's own property drawer both stay above it: Org keeps them
+there, and a drawer under a `#+' line is read as no drawer at all."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-comment-first))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (should
+       (equal
+        (alist-get 'success
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-file-set-setting"
+                     `((link . ,link)
+                       (setting . "category")
+                       (before . [])
+                       (after . "gtd")))))
+        t))
+      (should
+       (equal (alist-get 'CATEGORY (org-mcp-test--file-settings link))
+              ["gtd"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-joined-the-settings))))
+
+(ert-deftest org-mcp-test-file-set-setting-goes-under-a-lone-comment ()
+  "A file whose only preamble is a comment keeps the comment on line one.
+Emacs reads a file-local variables line there and nowhere else, so a
+setting written above it would take the file's mode with it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-comment-only))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "CATEGORY")
+         (before . [])
+         (after . "gtd")))
+      (should
+       (equal (alist-get 'CATEGORY (org-mcp-test--file-settings link))
+              ["gtd"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-under-the-comment))))
+
+(ert-deftest org-mcp-test-file-set-setting-goes-under-a-lone-drawer ()
+  "A file whose only preamble is its drawer keeps the drawer on top.
+The first setting it is given goes below the drawer, which is the
+only place Org reads a file's own properties from."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-drawer-only))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TITLE")
+         (before . [])
+         (after . "A file")))
+      (should
+       (equal
+        (alist-get 'properties (org-mcp-test--read-properties link "all"))
+        '((CAT . "inbox"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-under-the-drawer))))
+
+(ert-deftest org-mcp-test-file-set-setting-writes-above-a-first-heading ()
+  "A file that opens on a heading is given a preamble to hold the setting.
+The line goes above the heading, where a drawer of the file's own
+would go, and the heading keeps its own drawer untouched."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-opens-on-a-heading))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (mcp-server-lib-ert-call-tool
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "CATEGORY")
+         (before . [])
+         (after . "gtd")))
+      (should
+       (equal (alist-get 'CATEGORY (org-mcp-test--file-settings link))
+              ["gtd"]))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-settings-above-a-heading))))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-a-stale-before ()
+  "A `before' that is not what the file writes is a conflict.
+The refusal names both sets, so a client reading the file again can
+see which line it was holding out of date."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "TITLE")
+       (before . "Something else")
+       (after . "A new title"))
+     "\\`conflict: #\\+TITLE: mismatch: expected 'Something else', \
+found 'Getting things done'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-the-wrong-empty-set ()
+  "Asserting that the file writes no line is a conflict when it writes one.
+`[]' is the empty set and an assertion like any other, so it fails
+against a file that has the setting rather than passing silently."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "FILETAGS")
+       (before . [])
+       (after . [":work:"]))
+     "\\`conflict: #\\+FILETAGS: mismatch: expected (no line), \
+found ':gtd:'\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-file-set-setting-needs-a-before ()
+  "The write is guarded from the schema up: `before' is required.
+A call that omits it never reaches the file, and neither does one
+that fills it with a blank, which is the same mistake spelled the
+other way."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,link) (setting . "TITLE") (after . "A new title"))
+       "before"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TITLE")
+         (before . "")
+         (after . "A new title"))
+       "before"
+       test-file))))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-a-digest ()
+  "A digest is no settings line, wherever in `before' it turns up.
+A token covers a region of the file and this call replaces the
+lines of one setting, so the two forms are not interchangeable."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "TITLE")
+       (before . "sha256:0000000000000000")
+       (after . "A new title"))
+     "#\\+TITLE: is asserted with the value it holds, not with a digest"
+     test-file)))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-a-setting-outside-the-six ()
+  "A `#+' line this tool does not write is refused by name.
+The refusal lists the settings that are in scope, as the `setting'
+parameter takes them rather than as the lines read, so a client that
+guessed at one outside them can send back what it is told.
+`#+PROPERTY:' is the one worth guessing at and it is not here: it
+belongs to the property surface."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (org-mcp-test--call-tool-refused
+     "org-file-set-setting"
+     `((link . ,(concat "file:" (abbreviate-file-name test-file)))
+       (setting . "PROPERTY")
+       (before . [])
+       (after . "OWNER ada"))
+     "\\`No such setting: 'PROPERTY' - this tool writes TITLE, TODO, \
+ARCHIVE, CATEGORY, FILETAGS, STARTUP\\'"
+     test-file)))
+
+(ert-deftest org-mcp-test-file-set-setting-refuses-a-line-no-read-returns ()
+  "A value Org would not read back off the line is refused.
+`org-element' drops the space around the value and stops at the end
+of the line, so a value carrying either would be written and never
+read back the way it was sent."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-settings-gtd))
+    (let ((link (concat "file:" (abbreviate-file-name test-file))))
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TITLE")
+         (before . "Getting things done")
+         (after . "  padded  "))
+       "\\`A settings line carries no space around its value: \
+'  padded  '\\'"
+       test-file)
+      (org-mcp-test--call-tool-refused
+       "org-file-set-setting"
+       `((link . ,link)
+         (setting . "TITLE")
+         (before . "Getting things done")
+         (after . "one\ntwo"))
+       "\\`A setting is one line, and this value is two or more"
+       test-file))))
+
 ;;; Advertised values
 
 ;; A refusal that names a value is a promise to the client that sent
@@ -25048,6 +25878,50 @@ a client that sends every argument as a string sends."
           (org-mcp-test--advertised-tags-accepted text expected))))
     values))
 
+(defconst org-mcp-test--content-advertised-settings
+  "* TODO Task\nBody.\n"
+  "A file that writes no in-buffer setting at all.
+It opens on a heading, so a call naming a setting it does not write
+asserts the empty set truthfully and has nothing to take away: the
+call succeeds and the file is left alone, which is what lets one
+fixture answer for every setting a refusal names.")
+
+(defun org-mcp-test--advertisement-file-settings ()
+  "The settings the refusal of a name outside them lists.
+Each is sent back as `setting', asserting the empty set on either
+side, so the call is a no-op success unless the name is one the tool
+does not take.  The names are written as the parameter takes them
+and not as the lines read, which is the difference between an
+advertisement a client can obey and one it cannot: the line is
+`#+TODO:' and the value to send is TODO."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-advertised-settings))
+    (let* ((link (concat "file:" (abbreviate-file-name test-file)))
+           (message
+            (org-mcp-test--refusal-message
+             "org-file-set-setting"
+             `((link . ,link)
+               (setting . "PROPERTY")
+               (before . [])
+               (after . []))))
+           (values
+            (org-mcp-test--advertised-list
+             message " - this tool writes \\(.*\\)\\'")))
+      (dolist (setting values)
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-file-set-setting"
+                 `((link . ,link)
+                   (setting . ,setting)
+                   (before . [])
+                   (after . []))))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'setting result) setting))))
+      (org-mcp-test--verify-file-matches
+       test-file "\\`\\* TODO Task\nBody\\.\n\\'")
+      values)))
+
 (defconst org-mcp-test--advertisements
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
     ("the date under unread text"
@@ -25072,7 +25946,9 @@ a client that sends every argument as a string sends."
     ("the ranges a view takes" . org-mcp-test--advertisement-view-ranges)
     ("an array sent as its JSON text"
      . org-mcp-test--advertisement-array-as-json-text)
-    ("the tag sets a write takes" . org-mcp-test--advertisement-tag-sets))
+    ("the tag sets a write takes" . org-mcp-test--advertisement-tag-sets)
+    ("the settings a file write takes"
+     . org-mcp-test--advertisement-file-settings))
   "Every advertisement this suite guards, and how to provoke it.
 Each entry is (WHAT . FUNCTION).  FUNCTION provokes the
 advertisement from the running server, reads the values out of the
@@ -25218,6 +26094,7 @@ the delay and writes '%s'; '%s' warns before every repeat"
     "Unknown view: %s.  Configured views: %s"
     "Unknown filter: %s.  Configured filters: %s"
     "Unknown range for the %s view: %s.  Its ranges: %s"
+    "No such setting: '%s' - this tool writes %s"
    )
   "Every refusal that hands a client a value to send instead.
 Each of these is provoked by a row of `org-mcp-test--advertisements',
@@ -25351,16 +26228,33 @@ in Emacs"
     "link does not name the running clock: %s.  The clock runs on %s"
     "End time %s is before start time %s"
     "No clock entry starting at %s found"
+    "%s must be a string or an array of strings, not %s"
+    "A settings line must be a string: %s"
+    "A settings line carries no space around its value: '%s'"
+    "A setting is one line, and this value is two or more: '%s'"
+    "#+%s: mismatch: expected %s, found %s"
+    "#+TODO: would stop naming a keyword headings in this file carry: %s.  Org reads such a \
+keyword as the first word of the heading's title, so the headings would be retitled rather \
+than refused.  Write sequences that still name it, or add the new sequences beside the old \
+ones, move those headings with org-node-set-todo, and write the sequences again without it"
    )
   "Every refusal that hands a client no value to send.
-Three kinds are here.  Most name nothing at all, or name only what
+Four kinds are here.  Most name nothing at all, or name only what
 they refused.  Some name a shape rather than a value -- a full path
 such as /home/user/notes.org, a digest by the characters it starts
 with -- and the example in them is an example, refused as readily as
-what was sent.  The rest name a JSON type, a string or a number or
+what was sent.  Some name a JSON type, a string or a number or
 true or false, which the tool schema already publishes; null is a
 value rather than a type, because it asks a field to hold nothing,
 and the refusals naming it are in the list above.
+
+The last kind names a course to take rather than a value to send.
+The `#+TODO:' rewrite that would orphan a keyword is the one: the
+keyword it names is what stands in the way, not something a call
+carries, and what it recommends is a sequence of calls no regexp can
+lift out of the text.  A row of `org-mcp-test--advertisements' would
+have nothing to send back, so the route it recommends is pinned by a
+test of its own instead.
 
 A refusal whose message the source does not spell out is named here
 by the function that builds it.")

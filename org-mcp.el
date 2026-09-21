@@ -3600,16 +3600,30 @@ and logging directives, and `org-todo-key-alist' carries a key for
 every keyword, the ones `org-assign-fast-keys' invented for a
 sequence that named none included.  The lines carry what the file
 says, which is what this tool reports."
-  (let ((alist
-         (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO"))))
+  (org-mcp--todo-sequences-of
+   (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO"))))
+
+(defun org-mcp--todo-sequences-of (alist)
+  "Return the TODO sequences the settings in ALIST name.
+ALIST is what `org-collect-keywords' returns for `\"SEQ_TODO\"',
+`\"TODO\"' and `\"TYP_TODO\"': each entry pairs the setting with the
+values its lines carry.  The sequences come out in the order
+`org-set-regexps-and-options' puts them in, and have the shape of
+`org-todo-keywords'.
+
+It is a function of the settings rather than of the buffer so that
+the same assembly answers for the settings a file carries and for
+the settings a write is about to give it, see
+`org-mcp--todo-keywords-once'.  A second assembly would be a second
+answer to one question, and the two would drift."
+  (append
+   (mapcar
+    (lambda (value) (cons 'type (split-string value)))
+    (cdr (assoc "TYP_TODO" alist)))
+   (mapcar
+    (lambda (value) (cons 'sequence (split-string value)))
     (append
-     (mapcar
-      (lambda (value) (cons 'type (split-string value)))
-      (cdr (assoc "TYP_TODO" alist)))
-     (mapcar
-      (lambda (value) (cons 'sequence (split-string value)))
-      (append
-       (cdr (assoc "TODO" alist)) (cdr (assoc "SEQ_TODO" alist)))))))
+     (cdr (assoc "TODO" alist)) (cdr (assoc "SEQ_TODO" alist))))))
 
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword.
@@ -5817,6 +5831,406 @@ MCP Parameters:
              (org-delete-property key)
            (org-mcp--set-property key val)))))))
 
+;; In-buffer settings
+
+(defconst org-mcp--file-settings
+  '("TITLE" "TODO" "ARCHIVE" "CATEGORY" "FILETAGS" "STARTUP")
+  "The in-buffer settings org-mcp reads and writes, upcased.
+Each is a value about the file it stands in — its title, the
+workflow its headings are held to, where a subtree of it is
+archived, the category its entries carry in the agenda, the tags
+every heading in it inherits, and how it opens.  They are the
+settings a client driving a workflow has to be able to set and
+whose effect on what is already written org-mcp can account for.
+
+Everything else Org reads from a `#+' line is outside this tool,
+and two kinds are outside it on purpose.  A setting that reaches
+another file — `#+SETUPFILE:', `#+INCLUDE:' — would change what
+this file means by naming a file the call never named and the
+scope rules never saw.  And `#+PROPERTY:' sets properties
+file-wide: it belongs to the property surface, where a drawer
+line already has a guard spelling the three states it can be in,
+and one construct with two writers would have two vocabularies
+for one assertion.
+
+`#+CATEGORY:' is here although Org files its value under
+`org-keyword-properties' beside the `#+PROPERTY:' ones, because it
+names one thing rather than an arbitrary key: it is the file's
+category, which `org-get-category' answers with.")
+
+(defun org-mcp--setting-lines ()
+  "Return the lines the current buffer writes an in-buffer setting on.
+Each element is (KEY VALUE BEGIN): the upcased name of a setting
+`org-mcp--file-settings' holds, the text Org reads off the line,
+and where the line starts.  They come in document order, and a
+setting written on no line is absent from the list rather than
+present with nothing.
+
+`org-element' is asked rather than a regexp over the buffer
+because Org asks it too: `org-collect-keywords' checks every `#+'
+it finds with `org-element-at-point', so a `#+TODO:' inside an
+example block is a line of that block to both of them, and one
+written below the first heading is a setting to both.
+
+The value is the parser's, which is the line with the space around
+it gone.  Org reads the line that way, so that text is what a
+later call can assert and what a write can put back."
+  (let ((lines '()))
+    (org-element-map
+     (org-element-parse-buffer 'element) 'keyword
+     (lambda (keyword)
+       (let ((key (org-element-property :key keyword)))
+         (when (member key org-mcp--file-settings)
+           (push (list
+                  key
+                  (org-element-property :value keyword)
+                  (org-element-property :begin keyword))
+                 lines)))))
+    (nreverse lines)))
+
+(defun org-mcp--setting-lines-of (key lines)
+  "Return the entries of LINES that write setting KEY, in document order.
+LINES comes from `org-mcp--setting-lines'."
+  (cl-remove-if-not (lambda (line) (equal (car line) key)) lines))
+
+(defun org-mcp--setting-values (key lines)
+  "Return the values the LINES of setting KEY carry, in document order.
+LINES comes from `org-mcp--setting-lines'."
+  (mapcar #'cadr (org-mcp--setting-lines-of key lines)))
+
+(defun org-mcp--settings-insert-position (lines)
+  "Return where a settings line is written, given the LINES it joins.
+LINES is entries of `org-mcp--setting-lines': the lines of the
+setting being written when the file has any, and every settings
+line it writes otherwise, so that a line replacing others lands
+where they stood and a new one joins the settings already there.
+
+A file writing none takes the line at the top of its preamble,
+below the two things Org keeps above the settings: a leading
+comment line, which is where a file-local variables line is
+written, and the file\\='s own property drawer, which Org reads only
+above the settings, see `org-mcp--file-drawer-region-p'.  A file
+whose first line is a heading has no preamble, and the line goes
+above that heading, where `org-mcp--make-file-drawer' puts a
+drawer.
+
+Point does not move."
+  (save-excursion
+    (if lines
+        (progn
+          (goto-char (nth 2 (car lines)))
+          (line-beginning-position))
+      (goto-char (point-min))
+      (let ((element (org-element-at-point)))
+        (while (and (not (eobp))
+                    (memq
+                     (org-element-type element)
+                     '(comment property-drawer)))
+          (goto-char (org-element-property :end element))
+          (setq element (org-element-at-point))))
+      (point))))
+
+(defun org-mcp--setting-given (setting)
+  "Return SETTING, a call\\='s `setting' parameter, as the name it gives.
+The name is upcased, as Org upcases the key of a `#+' line it
+reads, so a call asking after `todo' asks after `#+TODO:'.  A name
+outside `org-mcp--file-settings' is refused with the names that are
+in it: the boundary is this tool\\='s subject, and a client that
+guessed at one outside it is told which are there rather than left
+to guess again.  They are named as this parameter takes them, so
+that the refusal hands back a value that can be sent — `#+TODO:' is
+how the line reads and `TODO' is what the call carries."
+  (let* ((text (org-mcp--text-param-given setting "setting"))
+         (key (upcase (string-trim text))))
+    (unless (member key org-mcp--file-settings)
+      (org-mcp--tool-validation-error
+       "No such setting: '%s' - this tool writes %s"
+       text (mapconcat #'identity org-mcp--file-settings ", ")))
+    key))
+
+(defun org-mcp--setting-set-given (value name)
+  "Return VALUE, the settings-lines parameter NAME of a call, as a list.
+One line arrives as a string and several as an array; `[]' is the
+empty set, which is the file writing the setting on no line, and a
+value like any other here.  Every other blank — null, false, \"\" —
+is the parameter left out and is refused as one, as it is in a tag
+set: nothing a client fills a parameter with absent-mindedly takes
+a settings line away.
+
+A member is the text Org reads off the line.  `org-element' drops
+the space around that text and stops at the end of the line, so a
+member carrying either would assert a line no file can hold and
+write one no read could give back."
+  (when (and (org-mcp--blank-param-p value) (not (equal value [])))
+    (org-mcp--missing-param-error name))
+  (let* ((value (org-mcp--array-param value name))
+         (lines
+          (cond
+           ((null value)
+            nil)
+           ((vectorp value)
+            (append value nil))
+           ((listp value)
+            value)
+           ((stringp value)
+            (list value))
+           (t
+            (org-mcp--tool-validation-error
+             "%s must be a string or an array of strings, not %s"
+             name (org-mcp--json-name value))))))
+    (dolist (line lines)
+      (unless (stringp line)
+        (org-mcp--tool-validation-error
+         "A settings line must be a string: %s"
+         (org-mcp--json-name line)))
+      (unless (equal line (string-trim line))
+        (org-mcp--tool-validation-error
+         "A settings line carries no space around its value: '%s'"
+         line))
+      (when (string-match-p "\n" line)
+        (org-mcp--tool-validation-error
+         "A setting is one line, and this value is two or more: '%s'"
+         line)))
+    lines))
+
+(defun org-mcp--settings-for-message (values)
+  "Return VALUES, the lines of one setting, as the text of a refusal.
+A setting written on no line reads as such rather than as nothing,
+so that a comparison of two sets names both sides."
+  (if values
+      (mapconcat (lambda (value) (format "'%s'" value)) values ", ")
+    "(no line)"))
+
+(defun org-mcp--setting-text (key value)
+  "Return the line setting KEY carrying VALUE is written as.
+A VALUE of no text is written with nothing after the colon, which
+is the line `org-element' reads back as no text: a trailing space
+would make a line no read returns."
+  (if (string-empty-p value)
+      (format "#+%s:\n" key)
+    (format "#+%s: %s\n" key value)))
+
+(defun org-mcp--todo-keywords-in-use ()
+  "Return each TODO keyword on a heading of this buffer, with its count.
+An alist, in the order the keywords first appear.  A keyword is
+what Org reads as one here and now: a word Org\\='s current sequences
+do not name is the first word of a heading\\='s title instead, and is
+no keyword to count."
+  (let ((counts '()))
+    (org-element-map
+     (org-element-parse-buffer 'headline) 'headline
+     (lambda (headline)
+       (when-let* ((keyword
+                    (org-element-property :todo-keyword headline)))
+         (let ((entry (assoc keyword counts)))
+           (if entry
+               (setcdr entry (1+ (cdr entry)))
+             (push (cons keyword 1) counts))))))
+    (nreverse counts)))
+
+(defun org-mcp--todo-keywords-once (own after)
+  "Return the TODO keywords Org reaches once this file\\='s OWN lines say AFTER.
+OWN is the values the file\\='s own `#+TODO:' lines carry and AFTER
+the values a write is about to give them.
+
+The keywords are read off the sequences
+`org-mcp--todo-sequences-of' assembles, which is the assembly
+`org-set-regexps-and-options' performs, so the answer is the one
+Org will reach.  `#+SEQ_TODO:' and `#+TYP_TODO:' are read beside
+`#+TODO:' because Org reads them there, and they are taken as
+`org-collect-keywords' returns them, so a `#+SETUPFILE:' is
+followed: the file\\='s own lines are removed from that answer and
+AFTER put in their place, which leaves whatever a setup file
+contributed standing.
+
+A file left naming no sequence at all falls back to the global
+`org-todo-keywords', as Org falls back to it."
+  (let* ((alist
+          (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO")))
+         (kept (copy-sequence (cdr (assoc "TODO" alist)))))
+    (dolist (value own)
+      (setq kept (delete value kept)))
+    (let ((sequences
+           (or (org-mcp--todo-sequences-of
+                (list
+                 (cons "TYP_TODO" (cdr (assoc "TYP_TODO" alist)))
+                 (cons "TODO" (append kept after))
+                 (cons "SEQ_TODO" (cdr (assoc "SEQ_TODO" alist)))))
+               org-todo-keywords)))
+      (org-remove-keyword-keys
+       (cl-remove
+        "|"
+        (apply #'append (mapcar #'cdr sequences))
+        :test #'string=)))))
+
+(defun org-mcp--assert-no-orphaned-keywords (own after)
+  "Refuse a `#+TODO:' write that would orphan a keyword in use.
+OWN is the values the file\\='s own `#+TODO:' lines carry and AFTER
+the values the call writes; see `org-mcp--todo-keywords-once'.
+
+A keyword the sequences no longer name does not make the headings
+carrying it invalid: Org reads it as the first word of their
+titles, so `WAIT ship it' becomes a heading with no keyword titled
+`WAIT ship it'.  The headings are retitled by a write that named
+none of them, and nothing in the file records what they were.  So
+the write is refused while any heading in the file still carries
+such a keyword, and the refusal counts them, because the count is
+what says how much work the remedy is.
+
+The refusal is unmarked, the validation class: the client\\='s belief
+about the file is not stale — a read of the file shows those
+headings — and Org vetoed nothing, since Org would go through with
+it.  What has to change is the call.  There are two ways to change
+it, and both stay inside this tool: write a set of sequences that
+still names the keyword, or write one naming the old keywords and
+the new ones together, move the headings with `org-node-set-todo'
+while both are valid, and write the set again without the old one."
+  (let* ((reached (org-mcp--todo-keywords-once own after))
+         (orphans
+          (cl-remove-if
+           (lambda (entry)
+             (member (car entry) reached))
+           (org-mcp--todo-keywords-in-use))))
+    (when orphans
+      (org-mcp--tool-validation-error
+       "#+TODO: would stop naming a keyword headings in this file \
+carry: %s.  Org reads such a keyword as the first word of the \
+heading's title, so the headings would be retitled rather than \
+refused.  Write sequences that still name it, or add the new \
+sequences beside the old ones, move those headings with \
+org-node-set-todo, and write the sequences again without it"
+       (mapconcat (lambda (entry)
+                    (format "%s on %d heading%s"
+                            (car entry) (cdr entry)
+                            (if (= (cdr entry) 1)
+                                ""
+                              "s")))
+                  orphans
+                  ", ")))))
+
+(defun org-mcp--reread-settings (key values)
+  "Make Org read this buffer\\='s settings again, KEY having been set to VALUES.
+The buffer stays open after the write, and what Org acts on there is
+what it derived from the settings when it read the file: the keywords
+a write to a heading is held to, the tags the file gives every
+heading, where a subtree of it is archived.
+`org-set-regexps-and-options' is the call that derives them again,
+and it is Org\\='s own, so the buffer ends up where a fresh visit would
+put it.
+
+Two of them need one thing more.  `org-archive-location' and
+`org-category' are set from a line Org finds and left alone when it
+finds none, so a call that takes the last `#+ARCHIVE:' or
+`#+CATEGORY:' line away would leave the value that line set standing
+in the buffer.  Killing the local first lets the global answer for a
+file that now names nothing, which is again what a fresh visit
+gives."
+  (when (null values)
+    (pcase key
+      ("ARCHIVE" (kill-local-variable 'org-archive-location))
+      ("CATEGORY" (kill-local-variable 'org-category))))
+  (org-set-regexps-and-options))
+
+(defun org-mcp--tool-file-settings (link &optional files)
+  "Return the in-buffer settings the file LINK names writes.
+LINK names the file, or a heading in it: these settings are
+file-wide, so the heading decides nothing about the answer and is
+never looked up.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+MCP Parameters:
+  link - Link to the file to answer for, or to a heading in it
+         (string, required)
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let* ((target (org-mcp--link-target link "link" files))
+         (file (plist-get target :file)))
+    (org-mcp--with-org-file file
+      (let ((lines (org-mcp--setting-lines)))
+        (json-encode
+         `((link . ,(org-mcp--file-link))
+           (settings
+            .
+            ,(mapcar
+              (lambda (key)
+                (cons
+                 (intern key)
+                 (vconcat (org-mcp--setting-values key lines))))
+              org-mcp--file-settings))))))))
+
+(defun org-mcp--tool-file-set-setting
+    (link setting before after &optional files)
+  "Write the in-buffer setting SETTING of the file LINK names.
+LINK names the file, or a heading in it, as it does for a read of
+these settings.
+SETTING names one of `org-mcp--file-settings'.
+BEFORE is every line the file writes that setting on now, in the
+order it writes them, and `[]' asserts that it writes none.  The
+assertion covers the whole set because the call takes away every
+line it does not list; it is ordered because the order of these
+lines is read — Org joins two `#+TITLE:' lines in the order they
+stand, and the first `#+TODO:' sequence is the one a heading with
+no keyword enters first.
+AFTER is the lines to write, `[]' to leave the file writing none.
+FILES, when non-nil, names the files an `id:' LINK is looked up in;
+see `org-mcp--link-target'.
+
+The response carries BEFORE back, because once the call returns
+nothing in the file records what the lines it replaced held.
+
+MCP Parameters:
+  link - Link to the file, or to a heading in it (string, required)
+  setting - The setting to write, such as TITLE or TODO
+            (string, required)
+  before - The lines the file writes that setting on now (string or
+           array, required); the array a read of these settings
+           returns for it.  Send [] to assert that it writes none
+  after - The lines to write (string or array, required); [] leaves
+          the file writing none
+  files - Files and directories to look up an id: link in, in order,
+          instead of Emacs's ID index (array of strings, optional);
+          refused with any other link"
+  (let* ((key (org-mcp--setting-given setting))
+         (asserted (org-mcp--setting-set-given before "before"))
+         (wanted (org-mcp--setting-set-given after "after"))
+         (target (org-mcp--link-target link "link" files))
+         (file-path (plist-get target :file)))
+    (dolist (value asserted)
+      (org-mcp--assert-field-value value (concat "#+" key ":")))
+    (org-mcp--modify-and-save file-path "set file setting"
+                              (list
+                               (cons 'setting key)
+                               (cons 'before (vconcat asserted))
+                               (cons 'after (vconcat wanted))
+                               (cons 'link (org-mcp--file-link)))
+      (let* ((lines (org-mcp--setting-lines))
+             (own-lines (org-mcp--setting-lines-of key lines))
+             (own (mapcar #'cadr own-lines))
+             (starts (mapcar (lambda (line) (nth 2 line)) own-lines)))
+        (unless (equal asserted own)
+          (org-mcp--tool-conflict-error
+           "#+%s: mismatch: expected %s, found %s"
+           key
+           (org-mcp--settings-for-message asserted)
+           (org-mcp--settings-for-message own)))
+        (when (string= key "TODO")
+          (org-mcp--assert-no-orphaned-keywords own wanted))
+        (let ((position
+               (org-mcp--settings-insert-position
+                (or own-lines lines))))
+          ;; Backwards, so that a line still to be deleted keeps the
+          ;; position read off the buffer before any deletion.
+          (dolist (start (reverse starts))
+            (goto-char start)
+            (delete-region
+             (line-beginning-position) (line-beginning-position 2)))
+          (goto-char position)
+          (dolist (value wanted)
+            (insert (org-mcp--setting-text key value))))
+        (org-mcp--reread-settings key wanted)))))
+
 (defun org-mcp--write-planning-timestamp (writer value)
   "Write VALUE on the entry at point through WRITER.
 WRITER is `org-schedule' or `org-deadline', which carry a repeater
@@ -7966,6 +8380,60 @@ Use cases:
     work correctly?"
     :read-only t)
    (list
+    #'org-mcp--tool-file-settings
+    :id "org-file-settings"
+    :description
+    (concat
+     "Read the in-buffer settings one Org file writes: the #+ lines at
+the top of it that say what the file is and how Org treats it.  This
+is what the file itself writes, line for line, which is what
+org-file-set-setting asserts and replaces.  It is not what Org ends
+up with: for the TODO keywords a write to a heading is held to,
+including the ones a #+SETUPFILE: or the global configuration brings
+in, ask org-config-todo.
+
+Parameters:
+  link - Link to the file to answer for, or to a heading in it
+         (string, required)
+"
+     org-mcp--node-link-formats
+     "         A link naming a heading answers for that heading's
+         file: these settings are file-wide.
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Returns JSON object:
+  link - Link to the file (string): id:{id} when its own property
+         drawer holds one, else file:{path}
+  settings - JSON object with one entry per setting this tool
+         covers, each an array of the lines the file writes it on,
+         in the order it writes them.  [] is a setting the file
+         does not write, which is what tells it from one written to
+         a value that looks like a default
+
+Example response:
+  {
+    \"link\": \"file:/home/user/org/gtd.org\",
+    \"settings\": {
+      \"TITLE\": [\"Getting things done\"],
+      \"TODO\": [\"TODO(t) NEXT(n) | DONE(d)\", \"WAIT(w) | KILL(k)\"],
+      \"ARCHIVE\": [],
+      \"CATEGORY\": [\"gtd\"],
+      \"FILETAGS\": [\":gtd:\"],
+      \"STARTUP\": []
+    }
+  }
+
+A setting may be written on more than one line, and Org reads all of
+them: two #+TODO: lines are two sequences, and two #+FILETAGS: lines
+are both sets of tags.  #+ARCHIVE: and #+CATEGORY: are the exception
+- Org reads the first line and ignores the rest - and this tool
+reports every line either way, because the file carries them.
+
+Use this before org-file-set-setting: its before is the array this
+answers with.")
+    :read-only t)
+   (list
     #'org-mcp--tool-node-set-todo
     :id "org-node-set-todo"
     :description
@@ -8338,6 +8806,78 @@ Returns JSON object:
          has an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}; for a file, id:{id}
          of its own drawer when it has one, else file:{path}")
+    :read-only nil)
+   (list
+    #'org-mcp--tool-file-set-setting
+    :id "org-file-set-setting"
+    :description
+    (concat
+     "Write one in-buffer setting of an Org file: the #+ lines that say
+what the file is and how Org treats it.  One call writes one
+setting, and it writes every line of it: before is all the lines the
+file has for it and after is all the lines it is to have.
+
+Settings this tool writes: #+TITLE:, #+TODO:, #+ARCHIVE:,
+#+CATEGORY:, #+FILETAGS:, #+STARTUP:.  Any other #+ line is refused
+by name.  #+PROPERTY: in particular is not here: it sets properties
+file-wide and belongs with org-node-set-properties, and a file's own
+property drawer - a different thing with the same name - is written
+there too.
+
+Parameters:
+  link - Link to the file, or to a heading in it (string, required)
+"
+     org-mcp--node-link-formats
+     "         A link naming a heading writes its file: these
+         settings are file-wide.
+  setting - Which setting to write (string, required): TITLE, TODO,
+          ARCHIVE, CATEGORY, FILETAGS or STARTUP.  Case makes no
+          difference
+  before - Every line the file writes that setting on now (string
+          or array, required), in the order it writes them - the
+          array org-file-settings returns for it.  Read it from
+          there rather than assuming it.  [] asserts that the file
+          writes the setting on no line.  Any other set of lines is
+          a conflict and nothing is written
+  after - The lines to write (string or array, required).  [] takes
+          every line of the setting away.  A line is one line of
+          text with no space around it, as a read returns it
+  files - Files and directories to look up an id: link in (array of
+          strings, optional); see org-node-read
+
+Returns JSON object:
+  success - Always true on success (boolean)
+  saved - False when the change is only in the user's open Emacs
+          buffer, not on disk; tell the user it needs saving (boolean)
+  setting - The setting written (string), upcased
+  before - The lines asserted, sent back because nothing in the file
+          records them once the call returns (array of strings)
+  after - The lines the file writes now (array of strings)
+  link - Link to the file (string): id:{id} when its own property
+         drawer holds one, else file:{path}
+
+Rewriting #+TODO: reaches past the line it changes.  A keyword the
+new sequences do not name stops being a keyword, and Org then reads
+it as the first word of the title of every heading carrying it - so
+the call is refused while any heading still does, naming each
+keyword and how many headings carry it.  To retire a keyword: write
+the new sequences beside the old ones, move those headings with
+org-node-set-todo, then write the sequences again without the old
+keyword.
+
+#+ARCHIVE: reaches past its line too, and is not refused: it changes
+where org-node-archive sends a subtree from then on, and leaves
+everything already written meaning what it meant.  #+FILETAGS: is
+the same shape - every heading in the file inherits those tags, and
+a heading's own tags are untouched.
+
+Refusals:
+  A before that does not match the file is marked conflict: the
+  file is not as the client believed, so read it again with
+  org-file-settings and plan against what it holds now.  A setting
+  outside the six, a line carrying a newline or space around its
+  value, and a #+TODO: write that would orphan a keyword are
+  unmarked: what has to change is the call.")
     :read-only nil)
    (list
     #'org-mcp--tool-node-set-scheduled
