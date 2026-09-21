@@ -1438,55 +1438,6 @@ A field gains an assertion by appearing here, which is why the
 plist and not a per-field reader is what a field record names."
   (or (plist-get (org-mcp--heading-metadata-at-point) field) ""))
 
-(defconst org-mcp--planning-fields
-  '((:scheduled . scheduled) (:deadline . deadline))
-  "The planning fields a write reports when it moves one under a client.
-Each entry pairs an `org-mcp--asserted-value' field with the name the
-response carries it under.
-
-These two are the list because each has a setter whose required
-`before' refuses a call the moment the field has moved.  CLOSED moves
-on a repeat as well, and no tool writes it, so no guard can fire on a
-stale belief about it.")
-
-(defun org-mcp--planning-at-point ()
-  "Return the planning states of the heading at point.
-An alist of `org-mcp--planning-fields' keys, each holding what the
-field holds as a `before' asserts it.  Reading through
-`org-mcp--asserted-value' is what makes a value reported here one the
-client can send straight back."
-  (mapcar
-   (lambda (field)
-     (cons (car field) (org-mcp--asserted-value (car field))))
-   org-mcp--planning-fields))
-
-(defun org-mcp--planning-moves (before after)
-  "Return response fields for each planning field BEFORE and AFTER differ on.
-BEFORE and AFTER are `org-mcp--planning-at-point' readings taken on
-either side of a write.  A field reading the same in both is left
-out: nothing moved under the client, so what it last read still
-holds.  A field that moved is named, carrying the state it was in and
-the state it is in now, the way every write answers about the field
-it writes, so the response\\='s value is the next call\\='s `before'.
-
-Naming only what moved is what makes the report a statement rather
-than something to infer.  A write asks Org for a keyword and Org may
-decide a date as well -- a repeating entry moved to a done keyword
-comes back in its not-done keyword with its dates carried on, and Org
-takes away a SCHEDULED that carries no repeater while it is there.
-Once the call returns nothing in the file records where those dates
-were, which is why the state a field was in is reported beside the
-state it is in."
-  (delq
-   nil
-   (mapcar
-    (lambda (field)
-      (let ((was (alist-get (car field) before))
-            (now (alist-get (car field) after)))
-        (unless (equal was now)
-          `(,(cdr field) (before . ,was) (after . ,now)))))
-    org-mcp--planning-fields)))
-
 (defun org-mcp--subtree-bounds ()
   "Return the subtree of the heading at point as (BEGIN . END).
 BEGIN is the heading's first star and END is where the next heading
@@ -4458,7 +4409,7 @@ lists those roots as absolute paths."
          `((override_roots . ,(vconcat roots))))))))
 
 (defun org-mcp--tool-node-set-todo
-    (link before after &optional note files)
+    (link before after &optional before_planning note files)
   "Move the TODO state of the headline LINK names, or take it off.
 Returns the link to the updated headline, and as the response's
 `after' the state Org left it in, which is the state asked for
@@ -4473,7 +4424,17 @@ BEFORE is the TODO state the headline is asserted to hold, \"\" for
 a headline that has none.  A headline in any other state is a
 conflict and nothing is written.
 AFTER is the new TODO state to set, or null to take the keyword off
-so that the headline stops being a task.
+so that the headline stops being a task.  It names the keyword only:
+the planning fields are Org's to decide and no parameter writes them
+here.
+BEFORE_PLANNING is what the call asserts the headline's planning
+fields hold, naming a field it says holds a timestamp and leaving out
+one it says holds nothing; see `org-mcp--planning-map-given'.  A
+field holding anything else is a conflict and nothing is written.
+It is optional, and a heading whose state change would move a
+planning value is refused without it, which is the whole of what
+makes an optional guard a guard here; see
+`org-mcp--planning-assertion-required-p'.
 NOTE, when provided, is stored in LOGBOOK as part of the state change entry.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
@@ -4492,6 +4453,22 @@ MCP Parameters:
           null takes the keyword off, so the heading stops being a
           task; \"\" names no keyword and is refused, and false is
           the parameter left out
+          It sets the keyword only: a planning date this call moves
+          is Org's doing, and the response reports it
+  before_planning - What the headline's planning fields hold now
+           (object, optional):
+             {\"scheduled\": \"<2026-06-20 Sat +1w>\"}
+           Each value is the raw Org timestamp a read returns,
+           brackets, repeater and delay included.  A field holding
+           nothing is left out of the map, which asserts that it
+           holds nothing; \"\" and null are refused, so one state
+           keeps one spelling.  A field holding something else is a
+           conflict and nothing is written
+           Required for a heading whose state change would move a
+           planning value, which is a repeating heading carrying
+           one, and refused there when it is missing.  The refusal
+           names what the heading holds, so the call can be sent
+           again without reading it first
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as the prose of the state
          change entry
@@ -4509,6 +4486,11 @@ MCP Parameters:
   ;; in, so a note this call cannot write is refused while there is
   ;; still nothing to take back.
   (setq note (org-mcp--optional-text-given note "note"))
+  ;; Read before the link is resolved, with the note, so a malformed
+  ;; assertion is refused while there is still nothing to take back.
+  (setq before_planning
+        (org-mcp--planning-map-given
+         before_planning "before_planning"))
 
   (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
@@ -4543,6 +4525,13 @@ MCP Parameters:
              "(no state)"
            actual-prev)
          "State"))
+
+      ;; Both assertions are checked before either is acted on: the
+      ;; keyword first, because it is the field the call is addressed
+      ;; to and the likelier of the two to have moved.  The planning
+      ;; one also decides whether the call had to carry an assertion
+      ;; at all, which needs the heading in front of it.
+      (org-mcp--assert-planning before_planning planning-prev)
 
       ;; Update the state, refusing a change Org vetoes and reading
       ;; back what Org made of the one it took.  The note rides the
@@ -5417,6 +5406,225 @@ returns, with no second accessor to drift from it.")
      (org-mcp--write-planning-timestamp #'org-deadline value)))
   "The DEADLINE field, for `org-mcp--write-field'.
 Shaped like `org-mcp--field-scheduled'.")
+
+(defconst org-mcp--field-closed (list :label "CLOSED" :key :closed)
+  "The CLOSED field, for the planning report.
+Shaped like `org-mcp--field-scheduled' but for its `:write' and
+`:remove': no tool writes CLOSED.  Org writes it when a heading
+reaches a done keyword and clears it when the heading leaves one, so
+what it holds is Org\='s record of the transition rather than anything
+a client chose.  Having no writer is what keeps it out of
+`org-mcp--write-field' and out of every assertion.")
+
+(defconst org-mcp--planning-fields
+  (list
+   (cons 'scheduled org-mcp--field-scheduled)
+   (cons 'deadline org-mcp--field-deadline)
+   (cons 'closed org-mcp--field-closed))
+  "Org\='s planning fields, under the names the wire spells them by.
+Each entry pairs that name with the field record holding the metadata
+key it is read through and the label a refusal names it by, so the
+parameter, the assertion and the response reach one field through one
+record.
+
+The response reports all three; `before_planning' asserts the two a
+client could have chosen, which `org-mcp--planning-asserted-p' picks
+out.  You assert what you could have destroyed, and you are told
+everything that moved.")
+
+(defun org-mcp--planning-asserted-p (record)
+  "Return non-nil when planning field RECORD is one a call asserts.
+A field this server writes is a field whose value a client chose and
+can hold a belief about, so `:write' is what decides it.  CLOSED has
+no writer: asking a client to assert it would ask it to vouch for a
+value Org picked and it never saw a reason for."
+  (plist-get record :write))
+
+(defun org-mcp--planning-asserted ()
+  "Return the `org-mcp--planning-fields' entries a call asserts."
+  (seq-filter
+   (lambda (entry)
+     (org-mcp--planning-asserted-p (cdr entry)))
+   org-mcp--planning-fields))
+
+(defun org-mcp--planning-at-point ()
+  "Return the planning states of the heading at point.
+An alist of `org-mcp--planning-fields' names, each holding what that
+field holds as a `before' asserts it, \"\" for a field holding
+nothing.  Reading through `org-mcp--asserted-value' is what makes a
+value reported here one the client can send straight back, and it is
+where the dates a repeat moved are read from: Org decides them, and
+neither this server nor a client works them out for itself."
+  (mapcar
+   (lambda (entry)
+     (cons
+      (car entry)
+      (org-mcp--asserted-value (plist-get (cdr entry) :key))))
+   org-mcp--planning-fields))
+
+(defun org-mcp--planning-field-names ()
+  "Return the planning field names a call may assert, for a refusal."
+  (mapconcat (lambda (entry) (format "'%s'" (car entry)))
+             (org-mcp--planning-asserted)
+             " and "))
+
+(defun org-mcp--planning-holdings (found)
+  "Return what FOUND says the asserted planning fields hold, as a clause.
+FOUND is an `org-mcp--planning-at-point' reading.  The clause names
+each field and its value, so a refusal for a missing assertion hands
+back what the next call has to assert and costs no second read."
+  (mapconcat (lambda (entry)
+               (let ((value (alist-get (car entry) found))
+                     (label (plist-get (cdr entry) :label)))
+                 (if (org-string-nw-p value)
+                     (format "%s '%s'" label value)
+                   (format "no %s" label))))
+             (org-mcp--planning-asserted)
+             " and "))
+
+(defun org-mcp--planning-value-given (value label)
+  "Return VALUE, the state a planning assertion says LABEL was in.
+A string with a timestamp in it is that state.  \"\" is refused: a
+map says a field holds nothing by leaving its name out, so the empty
+string would be a second spelling of an assertion that already has
+one.  Null is refused for the same reason.  A digest is refused by
+`org-mcp--assert-field-value', as it is wherever a field is asserted
+by its value."
+  (unless (stringp value)
+    (org-mcp--tool-validation-error
+     "%s is asserted with the timestamp it holds, and a field holding none is left out of the map, not %s"
+     label (org-mcp--json-name value)))
+  (when (string-empty-p value)
+    (org-mcp--tool-validation-error
+     "%s holding nothing is asserted by leaving it out of before_planning, not by \"\""
+     label))
+  (org-mcp--assert-field-value value label)
+  value)
+
+(defun org-mcp--planning-map-given (map what)
+  "Return MAP, the optional planning assertion WHAT, as pairs.
+The result is one (NAME . VALUE) pair per asserted field, in
+`org-mcp--planning-fields' order, VALUE the timestamp the call says
+that field held and \"\" where the map left the name out.  A blank
+MAP, see `org-mcp--blank-param-p', is nil: the call asserts nothing.
+
+*Two absences, two meanings, and the difference is the design.*  A
+name missing from a map the call built is a positive act, so it
+asserts that the field holds nothing, and a heading that does hold
+something there refuses the call.  That is what spares a client
+spelling out an empty DEADLINE on every heading that never had one.
+The whole parameter missing is not a positive act -- it reads the same
+whether the client meant it or forgot it -- so it asserts nothing at
+all.
+
+*An optional parameter is not an off guard here*, which the rule that a guard is required is
+otherwise right to refuse.  `org-mcp--planning-assertion-required-p'
+refuses the call in exactly the case where a planning value would
+move, so the guard cannot be off where it would have caught
+something.  A reader who does not find this sentence will make the
+parameter required and tax every ordinary transition for a guard that
+can only fire on a repeating heading.
+
+A name this call does not assert is refused rather than dropped,
+CLOSED among them: a client that asked for CLOSED to be guarded has
+misread the surface, and a quietly ignored key would leave it
+believing otherwise."
+  (unless (org-mcp--blank-param-p map)
+    (unless (and (listp map) (consp (car-safe map)))
+      (org-mcp--tool-validation-error
+       "%s must be an object naming %s, not %s"
+       what (org-mcp--planning-field-names) (org-mcp--json-name map)))
+    (dolist (pair map)
+      (let ((name (intern (format "%s" (car pair)))))
+        (unless (assq name (org-mcp--planning-asserted))
+          (org-mcp--tool-validation-error
+           (if (assq name org-mcp--planning-fields)
+               "%s does not assert '%s': the response reports it, and no call writes it.  It takes %s"
+             "%s names no planning field: '%s'.  It takes %s")
+           what name (org-mcp--planning-field-names)))))
+    (mapcar
+     (lambda (entry)
+       (let ((pair (assq (car entry) map)))
+         (cons
+          (car entry)
+          (if pair
+              (org-mcp--planning-value-given
+               (cdr pair) (plist-get (cdr entry) :label))
+            ""))))
+     (org-mcp--planning-asserted))))
+
+(defun org-mcp--planning-assertion-required-p (found)
+  "Return non-nil when the heading at point needs a planning assertion.
+FOUND is an `org-mcp--planning-at-point' reading.  A state change
+moves a planning value only when Org repeats the entry, and only when
+there is a value there to move, so those two together are what makes
+the assertion necessary -- and a call without one is refused exactly
+there.
+
+Whether the entry repeats is Org\='s question and `org-get-repeat'
+answers it, over the whole entry rather than over the planning line.
+That is wider than it looks and has to be: a repeater on a plain
+timestamp in the body makes Org take away a SCHEDULED that carries no
+repeater of its own, so a heading whose planning line holds no
+repeater at all can still lose its SCHEDULED to one.  A repeater
+Org would decline to act on, `+0d', still counts as one here; the
+assertion it asks for is a value the client has already read."
+  (and (org-get-repeat)
+       (seq-some
+        (lambda (entry)
+          (org-string-nw-p (alist-get (car entry) found)))
+        (org-mcp--planning-asserted))))
+
+(defun org-mcp--assert-planning (asserted found)
+  "Refuse the call unless FOUND is what ASSERTED says the fields hold.
+ASSERTED comes from `org-mcp--planning-map-given' and is nil when the
+call sent no assertion; FOUND comes from `org-mcp--planning-at-point'.
+A call that asserted nothing is refused when the heading is one whose
+state change would move a planning value, and the refusal names what
+the heading holds so the next call can assert it without reading
+again.  Otherwise the first field the two disagree on is a conflict,
+named by its record\='s label."
+  (if (null asserted)
+      (when (org-mcp--planning-assertion-required-p found)
+        (org-mcp--tool-validation-error
+         "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds %s"
+         (org-mcp--planning-holdings found)))
+    (pcase-dolist (`(,name . ,value) asserted)
+      (let ((holds (alist-get name found)))
+        (unless (equal value holds)
+          (org-mcp--state-mismatch-error
+           value holds
+           (plist-get
+            (alist-get name org-mcp--planning-fields)
+            :label)))))))
+
+(defun org-mcp--planning-moves (before after)
+  "Return response fields for each planning field BEFORE and AFTER differ on.
+BEFORE and AFTER are `org-mcp--planning-at-point' readings taken on
+either side of a write.  A field reading the same in both is left
+out: nothing moved under the client, so what it last read still
+holds.  A field that moved is named, carrying the state it was in and
+the state it is in now, the way every write answers about the field
+it writes, so the response\='s value is the next call's `before'.
+
+Naming only what moved is what makes the report a statement rather
+than something to infer.  A write asks Org for a keyword and Org may
+decide a date as well -- a repeating entry moved to a done keyword
+comes back in its not-done keyword with its dates carried on, Org
+takes away a SCHEDULED that carries no repeater while it is there,
+and CLOSED comes and goes with the done keyword.  All three are
+reported, although only two of them are asserted: what a client may
+have destroyed and what it is told about are different questions."
+  (delq
+   nil
+   (mapcar
+    (lambda (entry)
+      (let* ((name (car entry))
+             (was (alist-get name before))
+             (now (alist-get name after)))
+        (unless (equal was now)
+          `(,name (before . ,was) (after . ,now)))))
+    org-mcp--planning-fields)))
 
 (defconst org-mcp--field-priority
   (list
@@ -7237,21 +7445,46 @@ Parameters:
           null takes the keyword off, so the headline stops being
           a task; \"\" is no keyword and is refused as one, and
           false is the parameter left out
+          It sets the keyword only.  A planning date that moves is
+          Org's doing and comes back in the response
+  before_planning - The headline's planning fields as they are now
+           (object, optional)
+             {\"scheduled\": \"<2026-06-20 Sat +1w>\"}
+           Each value is the raw Org timestamp a read returns,
+           brackets, repeater and delay included
+           Name a field the headline has one for; leave out a field
+           it has none for, which asserts that it has none.  \"\"
+           and null are refused, so one state keeps one spelling
+           A field holding something else is refused as a conflict
+           and nothing is written; read the headline again and
+           re-plan
+           Required for a heading whose state change would move a
+           planning value -- a repeating heading that carries one --
+           and refused there when it is missing.  That refusal names
+           what the heading holds, so you can send the call again
+           without reading it first
+           CLOSED is not asserted here: Org writes and clears it on
+           a done transition, so it is reported and never vouched
+           for
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
-Example - starting a task:
+Example - starting a task that carries no planning dates:
   {\"link\": \"id:abc-123\", \"before\": \"TODO\",
    \"after\": \"IN-PROGRESS\"}
 
-Example - giving a headline its first TODO keyword:
-  {\"link\": \"id:abc-123\", \"before\": \"\", \"after\": \"TODO\"}
+Example - finishing a repeating task, asserting the date it will
+move.  The heading has no DEADLINE, so the map leaves it out:
+  {\"link\": \"id:abc-123\", \"before\": \"TODO\",
+   \"before_planning\": {\"scheduled\": \"<2026-06-20 Sat +1w>\"},
+   \"after\": \"DONE\"}
 
 Example - taking the keyword off, so it stops being a task:
-  {\"link\": \"id:abc-123\", \"before\": \"TODO\", \"after\": null}
+  {\"link\": \"id:abc-123\", \"before\": \"TODO\",
+   \"after\": null}
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -7265,6 +7498,19 @@ Returns JSON object:
           before and after are states the field was in and is in,
           not values to write: send either back as the next call's
           before, never as its after
+  scheduled, deadline, closed - Present only when the call moved
+          that field, which is what a repeat does (object): before is
+          the state it was in and after the state it is in now, the
+          raw Org timestamp to send as the next call's before, or
+          \"\" when the field ends up holding nothing
+          These are read back from Org after it has decided them.
+          Do not work a new date out from the old one and the
+          repeater: `.+' counts from today and `++' steps on until
+          it is past today, so the arithmetic is wrong for two of
+          the three repeater forms
+          CLOSED is reported like the other two and asserted like
+          neither: Org writes it on a done transition and clears it
+          on a repeat
   link - Link to the updated headline (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

@@ -1251,17 +1251,21 @@ alist sent as the `after' parameter and ASSERTED the one sent as
 ;; Helper functions for testing org-node-set-todo MCP tool
 
 (defun org-mcp-test--call-update-todo-state
-    (link new-state current-state &optional note files)
+    (link new-state current-state &optional note files planning)
   "Call org-node-set-todo tool via JSON-RPC and return the result.
 LINK is the link to the headline, NEW-STATE is the new TODO state to set.
 CURRENT-STATE is the TODO state the headline is asserted to hold,
 \"\" for a headline that has none.
 NOTE, when provided, is a note to attach to the state transition.
-FILES, when provided, is sent as the `files' parameter."
+FILES, when provided, is sent as the `files' parameter.
+PLANNING, when provided, is sent as `before_planning'.  Most fixtures
+carry no repeater, so most calls send none and assert nothing about
+the planning fields."
   (let* ((params
           `((link . ,link)
             (after . ,new-state)
             (before . ,current-state)
+            ,@(when planning `((before_planning . ,planning)))
             ,@(when note `((note . ,note)))
             ,@(when files `((files . ,files)))))
          (result-text
@@ -3321,7 +3325,17 @@ off, whatever the handler then does with it."
         (should (member "link" required))
         (should (member "before" required))
         (should (member "after" required))
-        (should-not (member "files" required))))))
+        (should-not (member "files" required))))
+    ;; `before_planning' is the exception the rule above survives.
+    ;; It is published optional because only a repeating heading can
+    ;; lose a planning date, and required by the server in exactly
+    ;; that case, so the guard is off nowhere it would have caught
+    ;; anything.  Publishing it required would tax every ordinary
+    ;; transition for a guard that cannot fire on one.
+    (should-not
+     (member "before_planning"
+             (org-mcp-test--registered-tool-required
+              "org-node-set-todo")))))
 
 (ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
@@ -4417,6 +4431,19 @@ reported means the field is as the client last read it."
   (when-let* ((move (alist-get field result)))
     (cons (alist-get 'before move) (alist-get 'after move))))
 
+(defun org-mcp-test--finish-repeating (link &rest planning)
+  "Ask DONE of the repeating headline LINK, asserting the dates it holds.
+PLANNING is the `before_planning' map as name-and-timestamp pairs: a
+field the headline carries is named, and one it does not is left out,
+which is how the map asserts that it holds nothing.  A repeating
+headline is the case the assertion is required in, so its tests name
+what it holds."
+  (org-mcp-test--call-update-todo-state
+   link "DONE" "TODO" nil nil
+   (mapcar
+    (lambda (pair) (cons (car pair) (cadr pair)))
+    (seq-partition planning 2))))
+
 (defun org-mcp-test--repeat-today-plus (days)
   "Return the Org date text for DAYS from today.
 Org writes a date as `org-timestamp-formats' does, so the day name is
@@ -4435,8 +4462,8 @@ the SCHEDULED it carried on with it."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO")))
+              (org-mcp-test--finish-repeating
+               link 'scheduled "<2026-01-01 Thu +1w>")))
         ;; Response fields
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
@@ -4464,8 +4491,8 @@ the state Org left the entry in, and the SCHEDULED that moved with it."
           (org-todo-keywords '((sequence "TODO" "NEXT" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO")))
+              (org-mcp-test--finish-repeating
+               link 'scheduled "<2026-01-01 Thu +1w>")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "NEXT"))
@@ -4493,8 +4520,8 @@ response names."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link 'scheduled "<2026-01-01 Thu ++1m>"))
              (move (org-mcp-test--planning-move result 'scheduled)))
         (should (equal (alist-get 'after result) "TODO"))
         (should (equal (car move) "<2026-01-01 Thu ++1m>"))
@@ -4519,8 +4546,8 @@ part of the call named."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link 'scheduled "<2026-01-01 Thu .+2d>"))
              (move (org-mcp-test--planning-move result 'scheduled)))
         (should (equal (alist-get 'after result) "TODO"))
         (should (equal (car move) "<2026-01-01 Thu .+2d>"))
@@ -4542,8 +4569,8 @@ the call left alone is a field the client's belief still covers."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link 'deadline "<2026-01-01 Thu +1w>"))
              (move (org-mcp-test--planning-move result 'deadline)))
         (should (equal (alist-get 'after result) "TODO"))
         (should (equal (car move) "<2026-01-01 Thu +1w>"))
@@ -4563,8 +4590,10 @@ other and both have to be named."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link
+               'scheduled "<2026-01-01 Thu +1w>"
+               'deadline "<2026-01-08 Thu +2w>"))
              (scheduled (org-mcp-test--planning-move result 'scheduled))
              (deadline (org-mcp-test--planning-move result 'deadline)))
         (should (equal (alist-get 'after result) "TODO"))
@@ -4590,8 +4619,10 @@ ever there, so the response carries it back under `before', and its
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link
+               'scheduled "<2026-01-01 Thu>"
+               'deadline "<2026-01-08 Thu +1w>"))
              (scheduled (org-mcp-test--planning-move result 'scheduled))
              (deadline (org-mcp-test--planning-move result 'deadline)))
         (should (equal (alist-get 'after result) "TODO"))
@@ -4616,8 +4647,8 @@ rather than leaving it to be inferred."
           (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
       (let* ((link (org-mcp-test--file-link test-file "*Weekly Task"))
              (result
-              (org-mcp-test--call-update-todo-state
-               link "DONE" "TODO"))
+              (org-mcp-test--finish-repeating
+               link 'scheduled "<2026-01-01 Thu +1w>"))
              (move (org-mcp-test--planning-move result 'scheduled)))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "DONE"))
@@ -4674,6 +4705,7 @@ both survives the refusal."
          test-file "org-node-set-todo"
          `((link . ,(org-mcp-test--file-link test-file "*Weekly Task"))
            (before . "TODO")
+           (before_planning . ((scheduled . "<2026-01-01 Thu +1w>")))
            (after . "DONE")))
         (concat org-mcp-test--blocked-marker
                 "TODO state change from TODO to DONE blocked "
@@ -4683,6 +4715,280 @@ both survives the refusal."
        (concat "\\`\\* TODO Weekly Task\n"
                "SCHEDULED: <2026-01-01 Thu \\+1w>\n"
                "\\*\\* TODO Child\n\\'")))))
+
+(defun org-mcp-test--set-todo-planning-refusal (test-file params)
+  "Return the refusal a DONE on Weekly Task in TEST-FILE with PARAMS gets.
+PARAMS carries whatever the case varies -- usually `before_planning'
+alone -- and the rest of the call is well formed, so the refusal is
+about the thing under test."
+  (org-mcp-test--call-tool-expecting-error
+   test-file "org-node-set-todo"
+   (append
+    `((link . ,(org-mcp-test--file-link test-file "*Weekly Task"))
+      (before . "TODO"))
+    params
+    '((after . "DONE")))))
+
+(ert-deftest org-mcp-test-set-todo-needs-no-assertion-without-a-repeater ()
+  "A heading that cannot lose a planning date is moved without asserting one.
+Only a repeat moves or removes a planning value, so a heading with
+dates and no repeater takes the ordinary call: nothing is asserted
+about SCHEDULED or DEADLINE, and both survive the transition
+untouched and unreported."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat "* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-01 Thu> "
+                "DEADLINE: <2026-01-08 Thu>\n")))
+    (let ((org-log-done nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              "DONE" "TODO")))
+        (should (equal (alist-get 'after result) "DONE"))
+        (should-not (org-mcp-test--planning-move result 'scheduled))
+        (should-not (org-mcp-test--planning-move result 'deadline)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       (concat "\\`\\* DONE Weekly Task\n"
+               "SCHEDULED: <2026-01-01 Thu> "
+               "DEADLINE: <2026-01-08 Thu>\n\\'")))))
+
+(ert-deftest org-mcp-test-set-todo-requires-the-assertion-on-a-repeater ()
+  "A heading whose dates a repeat would move is refused without the guard.
+The optional parameter is what keeps an ordinary transition cheap;
+this refusal is what keeps it a guard.  It names what the heading
+holds, so the call can be sent again without reading it first."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-both-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal test-file nil)
+        (concat "before_planning is required here: this headline "
+                "repeats, so the state change moves or removes its "
+                "planning dates.  It holds "
+                "SCHEDULED '<2026-01-01 Thu +1w>' and "
+                "DEADLINE '<2026-01-08 Thu +2w>'"))))))
+
+(ert-deftest org-mcp-test-set-todo-needs-no-assertion-with-nothing-to-lose ()
+  "A repeating entry with no planning date needs no assertion either.
+A repeater on a plain timestamp in the body repeats the entry while
+the planning fields stay empty, so there is nothing for the call to
+destroy and nothing for it to assert."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Weekly Task\nSee <2026-02-01 Sun +1w>.\n"))
+    (let ((org-log-repeat nil)
+          (org-log-done nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              "DONE" "TODO")))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should-not (org-mcp-test--planning-move result 'scheduled)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       "\\`\\* TODO Weekly Task\nSee <2026-02-08 [^>]*\\+1w>\\.\n\\'"))))
+
+(ert-deftest org-mcp-test-set-todo-guards-a-date-a-body-repeater-takes ()
+  "A repeater in the body takes away a SCHEDULED that carries none.
+Neither planning field repeats, so a guard that asked whether the
+planning line repeats would let this through — and Org removes the
+SCHEDULED outright.  The assertion is required here, and it covers
+the value that goes."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        (concat "* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-01 Thu>\n"
+                "See <2026-02-01 Sun +1w>.\n")))
+    (let ((org-log-repeat nil)
+          (org-log-done nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal test-file nil)
+        (concat "before_planning is required here: this headline "
+                "repeats, so the state change moves or removes its "
+                "planning dates.  It holds "
+                "SCHEDULED '<2026-01-01 Thu>' and no DEADLINE")))
+      (let ((result
+             (org-mcp-test--finish-repeating
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              'scheduled "<2026-01-01 Thu>")))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should
+         (equal (org-mcp-test--planning-move result 'scheduled)
+                '("<2026-01-01 Thu>" . ""))))
+      (org-mcp-test--verify-file-matches
+       test-file
+       "\\`\\* TODO Weekly Task\nSee <2026-02-08 [^>]*\\+1w>\\.\n\\'"))))
+
+(ert-deftest org-mcp-test-set-todo-silence-about-a-field-asserts-absence ()
+  "A name left out of the map asserts that field holds nothing.
+That is what spares a client spelling out an empty DEADLINE on every
+heading that never had one, and it is an assertion rather than a
+field skipped: a heading that does carry a DEADLINE refuses the call
+that stayed silent about it."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-both-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file
+         '((before_planning . ((scheduled . "<2026-01-01 Thu +1w>")))))
+        (concat org-mcp-test--conflict-marker
+                "DEADLINE mismatch: expected '', "
+                "found '<2026-01-08 Thu +2w>'"))))))
+
+(ert-deftest org-mcp-test-set-todo-refuses-a-stale-planning-assertion ()
+  "A planning field the heading does not hold is a conflict.
+The refusal names the field and what the heading actually holds, and
+nothing is written — not the keyword either, although the keyword
+assertion held."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-both-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file
+         '((before_planning
+            . ((scheduled . "<2026-01-01 Thu +1w>")
+               (deadline . "<2020-01-01 Wed +2w>")))))
+        (concat org-mcp-test--conflict-marker
+                "DEADLINE mismatch: "
+                "expected '<2020-01-01 Wed +2w>', "
+                "found '<2026-01-08 Thu +2w>'"))))))
+
+(ert-deftest org-mcp-test-set-todo-refuses-a-malformed-planning-map ()
+  "Every way of asserting a planning field wrongly is refused by name.
+\"\" and null are refused because the map already says `holds
+nothing' by leaving the name out, and one state keeps one spelling.
+A name that is no planning field is refused rather than dropped, and
+`closed' gets its own message: the response reports it and no call
+writes it, so it is not something to vouch for."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-repeat))
+    (let ((org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file '((before_planning . ((scheduled . "")))))
+        (concat "SCHEDULED holding nothing is asserted by leaving it "
+                "out of before_planning, not by \"\"")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file '((before_planning . ((scheduled . nil)))))
+        (concat "SCHEDULED is asserted with the timestamp it holds, "
+                "and a field holding none is left out of the map, "
+                "not null")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file '((before_planning . ((scheduled . 3)))))
+        (concat "SCHEDULED is asserted with the timestamp it holds, "
+                "and a field holding none is left out of the map, "
+                "not 3")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file
+         '((before_planning . ((closed . "[2026-01-01 Thu]")))))
+        (concat "before_planning does not assert 'closed': the "
+                "response reports it, and no call writes it.  "
+                "It takes 'scheduled' and 'deadline'")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file '((before_planning . ((nonsense . "x")))))
+        (concat "before_planning names no planning field: "
+                "'nonsense'.  It takes 'scheduled' and 'deadline'")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file '((before_planning . "nope")))
+        (concat "before_planning must be an object naming "
+                "'scheduled' and 'deadline', not \"nope\"")))
+      (should
+       (equal
+        (org-mcp-test--set-todo-planning-refusal
+         test-file
+         '((before_planning
+            . ((scheduled . "sha256:3f9c2a1b8e4d7c05")))))
+        (concat "SCHEDULED is asserted with the value it holds, not "
+                "with a digest: 'sha256:3f9c2a1b8e4d7c05' covers a "
+                "region and this call changes one field"))))))
+
+(ert-deftest org-mcp-test-set-todo-reports-the-closed-it-wrote ()
+  "CLOSED is reported like the other planning fields and asserted like none.
+Org writes it when the heading reaches a done keyword, so the call
+that asked for the keyword moved it without naming it, and the
+response says where it went."
+  (org-mcp-test--with-temp-org-files
+      ((test-file "* TODO Weekly Task\nBody.\n"))
+    (let ((org-log-done 'time)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let* ((result
+              (org-mcp-test--call-update-todo-state
+               (org-mcp-test--file-link test-file "*Weekly Task")
+               "DONE" "TODO"))
+             (move (org-mcp-test--planning-move result 'closed)))
+        (should (equal (alist-get 'after result) "DONE"))
+        (should (equal (car move) ""))
+        (should (string-match-p "\\`\\[[0-9]\\{4\\}-" (cdr move))))
+      (org-mcp-test--verify-file-matches
+       test-file
+       "\\`\\* DONE Weekly Task\nCLOSED: \\[[^]]+\\]\nBody\\.\n\\'"))))
+
+(ert-deftest org-mcp-test-set-todo-reports-the-closed-it-took-away ()
+  "Leaving a done keyword takes CLOSED away, and the response carries it.
+Nothing else records the timestamp once the call returns, and no
+parameter asserted it: CLOSED is Org's record of the transition
+rather than a value the client chose."
+  (org-mcp-test--with-temp-org-files
+      ((test-file
+        "* DONE Weekly Task\nCLOSED: [2026-01-02 Fri 10:00]\nBody.\n"))
+    (let ((org-log-done 'time)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let ((result
+             (org-mcp-test--call-update-todo-state
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              "TODO" "DONE")))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should
+         (equal (org-mcp-test--planning-move result 'closed)
+                '("[2026-01-02 Fri 10:00]" . ""))))
+      (org-mcp-test--verify-file-matches
+       test-file "\\`\\* TODO Weekly Task\nBody\\.\n\\'"))))
+
+(ert-deftest org-mcp-test-set-todo-repeat-reports-no-closed-at-all ()
+  "A repeat writes CLOSED and clears it again, so nothing moved.
+The response names a field only when the call moved it, and CLOSED
+ends where it began.  A client that saw one reported would believe
+the heading carries a closing timestamp it does not have."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-task-scheduled-repeat))
+    (let ((org-log-done 'time)
+          (org-log-repeat nil)
+          (org-todo-keywords '((sequence "TODO" "|" "DONE"))))
+      (let ((result
+             (org-mcp-test--finish-repeating
+              (org-mcp-test--file-link test-file "*Weekly Task")
+              'scheduled "<2026-01-01 Thu +1w>")))
+        (should (equal (alist-get 'after result) "TODO"))
+        (should (org-mcp-test--planning-move result 'scheduled))
+        (should-not (org-mcp-test--planning-move result 'closed)))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--expected-weekly-task-repeat-triggered-regex))))
 
 (ert-deftest org-mcp-test-add-todo-top-level ()
   "Test adding a top-level TODO item."
@@ -12136,9 +12442,9 @@ the response reports all come out of the one call."
           (org-log-repeat 'note)
           (org-log-into-drawer t))
       (let ((result
-             (org-mcp-test--call-update-todo-state
+             (org-mcp-test--finish-repeating
               (org-mcp-test--file-link test-file "*Weekly Task")
-              "DONE" "TODO")))
+              'scheduled "<2026-01-01 Thu +1w>")))
         (should (equal (alist-get 'success result) t))
         (should (equal (alist-get 'before result) "TODO"))
         (should (equal (alist-get 'after result) "TODO"))
