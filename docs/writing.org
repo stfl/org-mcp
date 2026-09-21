@@ -165,7 +165,7 @@ Date '2026-02-29' does not exist - Org reads it as '<2026-03-01 Sun>'
 Date '0000-01-01' has a year below 100, which Org reads as a two-digit year
 Date '[2026-03-27 Fri]' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written <...>
 Date '<2026-06-20 Sat>--<2026-06-21 Sun>' is a date range - name the one date the field is to carry
-Date '<2026-03-27 Fri 09:00 +1w typo>' carries text that is no part of a timestamp: 'typo' - Org would write '<2026-03-27 Fri 09:00 +1w>' without it
+Date '<2026-03-27 Fri repeat +1w>' carries text that is no part of a timestamp: 'repeat' - Org would write '<2026-03-27 Fri +1w>' without it
 Date '<2026-03-27 Fri +1w --3d>' pairs a first-only warning delay with a repeater - Org's planning writer drops the delay and writes '<2026-03-27 Fri +1w>'; '<2026-03-27 Fri +1w -3d>' warns before every repeat
 Invalid date 'next tuesday' - expected 2026-03-27, 2026-03-27 09:00, an Org timestamp such as <2026-06-20 Sat +1w -3d>, or null for no date
 #+end_example
@@ -185,13 +185,20 @@ and =before= asserts one by the whole string, but =after= names the one date the
 field is to carry.
 
 Org's parser reads a timestamp's parts and reads past whatever else stands
-between the brackets, keeping none of it. =<2026-03-27 Fri 09:00 +1w typo>=
-parses, and the file would get the repeater and none of the typo, so the call
+between the brackets, keeping none of it. =<2026-03-27 Fri repeat +1w>= parses,
+and the file would get the repeater and none of the word before it, so the call
 would be answered with a success and a heading repeating on a schedule nobody
-chose. Text Org reads past is refused, and the refusal names it, so the word to
-fix is the word the message quotes. The same goes for a repeater missing its
-sign: =2026-03-27 25h= is not a repeater to Org but a word it reads past, and
-it is refused rather than written as a bare day.
+chose. Text Org reads past is refused wherever between the brackets it stands,
+and the refusal names it, so the word to fix is the word the message quotes. The
+same goes for a repeater missing its sign: =2026-03-27 25h= is not a repeater to
+Org but a word it reads past, and it is refused rather than written as a bare
+day.
+
+Because that message names the timestamp Org would have written, it is the last
+question asked of a date. A value that is faulty underneath the text it carries
+answers with the fault instead: =<2026-02-30 Fri typo>= is refused for the day
+that does not exist, so the timestamp a message offers is always one the field
+would take.
 
 The day name is read past and not refused. Org writes the day the date falls on
 and reads nothing out of the slot the day name stands in, so =2026-03-27 zzz=
