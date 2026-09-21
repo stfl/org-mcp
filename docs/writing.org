@@ -644,11 +644,9 @@ headline names — and every timestamp in the entry that carries a repeater step
 on by its own interval. A SCHEDULED carrying no repeater is taken away rather
 than moved, as Org holds it no longer relevant once the task has moved on.
 
-With =org-log-repeat= set — it ships as =time= — Org records the transition
-(see [[*What a write records in the LOGBOOK]]) and writes a =LAST_REPEAT= property
-beside it, which it writes for an entry holding a clock line whatever that
-setting says. Either way a later read of the headline's properties finds one
-the call did not put there.
+=org-log-repeat= records the transition (see [[*What a write records in the LOGBOOK]]),
+and Org writes and maintains a =LAST_REPEAT= property of its own, which you
+neither assert nor preserve.
 
 One call therefore changes the keyword and the dates, and the response reports
 both. =after= is the keyword Org left. A =scheduled= or =deadline= field reports
@@ -687,12 +685,20 @@ state it is in now, each read the way a =before= is read:
 #+end_src
 
 A field is there only when the call moved it, so its absence says the headline
-still holds what you last read. Its =after= is the next call's =before=, which
-is the point of reporting it: [[*org-node-set-scheduled][org-node-set-scheduled]] compares your =before=
-against the date in the file, so a =before= read before this call is refused as
-a conflict, and the field hands you the value that settles it without a read.
-A date Org took away comes back under =before=, and once the call returns that
-is the only record of it anywhere.
+still holds what you last read. Its =after= is the next call's =before=:
+[[*org-node-set-scheduled][org-node-set-scheduled]] compares your =before= against the date in the file, so
+one read before this call is a conflict afterwards, and the reported value is
+the one to send. Plan from it rather than from what you read a moment earlier.
+
+*Nothing guards the date a repeat takes.* Every other write on this page that
+destroys something takes a required =before= for the thing it destroys, and is
+refused when the file disagrees (see [[*Knowing what you are about to change]]). A
+repeat destroys a planning value no parameter of the call named: you asserted
+the keyword, and the date went with it. What the response does instead is leave
+none of it unseen — the value that went comes back under =before=, which after
+the call is the only record of it anywhere, and what replaced it comes back
+beside it. Not asserted, but never unseen, and that is less than the rest of
+this page offers you.
 
 *Read the fields, not the keyword.* A repeat usually leaves a keyword other
 than the one you asked for, but not always: =REPEAT_TO_STATE= may name the very
