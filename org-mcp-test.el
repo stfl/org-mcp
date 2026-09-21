@@ -13278,13 +13278,38 @@ SCHEDULED and DEADLINE carry an active one, written <\\.\\.\\.>\\'"
     ("2026-03-27 09:00 blah blah"
      "blah blah"
      "<2026-03-27 [^ >]+ 09:00>")
-    ("2026-03-27 25h" "25h" "<2026-03-27 [^ >]+>"))
+    ("2026-03-27 25h" "25h" "<2026-03-27 [^ >]+>")
+    ("<2026-03-27 Fri junk +1w>"
+     "junk"
+     "<2026-03-27 [^ >]+ \\+1w>")
+    ("<2026-03-27 Fri x y +1w>"
+     "x y"
+     "<2026-03-27 [^ >]+ \\+1w>")
+    ("<2026-03-27 Fri 09:00 every +1w>"
+     "every"
+     "<2026-03-27 [^ >]+ 09:00 \\+1w>")
+    ("<2026-03-27 Fri +1w junk -3d>"
+     "junk"
+     "<2026-03-27 [^ >]+ \\+1w -3d>")
+    ("<2026-03-27 Fri +1w +2w>"
+     "+2w"
+     "<2026-03-27 [^ >]+ \\+1w>"))
   "Dates carrying text between the brackets that Org reads past.
 Each row is the value sent, the words Org would drop, and a pattern
-for what the file would have held instead.  The third row sends the
-text without brackets of its own, where the value is offered to Org
-wrapped in them; the fourth is a repeater missing its sign, which
-Org reads past rather than reading as a repeater.")
+for what the file would have held instead.
+
+The first four put the text after everything Org reads.  The third
+of them sends it without brackets of its own, where the value is
+offered to Org wrapped in them, and the fourth is a repeater missing
+its sign, which Org reads past rather than reading as a repeater.
+
+The rest put it where a head of the words cannot find it: before a
+repeater, between a time and a repeater, between a repeater and a
+warning period, and — in the last row, a repeater typed twice — in a
+word Org reads past because it already read one like it.  A word
+standing in the middle is the case a client meets, because a model
+writing a repeater puts its mistake beside the repeater rather than
+after everything.")
 
 (ert-deftest org-mcp-test-set-scheduled-refuses-text-inside-the-timestamp ()
   "Text Org reads past inside the brackets refuses the call.
@@ -13312,6 +13337,74 @@ told to name one date would be fixing the wrong thing."
                  "' - Org would write '"
                  written
                  "' without it\\'")
+         test-file))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-bare-todo))))
+
+(ert-deftest org-mcp-test-set-scheduled-advertises-a-date-it-takes ()
+  "The timestamp the refusal names is one the same tool writes.
+The message tells a client what Org would have written instead, so
+that is a value a client sends, and a refusal answered by another
+refusal leaves nobody anywhere to go.  The value is taken out of the
+message rather than spelled here, because the day name in it is the
+one the server\\='s locale writes.
+
+That the field ends up holding the advertised string character for
+character is the whole of the claim: Org\\='s rendering of what it
+read is a timestamp Org reads back as itself."
+  (pcase-dolist (`(,date ,_unread ,_written)
+                 org-mcp-test--dates-carrying-text-org-reads-past)
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-bare-todo))
+      (let* ((link (org-mcp-test--file-link test-file "*Simple Task"))
+             (message
+              (org-mcp-test--refusal-message
+               "org-node-set-scheduled"
+               `((link . ,link) (before . "") (after . ,date)))))
+        (should
+         (string-match "Org would write '\\(<[^>]*>\\)'" message))
+        (let* ((advertised (match-string 1 message))
+               (result
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-node-set-scheduled"
+                  `((link . ,link)
+                    (before . "")
+                    (after . ,advertised))))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'after result) advertised)))))))
+
+(defconst org-mcp-test--dates-read-past-and-faulty-besides
+  '(("<2026-02-30 Fri typo>" "does not exist - Org reads it as")
+    ("<0050-03-27 Mon +1w typo>" "has a year below 100")
+    ("<2026-03-27 Fri +1w --3d typo>"
+     "pairs a first-only warning delay with a repeater"))
+  "Dates carrying text Org reads past and one other fault besides.
+Each row is the value sent and the message the other fault answers
+with.  Taking the text out would leave a timestamp still refused, so
+naming the text first would name a value refused in its turn: the
+second of March for a call that asked for the thirtieth of February,
+a year Org reads as another century, and a delay Org drops.")
+
+(ert-deftest org-mcp-test-set-scheduled-names-the-fault-that-outlives-the-text ()
+  "A date faulty past the text Org reads is refused for the fault.
+The text-read-past message names what Org would have written, so it
+is asked last of the date checks and only ever names a timestamp the
+rest have passed.  A value that is faulty underneath the text is
+answered by the fault, which is the refusal that still stands once
+the text is gone."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-bare-todo))
+    (let ((link (org-mcp-test--file-link test-file "*Simple Task")))
+      (pcase-dolist (`(,date ,expected)
+                     org-mcp-test--dates-read-past-and-faulty-besides)
+        (org-mcp-test--call-tool-refused
+         "org-node-set-scheduled"
+         `((link . ,link) (before . "") (after . ,date))
+         (concat "\\`Date '"
+                 (regexp-quote date)
+                 "' "
+                 (regexp-quote expected))
          test-file))
       (org-mcp-test--verify-file-matches
        test-file org-mcp-test--pattern-bare-todo))))
