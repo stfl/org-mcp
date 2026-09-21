@@ -105,7 +105,7 @@ your =org-log-note-headings= holds for that kind of change.
 | =org-log-reschedule=           | a SCHEDULED moved, and one taken away      | =org-node-set-scheduled=               |
 | =org-log-redeadline=           | a DEADLINE moved, and one taken away       | =org-node-set-deadline=                |
 | =org-log-refile=               | the move                                   | =org-node-refile=                      |
-| =org-log-note-clock-out=       | a note on a clock closing                  | nothing — the clock tools leave this one unrecorded |
+| =org-log-note-clock-out=       | a clock closing                            | =org-clock-out=, =org-clock-in=        |
 
 =org-todo-log-states= is what a =!= or an =@= in =org-todo-keywords= fills, so
 keywords written as =TODO(t!)= record their own transitions. =org-log-done= set
@@ -113,6 +113,10 @@ to =time= writes a =CLOSED= timestamp on the heading instead of an entry in the
 drawer. =org-node-archive= reaches the same TODO machinery, when
 =org-archive-mark-done= has it mark the subtree done, and records what
 =org-log-repeat= asks for; Org turns the other two off for an archive itself.
+=org-log-note-headings= gives the clock-out entry an empty heading, so with its
+shipped value that setting writes nothing (see [[file:clocking.org::*org-clock-out][org-clock-out]]), and a
+clock-out that =org-clock-out-switch-to-state= turns into a TODO change is
+recorded by the settings above it.
 
 An entry carries its heading line and no prose under it, whether the setting is
 =time= or =note=. =note= asks for prose a person types into a buffer, and a

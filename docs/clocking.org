@@ -118,6 +118,17 @@ leaves no CLOCK line behind at all, and the drawer it empties goes with it;
 response reports neither — it reports the close that was asked for — so read
 the heading back when the outcome matters.
 
+The close is recorded the way any other change is: =org-log-note-clock-out=
+records the clock closing, and the TODO change
+=org-clock-out-switch-to-state= makes is recorded by whichever of
+=org-log-done=, =org-todo-log-states= and =org-log-repeat= covers it (see
+[[file:writing.org::*What a write records in the LOGBOOK][What a write records in the LOGBOOK]]). =org-log-note-headings= gives the
+clock-out entry an empty heading, so with its shipped value
+=org-log-note-clock-out= writes nothing and only the closed CLOCK line is
+there; give that entry a heading of your own and it is written against the
+clock it belongs to. The same happens to the clock =org-clock-in= closes
+before it opens its own.
+
 A call is refused when:
 
 - a clock runs in a file outside the allowed files, as =org-clock-in= refuses one.  org-mcp writes no file outside the allowed files, and says nothing about that clock, neither its file nor its heading nor its start, so the user has to clock out of it in Emacs:

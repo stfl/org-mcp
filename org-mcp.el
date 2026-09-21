@@ -2895,7 +2895,16 @@ the hook here is what BODY put there — an entry the user armed before
 the call is left for the user's own command loop.  Taking the entry
 off the hook and writing it, rather than only unhooking it, is what
 keeps the record the setting asked for: `org-store-log-note' places
-it where Org would have."
+it where Org would have.
+
+What that amounts to differs by caller, because it is
+`org-log-note-headings' that decides whether there is an entry to
+write.  `org-todo', `org-schedule', `org-deadline' and
+`org-archive-subtree' set up purposes it gives a heading line to, so
+an entry is written for each of them.  It gives `clock-out' an empty
+heading, so for `org-clock-out' there is nothing to write and all
+this does is take the prompt off the hook; a user who gives that
+purpose a heading gets the entry Org would have written there too."
   (declare (indent 1) (debug (form body)))
   (let ((prose (gensym "prose")))
     `(let ((,prose (or ,note ""))
@@ -5941,7 +5950,13 @@ MCP Parameters:
              (buf (marker-buffer marker))
              (was-modified (buffer-modified-p buf))
              (tick (buffer-chars-modified-tick buf)))
-        (org-clock-clock-out (cons marker running-start) t close-at)
+        ;; The close is Org's, so `org-log-note-clock-out' records it
+        ;; here as it does for a clock-out by hand, and the record is
+        ;; written before the buffer is saved rather than left on
+        ;; `post-command-hook'.
+        (org-mcp--logging-note nil
+          (org-clock-clock-out
+           (cons marker running-start) t close-at))
         (org-mcp--clock-save-closed
          buf (alist-get 'file active) was-modified)
         ;; Only an edit that reached BUF can stay unsaved, and it has
@@ -6078,7 +6093,13 @@ on %s"
                     (goto-char (marker-position marker))
                     (org-back-to-heading t)
                     (point))))
-            (org-clock-clock-out (cons marker start-time) nil end)
+            ;; `org-log-note-clock-out' records the close, and
+            ;; `org-clock-out-switch-to-state' can put the heading in
+            ;; another TODO state, which its own log settings record;
+            ;; both are written here rather than left waiting on
+            ;; `post-command-hook'.
+            (org-mcp--logging-note nil
+              (org-clock-clock-out (cons marker start-time) nil end))
             ;; The response links to the heading clocked out of.
             (goto-char heading)))))))
 

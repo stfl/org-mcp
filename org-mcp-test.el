@@ -7355,6 +7355,144 @@ close alone and names the heading by its title."
          test-file
          org-mcp-test--clock-add-custom-drawer-expected-regex)))))
 
+;;; The log entry closing a clock means to leave
+
+;; `org-log-note-clock-out' asks Org to record a clock closing, and
+;; `org-clock-out-switch-to-state' makes the close a TODO change with
+;; log settings of its own.  Org's route to either entry arms
+;; `org-add-log-note' on the global `post-command-hook'; an MCP call
+;; has no command loop to run it, so the entry would reach the user as
+;; a prompt at their next unrelated command.
+
+(defconst org-mcp-test--clock-out-logged-heading
+  "Clocked out on %t"
+  "A heading for the `clock-out' purpose, which Org leaves empty.")
+
+(defconst org-mcp-test--clock-out-note-expected-regex
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   "- Clocked out on \\[[^]]+\\]\n"
+   ":END:\n"
+   "\\'")
+  "File contents once a clock-out heading of one's own records the close.
+Org places the entry against the clock it belongs to rather than at
+the top of the drawer.")
+
+(ert-deftest org-mcp-test-clock-out-records-the-close-without-asking ()
+  "`org-log-note-clock-out' records the close and waits for no one.
+Org's own route to the entry arms `post-command-hook' and opens an
+`*Org Note*' buffer for a person to type in, which an MCP call has
+nobody to finish.  `org-log-note-headings' leaves the `clock-out'
+purpose an empty heading, so the record Org writes for it is nothing
+at all, and the file carries the closed CLOCK line alone."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (org-mcp-test--call-clock-out
+                (org-mcp-test--file-link test-file "*Task One")
+                "2026-01-01T11:00:00")))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'clocked_out result) t))
+          (should (equal (alist-get 'heading result) "Task One"))
+          (should (equal (alist-get 'duration result) "1:00")))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-add-expected-regex)))))
+
+(ert-deftest org-mcp-test-clock-out-writes-the-heading-given-for-it ()
+  "A `clock-out' heading of one's own is written, against its clock.
+The empty entry Org ships for the purpose is a default, not the
+whole of what the setting can record: a user who gives `clock-out' a
+heading gets it here as they would from a clock-out by hand."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t)
+          (org-log-note-headings
+           (cons
+            (cons 'clock-out org-mcp-test--clock-out-logged-heading)
+            (assq-delete-all 'clock-out
+                             (copy-alist org-log-note-headings)))))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (org-mcp-test--call-clock-out
+                (org-mcp-test--file-link test-file "*Task One")
+                "2026-01-01T11:00:00")))
+          (should (equal (alist-get 'success result) t))
+          (should (eq (alist-get 'saved result) t))
+          (should (equal (alist-get 'clocked_out result) t)))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file org-mcp-test--clock-out-note-expected-regex)))))
+
+(defconst org-mcp-test--clock-out-switch-state-logged-regex
+  (concat
+   "\\`\\* DONE Task One\n"
+   "CLOSED: \\[[^]]+\\]\n"
+   ":LOGBOOK:\n"
+   "- CLOSING NOTE \\[[^]]+\\]\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\'")
+  "File contents once a clock-out that switches state records it too.
+`org-clock-out-switch-to-state' makes the close a TODO change, and
+`org-log-done' records that change as it records any other.")
+
+(ert-deftest org-mcp-test-clock-out-switching-state-logs-without-asking ()
+  "`org-clock-out-switch-to-state' is a TODO change, and it is recorded.
+It is the second way a clock-out reaches a log entry: Org moves the
+heading with `org-todo', whose own settings decide what that writes.
+The entry lands here rather than on the hook."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--clock-task-with-open-clock))
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-clock-out-switch-to-state "DONE")
+          (org-log-done 'note)
+          (org-log-into-drawer t))
+      (org-mcp-test--with-session-clock test-file
+        (let ((result
+               (org-mcp-test--call-clock-out
+                (org-mcp-test--file-link test-file "*Task One")
+                "2026-01-01T11:00:00")))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'clocked_out result) t))
+          (should (equal (alist-get 'heading result) "Task One")))
+        (org-mcp-test--should-leave-no-log-prompt)
+        (org-mcp-test--verify-file-matches
+         test-file
+         org-mcp-test--clock-out-switch-state-logged-regex)))))
+
+(ert-deftest org-mcp-test-clock-in-closing-a-clock-asks-no-one ()
+  "The clock org-clock-in closes is recorded the same way, and asks no one.
+A clock-in closes whatever clock is running before it opens its own,
+and that close reaches the same log settings as a clock-out does."
+  (org-mcp-test--with-temp-org-files
+      ((file-1 org-mcp-test--clock-task-with-open-clock)
+       (file-2 org-mcp-test--clock-task-content))
+    (let ((org-log-note-clock-out t)
+          (org-log-into-drawer t))
+      (let ((result
+             (org-mcp-test--call-clock-in
+              (org-mcp-test--file-link file-2 "*Task One")
+              "2026-01-01T11:00:00" nil
+              (org-mcp-test--file-link file-1 "*Task One"))))
+        (should (equal (alist-get 'success result) t))
+        (should (equal (alist-get 'clocked_in result) t))
+        (should (eq (alist-get 'saved result) t)))
+      (org-mcp-test--should-leave-no-log-prompt)
+      (org-mcp-test--verify-file-matches
+       file-1 org-mcp-test--clock-add-expected-regex)
+      (org-mcp-test--verify-file-matches
+       file-2 org-mcp-test--clock-in-at-eleven-expected-regex))))
+
 ;;; Tests for org-clock-active
 
 (defconst org-mcp-test--clock-mixed-open-closed-content
