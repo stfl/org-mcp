@@ -401,7 +401,12 @@ in [[file:writing.org::*A done keyword can close the clock][A done keyword can c
 * Configuring Clock Tracking
 ** =org-mcp-clock-continuous-threshold=
 
-When =org-clock-continuously= is non-nil, a new clock-in within this many minutes of the last clock-out will start at the previous clock's end time rather than the current time. A gap of exactly this many minutes still counts; one a second longer does not. A last clock-out later than the current time is not continued from, so a clock never starts in the future. A clock-in given a =start_time= starts there regardless. Defaults to =30= minutes.
+When =org-clock-continuously= is non-nil, a clock-in without a =start_time= within this many minutes of the last clock-out starts at that clock-out rather than at the current time. A gap of exactly this many minutes still counts; one a second longer does not. Defaults to =30= minutes.
+
+- The last clock-out is the latest end of a closed clock in the allowed files at or before the current time. A clock ending later than now is passed over, and the one before it is continued from.
+- When the call closes a running clock through =clock_out=, that close is the last clock-out, even where rounding writes it a few minutes after now.
+- A =start_time= is taken as given, whatever continuity would pick.
+- Every start, continued or not, is written through =org-clock-rounding-minutes=, so under rounding the new clock can open a few minutes before or after the previous clock's end, and after the current time.
 
 #+begin_src emacs-lisp
 (setq org-mcp-clock-continuous-threshold 15)

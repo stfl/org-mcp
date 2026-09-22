@@ -34,7 +34,7 @@ documents.
 | =org-log-note-headings= | the default, and custom headings for a note and a clock-out |
 | =org-clock-into-drawer= | =nil=, a named drawer, and the default =LOGBOOK= |
 | =org-clock-continuously= | =nil=, =t=, another non-nil value; an explicit start overrides it |
-| =org-mcp-clock-continuous-threshold= | =0=, =1=, =30= and =90= minutes, each a second either side of its boundary |
+| =org-mcp-clock-continuous-threshold= | =2=, =30= and =90= minutes: a second short of the threshold, exactly at it, a second and a minute past it; =1=: at it, a second and a minute past it; =0=: a minute past it |
 | =org-archive-location= | the default =_archive= file, a heading in the same file, and the =#+ARCHIVE:= line written and removed |
 | =org-blocker-hook= | the child/sibling/parent blocker and the checkbox blocker, each with a vetoed and an unvetoed case |
 | =org-agenda-files= | =nil=, absolute and relative entries, a file outside the allowed set |

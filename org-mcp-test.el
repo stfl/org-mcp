@@ -9932,9 +9932,11 @@ docs/clocking.org and the defcustom's docstring both name that default."
 A clock-in reads the present through `current-time', so a call made
 in BODY clocks in at TIME wherever it has no start of its own."
   (declare (indent 1) (debug t))
-  `(let ((fixed-time ,time))
-     (cl-letf (((symbol-function 'current-time) (lambda () fixed-time)))
-       ,@body)))
+  (let ((fixed-time (make-symbol "fixed-time")))
+    `(let ((,fixed-time ,time))
+       (cl-letf (((symbol-function 'current-time)
+                  (lambda () ,fixed-time)))
+         ,@body))))
 
 (defconst org-mcp-test--continuous-last-end
   (encode-time (list 0 0 11 1 1 2026 nil -1 nil))
@@ -10007,32 +10009,40 @@ For every moment within the threshold after the previous clock-out, the
 new clock opens at that clock-out, 11:00, and not at the present; any
 non-nil value of the setting does so.  With the setting nil the same
 moments open the clock at the present, so the setting, and not the
-fixture, decides the start."
-  (dolist (elapsed '(0 60 600 1799))
+fixture, decides the start.  Each moment is at least a minute after
+11:00, because a CLOCK line carries minutes and a clock-in within the
+same minute writes 11:00 either way."
+  (dolist (elapsed '(60 600 1799))
     (dolist (continuously '(t always))
       (org-mcp-test--check-continuous-clock-in
        continuously 30 elapsed nil "11:00")))
-  (dolist (row '((0 "11:00") (60 "11:01") (600 "11:10") (1799 "11:29")))
+  (dolist (row '((60 "11:01") (600 "11:10") (1799 "11:29")))
     (org-mcp-test--check-continuous-clock-in
      nil 30 (car row) nil (cadr row))))
 
 (ert-deftest org-mcp-test-clock-in-continuous-threshold-boundary ()
   "The threshold admits a gap of exactly its minutes and nothing longer.
-For every threshold below, a clock-in one second short of it and one
-exactly at it opens at the previous clock-out, 11:00, and one a second
-past it or a minute past it opens at the present.  The comparison is
-to the second, so the boundary itself continues the previous clock:
-the docstring's \"within this many minutes\" includes the last one.
-Thresholds 1, 30 (the default) and 90 put the boundary on either side
-of the hour; a threshold of 0 continues only a clock-out at the
-present, and a minute later opens at the present."
-  (dolist (row '((1 59 "11:00") (1 60 "11:00")
-                 (1 61 "11:01") (1 120 "11:02")
+For thresholds of 2, 30 (the default) and 90 minutes, a clock-in one
+second short of the threshold and one exactly at it opens at the
+previous clock-out, 11:00, and one a second past it or a minute past
+it opens at the present.  The comparison is to the second, so the
+boundary itself continues the previous clock: the docstring's \"within
+this many minutes\" includes the last one.
+
+Every row lands in a minute other than 11:00, since a CLOCK line
+carries minutes and a present within 11:00's own minute writes 11:00
+whichever start is taken.  That leaves a threshold of 1 minute without
+its second-short row, 11:00:59, and a threshold of 0 with only a
+minute past it, which opens at the present; whether 0 continues a
+clock-out in the same second is not observable in the file."
+  (dolist (row '((2 119 "11:00") (2 120 "11:00")
+                 (2 121 "11:02") (2 180 "11:03")
                  (30 1799 "11:00") (30 1800 "11:00")
                  (30 1801 "11:30") (30 1860 "11:31")
                  (90 5399 "11:00") (90 5400 "11:00")
                  (90 5401 "12:30") (90 5460 "12:31")
-                 (0 0 "11:00") (0 60 "11:01")))
+                 (1 60 "11:00") (1 61 "11:01") (1 120 "11:02")
+                 (0 60 "11:01")))
     (pcase-let ((`(,threshold ,elapsed ,expected) row))
       (org-mcp-test--check-continuous-clock-in
        t threshold elapsed nil expected))))
@@ -10062,6 +10072,176 @@ leave a running clock that has not started yet."
   (dolist (row '((-1 "10:59") (-600 "10:50") (-3600 "10:00")))
     (org-mcp-test--check-continuous-clock-in
      t 30 (car row) nil (cadr row))))
+
+(defconst org-mcp-test--continuous-past-and-future-cases
+  `(("in another allowed file"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:59] =>  0:59\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     ,(concat
+       "* TODO Later\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2027-01-01 Fri 09:00]--[2027-01-01 Fri 10:00] =>  1:00\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\] =>  0:59\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]\n"
+       ":END:\n"
+       "\\'"))
+    ("above it in the same drawer"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2027-01-01 Fri 09:00]--[2027-01-01 Fri 10:00] =>  1:00\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:59] =>  0:59\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     nil
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2027-01-01 [A-Za-z]\\{2,3\\} 09:00\\]"
+       "--\\[2027-01-01 [A-Za-z]\\{2,3\\} 10:00\\] =>  1:00\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\] =>  0:59\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]\n"
+       ":END:\n"
+       "\\'")))
+  "A clock-out at 10:59 beside one a year ahead, and where that one sits.
+Each entry is (DESCRIPTION CONTENT OTHER-CONTENT EXPECTED-REGEX), as
+in `org-mcp-test--continuous-latest-cases', with EXPECTED-REGEX the
+file after a clock-in to Task Two at 11:10 that continues from 10:59.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-skips-a-future-clock-out ()
+  "A clock-out still to come leaves the latest past one in force.
+At 11:10, with one clock ending at 10:59 and another ending in 2027,
+the new clock opens at 10:59 whether the future clock lies in another
+allowed file or above the past one in the same drawer.  A clock-in
+that took the latest end of all would find it in the future and open
+at 11:10."
+  (dolist (case org-mcp-test--continuous-past-and-future-cases)
+    (pcase-let ((`(,description ,content ,other ,expected) case))
+      (ert-info (description :prefix "Future clock-out: ")
+        (org-mcp-test--with-temp-org-files
+            ((test-file content)
+             (other-file (or other "* Nothing clocked here\n")))
+          (let ((org-clock-continuously t)
+                (org-mcp-clock-continuous-threshold 30))
+            (org-mcp-test--at-time
+                (time-add org-mcp-test--continuous-last-end 600)
+              (let ((result
+                     (org-mcp-test--call-clock-in
+                      (org-mcp-test--file-link test-file "*Task Two"))))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (string-match-p
+                  "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]?\\'"
+                  (alist-get 'start result)))
+                (org-mcp-test--verify-file-matches test-file expected)
+                (should
+                 (equal (org-mcp-test--read-file other-file)
+                        (or other "* Nothing clocked here\n")))))))))))
+
+(defconst org-mcp-test--continuous-switch-cases
+  `(("no rounding" 0 -1200
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:30]\n"
+       ":END:\n"
+       "* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:20] =>  0:20\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:40\\] =>  0:10\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:40\\]\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:20\\] =>  0:20\n"
+       ":END:\n"
+       "\\'")
+     "10:40")
+    ("rounding to 5 minutes, the close rounded past the present" 5 480
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]\n"
+       ":END:\n"
+       "* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:30]--[2026-01-01 Thu 10:50] =>  0:20\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\] =>  1:10\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\]\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:20\n"
+       ":END:\n"
+       "\\'")
+     "11:10"))
+  "Switching from a running clock on Task One to Task Two.
+Each entry is (DESCRIPTION ROUNDING ELAPSED CONTENT EXPECTED-REGEX
+START): `org-clock-rounding-minutes' is ROUNDING, the present is
+ELAPSED seconds after 11:00, and EXPECTED-REGEX is the file after the
+switch, whose new clock opens at START.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-switch-continues-the-closed-clock ()
+  "A task switch under continuity opens where the running clock closed.
+A clock-in that names the running clock in clock_out closes it first,
+and that close is the latest clock-out, so the new clock opens at it
+and not at an older clock within the threshold.  At 10:40 unrounded
+both are 10:40.  At 11:08 with rounding to 5 minutes the close is
+written at 11:10, after the present, and the new clock opens there
+too rather than at the older 10:50: a clock-out this call wrote is
+never one still to come."
+  (dolist (case org-mcp-test--continuous-switch-cases)
+    (pcase-let ((`(,description ,rounding ,elapsed ,content ,expected ,start)
+                 case))
+      (ert-info (description :prefix "Switch: ")
+        (org-mcp-test--with-temp-org-files
+            ((test-file content))
+          (let ((org-clock-continuously t)
+                (org-mcp-clock-continuous-threshold 30)
+                (org-clock-rounding-minutes rounding))
+            (org-mcp-test--at-time
+                (time-add org-mcp-test--continuous-last-end elapsed)
+              (let ((result
+                     (org-mcp-test--call-clock-in
+                      (org-mcp-test--file-link test-file "*Task Two")
+                      nil nil
+                      (org-mcp-test--file-link test-file "*Task One"))))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (string-match-p
+                  (concat "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} "
+                          (regexp-quote start) "\\]?\\'")
+                  (alist-get 'start result)))
+                (org-mcp-test--verify-file-matches
+                 test-file expected)))))))))
 
 (defconst org-mcp-test--continuous-latest-cases
   `(("in the second line of a drawer"
