@@ -967,8 +967,37 @@ identifier, and `org-tag-re' forbids a bracket in a tag.  Any other
 VALUE is returned as it came, so a single tag, a single path,
 \"all\", \"none\" and the name of a configured list each reach their
 own check unchanged."
+  (org-mcp--json-text-param value what "[" "array"))
+
+(defun org-mcp--object-param (value what)
+  "Return VALUE, a call's object parameter WHAT, as the object it names.
+The tool schema types every parameter as a string, so a client that
+validates its arguments against the schema cannot send a JSON object
+either: it sends the object as its own JSON text.  A VALUE whose
+first non-blank character is a left brace is read back here, decoding
+as mcp-server-lib decodes an object that arrived as one, so the call
+goes on as if it had.  The text of an empty object decodes to nil, as
+{} does, and means what {} means there.  Such text that is not a JSON
+object is refused, naming WHAT.
+
+A left brace begins no other value these parameters take, because
+none of them takes a string at all: \"\" is blank, see
+`org-mcp--blank-param-p', and every other string is refused by the
+parameter's own check.  So the text form takes away nothing a caller
+could have meant, and any other VALUE is returned as it came, to meet
+that check unchanged."
+  (org-mcp--json-text-param value what "{" "object"))
+
+(defun org-mcp--json-text-param (value what opener kind)
+  "Return VALUE, parameter WHAT, read back from JSON text if it is some.
+VALUE is read back when it is a string whose first non-blank
+character is OPENER, and returned as it came otherwise.  Text that
+opens with OPENER and does not parse is refused, naming WHAT and
+KIND, the JSON value OPENER begins.  `org-mcp--array-param' and
+`org-mcp--object-param' say why each parameter may be read this way."
   (if (and (stringp value)
-           (string-match-p "\\`[[:space:]]*\\[" value))
+           (string-match-p
+            (concat "\\`[[:space:]]*" (regexp-quote opener)) value))
       (condition-case nil
           (json-parse-string value
                              :array-type 'array
@@ -978,8 +1007,8 @@ own check unchanged."
                              :json-false)
         (json-error
          (org-mcp--tool-validation-error
-          "%s begins with [ but is not a JSON array: %s"
-          what value)))
+          "%s begins with %s but is not a JSON %s: %s"
+          what opener kind value)))
     value))
 
 (defun org-mcp--boolean-param (value name)
@@ -4937,6 +4966,8 @@ MCP Parameters:
            one, and refused there when it is missing.  The refusal
            names what the heading holds, so the call can be sent
            again without reading it first
+           A client that sends every argument as a string sends the
+           object as its JSON text, those characters in a string
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as the prose of the state
          change entry
@@ -5054,7 +5085,9 @@ PARENT names a whole file.  An `id:' PREVIOUS_SIBLING is looked up in
 the parent's file.
 PROPERTIES is an optional alist of property names and values, checked
 by `org-mcp--validate-properties' like those of `org-node-set-properties'.
-A blank PROPERTIES, see `org-mcp--blank-param-p', sets none.
+A blank PROPERTIES, see `org-mcp--blank-param-p', sets none.  PROPERTIES
+sent as the text of a JSON object is read back as that object first,
+see `org-mcp--object-param'.
 FILES, when not blank, names the files an `id:' PARENT is looked
 up in; see `org-mcp--link-target'.  It applies to PARENT only.
 
@@ -5100,6 +5133,9 @@ MCP Parameters:
                forbidden
                properties itself given as null, false, \"\" or {}
                means no properties
+               A client that sends every argument as a string sends
+               the object as its JSON text, those characters in a
+               string
   files - Files and directories to look up an id: link of parent
           in, in order, instead of Emacs's ID index (array of
           strings, optional); refused with any other parent"
@@ -5123,8 +5159,10 @@ MCP Parameters:
              (org-mcp--json-name content)))
           content))
        (property-list
-        (unless (org-mcp--blank-param-p properties)
-          (org-mcp--validate-properties properties "properties")))
+        (let ((properties
+               (org-mcp--object-param properties "properties")))
+          (unless (org-mcp--blank-param-p properties)
+            (org-mcp--validate-properties properties "properties"))))
        ;; A link that names a whole file means top level.
        (parent-target (org-mcp--link-target parent "parent" files))
        (file-path (plist-get parent-target :file))
@@ -5601,10 +5639,14 @@ parameter would not be: a key carrying null is a key the call chose
 to send, and `org-mcp--asserted-property-values' requires `before'
 to name every property `after' writes, so the deletion still asserts
 what it destroys.  A blank MAP, see `org-mcp--blank-param-p', is the
-parameter left out."
-  (when (org-mcp--blank-param-p map)
-    (org-mcp--missing-param-error what))
-  (org-mcp--validate-properties map what))
+parameter left out.
+
+A MAP sent as the text of a JSON object is read back as that object
+first, see `org-mcp--object-param'."
+  (let ((map (org-mcp--object-param map what)))
+    (when (org-mcp--blank-param-p map)
+      (org-mcp--missing-param-error what))
+    (org-mcp--validate-properties map what)))
 
 (defun org-mcp--properties-touched (written drawer)
   "Return what a property write sets and what it takes away.
@@ -5857,6 +5899,9 @@ MCP Parameters:
           Special properties (TODO, TAGS, PRIORITY, etc.) are
           forbidden, and so is a name ending in +, which adds to
           another property rather than naming one
+          A client that sends every argument as a string sends
+          the object as its JSON text, those characters in a
+          string, and before the same way
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -6533,7 +6578,11 @@ can only fire on a repeating heading.
 A name this call does not assert is refused rather than dropped,
 CLOSED among them: a client that asked for CLOSED to be guarded has
 misread the surface, and a quietly ignored key would leave it
-believing otherwise."
+believing otherwise.
+
+A MAP sent as the text of a JSON object is read back as that object
+first, see `org-mcp--object-param'."
+  (setq map (org-mcp--object-param map what))
   (unless (org-mcp--blank-param-p map)
     (unless (and (listp map) (consp (car-safe map)))
       (org-mcp--tool-validation-error
@@ -8595,6 +8644,8 @@ Parameters:
            CLOSED is not asserted here: Org writes and clears it on
            a done transition, so it is reported and never vouched
            for
+           A client that sends every argument as a string sends the
+           object as its JSON text, those characters in a string
   note - Optional note to attach to this state transition (string, optional)
          When provided, stored in LOGBOOK as part of the state change entry
          Empty or whitespace-only values are ignored
@@ -8720,6 +8771,9 @@ Parameters:
                parameters and dedicated tools
                properties itself given as null, false, \"\" or {}
                means no properties
+               A client that sends every argument as a string sends
+               the object as its JSON text, those characters in a
+               string
   files - Files and directories to look up an id: link of parent in
           (array of strings, optional); see org-node-read.  It
           applies to parent only, and is refused unless parent is an
@@ -8906,6 +8960,9 @@ Parameters:
           added to Org's ID index
           Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
           DEADLINE, etc.) are forbidden - use dedicated tools
+          A client that sends every argument as a string sends
+          the object as its JSON text, those characters in a
+          string, and before the same way
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
