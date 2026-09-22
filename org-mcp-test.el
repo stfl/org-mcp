@@ -26827,7 +26827,7 @@ JSON reads past."
 
 (defun org-mcp-test--advertisement-tag-sets ()
   "The tag sets the description of the tags to write spells out.
-One tag, several of them, and the empty set that leaves the headline
+One tag, several of them, and the empty set that leaves the node
 carrying none of its own.  Each goes as the value the description
 spells, and an array goes again as its own JSON text, which is what
 a client that sends every argument as a string sends."
@@ -26842,7 +26842,7 @@ a client that sends every argument as a string sends."
            (org-mcp-test--advertised
             description "Multiple tags: \\(\\[[^]]*\\]\\)")
            (org-mcp-test--advertised
-            description "\\(\\[\\]\\) leaves the headline"))))
+            description "\\(\\[\\]\\) leaves the node"))))
     (dolist (text values)
       (let* ((value (json-parse-string text))
              (expected (if (vectorp value) (append value nil) (list value))))
