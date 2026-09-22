@@ -137,12 +137,14 @@ result is then verified with a single regular expression matching the complete
 Org file, so a test that passes has pinned the whole file, not the one line it
 was looking at.
 
-A run in batch, under =eask test= or =eask exec= alike, keeps Org's state out of
-your Emacs: the element caches and the ID index each live in a directory of the
-run's own under =temporary-file-directory=, deleted when it exits. A test that
-makes Org save the ID index anywhere else fails, and nothing is written. A test
-that wants an index of its own binds =org-id-locations-file= to a
-=make-temp-file=.
+A run in batch keeps Org's state out of your Emacs, whether it is =just test= or
+a probe that loads the suite with =eask exec emacs --batch=: the element caches
+and the ID index each live in a directory of the run's own under
+=temporary-file-directory=, deleted when it exits. When Org saves the ID index,
+through =org-id-locations-save=, to a file anywhere else, the save writes
+nothing and the test fails. The suite's tests bind =org-id-locations-file= to
+=nil= so that no index is saved at all, which the guard permits; a test that
+needs an index on disk binds it to a =make-temp-file=.
 
 ** What a test has to quantify over
 

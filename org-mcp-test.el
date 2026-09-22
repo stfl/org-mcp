@@ -53,13 +53,16 @@ run is writing.  This run uses a `make-temp-file' directory under
 ;; own index, unguarded.
 (define-error 'org-mcp-test-id-index-outside-temp
               "A test saved the ID index outside `temporary-file-directory'"
-              ;; Not an `error': the tools rescan inside `ignore-errors', which would swallow one.
-              ;; ERT fails a test on a `quit' as it does on an error.
+              ;; A child of `quit', not of `error', only so that `ignore-errors', which the tools
+              ;; rescan in, cannot swallow it; a `with-local-quit' on the path would.  What fails
+              ;; the test is the condition's own name: ERT records a bare `quit' as QUIT, which a
+              ;; run does not count as unexpected, and any other condition as FAILED.  Signalling
+              ;; `quit' itself would let a refused save pass.
               'quit)
 
-(defun org-mcp-test--refuse-id-index-outside-temp (save)
-  "Run SAVE, `org-id-locations-save', unless it would write outside the temp dir.
-A save that would write `org-id-locations-file' outside
+(defun org-mcp-test--refuse-id-index-outside-temp (save &rest args)
+  "Run SAVE on ARGS unless it would write the ID index outside the temp dir.
+SAVE is `org-id-locations-save'.  A save that would write `org-id-locations-file' outside
 `temporary-file-directory' writes nothing and signals
 `org-mcp-test-id-index-outside-temp', which fails the running test.
 The condition for writing is `org-id-locations-save''s own."
@@ -68,7 +71,7 @@ The condition for writing is `org-id-locations-save''s own."
            org-id-locations-file
            (not (file-in-directory-p org-id-locations-file temporary-file-directory)))
       (signal 'org-mcp-test-id-index-outside-temp (list org-id-locations-file))
-    (funcall save)))
+    (apply save args)))
 
 (when noninteractive
   (let ((dir (make-temp-file "org-mcp-test-id-" t)))
@@ -87,6 +90,15 @@ exec' is the user's own Emacs directory."
   (skip-unless noninteractive)
   (should (file-in-directory-p (default-value 'org-id-locations-file)
                                temporary-file-directory)))
+
+(ert-deftest org-mcp-test-id-index-guard-fails-rather-than-quits ()
+  "The guard's condition fails a test, even signalled inside `ignore-errors'.
+ERT records a bare `quit' as QUIT, which a run does not count as
+unexpected, so a guard signalling `quit' would let a save outside the
+temp dir pass; one signalling an `error' would be swallowed by the
+`ignore-errors' the tools rescan in.  This test is expected to fail."
+  :expected-result :failed
+  (ignore-errors (signal 'org-mcp-test-id-index-outside-temp (list "/nope"))))
 
 (ert-deftest org-mcp-test-id-index-save-outside-temp-fails-the-test ()
   "A save of the ID index outside the temp dir writes nothing and fails.
