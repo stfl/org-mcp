@@ -3910,13 +3910,12 @@ to address it by."
             ;; In Emacs 27.2, [[:space:]] doesn't match NBSP (U+00A0)
             (string-match-p "^[\u00A0]*$" title))
     (org-mcp--tool-validation-error
-     "Headline title cannot be empty or contain only whitespace"))
+     "Title cannot be empty or contain only whitespace"))
   (when (string-match-p "[\n\r]" title)
-    (org-mcp--tool-validation-error
-     "Headline title cannot contain newlines"))
+    (org-mcp--tool-validation-error "Title cannot contain newlines"))
   (when (string-empty-p (org-link--normalize-string title))
     (org-mcp--tool-validation-error
-     "Headline title reads as nothing: '%s'.  Org takes a \
+     "Title reads as nothing: '%s'.  Org takes a \
 statistics cookie out of a heading, so nothing would be left to \
 name it by"
      title)))
@@ -6593,7 +6592,7 @@ named by its record\\='s label."
   (if (null asserted)
       (when (org-mcp--planning-assertion-required-p found)
         (org-mcp--tool-validation-error
-         "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds %s"
+         "before_planning is required here: this node repeats, so the state change moves or removes its planning dates.  It holds %s"
          (org-mcp--planning-holdings found)))
     (pcase-dolist (`(,name . ,value) asserted)
       (let ((holds (alist-get name found)))

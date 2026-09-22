@@ -5649,7 +5649,7 @@ holds, so the call can be sent again without reading it first."
       (should
        (equal
         (org-mcp-test--set-todo-planning-refusal test-file nil)
-        (concat "before_planning is required here: this headline "
+        (concat "before_planning is required here: this node "
                 "repeats, so the state change moves or removes its "
                 "planning dates.  It holds "
                 "SCHEDULED '<2026-01-01 Thu +1w>' and "
@@ -5692,7 +5692,7 @@ the value that goes."
       (should
        (equal
         (org-mcp-test--set-todo-planning-refusal test-file nil)
-        (concat "before_planning is required here: this headline "
+        (concat "before_planning is required here: this node "
                 "repeats, so the state change moves or removes its "
                 "planning dates.  It holds "
                 "SCHEDULED '<2026-01-01 Thu>' and no DEADLINE")))
@@ -6581,7 +6581,7 @@ crosses the MCP boundary as an internal error naming no parameter."
      `((title . "")
        (todo . "TODO")
        (parent . ,(concat "file:" test-file)))
-     "\\`Headline title cannot be empty or contain only whitespace\\'"
+     "\\`Title cannot be empty or contain only whitespace\\'"
      test-file)))
 
 (defconst org-mcp-test--content-create-examples
@@ -7546,7 +7546,7 @@ is the title this server reports everywhere else."
         (org-mcp-test--call-tool-refused
          "org-node-set-title"
          `((link . ,link) (before . "Original") (after . ,title))
-         (concat "\\`Headline title reads as nothing: '"
+         (concat "\\`Title reads as nothing: '"
                  (regexp-quote title)
                  "'\\.  Org takes a statistics cookie out of a "
                  "heading, so nothing would be left to name it by\\'")
@@ -7560,7 +7560,7 @@ is the title this server reports everywhere else."
       (org-mcp-test--call-tool-refused
        "org-node-create"
        `((title . ,title) (parent . ,(concat "file:" test-file)))
-       (concat "\\`Headline title reads as nothing: '"
+       (concat "\\`Title reads as nothing: '"
                (regexp-quote title)
                "'\\.  Org takes a statistics cookie out of a "
                "heading, so nothing would be left to name it by\\'")
@@ -7584,7 +7584,7 @@ refusal is still about the title."
         (org-mcp-test--call-tool-refused
          "org-node-set-title"
          `((link . ,missing) (before . "Original") (after . ,(car case)))
-         (concat "\\`Headline title " (regexp-quote (cdr case)))
+         (concat "\\`Title " (regexp-quote (cdr case)))
          test-file)))))
 
 (ert-deftest org-mcp-test-set-title-refuses-a-title-org-would-claim ()
@@ -20284,7 +20284,7 @@ answers a client with an internal error."
       (org-mcp-test--call-tool-refused
        "org-node-set-title"
        `((link . ,link) (before . "Simple Task") (after . ""))
-       "\\`Headline title cannot be empty or contain only \
+       "\\`Title cannot be empty or contain only \
 whitespace\\'"
        test-file)
       (org-mcp-test--call-tool-refused
@@ -24622,7 +24622,7 @@ its way out would be visible."
       (todo . "TODO")
       (content . nil)
       (parent . ,(concat "file:" file)))
-     "\\`Headline title cannot contain newlines")))
+     "\\`Title cannot contain newlines")))
 
 (ert-deftest org-mcp-test-write-refused-leaves-the-dirty-buffer-alone ()
   "A refused write moves nothing in the buffer the user is editing.
@@ -27198,9 +27198,9 @@ the one you mean in Emacs"
     "TODO state change from %s to %s blocked%s"
     "Invalid tag name: %s"
     "Tags %s are mutually exclusive (cannot use together)"
-    "Headline title cannot be empty or contain only whitespace"
-    "Headline title cannot contain newlines"
-    "Headline title reads as nothing: '%s'.  Org takes a statistics cookie out of a heading, \
+    "Title cannot be empty or contain only whitespace"
+    "Title cannot contain newlines"
+    "Title reads as nothing: '%s'.  Org takes a statistics cookie out of a heading, \
 so nothing would be left to name it by"
     "Not a title: '%s'.  It %s"
     "Date '%s' is an inactive timestamp - SCHEDULED and DEADLINE carry an active one, written \
@@ -27237,7 +27237,7 @@ map, not %s"
     "%s must be an object naming %s, not %s"
     "%s names no planning field: '%s'.  It takes %s"
     "%s does not assert '%s': the response reports it, and no call writes it.  It takes %s"
-    "before_planning is required here: this headline repeats, so the state change moves or \
+    "before_planning is required here: this node repeats, so the state change moves or \
 removes its planning dates.  It holds %s"
     "Cannot remove tag '%s': the heading inherits it from %s and does not carry it itself"
     "Note cannot be empty or whitespace-only"

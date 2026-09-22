@@ -485,7 +485,7 @@ a read with an empty title, and a =::*title= link would address whichever
 heading normalizes to nothing rather than that one:
 
 #+begin_example
-Headline title reads as nothing: '[0/0]'.  Org takes a statistics cookie out of a heading, so nothing would be left to name it by
+Title reads as nothing: '[0/0]'.  Org takes a statistics cookie out of a heading, so nothing would be left to name it by
 #+end_example
 
 A cookie beside text is fine and is kept: =Ship v3 [2/5]= is the title =Ship v3=
@@ -933,7 +933,7 @@ state it is in now, each read the way a =before= is read:
 # The same call sent without before_planning.  The refusal names what
 # the headline holds, so the next one needs no read:
 {
-  "error": "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds SCHEDULED '<2026-06-18 Thu>' and DEADLINE '<2026-06-20 Sat +1w>'"
+  "error": "before_planning is required here: this node repeats, so the state change moves or removes its planning dates.  It holds SCHEDULED '<2026-06-18 Thu>' and DEADLINE '<2026-06-20 Sat +1w>'"
 }
 #+end_src
 
