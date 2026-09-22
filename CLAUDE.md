@@ -100,6 +100,12 @@ one, so a `.omc/plans/…` path is stripped before anything is published.
 Work ends committed, never stashed: the stash is shared with every worktree of
 this repository and other sessions pop it.
 
+Before the push, every ticket whose work this session merged is closed and
+ticked in its umbrella's checklist, which `docs/agents/issue-tracker.md`,
+"Umbrella issues", says how to do at merge time. An umbrella whose checklist
+disagrees with the tracker is corrected on the tracker in the same pass: a
+handoff under `.omc/` records it where no reader of the issue will look.
+
 A session ends with the branch pushed, then `git status` to confirm the branch
 tracks its remote. `dev` is published and tracks `origin`; `main` is where it is
 headed, and merging it there is Stefan's decision, not a session's.

@@ -41,6 +41,13 @@ Adding a ticket to a set means creating the issue, adding a line to the
 umbrella's checklist, and naming its blockers in its own body. The three places
 are the whole mechanism; there is no sub-issue API in use here.
 
+A ticket closes in the step that merges its branch: `gh issue close <n>
+--comment` naming the merge commit, and its line in the umbrella's checklist
+ticked in the same pass. The merge commit's message carries `Closes #<n>` too,
+so GitHub closes a ticket whose manual close was missed once the commit reaches
+`main`. A branch named for its ticket — `fix/91-id-locations-leak` — keeps the
+number in front of whoever merges it.
+
 ## Blocking
 
 A blocked ticket states its blockers as `**Blocked by:** #<n>` at the top of the
