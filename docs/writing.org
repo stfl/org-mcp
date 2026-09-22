@@ -337,11 +337,11 @@ call is well formed and the file is exactly as the client read it, so it is no
 conflict, and reading it again resolves nothing. What resolves it is a
 clock-out, which the refusal names; see [[*org-node-delete][org-node-delete]].
 
-The third is a =#+TODO:= rewrite that would leave headings carrying a keyword
-the new sequences do not name. The file is as the client read it there too, and
-Org would go through with the write rather than veto it; what resolves it is a
-different call, which the refusal spells out. See
-[[*Rewriting #+TODO: reaches past the line it changes]].
+The third is a =#+TODO:= rewrite that would leave a heading reading differently
+— a keyword the new sequences no longer name, or a title whose first word they
+start naming. The file is as the client read it there too, and Org would go
+through with the write rather than veto it; what resolves it is a different
+call, which the refusal spells out. See [[*Rewriting #+TODO: rewrites headings]].
 
 Every tool below names the classes it can refuse with; the clock tools name
 theirs in [[file:clocking.org][Clock tracking]].
@@ -525,17 +525,17 @@ that means nothing — a TODO keyword, a SCHEDULED, a DEADLINE and a priority ar
 each a value or an absence, with nothing in between — so =null= is how you empty
 them:
 
-| To take away   | The call                  | Spelled                   |
-|----------------+---------------------------+---------------------------|
-| a TODO keyword | =org-node-set-todo=       | =after: null=             |
-| a SCHEDULED    | =org-node-set-scheduled=  | =after: null=             |
-| a DEADLINE     | =org-node-set-deadline=   | =after: null=             |
-| a priority     | =org-node-set-priority=   | =after: null=             |
-| a property     | =org-node-set-properties= | that name's value =null=  |
-| the body       | =org-node-set-content=    | =after: ""=               |
-| a tag          | =org-node-remove-tags=    | the tags named in =after= |
-| every own tag  | =org-node-set-tags=       | =after: []=               |
-| a whole setting | =org-file-set-setting=   | =after: []=               |
+| To take away    | The call                  | Spelled                   |
+|-----------------+---------------------------+---------------------------|
+| a TODO keyword  | =org-node-set-todo=       | =after: null=             |
+| a SCHEDULED     | =org-node-set-scheduled=  | =after: null=             |
+| a DEADLINE      | =org-node-set-deadline=   | =after: null=             |
+| a priority      | =org-node-set-priority=   | =after: null=             |
+| a property      | =org-node-set-properties= | that name's value =null=  |
+| the body        | =org-node-set-content=    | =after: ""=               |
+| a tag           | =org-node-remove-tags=    | the tags named in =after= |
+| every own tag   | =org-node-set-tags=       | =after: []=               |
+| a whole setting | =org-file-set-setting=    | =after: []=               |
 
 *={}= is =null= written another way.* The JSON decoder reads an empty object
 as nothing at all, which is what it reads =null= as, so nothing past it can
@@ -1479,7 +1479,7 @@ Unlike a tag set, the order is asserted too, because Org reads it: two
 is the one a heading with no keyword enters first.
 
 One call writes one setting. Each of them is its own value with its own reach —
-=#+TODO:= touches every heading in the file and =#+TITLE:= touches nothing — so
+=#+TODO:= reaches every heading in the file and =#+TITLE:= reaches none — so
 a call that wrote several would have to refuse them all for one setting's sake,
 or report a part of itself done. Set a file up with one call per setting, each
 guarded on its own.
@@ -1491,33 +1491,53 @@ so nothing a client fills a parameter with absent-mindedly takes a line away
 (see [[*What a blank parameter means]]).
 
 *Where a new line goes.* A call that replaces lines writes over the first of
-them and takes the rest away. A call giving the file a setting it writes on no
-line puts it with the settings the file already has; a file with none takes it
-at the top of its preamble, below a leading comment line and below the file's
-own property drawer, both of which Org keeps above the settings (see [[*A file's own property drawer]]).
-A file whose very first line is a heading is given a preamble above that
-heading, where a drawer of its own would go.
+them, wherever it stands, and takes the rest away. A call giving the file a
+setting it writes on no line puts it with the settings the file already has in
+its *preamble*; a file with none there takes it at the top of the preamble,
+below a leading comment line and below the file's own property drawer, both of
+which Org keeps above the settings (see [[*A file's own property drawer]]). A file
+whose very first line is a heading is given a preamble above that heading,
+where a drawer of its own would go.
+
+The preamble is where a new line goes even when the file's settings are not
+there. Org honours a settings line below a heading, so a file may write one
+inside a heading's body — and a second line beside it would be part of that
+heading's =content=, changing a node the call never named and invalidating the
+=content_digest= a client holds for it (see [[file:reading.org::*The node][The node]]). A line the file
+already writes there is still replaced where it stands, because that line is
+what the call asserted.
 
 The value is the text after the colon with the space around it gone, which is
 what a read returns. A value carrying space at either end, or a newline, is
 refused: it would be written and never read back the way it was sent.
 
-*** Rewriting #+TODO: reaches past the line it changes
+*** Rewriting #+TODO: rewrites headings
 
 The keywords a file names are what every write to a heading in it is validated
-against (see [[file:reading.org::*Which file the answer is about][Which file the answer is about]]). Rewriting them is therefore not a
-change to one line: a keyword the new sequences no longer name stops being a
-keyword, and Org reads it as the first word of the title of every heading
-carrying it. =* WAIT Hear back= becomes a heading with no keyword titled =WAIT
-Hear back=, and nothing in the file records that it was ever a state.
+against (see [[file:reading.org::*Which file the answer is about][Which file the answer is about]]), and they decide something more:
+*Org takes a heading's first word for its keyword when the sequences name that
+word, and for the start of its title when they do not.* So rewriting the
+sequences is not a change to one line. It moves headings across that boundary,
+in both directions:
 
-So the call is refused while any heading in the file still carries such a
-keyword. The refusal names each one and counts the headings, because the count
-is what says how much work the remedy is:
+| The sequences        | =* WAIT Hear back= reads as                |
+|----------------------+--------------------------------------------|
+| name =WAIT=          | a WAIT heading titled =Hear back=          |
+| do not name =WAIT=   | a heading with no keyword titled =WAIT Hear back= |
+
+A heading that crosses is rewritten by a call that named no heading, nothing in
+the file records what it was, and its =::*title= link changes with its title.
+That is as true of a sequence that *starts* naming a word as of one that stops:
+naming =WAIT= turns =* WAIT for the parts=, a plain heading, into a WAIT heading
+titled =for the parts=.
+
+So the call is refused while any heading in the file would read differently
+afterwards. The refusal says which keywords move and how many headings each
+takes with it, because that count is what says how much work the remedy is:
 
 #+begin_src json
 {
-  "error": "#+TODO: would stop naming a keyword headings in this file carry: WAIT on 3 headings.  Org reads such a keyword as the first word of the heading's title, so the headings would be retitled rather than refused.  Write sequences that still name it, or add the new sequences beside the old ones, move those headings with org-node-set-todo, and write the sequences again without it"
+  "error": "#+TODO: would change what Org reads headings in this file as: WAIT stops being a keyword on 3 headings, HOLD becomes the keyword of 1 heading.  Org takes a heading's first word for its keyword when the sequences name that word and for the start of its title when they do not, so these headings are rewritten by a call that names none of them.  Write sequences that leave them as they are, or move each heading first -- org-node-set-todo off a keyword that is going, org-node-set-title off a title that would become one -- and write the sequences again"
 }
 #+end_src
 
@@ -1525,15 +1545,24 @@ It is the unmarked class, not a conflict: the file is as the client believed it
 to be, and reading it again changes nothing (see [[*How a refusal is classed]]).
 What has to change is the call, and there are two ways:
 
-1. Write sequences that still name the keyword.
-2. Retire it in three calls — write the new sequences beside the old ones, move
+1. Write sequences that leave those headings as they read now.
+2. Move the headings first, then write the sequences. A keyword on its way out
+   is retired in three calls — write the new sequences beside the old ones, move
    the headings with [[*org-node-set-todo]] while both are valid, then write the
-   sequences again without the old one.
+   sequences again without the old one. A title about to become a keyword is
+   moved out of the way with [[*org-node-set-title]] instead.
 
-A keyword no heading carries is dropped without a word, so a workflow can be
-trimmed of states nothing is in.
+A keyword no heading carries, in either direction, passes without a word — so a
+workflow can be trimmed of states nothing is in, and extended with states no
+title begins with.
 
-The check is about this file only, and it asks what Org will reach there: a
+*Org decides which headings cross, not a reading of their titles.* A keyword
+stands in the slot before the priority cookie, so =* [#A] WAIT behind a cookie=
+keeps =WAIT= in its title whatever the sequences say; and the match is on the
+whole word, so a sequence naming =WAIT= says nothing about =* WAITING=. Both
+are left alone and neither refuses the call.
+
+The check is about this file only, and it asks what Org will read there: a
 =#+SETUPFILE:=, a =#+SEQ_TODO:= and a =#+TYP_TODO:= all contribute, and a file
 left naming no sequence at all falls back to the global configuration rather
 than to nothing.

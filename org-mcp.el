@@ -303,7 +303,7 @@ empty value into it."
 
 (defun org-mcp--json-name (value)
   "Return the JSON spelling of VALUE, for a refusal to name it by.
-VALUE is what `json-read-from-string' made of a client\\='s JSON, and a
+VALUE is what `json-read-from-string' made of a client's JSON, and a
 refusal that printed that back would hand the client the spelling of
 its own value in another language: an object reads as an alist,
 false as `:json-false', null as nil.  A string and a number are
@@ -2380,7 +2380,7 @@ the field `title'.
 
 Keeping the last two apart is what tells a client which values a
 write can put back: `properties' is in the file and survives the
-round trip, `computed' is this server\\='s answer at this moment and
+round trip, `computed' is this server's answer at this moment and
 belongs to no drawer.  Merged into one object they would be
 indistinguishable without reading the configuration, and a client
 would write this server\\='s opinion into the user\\='s file.
@@ -3600,30 +3600,16 @@ and logging directives, and `org-todo-key-alist' carries a key for
 every keyword, the ones `org-assign-fast-keys' invented for a
 sequence that named none included.  The lines carry what the file
 says, which is what this tool reports."
-  (org-mcp--todo-sequences-of
-   (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO"))))
-
-(defun org-mcp--todo-sequences-of (alist)
-  "Return the TODO sequences the settings in ALIST name.
-ALIST is what `org-collect-keywords' returns for `\"SEQ_TODO\"',
-`\"TODO\"' and `\"TYP_TODO\"': each entry pairs the setting with the
-values its lines carry.  The sequences come out in the order
-`org-set-regexps-and-options' puts them in, and have the shape of
-`org-todo-keywords'.
-
-It is a function of the settings rather than of the buffer so that
-the same assembly answers for the settings a file carries and for
-the settings a write is about to give it, see
-`org-mcp--todo-keywords-once'.  A second assembly would be a second
-answer to one question, and the two would drift."
-  (append
-   (mapcar
-    (lambda (value) (cons 'type (split-string value)))
-    (cdr (assoc "TYP_TODO" alist)))
-   (mapcar
-    (lambda (value) (cons 'sequence (split-string value)))
+  (let ((alist
+         (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO"))))
     (append
-     (cdr (assoc "TODO" alist)) (cdr (assoc "SEQ_TODO" alist))))))
+     (mapcar
+      (lambda (value) (cons 'type (split-string value)))
+      (cdr (assoc "TYP_TODO" alist)))
+     (mapcar
+      (lambda (value) (cons 'sequence (split-string value)))
+      (append
+       (cdr (assoc "TODO" alist)) (cdr (assoc "SEQ_TODO" alist)))))))
 
 (defun org-mcp--validate-todo-state (state)
   "Validate STATE is a valid TODO keyword.
@@ -3949,7 +3935,7 @@ holding something other than what was sent and a read handing back
 something other than what was asked for, which is the failure this
 refusal exists to prevent.  The refusal names what Org would make of
 the title instead, so the client can spell that part another way: a
-tag belongs in `org-node-add-tags', a TODO keyword in the call\\='s own
+tag belongs in `org-node-add-tags', a TODO keyword in the call's own
 `todo' or in `org-node-set-todo', a priority in
 `org-node-set-priority', and the rest is reworded."
   (when-let* ((claimed (org-mcp--title-claimed-by-org title)))
@@ -4115,7 +4101,7 @@ something other than what the call sent into the file:
 - a date range — two timestamps joined by `--' — whose second half
   Org\\='s planning writer drops, however close the two fall;
 - a first-only warning delay standing beside a repeater — the
-  `--3d' of `<2026-03-27 Fri +1w --3d>' — which Org\\='s planning
+  `--3d' of `<2026-03-27 Fri +1w --3d>' — which Org's planning
   writer takes off, writing the repeater by itself;
 - text Org reads past — the `typo' of
   `<2026-03-27 Fri 09:00 +1w typo>' — which never reaches the file,
@@ -5965,6 +5951,22 @@ LINES comes from `org-mcp--setting-lines'."
 LINES comes from `org-mcp--setting-lines'."
   (mapcar #'cadr (org-mcp--setting-lines-of key lines)))
 
+(defun org-mcp--settings-in-preamble (lines)
+  "Return the entries of LINES that stand before the file\\='s first heading.
+LINES comes from `org-mcp--setting-lines'.  Org honours a settings
+line wherever it stands, below a heading included, so a file may
+write one inside a heading\\='s body — and a line written there is
+part of that heading\\='s content."
+  (let ((first-heading
+         (save-excursion
+           (goto-char (point-min))
+           (and (re-search-forward org-outline-regexp-bol nil t)
+                (match-beginning 0)))))
+    (if first-heading
+        (cl-remove-if-not
+         (lambda (line) (< (nth 2 line) first-heading)) lines)
+      lines)))
+
 (defun org-mcp--settings-insert-position (lines)
   "Return where a settings line is written, given the LINES it joins.
 LINES is entries of `org-mcp--setting-lines': the lines of the
@@ -5972,8 +5974,16 @@ setting being written when the file has any, and every settings
 line it writes otherwise, so that a line replacing others lands
 where they stood and a new one joins the settings already there.
 
-A file writing none takes the line at the top of its preamble,
-below the two things Org keeps above the settings: a leading
+A line the file does not yet write goes in the preamble, and only
+there.  Org honours a settings line below a heading, so a file may
+have one there and the answer would otherwise join it — writing a
+`#+' line into that heading's body, which changes a node the call
+never named and invalidates the `content_digest' a client holds for
+it.  A line already written is replaced where it stands, because
+that is the line the call asserted.
+
+A file writing none in its preamble takes the line at the top of
+it, below the two things Org keeps above the settings: a leading
 comment line, which is where a file-local variables line is
 written, and the file\\='s own property drawer, which Org reads only
 above the settings, see `org-mcp--file-drawer-region-p'.  A file
@@ -6077,107 +6087,106 @@ would make a line no read returns."
       (format "#+%s:\n" key)
     (format "#+%s: %s\n" key value)))
 
-(defun org-mcp--todo-keywords-in-use ()
-  "Return each TODO keyword on a heading of this buffer, with its count.
-An alist, in the order the keywords first appear.  A keyword is
-what Org reads as one here and now: a word Org\\='s current sequences
-do not name is the first word of a heading\\='s title instead, and is
-no keyword to count."
-  (let ((counts '()))
-    (org-element-map
-     (org-element-parse-buffer 'headline) 'headline
-     (lambda (headline)
-       (when-let* ((keyword
-                    (org-element-property :todo-keyword headline)))
-         (let ((entry (assoc keyword counts)))
-           (if entry
-               (setcdr entry (1+ (cdr entry)))
-             (push (cons keyword 1) counts))))))
-    (nreverse counts)))
+(defun org-mcp--headline-states ()
+  "Return what Org reads each heading of this buffer as, in document order.
+Each element is (KEYWORD . TITLE): the TODO state Org finds on the
+heading, nil when it finds none, and the title it is left with.
 
-(defun org-mcp--todo-keywords-once (own after)
-  "Return the TODO keywords Org reaches once this file\\='s OWN lines say AFTER.
-OWN is the values the file\\='s own `#+TODO:' lines carry and AFTER
-the values a write is about to give them.
+Org is asked rather than told, because whether the first word of a
+heading is a keyword or the start of its title is Org\\='s reading of
+the whole headline and not a question about that word.  A word the
+sequences name is a keyword only in the slot before the priority
+cookie, so `* [#A] WAIT it' keeps `WAIT' in its title however the
+sequences read; and the match is on the whole word, so `WAITING'
+is untouched by a sequence naming `WAIT'.  Re-deriving either rule
+here would be a second grammar beside Org\\='s."
+  (org-element-map
+   (org-element-parse-buffer 'headline) 'headline
+   (lambda (headline)
+     (cons
+      (org-element-property :todo-keyword headline)
+      (org-element-property :raw-value headline)))))
 
-The keywords are read off the sequences
-`org-mcp--todo-sequences-of' assembles, which is the assembly
-`org-set-regexps-and-options' performs, so the answer is the one
-Org will reach.  `#+SEQ_TODO:' and `#+TYP_TODO:' are read beside
-`#+TODO:' because Org reads them there, and they are taken as
-`org-collect-keywords' returns them, so a `#+SETUPFILE:' is
-followed: the file\\='s own lines are removed from that answer and
-AFTER put in their place, which leaves whatever a setup file
-contributed standing.
+(defun org-mcp--headline-keywords-changed (before after)
+  "Return the keywords whose reading changed between BEFORE and AFTER.
+Both come from `org-mcp--headline-states' over the same buffer, so
+the two line up heading by heading.  The value is (LOST . GAINED),
+each an alist of (KEYWORD . COUNT) in the order the keywords first
+appear: LOST is the keywords headings stop carrying, GAINED the
+keywords headings start carrying."
+  (let ((lost '())
+        (gained '()))
+    (cl-mapc
+     (lambda (was is)
+       (unless (equal was is)
+         (dolist (entry
+                  (list
+                   (cons (car was) 'lost) (cons (car is) 'gained)))
+           (when (car entry)
+             (let* ((counts
+                     (if (eq (cdr entry) 'lost)
+                         lost
+                       gained))
+                    (found (assoc (car entry) counts)))
+               (cond
+                (found
+                 (setcdr found (1+ (cdr found))))
+                ((eq (cdr entry) 'lost)
+                 (push (cons (car entry) 1) lost))
+                (t
+                 (push (cons (car entry) 1) gained))))))))
+     before after)
+    (cons (nreverse lost) (nreverse gained))))
 
-A file left naming no sequence at all falls back to the global
-`org-todo-keywords', as Org falls back to it."
-  (let* ((alist
-          (org-collect-keywords '("SEQ_TODO" "TODO" "TYP_TODO")))
-         (kept (cdr (assoc "TODO" alist))))
-    ;; One occurrence per line of OWN, not every line equal to it: a
-    ;; setup file may write the same sequence the file writes, and
-    ;; taking both copies out would report the setup file's keywords
-    ;; as about to go when only the file's own line is being replaced.
-    (dolist (value own)
-      (setq kept (cl-remove value kept :count 1 :test #'equal)))
-    (let ((sequences
-           (or (org-mcp--todo-sequences-of
-                (list
-                 (cons "TYP_TODO" (cdr (assoc "TYP_TODO" alist)))
-                 (cons "TODO" (append kept after))
-                 (cons "SEQ_TODO" (cdr (assoc "SEQ_TODO" alist)))))
-               org-todo-keywords)))
-      (org-remove-keyword-keys
-       (cl-remove
-        "|"
-        (apply #'append (mapcar #'cdr sequences))
-        :test #'string=)))))
+(defun org-mcp--headline-change-text (changes)
+  "Return CHANGES, from `org-mcp--headline-keywords-changed', as refusal text."
+  (mapconcat #'identity
+             (append
+              (mapcar
+               (lambda (entry)
+                 (format "%s stops being a keyword on %d heading%s"
+                         (car entry) (cdr entry)
+                         (if (= (cdr entry) 1)
+                             ""
+                           "s")))
+               (car changes))
+              (mapcar
+               (lambda (entry)
+                 (format "%s becomes the keyword of %d heading%s"
+                         (car entry) (cdr entry)
+                         (if (= (cdr entry) 1)
+                             ""
+                           "s")))
+               (cdr changes)))
+             ", "))
 
-(defun org-mcp--assert-no-orphaned-keywords (own after)
-  "Refuse a `#+TODO:' write that would orphan a keyword in use.
-OWN is the values the file\\='s own `#+TODO:' lines carry and AFTER
-the values the call writes; see `org-mcp--todo-keywords-once'.
+(defun org-mcp--assert-headings-unchanged (before)
+  "Refuse the `#+TODO:' write when it changed what a heading is.
+BEFORE is `org-mcp--headline-states' as it stood before the write,
+which has been made and whose settings Org has read again, so this
+buffer now shows what the call would leave behind.
 
-A keyword the sequences no longer name does not make the headings
-carrying it invalid: Org reads it as the first word of their
-titles, so `WAIT ship it' becomes a heading with no keyword titled
-`WAIT ship it'.  The headings are retitled by a write that named
-none of them, and nothing in the file records what they were.  So
-the write is refused while any heading in the file still carries
-such a keyword, and the refusal counts them, because the count is
-what says how much work the remedy is.
+The guard runs in both directions because the two are one thing.
+Org takes a heading\\='s first word for its keyword when the sequences
+name that word and for the start of its title when they do not, so
+sequences that stop naming a word retitle `* WAIT ship it' to the
+keywordless heading titled `WAIT ship it', and sequences that start
+naming one retitle `* WAIT for the parts' to a WAIT heading titled
+`for the parts'.  Each rewrites headings the call named none of,
+each leaves nothing in the file saying what they were, and each is
+undone only by writing the sequences back.
 
 The refusal is unmarked, the validation class: the client\\='s belief
 about the file is not stale — a read of the file shows those
 headings — and Org vetoed nothing, since Org would go through with
-it.  What has to change is the call.  There are two ways to change
-it, and both stay inside this tool: write a set of sequences that
-still names the keyword, or write one naming the old keywords and
-the new ones together, move the headings with `org-node-set-todo'
-while both are valid, and write the set again without the old one."
-  (let* ((reached (org-mcp--todo-keywords-once own after))
-         (orphans
-          (cl-remove-if
-           (lambda (entry)
-             (member (car entry) reached))
-           (org-mcp--todo-keywords-in-use))))
-    (when orphans
+it.  What has to change is the call."
+  (let ((changes
+         (org-mcp--headline-keywords-changed
+          before (org-mcp--headline-states))))
+    (when (or (car changes) (cdr changes))
       (org-mcp--tool-validation-error
-       "#+TODO: would stop naming a keyword headings in this file \
-carry: %s.  Org reads such a keyword as the first word of the \
-heading's title, so the headings would be retitled rather than \
-refused.  Write sequences that still name it, or add the new \
-sequences beside the old ones, move those headings with \
-org-node-set-todo, and write the sequences again without it"
-       (mapconcat (lambda (entry)
-                    (format "%s on %d heading%s"
-                            (car entry) (cdr entry)
-                            (if (= (cdr entry) 1)
-                                ""
-                              "s")))
-                  orphans
-                  ", ")))))
+       "#+TODO: would change what Org reads headings in this file as: %s.  Org takes a heading's first word for its keyword when the sequences name that word and for the start of its title when they do not, so these headings are rewritten by a call that names none of them.  Write sequences that leave them as they are, or move each heading first -- org-node-set-todo off a keyword that is going, org-node-set-title off a title that would become one -- and write the sequences again"
+       (org-mcp--headline-change-text changes)))))
 
 (defun org-mcp--reread-settings (key values)
   "Make Org read this buffer\\='s settings again, KEY having been set to VALUES.
@@ -6270,37 +6279,67 @@ MCP Parameters:
          (file-path (plist-get target :file)))
     (dolist (value asserted)
       (org-mcp--assert-field-value value (concat "#+" key ":")))
-    (org-mcp--modify-and-save file-path "set file setting"
-                              (list
-                               (cons 'setting key)
-                               (cons 'before (vconcat asserted))
-                               (cons 'after (vconcat wanted))
-                               (cons 'link (org-mcp--file-link)))
-      (let* ((lines (org-mcp--setting-lines))
-             (own-lines (org-mcp--setting-lines-of key lines))
-             (own (mapcar #'cadr own-lines))
-             (starts (mapcar (lambda (line) (nth 2 line)) own-lines)))
-        (unless (equal asserted own)
-          (org-mcp--tool-conflict-error
-           "#+%s: mismatch: expected %s, found %s"
-           key
-           (org-mcp--settings-for-message asserted)
-           (org-mcp--settings-for-message own)))
-        (when (string= key "TODO")
-          (org-mcp--assert-no-orphaned-keywords own wanted))
-        (let ((position
-               (org-mcp--settings-insert-position
-                (or own-lines lines))))
-          ;; Backwards, so that a line still to be deleted keeps the
-          ;; position read off the buffer before any deletion.
-          (dolist (start (reverse starts))
-            (goto-char start)
-            (delete-region
-             (line-beginning-position) (line-beginning-position 2)))
-          (goto-char position)
-          (dolist (value wanted)
-            (insert (org-mcp--setting-text key value))))
-        (org-mcp--reread-settings key wanted)))))
+    (condition-case err
+        (org-mcp--settings-written file-path key asserted wanted)
+      (error
+       ;; The change group has put the text back, and Org's reading of
+       ;; it has to follow: the checks above run with the settings the
+       ;; call wrote, so the buffer is left holding a workflow its file
+       ;; no longer names unless the restored lines are read again.  A
+       ;; second failure must not replace the first refusal.
+       (ignore-errors
+         (org-mcp--with-org-file file-path
+           (org-mcp--reread-settings key asserted)))
+       (signal (car err) (cdr err))))))
+
+(defun org-mcp--settings-written (file-path key asserted wanted)
+  "Write the lines of setting KEY in FILE-PATH, from ASSERTED to WANTED.
+ASSERTED is every line the file is vouched for writing that setting
+on and WANTED every line it is to write instead; both come from
+`org-mcp--setting-set-given'.
+
+This is the whole of what the write does to the file, so that its
+caller is left with the one thing it has to do around it: put Org\\='s
+reading of the settings back when a refusal puts the text back."
+  (org-mcp--modify-and-save file-path "set file setting"
+                            (list
+                             (cons 'setting key)
+                             (cons 'before (vconcat asserted))
+                             (cons 'after (vconcat wanted))
+                             (cons 'link (org-mcp--file-link)))
+    (let* ((states nil)
+           (lines (org-mcp--setting-lines))
+           (own-lines (org-mcp--setting-lines-of key lines))
+           (own (mapcar #'cadr own-lines))
+           (starts (mapcar (lambda (line) (nth 2 line)) own-lines)))
+      (unless (equal asserted own)
+        (org-mcp--tool-conflict-error
+         "#+%s: mismatch: expected %s, found %s"
+         key
+         (org-mcp--settings-for-message asserted)
+         (org-mcp--settings-for-message own)))
+      (when (string= key "TODO")
+        (setq states (org-mcp--headline-states)))
+      (let ((position
+             (org-mcp--settings-insert-position
+              (or own-lines (org-mcp--settings-in-preamble lines)))))
+        ;; Backwards, so that a line still to be deleted keeps the
+        ;; position read off the buffer before any deletion.
+        (dolist (start (reverse starts))
+          (goto-char start)
+          (delete-region
+           (line-beginning-position) (line-beginning-position 2)))
+        (goto-char position)
+        (dolist (value wanted)
+          (insert (org-mcp--setting-text key value))))
+      (org-mcp--reread-settings key wanted)
+      ;; After the write and after Org has read the settings again,
+      ;; because what a heading is is Org's reading of it and this
+      ;; buffer is the only place that reading can be taken.  The
+      ;; change group puts the text back when this refuses, and the
+      ;; caller puts Org's reading of it back with it.
+      (when (string= key "TODO")
+        (org-mcp--assert-headings-unchanged states)))))
 
 (defun org-mcp--write-planning-timestamp (writer value)
   "Write VALUE on the entry at point through WRITER.
@@ -8504,6 +8543,13 @@ are both sets of tags.  #+ARCHIVE: and #+CATEGORY: are the exception
 - Org reads the first line and ignores the rest - and this tool
 reports every line either way, because the file carries them.
 
+TODO here is the #+TODO: lines and those alone.  A file may name
+sequences in #+SEQ_TODO: or #+TYP_TODO: as well, or pull them in
+through a #+SETUPFILE:, and none of the three is reported here or
+replaced by writing TODO: ask org-config-todo for the keywords a
+write to a heading in this file is actually held to, and expect it
+to name states this answer does not.
+
 Use this before org-file-set-setting: its before is the array this
 answers with.")
     :read-only t)
@@ -8930,14 +8976,18 @@ Returns JSON object:
   link - Link to the file (string): id:{id} when its own property
          drawer holds one, else file:{path}
 
-Rewriting #+TODO: reaches past the line it changes.  A keyword the
-new sequences do not name stops being a keyword, and Org then reads
-it as the first word of the title of every heading carrying it - so
-the call is refused while any heading still does, naming each
-keyword and how many headings carry it.  To retire a keyword: write
-the new sequences beside the old ones, move those headings with
-org-node-set-todo, then write the sequences again without the old
-keyword.
+Rewriting #+TODO: rewrites headings.  Org takes a heading's first
+word for its keyword when the sequences name that word and for the
+start of its title when they do not, so sequences that stop naming
+WAIT retitle `* WAIT ship it' to a keywordless heading titled `WAIT
+ship it', and sequences that start naming it retitle `* WAIT for the
+parts' to a WAIT heading titled `for the parts'.  Both are a call
+rewriting headings it named none of, so the call is refused while
+any heading in the file would read differently, naming the keywords
+that move and counting the headings each takes.  To move a heading
+out of the way first: org-node-set-todo off a keyword that is going,
+with the new sequences written beside the old ones so both are
+valid; org-node-set-title off a title that would become one.
 
 #+ARCHIVE: reaches past its line too, and is not refused: it changes
 where org-node-archive sends a subtree from then on, and leaves
@@ -8950,7 +9000,7 @@ Refusals:
   file is not as the client believed, so read it again with
   org-file-settings and plan against what it holds now.  A setting
   outside the six, a line carrying a newline or space around its
-  value, and a #+TODO: write that would orphan a keyword are
+  value, and a #+TODO: write that would rewrite a heading are
   unmarked: what has to change is the call.")
     :read-only nil)
    (list

@@ -679,6 +679,15 @@ effect, so the array has one entry per line, in the order the file writes them.
 ignores the rest — and the array still carries every line, because the file
 carries them and a write has to assert them.
 
+*=TODO= is the =#+TODO:= lines and no other source of keywords.* A file may
+name sequences in =#+SEQ_TODO:= or =#+TYP_TODO:= as well, or pull them in
+through a =#+SETUPFILE:=, and Org reads all of them into one workflow. None of
+the three is reported here and none is replaced by writing =TODO=, so a file
+whose whole workflow comes from a setup file answers =TODO: []= while its
+headings carry states. [[*org-config-todo]] is where the keywords a write to a
+heading is actually held to come from, and it is the tool to ask before a write:
+expect it to name states this answer does not.
+
 The values are the text Org reads off each line, with the space around it gone.
 Org honours a settings line wherever it stands, below the first heading
 included, and this answer reports it wherever it stands too; a =#+TODO:= inside
