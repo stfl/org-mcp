@@ -13,6 +13,7 @@
 (require 'json)
 (require 'find-func)
 (require 'org-persist)
+(require 'org-id)
 
 (setq mcp-server-lib-ert-server-id "org-mcp")
 
@@ -41,6 +42,83 @@ run is writing.  This run uses a `make-temp-file' directory under
 `temporary-file-directory', a name no other Emacs is given."
   (skip-unless noninteractive)
   (should (file-in-directory-p org-persist-directory temporary-file-directory)))
+
+;; Org saves its ID index to `org-id-locations-file' whenever a rescan finds an ID, and a tool
+;; rescans on every `id:' link the index does not know.  The default file lies in
+;; `user-emacs-directory': the checkout's `.eask/' under `eask test', but the user's own Emacs
+;; directory under `eask exec', so a test resolving such a link while any Org buffer holding an
+;; ID is open would write a temporary file's path into the user's index.  In batch the run keeps
+;; the index in a `make-temp-file' directory, deleted at exit, and refuses any save that would
+;; land outside `temporary-file-directory'.  An interactive Emacs running the suite keeps its
+;; own index, unguarded.
+(define-error 'org-mcp-test-id-index-outside-temp
+              "A test saved the ID index outside `temporary-file-directory'"
+              ;; A child of `quit', not of `error', only so that `ignore-errors', which the tools
+              ;; rescan in, cannot swallow it; a `with-local-quit' on the path would.  What fails
+              ;; the test is the condition's own name: ERT records a bare `quit' as QUIT, which a
+              ;; run does not count as unexpected, and any other condition as FAILED.  Signalling
+              ;; `quit' itself would let a refused save pass.
+              'quit)
+
+(defun org-mcp-test--refuse-id-index-outside-temp (save &rest args)
+  "Run SAVE on ARGS unless it would write the ID index outside the temp dir.
+SAVE is `org-id-locations-save'.  A save that would write `org-id-locations-file' outside
+`temporary-file-directory' writes nothing and signals
+`org-mcp-test-id-index-outside-temp', which fails the running test.
+The condition for writing is `org-id-locations-save''s own."
+  (if (and org-id-track-globally
+           org-id-locations
+           org-id-locations-file
+           (not (file-in-directory-p org-id-locations-file temporary-file-directory)))
+      (signal 'org-mcp-test-id-index-outside-temp (list org-id-locations-file))
+    (apply save args)))
+
+(when noninteractive
+  (let ((dir (make-temp-file "org-mcp-test-id-" t)))
+    (setq org-id-locations-file (expand-file-name ".org-id-locations" dir))
+    (add-hook 'kill-emacs-hook
+              (lambda ()
+                (when (file-directory-p dir)
+                  (delete-directory dir t)))
+              100))
+  (advice-add 'org-id-locations-save :around #'org-mcp-test--refuse-id-index-outside-temp))
+
+(ert-deftest org-mcp-test-id-index-is-private-to-the-run ()
+  "Org saves the ID index to a file under `temporary-file-directory'.
+The default file lies in `user-emacs-directory', which under `eask
+exec' is the user's own Emacs directory."
+  (skip-unless noninteractive)
+  (should (file-in-directory-p (default-value 'org-id-locations-file)
+                               temporary-file-directory)))
+
+(ert-deftest org-mcp-test-id-index-guard-fails-rather-than-quits ()
+  "The guard's condition fails a test, even signalled inside `ignore-errors'.
+ERT records a bare `quit' as QUIT, which a run does not count as
+unexpected, so a guard signalling `quit' would let a save outside the
+temp dir pass; one signalling an `error' would be swallowed by the
+`ignore-errors' the tools rescan in.  This test is expected to fail."
+  :expected-result :failed
+  (ignore-errors (signal 'org-mcp-test-id-index-outside-temp (list "/nope"))))
+
+(ert-deftest org-mcp-test-id-index-save-outside-temp-fails-the-test ()
+  "A save of the ID index outside the temp dir writes nothing and fails.
+The failure is signalled past `ignore-errors', the form the tools
+rescan in.  The target lies in a directory that does not exist, so
+even an unguarded save could not write it."
+  (skip-unless noninteractive)
+  (let* ((org-id-track-globally t)
+         (org-id-locations '(("/tmp/org-mcp-test.org" "org-mcp-test-id")))
+         (org-id-locations-file "/org-mcp-test-no-such-directory/.org-id-locations")
+         (signalled
+          (condition-case err
+              (progn
+                (ignore-errors
+                  (org-id-locations-save))
+                nil)
+            (org-mcp-test-id-index-outside-temp err))))
+    (should (equal signalled
+                   (list 'org-mcp-test-id-index-outside-temp org-id-locations-file)))
+    (should-not (file-exists-p org-id-locations-file))))
 
 ;;; Test Data Constants
 
@@ -2153,6 +2231,34 @@ without naming a file is about the configuration, not about a file."
     (org-mcp-test--get-tag-config-and-check
      "(\"work\" \"personal\")" "nil" "(\"work\")"
      "nil")))
+
+(ert-deftest org-mcp-test-tool-config-priority-reports-the-session-range ()
+  "org-config-priority reports each priority setting as its character.
+For every range the session sets, the answer is exactly the three
+characters `org-priority-highest', `org-priority-lowest' and
+`org-priority-default' hold, each under its own key.  The ranges
+cover Org's default A-C-B, a wider range, a default at either end,
+and one where no setting shares a character with Org's default; a
+tool swapping two keys, or answering Org's defaults instead of the
+session's, fails at least one of them.  Numeric priorities, which
+Org takes from values below 65, are outside this test."
+  (dolist (row '((?A ?C ?B ("A" "C" "B"))
+                 (?A ?E ?C ("A" "E" "C"))
+                 (?B ?D ?D ("B" "D" "D"))
+                 (?A ?Z ?A ("A" "Z" "A"))
+                 (?H ?M ?J ("H" "M" "J"))))
+    (pcase-let ((`(,highest ,lowest ,default (,h ,l ,d)) row))
+      (ert-info ((format "%c %c %c" highest lowest default)
+                 :prefix "Range: ")
+        (let ((org-priority-highest highest)
+              (org-priority-lowest lowest)
+              (org-priority-default default))
+          (org-mcp-test--with-enabled
+           (should
+            (equal
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool "org-config-priority" nil))
+             `((highest . ,h) (lowest . ,l) (default . ,d))))))))))
 
 (defun org-mcp-test--call-get-tag-candidates ()
   "Call org-config-tag-candidates and return the parsed `tags' vector."
@@ -10207,6 +10313,541 @@ and that close reaches the same log settings as a clock-out does."
        file-1 org-mcp-test--clock-add-expected-regex)
       (org-mcp-test--verify-file-matches
        file-2 org-mcp-test--clock-in-at-eleven-expected-regex))))
+
+;;; Continuous clocking and the clock configuration
+
+(ert-deftest org-mcp-test-tool-config-clock-reports-the-session-settings ()
+  "org-config-clock reports the four clock settings the session holds.
+For every combination below the answer is exactly the four keys, each
+carrying its setting: `org-clock-into-drawer' printed as Lisp, so t,
+nil, a drawer name and a count stay distinguishable;
+`org-clock-rounding-minutes' as a number; `org-clock-continuously' as
+a JSON boolean, true for any non-nil value; and
+`org-mcp-clock-continuous-threshold' as a number.  Each setting takes
+at least two values across the rows, so a key answering a constant
+fails one of them."
+  (dolist (row '((t 0 nil 30
+                    ((org_clock_into_drawer . "t")
+                     (org_clock_rounding_minutes . 0)
+                     (org_clock_continuously . :json-false)
+                     (org_mcp_clock_continuous_threshold . 30)))
+                 (nil 1 t 0
+                      ((org_clock_into_drawer . "nil")
+                       (org_clock_rounding_minutes . 1)
+                       (org_clock_continuously . t)
+                       (org_mcp_clock_continuous_threshold . 0)))
+                 ("LOGBOOK" 5 always 90
+                  ((org_clock_into_drawer . "\"LOGBOOK\"")
+                   (org_clock_rounding_minutes . 5)
+                   (org_clock_continuously . t)
+                   (org_mcp_clock_continuous_threshold . 90)))
+                 ("CLOCKS" 15 nil 1
+                  ((org_clock_into_drawer . "\"CLOCKS\"")
+                   (org_clock_rounding_minutes . 15)
+                   (org_clock_continuously . :json-false)
+                   (org_mcp_clock_continuous_threshold . 1)))
+                 (3 0 t 45
+                    ((org_clock_into_drawer . "3")
+                     (org_clock_rounding_minutes . 0)
+                     (org_clock_continuously . t)
+                     (org_mcp_clock_continuous_threshold . 45)))))
+    (pcase-let ((`(,drawer ,rounding ,continuously ,threshold ,expected)
+                 row))
+      (ert-info ((format "%S" (butlast row)) :prefix "Settings: ")
+        (let ((org-clock-into-drawer drawer)
+              (org-clock-rounding-minutes rounding)
+              (org-clock-continuously continuously)
+              (org-mcp-clock-continuous-threshold threshold))
+          (org-mcp-test--with-enabled
+           (should
+            (equal
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool "org-config-clock" nil))
+             expected))))))))
+
+(ert-deftest org-mcp-test-clock-continuous-threshold-defaults-to-thirty ()
+  "`org-mcp-clock-continuous-threshold' is 30 minutes unless customized.
+docs/clocking.org and the defcustom's docstring both name that default."
+  (should
+   (equal
+    (eval (car (get 'org-mcp-clock-continuous-threshold 'standard-value)) t)
+    30)))
+
+(defmacro org-mcp-test--at-time (time &rest body)
+  "Run BODY with `current-time' answering TIME, an Emacs time value.
+A clock-in reads the present through `current-time', so a call made
+in BODY clocks in at TIME wherever it has no start of its own."
+  (declare (indent 1) (debug t))
+  (let ((fixed-time (make-symbol "fixed-time")))
+    `(let ((,fixed-time ,time))
+       (cl-letf (((symbol-function 'current-time)
+                  (lambda () ,fixed-time)))
+         ,@body))))
+
+(defconst org-mcp-test--continuous-last-end
+  (encode-time (list 0 0 11 1 1 2026 nil -1 nil))
+  "2026-01-01 11:00 local time, where the previous clock ends.")
+
+(defconst org-mcp-test--continuous-content
+  (concat
+   "* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 11:00] =>  1:00\n"
+   ":END:\n"
+   "* TODO Task Two\n")
+  "A file whose only clock closed at 11:00, and a task to clock in to.")
+
+(defun org-mcp-test--continuous-expected-regex (start)
+  "Regex for the whole continuous-clock file after a clock-in at START.
+START is the \"HH:MM\" on 2026-01-01 the new CLOCK line opens at, on
+Task Two; Task One's closed clock is unchanged."
+  (concat
+   "\\`\\* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+   "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  1:00\n"
+   ":END:\n"
+   "\\* TODO Task Two\n"
+   ":LOGBOOK:\n"
+   "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} "
+   (regexp-quote start)
+   "\\]\n"
+   ":END:\n"
+   "\\'"))
+
+(defun org-mcp-test--check-continuous-clock-in
+    (continuously threshold elapsed start-time expected)
+  "Clock in to Task Two ELAPSED seconds after the 11:00 clock-out.
+The call runs with `org-clock-continuously' bound to CONTINUOUSLY and
+`org-mcp-clock-continuous-threshold' to THRESHOLD, and passes
+START-TIME as `start_time' when it is non-nil.  EXPECTED is the
+\"HH:MM\" the new clock has to open at: the response's `start' names
+it and the file holds exactly that one new CLOCK line."
+  (ert-info ((format "continuously %S, threshold %d, %ds after, start %S"
+                     continuously threshold elapsed start-time)
+             :prefix "Case: ")
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--continuous-content))
+      (let ((org-clock-continuously continuously)
+            (org-mcp-clock-continuous-threshold threshold))
+        (org-mcp-test--at-time
+            (time-add org-mcp-test--continuous-last-end elapsed)
+          (let ((result
+                 (org-mcp-test--call-clock-in
+                  (org-mcp-test--file-link test-file "*Task Two")
+                  start-time)))
+            (should (equal (alist-get 'success result) t))
+            (should (equal (alist-get 'clocked_in result) t))
+            (should (equal (alist-get 'heading result) "Task Two"))
+            (should
+             (string-match-p
+              (concat
+               "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} "
+               (regexp-quote expected) "\\]?\\'")
+              (alist-get 'start result)))
+            (org-mcp-test--verify-file-matches
+             test-file
+             (org-mcp-test--continuous-expected-regex expected))))))))
+
+(ert-deftest org-mcp-test-clock-in-continuous-starts-at-previous-end ()
+  "Under `org-clock-continuously' a clock-in starts where the last clock ended.
+For every moment within the threshold after the previous clock-out, the
+new clock opens at that clock-out, 11:00, and not at the present; any
+non-nil value of the setting does so.  With the setting nil the same
+moments open the clock at the present, so the setting, and not the
+fixture, decides the start.  Each moment is at least a minute after
+11:00, because a CLOCK line carries minutes and a clock-in within the
+same minute writes 11:00 either way."
+  (dolist (elapsed '(60 600 1799))
+    (dolist (continuously '(t always))
+      (org-mcp-test--check-continuous-clock-in
+       continuously 30 elapsed nil "11:00")))
+  (dolist (row '((60 "11:01") (600 "11:10") (1799 "11:29")))
+    (org-mcp-test--check-continuous-clock-in
+     nil 30 (car row) nil (cadr row))))
+
+(ert-deftest org-mcp-test-clock-in-continuous-threshold-boundary ()
+  "The threshold admits a gap of exactly its minutes and nothing longer.
+For thresholds of 2, 30 (the default) and 90 minutes, a clock-in one
+second short of the threshold and one exactly at it opens at the
+previous clock-out, 11:00, and one a second past it or a minute past
+it opens at the present.  The comparison is to the second, so the
+boundary itself continues the previous clock: the docstring's \"within
+this many minutes\" includes the last one.
+
+Every row lands in a minute other than 11:00, since a CLOCK line
+carries minutes and a present within 11:00's own minute writes 11:00
+whichever start is taken.  That leaves a threshold of 1 minute without
+its second-short row, 11:00:59, and a threshold of 0 with only a
+minute past it, which opens at the present; whether 0 continues a
+clock-out in the same second is not observable in the file."
+  (dolist (row '((2 119 "11:00") (2 120 "11:00")
+                 (2 121 "11:02") (2 180 "11:03")
+                 (30 1799 "11:00") (30 1800 "11:00")
+                 (30 1801 "11:30") (30 1860 "11:31")
+                 (90 5399 "11:00") (90 5400 "11:00")
+                 (90 5401 "12:30") (90 5460 "12:31")
+                 (1 60 "11:00") (1 61 "11:01") (1 120 "11:02")
+                 (0 60 "11:01")))
+    (pcase-let ((`(,threshold ,elapsed ,expected) row))
+      (org-mcp-test--check-continuous-clock-in
+       t threshold elapsed nil expected))))
+
+(ert-deftest org-mcp-test-clock-in-explicit-start-ignores-continuous ()
+  "A clock-in naming its start opens there, whatever continuity would say.
+Ten minutes after the 11:00 clock-out, well within the threshold, a
+start before the clock-out, between it and the present, at the
+present and after it each opens the clock at the start named, with
+`org-clock-continuously' t and nil alike.  None of them is 11:00, so a
+call that let continuity win would fail every row."
+  (dolist (continuously '(t nil))
+    (dolist (row '(("2026-01-01T10:30:00" "10:30")
+                   ("2026-01-01T11:05:00" "11:05")
+                   ("2026-01-01T11:10:00" "11:10")
+                   ("2026-01-01T12:00:00" "12:00")))
+      (org-mcp-test--check-continuous-clock-in
+       continuously 30 600 (car row) (cadr row)))))
+
+(ert-deftest org-mcp-test-clock-in-continuous-never-starts-in-the-future ()
+  "A clock-out still to come is not one a clock-in continues from.
+A closed clock can end after the present: written by hand, added for
+later, or synced from a machine whose clock runs ahead.  For every
+moment before its 11:00 end, a second, ten minutes or an hour early,
+the new clock opens at the present rather than at 11:00, which would
+leave a running clock that has not started yet."
+  (dolist (row '((-1 "10:59") (-600 "10:50") (-3600 "10:00")))
+    (org-mcp-test--check-continuous-clock-in
+     t 30 (car row) nil (cadr row))))
+
+(defconst org-mcp-test--continuous-past-and-future-cases
+  `(("in another allowed file"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:59] =>  0:59\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     ,(concat
+       "* TODO Later\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2027-01-01 Fri 09:00]--[2027-01-01 Fri 10:00] =>  1:00\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\] =>  0:59\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]\n"
+       ":END:\n"
+       "\\'"))
+    ("above it in the same drawer"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2027-01-01 Fri 09:00]--[2027-01-01 Fri 10:00] =>  1:00\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:59] =>  0:59\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     nil
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2027-01-01 [A-Za-z]\\{2,3\\} 09:00\\]"
+       "--\\[2027-01-01 [A-Za-z]\\{2,3\\} 10:00\\] =>  1:00\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\] =>  0:59\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]\n"
+       ":END:\n"
+       "\\'")))
+  "A clock-out at 10:59 beside one a year ahead, and where that one sits.
+Each entry is (DESCRIPTION CONTENT OTHER-CONTENT EXPECTED-REGEX), as
+in `org-mcp-test--continuous-latest-cases', with EXPECTED-REGEX the
+file after a clock-in to Task Two at 11:10 that continues from 10:59.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-skips-a-future-clock-out ()
+  "A clock-out still to come leaves the latest past one in force.
+At 11:10, with one clock ending at 10:59 and another ending in 2027,
+the new clock opens at 10:59 whether the future clock lies in another
+allowed file or above the past one in the same drawer.  A clock-in
+that took the latest end of all would find it in the future and open
+at 11:10."
+  (dolist (case org-mcp-test--continuous-past-and-future-cases)
+    (pcase-let ((`(,description ,content ,other ,expected) case))
+      (ert-info (description :prefix "Future clock-out: ")
+        (org-mcp-test--with-temp-org-files
+            ((test-file content)
+             (other-file (or other "* Nothing clocked here\n")))
+          (let ((org-clock-continuously t)
+                (org-mcp-clock-continuous-threshold 30))
+            (org-mcp-test--at-time
+                (time-add org-mcp-test--continuous-last-end 600)
+              (let ((result
+                     (org-mcp-test--call-clock-in
+                      (org-mcp-test--file-link test-file "*Task Two"))))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (string-match-p
+                  "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} 10:59\\]?\\'"
+                  (alist-get 'start result)))
+                (org-mcp-test--verify-file-matches test-file expected)
+                (should
+                 (equal (org-mcp-test--read-file other-file)
+                        (or other "* Nothing clocked here\n")))))))))))
+
+(defconst org-mcp-test--continuous-rounded-foreign-content
+  (concat
+   "* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:30]--[2026-01-01 Thu 10:50] =>  0:20\n"
+   ":END:\n"
+   "* TODO Elsewhere\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 11:00]--[2026-01-01 Thu 11:10] =>  0:10\n"
+   ":END:\n"
+   "* TODO Task Two\n")
+  "Clocks ending at 10:50 and at 11:10, and a task to clock in to.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-rounding-skips-a-foreign-future-end ()
+  "Rounding widens the present only for the clock this call closes.
+At 11:08 with `org-clock-rounding-minutes' 5 and no clock running,
+the present rounds to 11:10, but a clock ending at 11:10 that this
+call did not close still ends after the present.  It is passed over,
+and the new clock continues from 10:50."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--continuous-rounded-foreign-content))
+    (let ((org-clock-continuously t)
+          (org-mcp-clock-continuous-threshold 30)
+          (org-clock-rounding-minutes 5))
+      (org-mcp-test--at-time
+          (time-add org-mcp-test--continuous-last-end 480)
+        (let ((result
+               (org-mcp-test--call-clock-in
+                (org-mcp-test--file-link test-file "*Task Two"))))
+          (should (equal (alist-get 'success result) t))
+          (should
+           (string-match-p
+            "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\]?\\'"
+            (alist-get 'start result)))
+          (org-mcp-test--verify-file-matches
+           test-file
+           (concat
+            "\\`\\* TODO Task One\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+            "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:20\n"
+            ":END:\n"
+            "\\* TODO Elsewhere\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]"
+            "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\] =>  0:10\n"
+            ":END:\n"
+            "\\* TODO Task Two\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\]\n"
+            ":END:\n"
+            "\\'")))))))
+
+(defconst org-mcp-test--continuous-switch-cases
+  `(("no rounding" 0 -1200
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:30]\n"
+       ":END:\n"
+       "* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:20] =>  0:20\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:40\\] =>  0:10\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:40\\]\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:20\\] =>  0:20\n"
+       ":END:\n"
+       "\\'")
+     "10:40")
+    ("rounding to 5 minutes, the close rounded past the present" 5 480
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]\n"
+       ":END:\n"
+       "* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:30]--[2026-01-01 Thu 10:50] =>  0:20\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\] =>  1:10\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\]\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:20\n"
+       ":END:\n"
+       "\\'")
+     "11:10"))
+  "Switching from a running clock on Task One to Task Two.
+Each entry is (DESCRIPTION ROUNDING ELAPSED CONTENT EXPECTED-REGEX
+START): `org-clock-rounding-minutes' is ROUNDING, the present is
+ELAPSED seconds after 11:00, and EXPECTED-REGEX is the file after the
+switch, whose new clock opens at START.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-switch-continues-the-closed-clock ()
+  "A task switch under continuity opens where the running clock closed.
+A clock-in that names the running clock in clock_out closes it first,
+and that close is the latest clock-out, so the new clock opens at it
+and not at an older clock within the threshold.  At 10:40 unrounded
+both are 10:40.  At 11:08 with rounding to 5 minutes the close is
+written at 11:10, after the present, and the new clock opens there
+too rather than at the older 10:50: a clock-out this call wrote is
+never one still to come."
+  (dolist (case org-mcp-test--continuous-switch-cases)
+    (pcase-let ((`(,description ,rounding ,elapsed ,content ,expected ,start)
+                 case))
+      (ert-info (description :prefix "Switch: ")
+        (org-mcp-test--with-temp-org-files
+            ((test-file content))
+          (let ((org-clock-continuously t)
+                (org-mcp-clock-continuous-threshold 30)
+                (org-clock-rounding-minutes rounding))
+            (org-mcp-test--at-time
+                (time-add org-mcp-test--continuous-last-end elapsed)
+              (let ((result
+                     (org-mcp-test--call-clock-in
+                      (org-mcp-test--file-link test-file "*Task Two")
+                      nil nil
+                      (org-mcp-test--file-link test-file "*Task One"))))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (string-match-p
+                  (concat "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} "
+                          (regexp-quote start) "\\]?\\'")
+                  (alist-get 'start result)))
+                (org-mcp-test--verify-file-matches
+                 test-file expected)))))))))
+
+(defconst org-mcp-test--continuous-latest-cases
+  `(("in the second line of a drawer"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:50] =>  0:50\n"
+       "CLOCK: [2026-01-01 Thu 08:00]--[2026-01-01 Thu 11:00] =>  3:00\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     nil
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:50\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 08:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  3:00\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+       ":END:\n"
+       "\\'"))
+    ("on the heading clocked in to"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:50] =>  0:50\n"
+       ":END:\n"
+       "* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:55]--[2026-01-01 Thu 11:00] =>  0:05\n"
+       ":END:\n")
+     nil
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:50\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:55\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\] =>  0:05\n"
+       ":END:\n"
+       "\\'"))
+    ("in another allowed file"
+     ,(concat
+       "* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 10:00]--[2026-01-01 Thu 10:50] =>  0:50\n"
+       ":END:\n"
+       "* TODO Task Two\n")
+     ,(concat
+       "* TODO Elsewhere\n"
+       ":LOGBOOK:\n"
+       "CLOCK: [2026-01-01 Thu 09:00]--[2026-01-01 Thu 11:00] =>  2:00\n"
+       ":END:\n")
+     ,(concat
+       "\\`\\* TODO Task One\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:00\\]"
+       "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:50\n"
+       ":END:\n"
+       "\\* TODO Task Two\n"
+       ":LOGBOOK:\n"
+       "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]\n"
+       ":END:\n"
+       "\\'")))
+  "Where the latest clock-out sits, relative to the heading clocked in to.
+Each entry is (DESCRIPTION CONTENT OTHER-CONTENT EXPECTED-REGEX):
+CONTENT holds Task Two, OTHER-CONTENT is a second allowed file or nil,
+and EXPECTED-REGEX is CONTENT after a clock-in to Task Two at 11:00.
+In every one the latest clock ends at 11:00 and an earlier one at
+10:50, both within the threshold of 11:10.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-takes-the-latest-clock-out ()
+  "The previous clock is the one that ended last, wherever it is.
+At 11:10, with clocks ending at 10:50 and at 11:00 in the allowed
+files, the new clock opens at 11:00 whether that clock comes after the
+earlier one in the same drawer, sits on the heading being clocked in
+to, or lies in another allowed file.  A clock-in taking the first
+clock it meets, or the target heading's, would open at 10:50."
+  (dolist (case org-mcp-test--continuous-latest-cases)
+    (pcase-let ((`(,description ,content ,other ,expected) case))
+      (ert-info (description :prefix "Latest clock-out: ")
+        (org-mcp-test--with-temp-org-files
+            ((test-file content)
+             (other-file (or other "* Nothing clocked here\n")))
+          (let ((org-clock-continuously t)
+                (org-mcp-clock-continuous-threshold 30))
+            (org-mcp-test--at-time
+                (time-add org-mcp-test--continuous-last-end 600)
+              (let ((result
+                     (org-mcp-test--call-clock-in
+                      (org-mcp-test--file-link test-file "*Task Two"))))
+                (should (equal (alist-get 'success result) t))
+                (should
+                 (string-match-p
+                  "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]?\\'"
+                  (alist-get 'start result)))
+                (org-mcp-test--verify-file-matches test-file expected)
+                (should
+                 (equal (org-mcp-test--read-file other-file)
+                        (or other "* Nothing clocked here\n")))))))))))
 
 ;;; Tests for org-clock-active
 
@@ -22383,6 +23024,383 @@ nothing it can do instead."
         "array as its JSON text"
         (org-mcp-test--registered-tool-description tool))))))
 
+;;; An object from a client that cannot send one
+
+;; The same schema keeps a validating client from sending a JSON object,
+;; and four parameters take nothing else: `before' and `after' on
+;; org-node-set-properties, `properties' on org-node-create and
+;; `before_planning' on org-node-set-todo.  None of them takes a string
+;; that is not blank, so text whose first non-blank character is a
+;; brace can only be the object's text.  The claim is that the text of
+;; an object means that object, for every object: each test here sends
+;; a set of maps both ways, refused ones among them, and compares what
+;; the client reads and what the file holds.
+
+(defun org-mcp-test--object-call-outcome (content tool params)
+  "Call TOOL on a fresh file holding CONTENT and return the outcome.
+PARAMS is a function of the file returning the call's parameters.
+The outcome is (REFUSED TEXT IMAGE): whether the call was refused,
+the text the client reads with the file's path and name written FILE, so that
+two files' outcomes compare, and what the file holds afterwards."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (org-log-repeat nil)
+        (org-log-done nil))
+    (org-mcp-test--with-temp-org-files ((file content))
+      (let* ((response
+              (mcp-server-lib-process-jsonrpc-parsed
+               (mcp-server-lib-create-tools-call-request
+                tool 1 (funcall params file))
+               mcp-server-lib-ert-server-id))
+             (result (alist-get 'result response))
+             (text
+              (if result
+                  (alist-get 'text (aref (alist-get 'content result) 0))
+                (alist-get 'message (alist-get 'error response)))))
+        (list
+         (eq (alist-get 'isError result) t)
+         (seq-reduce
+          (lambda (text name)
+            (replace-regexp-in-string (regexp-quote name) "FILE" text t t))
+          (list
+           file (abbreviate-file-name file) (file-name-nondirectory file))
+          text)
+         (org-mcp-test--read-file file))))))
+
+(defun org-mcp-test--object-spellings (map)
+  "Return the spellings a client may send MAP, an alist, in.
+The first is MAP itself, which the request encodes as a JSON object;
+the rest are that object's JSON text, bare and behind blank space."
+  (let ((text (json-encode map)))
+    (list map text (concat " \n\t" text))))
+
+(defun org-mcp-test--assert-object-spellings-agree
+    (content tool params maps)
+  "Assert every spelling of each of MAPS gets the object\\='s outcome.
+PARAMS is a function of the file and a spelling of one of MAPS
+returning the call's parameters; TOOL is called on a fresh file
+holding CONTENT for each.  The outcome of the object is the one each
+text spelling must reproduce, refused or not.  Return the outcomes
+of the objects, in the order of MAPS."
+  (mapcar
+   (lambda (map)
+     (let* ((spellings (org-mcp-test--object-spellings map))
+            (expected
+             (org-mcp-test--object-call-outcome
+              content tool
+              (lambda (file) (funcall params file (car spellings))))))
+       (dolist (spelling (cdr spellings))
+         (should
+          (equal
+           (org-mcp-test--object-call-outcome
+            content tool (lambda (file) (funcall params file spelling)))
+           expected)))
+       expected))
+   maps))
+
+(ert-deftest org-mcp-test-object-text-set-properties ()
+  "`before' and `after' sent as text write what the objects write.
+Every pairing of the two spellings is sent — both as text, either one
+alone — over maps covering each value a drawer line takes: a string,
+a number, true and false, \"\", null that takes a line away, a string
+that itself begins with a brace, which is written as it stands, and
+a special property, which is refused as it is in an object."
+  (let* ((bare org-mcp-test--content-bare-todo)
+         (props org-mcp-test--content-todo-with-props)
+         (cases
+          `((,bare "*Simple Task" ((Effort)) ((Effort . "1:00")))
+            (,bare
+             "*Simple Task"
+             ((A) (B) (C) (D))
+             ((A . 2) (B . t) (C . :json-false) (D . "")))
+            (,bare "*Simple Task" ((Foo)) ((Foo . "{not json}")))
+            (,props
+             "*Task with Properties"
+             ((EFFORT . "1:00") (Owner))
+             ((EFFORT) (Owner . "me")))
+            (,props "*Task with Properties" ((EFFORT . "2:00"))
+                    ((EFFORT . "3:00")))
+            (,bare "*Simple Task" ((TODO)) ((TODO . "DONE"))))))
+    (let ((refused '()))
+      (dolist (case cases)
+        (pcase-let ((`(,content ,search ,before ,after) case))
+          (let* ((params
+                  (lambda (file before after)
+                    `((link . ,(org-mcp-test--file-link file search))
+                      (before . ,before)
+                      (after . ,after))))
+                 (expected
+                  (org-mcp-test--object-call-outcome
+                   content "org-node-set-properties"
+                   (lambda (file) (funcall params file before after)))))
+            (push (car expected) refused)
+            (dolist (before-spelling
+                     (org-mcp-test--object-spellings before))
+              (dolist (after-spelling
+                       (org-mcp-test--object-spellings after))
+                (should
+                 (equal
+                  (org-mcp-test--object-call-outcome
+                   content "org-node-set-properties"
+                   (lambda (file)
+                     (funcall params file before-spelling after-spelling)))
+                  expected)))))))
+      ;; The last two are refused, a stale assertion and a special
+      ;; property, and the rest are written.
+      (should (equal (nreverse refused) '(nil nil nil nil t t))))
+    ;; The outcomes compared above are the ones an object gets, so
+    ;; each shape is pinned once in its own words as well.
+    (pcase-let ((`(,refused ,text ,image)
+                 (org-mcp-test--object-call-outcome
+                  bare "org-node-set-properties"
+                  (lambda (file)
+                    `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+                      (before . "{\"Effort\": null, \"Foo\": null}")
+                      (after . "{\"Effort\": \"1:00\", \"Foo\": \"{x}\"}"))))))
+      (should-not refused)
+      (let ((result (json-read-from-string text)))
+        (should (equal (alist-get 'properties_set result) ["Effort" "Foo"]))
+        (should (equal (alist-get 'properties_deleted result) []))
+        (should (equal (alist-get 'before result) '((Effort) (Foo)))))
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Simple Task\n"
+                ":PROPERTIES:\n"
+                ":Effort: +1:00\n"
+                ":Foo: +{x}\n"
+                ":END:\n"
+                "Task body text.\n?\\'")
+        image)))
+    (pcase-let ((`(,refused ,text ,image)
+                 (org-mcp-test--object-call-outcome
+                  props "org-node-set-properties"
+                  (lambda (file)
+                    `((link
+                       . ,(org-mcp-test--file-link
+                           file "*Task with Properties"))
+                      (before . "{\"EFFORT\": \"1:00\"}")
+                      (after . "{\"EFFORT\": null}"))))))
+      (should-not refused)
+      (should
+       (equal (alist-get 'properties_deleted (json-read-from-string text))
+              ["EFFORT"]))
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Task with Properties\n"
+                ":PROPERTIES:\n"
+                ":CATEGORY: work\n"
+                ":END:\n"
+                "Some body.\n?\\'")
+        image)))))
+
+(ert-deftest org-mcp-test-object-text-create-properties ()
+  "`properties' sent as text gives the new node what the object gives.
+The maps cover a string, a number, true and false, \"\", null, which
+writes nothing on a new node, an ID, which makes the returned link an
+id: link, and a special property, which is refused."
+  (let ((pinned
+         (org-mcp-test--assert-object-spellings-agree
+          org-mcp-test--content-bare-todo "org-node-create"
+          (lambda (file properties)
+            `((title . "New Task")
+              (todo . "TODO")
+              (parent . ,(concat "file:" file))
+              (properties . ,properties)))
+          '(((Effort . "1:00") (Rank . 3))
+            ((Done . t) (Open . :json-false) (Blank . ""))
+            ((Gone) (Kept . "k"))
+            ((ID . "0b5e7cc2-2c55-4d8c-9d4e-7d0c3e2d4a11"))
+            ((TAGS . "x"))))))
+    (pcase-let ((`(,refused ,text ,image) (car pinned)))
+      (should-not refused)
+      (should (string-match-p "\"success\":true" text))
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO New Task\n"
+                ":PROPERTIES:\n"
+                ":Effort: +1:00\n"
+                ":Rank: +3\n"
+                ":END:\n"
+                "\\* TODO Simple Task\n"
+                "Task body text.\n?\\'")
+        image)))
+    (pcase-let ((`(,refused ,text ,_image) (nth 3 pinned)))
+      (should-not refused)
+      (should
+       (equal
+        (alist-get 'link (json-read-from-string text))
+        "id:0b5e7cc2-2c55-4d8c-9d4e-7d0c3e2d4a11")))
+    (should (car (nth 4 pinned)))))
+
+(ert-deftest org-mcp-test-object-text-before-planning ()
+  "`before_planning' sent as text guards what the object guards.
+A map naming both dates lets the repeat through, one leaving a date
+out asserts it holds nothing and is refused as stale, and one naming
+a field the call does not assert is refused by name."
+  (let ((pinned
+         (org-mcp-test--assert-object-spellings-agree
+          org-mcp-test--content-task-both-repeat "org-node-set-todo"
+          (lambda (file planning)
+            `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+              (before . "TODO")
+              (after . "DONE")
+              (before_planning . ,planning)))
+          '(((scheduled . "<2026-01-01 Thu +1w>")
+             (deadline . "<2026-01-08 Thu +2w>"))
+            ((scheduled . "<2026-01-01 Thu +1w>"))
+            ((closed . "[2026-01-01 Thu]"))))))
+    (pcase-let ((`(,refused ,_text ,image) (car pinned)))
+      (should-not refused)
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-08 [^ >]+ \\+1w> "
+                "DEADLINE: <2026-01-22 [^ >]+ \\+2w>")
+        image)))
+    (should (car (nth 1 pinned)))
+    (should (car (nth 2 pinned)))))
+
+(ert-deftest org-mcp-test-object-text-blanks-keep-their-meaning ()
+  "Every blank spelling of an object parameter means what it meant.
+null, false, \"\", [] and {} are the parameter left out, and so is the
+text of an empty object, with or without blank space around it: no
+properties on a new node, a missing `before' or `after', and no
+planning assertion, which a repeating heading refuses."
+  (let ((blanks (list nil :json-false "" [] (make-hash-table) "{}" " { } ")))
+    (let ((unsent
+           (org-mcp-test--object-call-outcome
+            org-mcp-test--content-bare-todo "org-node-create"
+            (lambda (file)
+              `((title . "New Task") (parent . ,(concat "file:" file)))))))
+      (should-not (car unsent))
+      (should-not (string-match-p ":PROPERTIES:" (nth 2 unsent)))
+      (dolist (blank blanks)
+        (should
+         (equal
+          (org-mcp-test--object-call-outcome
+           org-mcp-test--content-bare-todo "org-node-create"
+           (lambda (file)
+             `((title . "New Task")
+               (parent . ,(concat "file:" file))
+               (properties . ,blank))))
+          unsent))))
+    (dolist (blank blanks)
+      (dolist (side '(before after))
+        (let ((outcome
+               (org-mcp-test--object-call-outcome
+                org-mcp-test--content-bare-todo "org-node-set-properties"
+                (lambda (file)
+                  `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+                    (before . ,(if (eq side 'before) blank '((Effort))))
+                    (after
+                     . ,(if (eq side 'after) blank '((Effort . "1:00")))))))))
+          (should (car outcome))
+          (should
+           (equal (nth 1 outcome)
+                  (format "Missing required parameter: %s" side)))
+          (should
+           (equal (nth 2 outcome) org-mcp-test--content-bare-todo)))))
+    (let ((unsent
+           (org-mcp-test--object-call-outcome
+            org-mcp-test--content-task-both-repeat "org-node-set-todo"
+            (lambda (file)
+              `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+                (before . "TODO")
+                (after . "DONE"))))))
+      (should (car unsent))
+      (should
+       (string-match-p "\\`before_planning is required here" (nth 1 unsent)))
+      (dolist (blank blanks)
+        (should
+         (equal
+          (org-mcp-test--object-call-outcome
+           org-mcp-test--content-task-both-repeat "org-node-set-todo"
+           (lambda (file)
+             `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+               (before . "TODO")
+               (after . "DONE")
+               (before_planning . ,blank))))
+          unsent))))))
+
+(defconst org-mcp-test--object-params
+  `(("org-node-set-properties" "after" "after must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . ((Effort)))
+          (after . ,value))))
+    ("org-node-set-properties" "before" "before must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . ,value)
+          (after . ((Effort . "1:00"))))))
+    ("org-node-create" "properties" "properties must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((title . "New Task")
+          (parent . ,(concat "file:" file))
+          (properties . ,value))))
+    ("org-node-set-todo" "before_planning"
+     "before_planning must be an object naming"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . "TODO")
+          (after . "DONE")
+          (before_planning . ,value)))))
+  "The parameters that take a JSON object, one entry each.
+An entry holds the tool, the parameter's name, the refusal a value
+that is not an object gets, and a function of a file and a value
+returning a call to Simple Task in that file carrying the value
+there.")
+
+(ert-deftest org-mcp-test-object-text-other-strings-still-refused ()
+  "A string that does not open an object is refused as it was.
+Only a brace is read as an object\\='s text, so the text of any other
+JSON value — null, a string, an array, a number — and blank space
+alone reach the parameter\\='s own refusal unchanged."
+  (dolist (param org-mcp-test--object-params)
+    (pcase-let ((`(,tool ,_name ,refusal ,params) param))
+      (dolist (value '("x" "  " "null" "\"{}\"" "[\"Effort\"]" "1" "}"))
+        (org-mcp-test--with-temp-org-files
+            ((file org-mcp-test--content-bare-todo))
+          (org-mcp-test--call-tool-refused
+           tool (funcall params file value)
+           (concat "\\`" (regexp-quote refusal))
+           file))))))
+
+(ert-deftest org-mcp-test-object-text-malformed-refused ()
+  "Text that opens an object and is not one is refused by parameter.
+The refusal names the parameter and echoes the text, and the file is
+left as it was."
+  (dolist (param org-mcp-test--object-params)
+    (pcase-let ((`(,tool ,name ,_refusal ,params) param))
+      (dolist (broken
+               '("{"
+                 "{\"Effort\":"
+                 "{\"Effort\": \"1:00\"} trailing"
+                 "{\"Effort\": \"1:00\"}}"
+                 " {Effort: 1}"
+                 "{\"Effort\": \"1:00\",}"))
+        (org-mcp-test--with-temp-org-files
+            ((file org-mcp-test--content-bare-todo))
+          (should
+           (equal
+            (org-mcp-test--refusal-message
+             tool (funcall params file broken))
+            (format "%s begins with { but is not a JSON object: %s"
+                    name broken)))
+          (should
+           (equal
+            (org-mcp-test--read-file file)
+            org-mcp-test--content-bare-todo)))))))
+
+(ert-deftest org-mcp-test-object-text-said-in-the-tool-description ()
+  "A tool taking an object parameter says the text form is taken."
+  (org-mcp-test--with-enabled
+    (dolist (tool
+             '("org-node-set-properties" "org-node-create" "org-node-set-todo"))
+      (should
+       (string-match-p
+        "object as its JSON text"
+        (org-mcp-test--registered-tool-description tool))))))
+
 ;;; Reading a subtree in one call
 
 ;; `depth' expands that many generations of children in place, and the
@@ -27343,6 +28361,262 @@ advertisement a client can obey and one it cannot: the line is
        test-file "\\`\\* TODO Task\nBody\\.\n\\'")
       values)))
 
+;; A description advertises too, and the advertisement a client is
+;; likeliest to copy is the one that takes a value away: "null takes
+;; the timestamp away", "[] leaves the node carrying no tags".  The
+;; spellings of nothing -- null, "", [], {} and false -- mean
+;; different things at different positions, so a description naming
+;; the wrong one sends a client into a refusal that its own summary
+;; told it to provoke.
+;;
+;; What is measured has two halves.  A tool with an entry in
+;; `org-mcp-test--clearing-writes' is guarded whatever its wording:
+;; its descriptions have to go on naming a clearing value the phrases
+;; below find, and every value they name is sent.  A tool without an
+;; entry is found only when a sentence of its fits one of the phrases
+;; below, since a value is recognised by the words around it: a new
+;; tool advertising a clearing value in other words is not seen.
+;;
+;; A value found in a parameter's schema description is known to be
+;; that parameter's, and has to be `after', the one every fixture
+;; writes.  A value found in the tool's own description carries no
+;; parameter, since that text names its parameters in prose, and is
+;; sent to `after' on the strength of the phrase alone.
+
+(defconst org-mcp-test--clearing-advertisement-regexps
+  (let ((value "\\([Nn]ull\\|[Ff]alse\\|\"\"\\|\\[\\]\\|{}\\)")
+        (before "\\(?:\\`\\|[ (,:]\\)"))
+    (list
+     ;; "null takes the timestamp away", "A null after leaves the node
+     ;; with no keyword", "[] leaves the node carrying no tags"
+     (concat
+      before value " \\(?:after \\)?"
+      "\\(?:takes? [^.;]*?\\_<\\(?:away\\|off\\)\\_>"
+      "\\|leaves? [^.;]*?\\_<\\(?:none\\|nothing\\|no\\)\\_>"
+      "\\|\\(?:empties\\|clears\\|removes\\)\\_>\\)")
+     ;; "or null to leave it with none"
+     (concat
+      before value " to \\(?:leave\\|take\\|clear\\|remove\\|empty\\)\\_>")
+     ;; "a removal is asked for again with null"
+     (concat "\\_<removal\\_>[^.;]*? with " value)
+     ;; "Example - taking the keyword off: {... \"after\": null}"
+     (concat
+      "Example - \\(?:taking\\|leaving\\|removing\\|clearing\\|emptying\\)"
+      "[^:]*: {[^}]*\"after\": " value)))
+  "Regexps whose first group is a value a description says clears a field.
+Each is matched against a description with its whitespace folded to
+single spaces, since a description wraps its sentences over lines.
+Null and false are matched capitalised too, since a sentence may
+open on one.")
+
+(defun org-mcp-test--clearing-values-in (text)
+  "Return the values TEXT tells a client to send to clear a field.
+Each is spelled as the JSON TEXT names it, a null or false opening a
+sentence written in the lower case JSON spells it in.  The regexps' word
+boundaries are read under the standard syntax table, since the
+current buffer's would make them mean whatever that buffer's mode
+says a word is."
+  (let ((case-fold-search nil)
+        (text (replace-regexp-in-string "[ \t\n]+" " " text))
+        (values nil))
+    (with-syntax-table (standard-syntax-table)
+      (dolist (regexp org-mcp-test--clearing-advertisement-regexps)
+        (let ((start 0))
+          (while (string-match regexp text start)
+            (push (downcase (match-string 1 text)) values)
+            (setq start (match-end 0))))))
+    (delete-dups (nreverse values))))
+
+(defun org-mcp-test--clearing-advertisements ()
+  "Return (TOOL . VALUES) for each published tool advertising a clearing value.
+The descriptions are those of every tool tools/list publishes with a
+view configured, so the list is every tool there is.  Both the tool's
+description and each parameter's description in its input schema are
+read, because a client may plan from either.
+
+Each of VALUES is (PARAMETER . TEXT): TEXT the value as JSON, and
+PARAMETER the symbol of the parameter whose schema description named
+it, or nil when the tool's own description did."
+  (org-mcp-test--with-views
+    (delq
+     nil
+     (mapcar
+      (lambda (tool)
+        (let ((values
+               (delete-dups
+                (mapcan
+                 (lambda (source)
+                   (mapcar
+                    (lambda (text) (cons (car source) text))
+                    (org-mcp-test--clearing-values-in (cdr source))))
+                 (cons
+                  (cons nil (alist-get 'description tool))
+                  (delq
+                   nil
+                   (mapcar
+                    (lambda (parameter)
+                      (let ((text
+                             (alist-get 'description (cdr parameter))))
+                        (and text (cons (car parameter) text))))
+                    (alist-get
+                     'properties (alist-get 'inputSchema tool)))))))))
+          (and values (cons (alist-get 'name tool) values))))
+      (org-mcp-test--registered-tools)))))
+
+(defun org-mcp-test--advertised-clearing-accepted
+    (tool content search params expected)
+  "Assert TOOL clears a field of CONTENT, leaving the file matching EXPECTED.
+SEARCH names the heading the call's link reaches, or is nil for a
+link to the whole file.  PARAMS is a function of that link returning
+the arguments."
+  (org-mcp-test--with-temp-org-files
+      ((test-file content))
+    (let* ((link
+            (if search
+                (org-mcp-test--file-link test-file search)
+              (concat "file:" (abbreviate-file-name test-file))))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool tool (funcall params link)))))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches test-file expected))))
+
+(defun org-mcp-test--clearing-planning (tool keyword value)
+  "Assert TOOL takes the KEYWORD timestamp away when after is VALUE."
+  (org-mcp-test--advertised-clearing-accepted
+   tool
+   (concat "* TODO Task\n" keyword ": <2026-03-27 Fri>\nBody.\n")
+   "*Task"
+   (lambda (link)
+     `((link . ,link) (before . "<2026-03-27 Fri>") (after . ,value)))
+   "\\`\\* TODO Task\nBody\\.\n\\'"))
+
+(defconst org-mcp-test--clearing-writes
+  `(("org-node-set-todo"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-todo" "* TODO Task\nBody.\n" "*Task"
+           (lambda (link)
+             `((link . ,link) (before . "TODO") (after . ,value)))
+           "\\`\\* Task\nBody\\.\n\\'")))
+    ("org-node-set-scheduled"
+     . ,(lambda (value)
+          (org-mcp-test--clearing-planning
+           "org-node-set-scheduled" "SCHEDULED" value)))
+    ("org-node-set-deadline"
+     . ,(lambda (value)
+          (org-mcp-test--clearing-planning
+           "org-node-set-deadline" "DEADLINE" value)))
+    ("org-node-set-priority"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-priority" "* TODO [#A] Task\nBody.\n" "*Task"
+           (lambda (link)
+             `((link . ,link) (before . "A") (after . ,value)))
+           "\\`\\* TODO Task\nBody\\.\n\\'")))
+    ("org-node-set-properties"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-properties"
+           "* Task\n:PROPERTIES:\n:FOO: bar\n:KEEP: yes\n:END:\nBody.\n"
+           "*Task"
+           (lambda (link)
+             `((link . ,link)
+               (before . ((FOO . "bar")))
+               (after . ((FOO . ,value)))))
+           "\\`\\* Task\n *:PROPERTIES:\n *:KEEP: +yes\n *:END:\nBody\\.\n\\'")))
+    ("org-node-set-content"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-content" "* Task\nFirst line.\nSecond line.\n"
+           "*Task"
+           ;; The digest names the body entire, so the value empties
+           ;; the field rather than cutting a part of it out.
+           (lambda (link)
+             `((link . ,link)
+               (before . ,(org-mcp-test--content-digest-of link))
+               (after . ,value)))
+           ;; Org keeps the line break that ended the body.
+           "\\`\\* Task\n\n?\\'")))
+    ("org-node-set-tags"
+     . ,(lambda (value) (org-mcp-test--advertised-tags-accepted value nil)))
+    ("org-file-set-setting"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-file-set-setting" "#+TITLE: Old\n* Task\n" nil
+           (lambda (link)
+             `((link . ,link)
+               (setting . "TITLE")
+               (before . ["Old"])
+               (after . ,value)))
+           "\\`\\* Task\n\\'"))))
+  "The write tools a description may name a clearing value for, and how.
+Each entry is (TOOL . FUNCTION): FUNCTION sends the value it is given
+as TOOL's `after' -- inside the property map, for
+org-node-set-properties -- to a field that holds something, and
+asserts the call succeeds and the field is left holding nothing.")
+
+(defun org-mcp-test--advertisement-clearing-values ()
+  "The values the published descriptions name for taking a value away.
+Every tool naming one has an entry in `org-mcp-test--clearing-writes',
+so a description naming a clearing value on a tool nobody has asked
+about fails here, and every entry there still names one, so a
+reworded description whose value the regexps stop finding fails too.
+Each value goes to its tool as the JSON it is spelled in."
+  (let ((advertised (org-mcp-test--clearing-advertisements))
+        (asserted nil))
+    (dolist (entry org-mcp-test--clearing-writes)
+      (ert-info ((car entry) :prefix "Names no clearing value: ")
+        (should (assoc (car entry) advertised))))
+    (pcase-dolist (`(,tool . ,values) advertised)
+      (ert-info (tool :prefix "Names a clearing value: ")
+        (let ((clear
+               (alist-get tool org-mcp-test--clearing-writes nil nil #'equal)))
+          (should clear)
+          (pcase-dolist (`(,parameter . ,text) values)
+            (ert-info ((format "%s in %s" text (or parameter "description"))
+                       :prefix "Value: ")
+              ;; A schema description says which parameter it is
+              ;; about, and every fixture writes `after'.
+              (should (memq parameter '(nil after)))))
+          (dolist (text (delete-dups (mapcar #'cdr values)))
+            (ert-info (text :prefix "Value: ")
+              (funcall clear
+                       (json-parse-string
+                        text
+                        :null-object nil
+                        :false-object :json-false)))
+            (push (cons tool text) asserted)))))
+    asserted))
+
+(ert-deftest org-mcp-test-clearing-values-are-read-out-of-each-phrase ()
+  "Each phrase a description advertises a clearing value in is read.
+The census over the published descriptions finds a value only where
+its phrase is one these regexps know, so each shape is pinned here
+against a sentence of its own, a null or false opening a sentence
+among them, which the census hands on in the lower case JSON spells
+it in.  A sentence naming a spelling of nothing without saying it
+clears anything is read as naming no value."
+  (dolist (row
+           '(("null takes the timestamp away, guarded by before" "null")
+             ("A null after leaves the node with no keyword" "null")
+             ("[] leaves the node carrying no tags of its own" "[]")
+             ("an after of \"\" leaves nothing in\n  its place" "\"\"")
+             ("or null to leave it with none" "null")
+             ("Null takes the property line away" "null")
+             ("False empties the field" "false")
+             ("{} clears the map" "{}")
+             ("a removal is asked for again with null" "null")
+             ("Example - taking the keyword off, so it stops being a task:
+  {\"link\": \"id:abc\", \"before\": \"TODO\", \"after\": null}"
+              "null")
+             ("Null, false and [] are the parameter left out")
+             ("\"\" is no date and is refused, and false is the parameter left out")
+             ("Empty string asserts the node has no priority")))
+    (ert-info ((car row) :prefix "Sentence: ")
+      (should
+       (equal (org-mcp-test--clearing-values-in (car row)) (cdr row))))))
+
 (defconst org-mcp-test--advertisements
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
     ("the date under unread text"
@@ -27369,7 +28643,9 @@ advertisement a client can obey and one it cannot: the line is
      . org-mcp-test--advertisement-array-as-json-text)
     ("the tag sets a write takes" . org-mcp-test--advertisement-tag-sets)
     ("the settings a file write takes"
-     . org-mcp-test--advertisement-file-settings))
+     . org-mcp-test--advertisement-file-settings)
+    ("the values a description names for taking a value away"
+     . org-mcp-test--advertisement-clearing-values))
   "Every advertisement this suite guards, and how to provoke it.
 Each entry is (WHAT . FUNCTION).  FUNCTION provokes the
 advertisement from the running server, reads the values out of the
@@ -27584,7 +28860,7 @@ functions that modify the buffer"
     "Failed to refresh buffer for file %s: %s. Check your Emacs hooks (`before-revert-hook', \
 `after-revert-hook', `revert-buffer-function')"
     "The change was made%s, but no link to it could be made: %s"
-    "%s begins with [ but is not a JSON array: %s"
+    "%s begins with %s but is not a JSON %s: %s"
     "%s must be true or false: %s"
     "depth must be a whole number of generations, not: %s"
     "org-store-link changed %s while linking to it; org-mcp creates no identifiers, so advice \
