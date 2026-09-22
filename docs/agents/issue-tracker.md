@@ -26,27 +26,36 @@ never a session.
 ## Umbrella issues
 
 A body of work larger than one ticket is an umbrella issue holding the
-publishable spec, with a `## Tickets` checklist naming its children in
-dependency order. Each child carries a `Part of #<umbrella>` line and a
-`**Blocked by:** #<n>, #<n>` line. A child with no open blocker is startable.
+publishable spec. Its children are its **sub-issues**, linked in dependency
+order. GitHub lists them under the umbrella with a completed-of-total count, and
+shows each child's parent, so the sub-issue list is the one record of what a set
+contains and how far it has got. Each child names its blockers as a
+`**Blocked by:** #<n>, #<n>` line in its own body; a child with no open blocker
+is startable.
 
-Two umbrellas are open:
+One umbrella is open: #2, write safety — a write says what it believed it was
+changing.
 
-| Issue | Covers |
-|---|---|
-| #1 | Restructure the API surface around one node — native Org links replace the invented address formats |
-| #2 | Write safety — a write says what it believed it was changing |
+Adding a ticket to a set means creating the issue, linking it as a sub-issue,
+and naming its blockers in its body. The link takes the issue's database `id`,
+not its number, and appends to the list, so link a set in dependency order:
 
-Adding a ticket to a set means creating the issue, adding a line to the
-umbrella's checklist, and naming its blockers in its own body. The three places
-are the whole mechanism; there is no sub-issue API in use here.
+```sh
+id=$(gh api repos/stfl/org-mcp/issues/<n> --jq .id)
+gh api -X POST repos/stfl/org-mcp/issues/<umbrella>/sub_issues -F sub_issue_id="$id"
+gh api repos/stfl/org-mcp/issues/<umbrella>/sub_issues --paginate --jq '.[] | "#\(.number) \(.state)"'
+```
+
+The umbrella's body carries the spec. Its `## Tickets` section says the children
+are its sub-issues and holds only what a list cannot: which tickets are one
+decision, what the work found, what was filed alongside and left out of the set.
 
 A ticket closes in the step that merges its branch: `gh issue close <n>
---comment` naming the merge commit, and its line in the umbrella's checklist
-ticked in the same pass. The merge commit's message carries `Closes #<n>` too,
-so GitHub closes a ticket whose manual close was missed once the commit reaches
-`main`. A branch named for its ticket — `fix/91-id-locations-leak` — keeps the
-number in front of whoever merges it.
+--comment` naming the merge commit, and the umbrella's count follows. The merge
+commit's message carries `Closes #<n>` too, so GitHub closes a ticket whose
+manual close was missed once the commit reaches `main`. A branch named for its
+ticket — `fix/91-id-locations-leak` — keeps the number in front of whoever
+merges it.
 
 ## Blocking
 
