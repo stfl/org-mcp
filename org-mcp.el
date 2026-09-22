@@ -158,9 +158,19 @@ end the walk -- so raising it raises what one call may return."
 
 (defcustom org-mcp-clock-continuous-threshold 30
   "Max minutes since last clock-out for continuous clocking.
-When `org-clock-continuously' is non-nil and a new clock-in occurs
-within this many minutes of the last clock-out, the new clock starts
-at the previous clock's end time."
+When `org-clock-continuously' is non-nil and a new clock-in without
+an explicit start occurs within this many minutes of the last
+clock-out, the new clock starts at that clock-out rather than at the
+current time.  A gap of exactly this many minutes still continues;
+one a second longer does not.
+
+The last clock-out is the latest end of a closed clock in the allowed
+files at or before the current time: a clock ending later is passed
+over, and the one before it continues.  The end of a running clock
+the same call closes counts, even where rounding writes it after the
+current time.  An explicit start is taken as given.  Whichever start
+is chosen is written through `org-clock-rounding-minutes' like any
+other, so under rounding it can differ from the previous clock's end."
   :type 'integer
   :group 'org-mcp)
 
@@ -3070,11 +3080,13 @@ takes it for still running."
        (org-mcp--saved-then-failed-error
         "The running clock was closed and saved" err)))))
 
-(defun org-mcp--clock-find-last-closed ()
+(defun org-mcp--clock-find-last-closed (&optional not-after)
   "Return the most recent closed-clock end time across allowed files.
 Walks clock elements via `org-element-map' and picks the latest
-`:value' end timestamp.  Returns an Emacs time, or nil when no closed
-clocks exist."
+`:value' end timestamp.  When NOT-AFTER, an Emacs time, is non-nil, a
+clock ending after it is passed over, so the answer is the latest end
+at or before NOT-AFTER.  Returns an Emacs time, or nil when no closed
+clock qualifies."
   (let ((latest nil))
     (dolist (file (org-mcp--expanded-allowed-files))
       (when (file-exists-p file)
@@ -3086,6 +3098,9 @@ clocks exist."
                (let ((end-time
                       (org-mcp--clock-element-end-time clock)))
                  (when (and end-time
+                            (not
+                             (and not-after
+                                  (time-less-p not-after end-time)))
                             (or (not latest)
                                 (time-less-p latest end-time)))
                    (setq latest end-time)))))))))
@@ -7958,7 +7973,18 @@ MCP Parameters:
     ;; Determine start time
     (let* ((continuous-start
             (when (and org-clock-continuously (not explicit-start))
-              (let ((last-end (org-mcp--clock-find-last-closed)))
+              ;; A clock-out still to come is not one this clock-in
+              ;; follows, so the latest one at or before the present
+              ;; is.  Where the close above wrote the running clock's
+              ;; end after the present, as rounding can, the present
+              ;; reaches that end, because it is the one the new
+              ;; clock continues from.  No other clock gains from it.
+              (let* ((present
+                      (if (and active (time-less-p now close-at))
+                          close-at
+                        now))
+                     (last-end
+                      (org-mcp--clock-find-last-closed present)))
                 (when last-end
                   (let ((elapsed
                          (float-time (time-subtract now last-end))))
