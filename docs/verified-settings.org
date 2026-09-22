@@ -21,6 +21,7 @@ documents.
 |---------+----------------|
 | =org-use-tag-inheritance= | =t=, =nil=, a list of tags, a regexp |
 | =org-tags-exclude-from-inheritance= | =nil=, a list of tags |
+| =org-use-property-inheritance= | =t=, =nil=, a list of names, a regexp; see [[file:reading.org::*Inherited properties][Inherited properties]] |
 | =org-todo-keywords= | nine shapes: one and several sequences, =type= sets, fast-access keys, log cookies |
 | =org-tag-alist= | plain lists, fast-access keys, mutually exclusive groups, group tags |
 | =org-tag-persistent-alist= | =nil=, plain, fast-access keys, groups |
@@ -76,8 +77,6 @@ one so the behaviour cannot drift back.
 Org reads these itself, so its behaviour applies and they will very likely work.
 What is missing is evidence, and two of them have a measured consequence.
 
-- =org-use-property-inheritance= — property reads go through Org, and no test
-  covers the inheriting case.
 - =org-clock-continuously=, =org-mcp-clock-continuous-threshold= — continuous
   clock-in is live code and no test exercises it.
 - =org-todo-state-tags-triggers= — a done transition rewrites the heading's tags

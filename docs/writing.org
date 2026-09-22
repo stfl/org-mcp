@@ -1201,6 +1201,10 @@ Example:
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
 
+A write reaches the drawer of the node its link names and no other. A value that
+node only inherits is not in that drawer, so its =before= is =null=; see
+[[file:reading.org::*Inherited properties][Inherited properties]] for where that parts from a query that inherits.
+
 *** The three states of a drawer line
 
 A drawer line is in one of three states, and a property map spells all three,

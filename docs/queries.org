@@ -53,6 +53,9 @@ a call chooses otherwise, each in either direction: naming =content= in
 =fields= returns the bodies, at that cost, and ="none"= leaves the drawer or the
 computed fields out of a match list that does not need them.
 
+A match's =properties= are its own drawer, and a =property= predicate matches on
+that drawer unless the query asks it to inherit (see [[file:reading.org::*Inherited properties][Inherited properties]]).
+
 Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags has the =local_tags= that =org-node-set-tags= asserts without
 reading the heading again (see [[file:reading.org::*The two tag fields][The two tag fields]]).

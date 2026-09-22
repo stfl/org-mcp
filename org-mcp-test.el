@@ -17015,6 +17015,416 @@ a view's range default is stated where the caller reads it."
                  "Configured filters: work, private"))
         (should (string-match-p (regexp-quote line) description))))))
 
+;;; Property inheritance tests
+;;
+;; A property reaches a heading from an ancestor's drawer or from a
+;; `#+PROPERTY:' line, and `org-use-property-inheritance' says which
+;; ones do.  These bind it at t, nil, a list and a regexp, as the tag
+;; tests bind `org-use-tag-inheritance', and assert what every read
+;; path a client has for properties answers under it, and which node a
+;; property write reaches while the value in force is inherited.
+
+(defconst org-mcp-test--content-inherited-properties
+  "#+PROPERTY: SCOPE global
+* TODO Holding Parent
+:PROPERTIES:
+:AREA:     work
+:OWNER:    stefan
+:END:
+** TODO Inheriting Child
+Child body."
+  "A child holding no property, below a parent that holds two.
+SCOPE comes from the file's `#+PROPERTY:' line and AREA and OWNER
+from the parent's drawer, so an inherited value has both sources
+Org gives it.  AREA is the one name the list and the regexp in
+`org-mcp-test--property-inheritance-settings' select.")
+
+(defconst org-mcp-test--pattern-inherited-properties-parent
+  (concat
+   "\\`#\\+PROPERTY: SCOPE global\n"
+   "\\* TODO Holding Parent\n"
+   ":PROPERTIES:\n"
+   ":AREA:     work\n"
+   ":OWNER:    stefan\n"
+   ":END:\n")
+  "The parent of `org-mcp-test--content-inherited-properties' unchanged.")
+
+(defconst org-mcp-test--pattern-inherited-properties-unchanged
+  (concat
+   org-mcp-test--pattern-inherited-properties-parent
+   "\\*\\* TODO Inheriting Child\n"
+   "Child body\\.\n?\\'")
+  "The whole of `org-mcp-test--content-inherited-properties' unchanged.")
+
+(defconst org-mcp-test--pattern-inherited-properties-child-holds-area
+  (concat
+   org-mcp-test--pattern-inherited-properties-parent
+   "\\*\\* TODO Inheriting Child\n"
+   ":PROPERTIES:\n"
+   ":AREA: +home\n"
+   ":END:\n"
+   "Child body\\.\n?\\'")
+  "The file after a write of AREA to the child: a drawer of its own.
+The parent's line, the one the child inherited, is left as it was.")
+
+(defconst org-mcp-test--pattern-inherited-properties-parent-rewritten
+  (concat
+   "\\`#\\+PROPERTY: SCOPE global\n"
+   "\\* TODO Holding Parent\n"
+   ":PROPERTIES:\n"
+   ":AREA: +home\n"
+   ":OWNER:    stefan\n"
+   ":END:\n"
+   "\\*\\* TODO Inheriting Child\n"
+   "Child body\\.\n?\\'")
+  "The file after a write of AREA to the parent, which holds it.
+The child is left without a drawer: what it inherits changes because
+the line it inherits from did.")
+
+(defconst org-mcp-test--pattern-inherited-properties-new-child
+  (concat
+   org-mcp-test--pattern-inherited-properties-parent
+   "\\*\\* TODO Inheriting Child\n"
+   "Child body\\.\n"
+   "\\*\\* TODO New Child\n"
+   ":PROPERTIES:\n"
+   ":OWNER: +ada\n"
+   ":END:\n?\\'")
+  "The file after a child is created under the parent with OWNER.
+The new drawer holds the one property the call sent; nothing the new
+heading inherits is copied into it.")
+
+(defconst org-mcp-test--property-inheritance-settings
+  '((t "AREA" "OWNER" "SCOPE") (nil) (("AREA") "AREA") ("\\`AR" "AREA"))
+  "Each value of `org-use-property-inheritance' under test, with what it inherits.
+An entry is (VALUE . NAMES): NAMES are the properties the child of
+`org-mcp-test--content-inherited-properties' inherits under VALUE.")
+
+(defconst org-mcp-test--inherited-property-values
+  '(("AREA" "work" "Holding Parent")
+    ("OWNER" "stefan" "Holding Parent")
+    ("SCOPE" "global" nil))
+  "Each inheritable property of the fixture: (NAME VALUE HOLDER).
+HOLDER is the title of the heading whose drawer holds NAME, or nil
+when only the file's `#+PROPERTY:' line gives it.")
+
+(defconst org-mcp-test--inherited-properties-parent-drawer
+  '((OWNER . "stefan") (AREA . "work"))
+  "The parent's drawer as every read path answers it.
+The order is the one `org-entry-properties' reports the drawer in.")
+
+(defun org-mcp-test--inherited-property-views ()
+  "Return the views the property inheritance tests are configured with.
+One asks the inheriting predicate itself, as a literal query; the
+other folds it in as a filter, the way a view is narrowed."
+  '((area-inherited
+     :name "Area, inherited"
+     :query (property "AREA" "work" :inherit 'selective))
+    (stuck
+     :name "Stuck Projects"
+     :query org-mcp-test--view-query-stuck
+     :filter t)))
+
+(defmacro org-mcp-test--with-property-inheritance (inheritance &rest body)
+  "Run BODY over the inherited-properties fixture under INHERITANCE.
+`test-file' is bound in BODY, and `org-use-property-inheritance' is
+INHERITANCE while the server answers.  Every use makes a new file, so
+no value org-ql cached for one setting is read back under another:
+its caches are keyed by buffer and position, not by this setting."
+  (declare (indent 1) (debug t))
+  `(org-mcp-test--with-configured-server
+       ((test-file org-mcp-test--content-inherited-properties))
+       ((org-use-property-inheritance ,inheritance)
+        (org-mcp-views (org-mcp-test--inherited-property-views))
+        (org-mcp-filters
+         '((area . (property "AREA" "work" :inherit 'selective))))
+        (org-mcp-query-sort-fn nil))
+     ,@body))
+
+(defun org-mcp-test--inherited-property-query (query)
+  "Return the (TITLE . PROPERTIES) of every node org-query matches QUERY with.
+PROPERTIES is the whole drawer the match carries, or nil for none."
+  (mapcar
+   (lambda (match)
+     (cons (alist-get 'title match) (alist-get 'properties match)))
+   (org-mcp-test--query-properties query "all")))
+
+(defun org-mcp-test--inherited-property-view (params)
+  "Return the (TITLE . PROPERTIES) of every node org-view returns for PARAMS."
+  (mapcar
+   (lambda (match)
+     (cons (alist-get 'title match) (alist-get 'properties match)))
+   (org-mcp-test--view-matches params)))
+
+(defun org-mcp-test--answered-with-drawers (titles)
+  "Return TITLES as the (TITLE . PROPERTIES) a query answers them with.
+The parent carries its drawer and the child none, because a match's
+properties are the ones its own drawer holds."
+  (mapcar
+   (lambda (title)
+     (cons
+      title
+      (and (equal title "Holding Parent")
+           org-mcp-test--inherited-properties-parent-drawer)))
+   titles))
+
+(defun org-mcp-test--assert-property-reads (test-file inherited)
+  "Assert every read path answers TEST-FILE under the setting in force.
+TEST-FILE holds `org-mcp-test--content-inherited-properties'.
+INHERITED names the properties the child inherits under it.
+
+The drawer paths are org-node-read, alone and walked into with
+`depth', the org://{link} resource, and the `properties' of an
+org-query or org-view match: each answers with the drawer the node
+holds, which does not move with the setting.  The predicate paths
+are org-ql's `property', which matches on the drawer unless asked to
+inherit, and matches as Org does when its `:inherit' is the symbol
+selective — whether in org-query, in a view's query or in a
+view's filter."
+  (let ((child (org-mcp-test--file-link test-file "*Inheriting Child"))
+        (parent (org-mcp-test--file-link test-file "*Holding Parent")))
+    ;; org-node-read, the whole drawer and every inheritable name.
+    (dolist (asked (list "all" ["AREA" "OWNER" "SCOPE"]))
+      (should
+       (equal
+        (org-mcp-test--read-properties child asked)
+        '((title . "Inheriting Child"))))
+      (should
+       (equal
+        (org-mcp-test--read-properties parent asked)
+        `((title . "Holding Parent")
+          (properties
+           . ,org-mcp-test--inherited-properties-parent-drawer)))))
+    ;; org-node-read walking into the child with `depth'.
+    (let* ((node
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-read"
+              `((link . ,parent)
+                (fields . ["title" "children"])
+                (properties . "all")
+                (depth . 1)))))
+           (walked (aref (alist-get 'children node) 0)))
+      (should
+       (equal
+        (alist-get 'properties node)
+        org-mcp-test--inherited-properties-parent-drawer))
+      (should (equal (alist-get 'title walked) "Inheriting Child"))
+      (should-not (assq 'properties walked)))
+    ;; The resource, which answers as an org-node-read asking nothing.
+    (let ((resource
+           (json-read-from-string
+            (org-mcp-test--read-resource (concat "org://" child)))))
+      (should (equal (alist-get 'title resource) "Inheriting Child"))
+      (should-not (assq 'properties resource)))
+    ;; org-query's matches carry their own drawers.
+    (should
+     (equal
+      (org-mcp-test--inherited-property-query "(todo)")
+      (org-mcp-test--answered-with-drawers
+       '("Holding Parent" "Inheriting Child"))))
+    ;; org-ql's `property' predicate, in its three forms.
+    (pcase-dolist (`(,name ,value ,holder)
+                   org-mcp-test--inherited-property-values)
+      (let ((both '("Holding Parent" "Inheriting Child")))
+        (should
+         (equal
+          (org-mcp-test--inherited-property-query
+           (format "(property %S %S)" name value))
+          (org-mcp-test--answered-with-drawers
+           (and holder (list holder)))))
+        (should
+         (equal
+          (org-mcp-test--inherited-property-query
+           (format "(property %S %S :inherit t)" name value))
+          (org-mcp-test--answered-with-drawers both)))
+        (should
+         (equal
+          (org-mcp-test--inherited-property-query
+           (format "(property %S %S :inherit 'selective)" name value))
+          (org-mcp-test--answered-with-drawers
+           (if (member name inherited)
+               both
+             (and holder (list holder))))))))
+    ;; org-view, the predicate as a view's query and as its filter.
+    (let ((area
+           (org-mcp-test--answered-with-drawers
+            (if (member "AREA" inherited)
+                '("Holding Parent" "Inheriting Child")
+              '("Holding Parent")))))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-view
+         '((view . "area-inherited")))
+        area))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-view
+         '((view . "stuck") (filter . "area")))
+        area)))))
+
+(ert-deftest org-mcp-test-properties-inherited-agree-across-read-paths ()
+  "With inheritance on, only the inheriting predicate sees the ancestor's value.
+The child inherits AREA and OWNER from its parent and SCOPE from the
+file.  A read of its drawer, on every path, answers with none of
+them; `property' with the symbol selective as its `:inherit' matches it on
+all three."
+  (org-mcp-test--with-property-inheritance t
+    (org-mcp-test--assert-property-reads test-file '("AREA" "OWNER" "SCOPE"))))
+
+(ert-deftest org-mcp-test-properties-without-inheritance-agree-across-read-paths ()
+  "With inheritance off, every read path answers with the node's own drawer."
+  (org-mcp-test--with-property-inheritance nil
+    (org-mcp-test--assert-property-reads test-file nil)))
+
+(ert-deftest org-mcp-test-properties-inheritance-list-form ()
+  "A list `org-use-property-inheritance' inherits only the names it holds."
+  (org-mcp-test--with-property-inheritance '("AREA")
+    (org-mcp-test--assert-property-reads test-file '("AREA"))))
+
+(ert-deftest org-mcp-test-properties-inheritance-regexp-form ()
+  "A regexp `org-use-property-inheritance' inherits only matching names."
+  (org-mcp-test--with-property-inheritance "\\`AR"
+    (org-mcp-test--assert-property-reads test-file '("AREA"))))
+
+(defmacro org-mcp-test--for-each-property-inheritance (inherited &rest body)
+  "Run BODY once for every setting of the property inheritance tests.
+Each run has a fresh fixture in `test-file' and INHERITED bound to
+the names the child inherits under that setting."
+  (declare (indent 1) (debug t))
+  (let ((case (gensym "case")))
+    `(dolist (,case org-mcp-test--property-inheritance-settings)
+       (let ((,inherited (cdr ,case)))
+         (org-mcp-test--with-property-inheritance (car ,case)
+           ,@body)))))
+
+(ert-deftest org-mcp-test-property-write-to-an-inheriting-node-lands-on-it ()
+  "A property write reaches the node its link names, never the holder.
+Whatever the setting, the child's `before' is its own drawer, which
+holds no AREA, so null is the assertion that holds; the value writes
+a drawer of the child's own, and the parent's line stays.  From then
+on the child's own line is what every path reads, including the
+inheriting predicate, which no longer finds the parent's value there."
+  (org-mcp-test--for-each-property-inheritance _inherited
+    (let* ((child (org-mcp-test--file-link test-file "*Inheriting Child"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-set-properties"
+              `((link . ,child)
+                (before . ((AREA)))
+                (after . ((AREA . "home"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'link result) child))
+      (should (equal (alist-get 'properties_set result) ["AREA"]))
+      (should (equal (alist-get 'properties_deleted result) []))
+      (org-mcp-test--verify-file-matches
+       test-file
+       org-mcp-test--pattern-inherited-properties-child-holds-area)
+      (should
+       (equal
+        (org-mcp-test--read-properties child "all")
+        '((title . "Inheriting Child") (properties . ((AREA . "home"))))))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-query
+         "(property \"AREA\" \"work\" :inherit 'selective)")
+        (org-mcp-test--answered-with-drawers '("Holding Parent")))))))
+
+(ert-deftest org-mcp-test-property-write-asserts-the-own-drawer-not-the-inherited ()
+  "The value an inheriting node shows is not one its `before' can assert.
+The parent's AREA is in force at the child under three of the four
+settings, and asserting it at the child is refused under all four:
+the child holds no AREA line, and the refusal says so."
+  (org-mcp-test--for-each-property-inheritance _inherited
+    (org-mcp-test--call-tool-refused
+     "org-node-set-properties"
+     `((link
+        . ,(org-mcp-test--file-link test-file "*Inheriting Child"))
+       (before . ((AREA . "work")))
+       (after . ((AREA . "home"))))
+     "\\`conflict: Property 'AREA' mismatch: expected 'work', \
+found (absent)\\'"
+     test-file)
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-inherited-properties-unchanged)))
+
+(ert-deftest org-mcp-test-property-removal-at-an-inheriting-node-spares-the-holder ()
+  "Removing an inherited property at the child takes nothing away.
+The child's drawer holds no OWNER, so the removal asserts and
+deletes nothing, and the parent's line — the value the child
+inherits under t — is not the line this call names."
+  (org-mcp-test--for-each-property-inheritance _inherited
+    (let ((result
+           (org-mcp-test--call-tool-leaving-file
+            "org-node-set-properties"
+            `((link
+               . ,(org-mcp-test--file-link test-file "*Inheriting Child"))
+              (before . ((OWNER)))
+              (after . ((OWNER))))
+            test-file)))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'properties_set result) []))
+      (should (equal (alist-get 'properties_deleted result) [])))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-inherited-properties-unchanged)))
+
+(ert-deftest org-mcp-test-property-write-to-the-holder-changes-what-inherits ()
+  "An inherited value changes where it is held, and the child follows.
+The write names the parent, whose drawer holds AREA; the child's
+text is left alone, and what it inherits is the new value under every
+setting that selects AREA and nothing under the one that does not."
+  (org-mcp-test--for-each-property-inheritance inherited
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-set-properties"
+             `((link
+                . ,(org-mcp-test--file-link test-file "*Holding Parent"))
+               (before . ((AREA . "work")))
+               (after . ((AREA . "home"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should (equal (alist-get 'properties_set result) ["AREA"])))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-inherited-properties-parent-rewritten)
+    (should
+     (equal
+      (mapcar
+       #'car
+       (org-mcp-test--inherited-property-query
+        "(property \"AREA\" \"home\" :inherit 'selective)"))
+      (if (member "AREA" inherited)
+          '("Holding Parent" "Inheriting Child")
+        '("Holding Parent"))))))
+
+(ert-deftest org-mcp-test-node-create-writes-only-the-properties-it-sends ()
+  "A node created under a holder carries the drawer the call sent.
+It inherits from its parent as any child does, and nothing inherited
+is copied into its drawer: a read of it answers with OWNER alone."
+  (org-mcp-test--for-each-property-inheritance _inherited
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-create"
+             `((title . "New Child")
+               (todo . "TODO")
+               (content . nil)
+               (parent
+                . ,(org-mcp-test--file-link test-file "*Holding Parent"))
+               (properties . ((OWNER . "ada"))))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal
+        (alist-get 'link result)
+        (org-mcp-test--file-link test-file "*New Child"))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--pattern-inherited-properties-new-child)
+    (should
+     (equal
+      (org-mcp-test--read-properties
+       (org-mcp-test--file-link test-file "*New Child") "all")
+      '((title . "New Child") (properties . ((OWNER . "ada"))))))))
+
 ;;; Native link tests
 
 (defconst org-mcp-test--link-beta-id "8a3c5d2e-4b1f-4c6a-9e7d-0f2b3c4d5e6f"
