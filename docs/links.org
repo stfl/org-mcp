@@ -77,7 +77,7 @@ org-mcp refuses:
   connection is opened for a remote path.
 - a regexp search (=::/regexp/=), which Org answers by building a sparse tree
   in your buffer.
-- a value that is not text: a number, =true=, an array or an object. The
+- a value that is not text: a number, =true=, or a non-empty array or object. The
   refusal names the parameter and what arrived, in JSON's words, before any
   parsing:
 
@@ -110,14 +110,15 @@ parameter is required, and it is the same on every tool that takes a link:
   Missing required parameter: link
   #+end_example
 
-  =link= on every read, write and clock tool is required, and so is =parent= on
-  =org-node-create= and =org-node-refile=. The parameter is read before its
+  =link= on every read, write and clock tool but =org-config-todo= is required,
+  and so is =parent= on =org-node-create= and =org-node-refile=. The parameter is read before its
   file is opened, so nothing is looked up and nothing is written.
 
 - *Optional and blank* means the call names no link, which each parameter has
-  its own sense of: =previous_sibling= puts the new node last among its
-  parent's children, and =clock_out= says the call has no running clock to
-  close. Neither is refused.
+  its own sense of: =previous_sibling= on =org-node-create= and
+  =org-node-refile= puts the node last among its parent's children,
+  =clock_out= says the call has no running clock to close, and =link= on
+  =org-config-todo= asks for the global configuration. None is refused.
 
 * Stable links
 

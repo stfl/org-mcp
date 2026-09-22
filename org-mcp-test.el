@@ -6748,62 +6748,276 @@ what arrived.  Nothing is written."
 
 (defconst org-mcp-test--elisp-spelling-regexp
   (concat
-   "((\\| \\. \\|"
-   "\\(?:\\`\\|[] ['\"(]\\)"
-   "\\(?:nil\\|t\\|:json-false\\)"
-   "\\(?:\\'\\|[] .,')\"]\\)")
+   "((\\| \\. \\|:json-false\\|"
+   "'\\(?:nil\\|t\\)'\\|"
+   "\\(?:\\`\\|[ [(\"]\\)\\(?:nil\\|t\\)\\(?:\\'\\|[] .,)\"]\\)")
   "Matches the Elisp reader's spelling of a decoded JSON value.
 JSON null reads as `nil', false as `:json-false', true as `t', an
 object as a list of dotted pairs, and an array holding any of them
-prints with the same members.")
+prints with the same members.  A bare `t' or `nil' counts only where
+a value stands, after a space, a bracket, a paren or a quote, so the
+t of an English contraction is not one.")
+
+(ert-deftest org-mcp-test-elisp-spelling-regexp-tells-values-from-words ()
+  "The sweep's pattern finds a decoded value and passes over English.
+Each Elisp spelling a refusal could echo is matched as it would stand
+in a message, and the words most likely to look like one are not."
+  (dolist (message '("Not an Org link: t.  Send id:<uuid>"
+                     "Not an Org link: [nil].  Send"
+                     "Not an Org link: [:json-false]."
+                     "Not an Org link: ((a . 1))."
+                     "Invalid TODO state: 't' - valid states"
+                     "clock_out names a clock to close: nil"))
+    (should (string-match-p org-mcp-test--elisp-spelling-regexp message)))
+  (dolist (message '("don't send it" "it isn't a link" "can't"
+                     "Invalid tags format: true"
+                     "todo must be a string, not an object"
+                     "Missing required parameter: title"))
+    (should-not
+     (string-match-p org-mcp-test--elisp-spelling-regexp message))))
+
+(defconst org-mcp-test--json-kind-values
+  '(nil :json-false t 0 1.5 "" [] [1] [nil] [:json-false] [t]
+        ((a . 1)) ((a . :json-false)))
+  "A value of every JSON kind, as the decoder hands it to a tool.
+Each blank, each scalar, arrays holding a number, a null, a false and
+a true, and objects holding a number and a false.")
+
+(defun org-mcp-test--call-message (tool params)
+  "Call TOOL with PARAMS; return the refusal message, or nil on success."
+  (let* ((response
+          (mcp-server-lib-process-jsonrpc-parsed
+           (mcp-server-lib-create-tools-call-request tool 1 params)
+           mcp-server-lib-ert-server-id))
+         (result (alist-get 'result response)))
+    (cond
+     ((eq (alist-get 'isError result) t)
+      (alist-get 'text (aref (alist-get 'content result) 0)))
+     ((alist-get 'error response)
+      (alist-get 'message (alist-get 'error response))))))
+
+(defun org-mcp-test--sweep-json-spellings (tool base-args floor &optional after)
+  "Call TOOL with every published parameter set to every JSON kind.
+BASE-ARGS is a function of a parameter name returning the arguments
+a valid call carries for that row, which the swept value then
+replaces.  AFTER, when non-nil, is called after every call, to undo
+what a call that went through left running.  Asserts that no refusal
+spells a value the Elisp way, and that every parameter reached at
+least FLOOR refusals, so no row of the sweep is vacuous."
+  (dolist (name (org-mcp-test--registered-tool-properties tool))
+    (let ((param (intern name))
+          (refusals 0))
+      (dolist (value org-mcp-test--json-kind-values)
+        (let ((message
+               (org-mcp-test--call-message
+                tool
+                (cons
+                 (cons param value)
+                 (assq-delete-all
+                  param (copy-alist (funcall base-args name)))))))
+          (when after
+            (funcall after))
+          (when message
+            (setq refusals (1+ refusals))
+            ;; The row rides in the form, so a failure names it.
+            (should-not
+             (and (string-match-p
+                   org-mcp-test--elisp-spelling-regexp message)
+                  (list name value message))))))
+      (unless (>= refusals floor)
+        (ert-fail (list 'too-few-refusals name refusals floor))))))
+
+(defconst org-mcp-test--content-sweep
+  "* Parent\n:PROPERTIES:\n:ID: sweep-parent\n:END:\n"
+  "A heading an `id:' link and a title link both reach.
+The sweep's `files' rows name it by ID, since `files' applies to an
+`id:' link only and a title link would stop every row at that rule.")
 
 (ert-deftest org-mcp-test-node-create-refuses-in-json-spelling ()
   "No refusal of org-node-create spells a JSON value the Elisp way.
 For every parameter the tool publishes, and a value of every JSON
-kind — each blank, each scalar, arrays holding a number, a null, a
-false and a true, and objects — a refusal names what arrived in
-JSON's words or not at all.  The parameters are the ones the schema
-lists, so a parameter added later is covered without being named
-here.  Values inside a `properties' object are that map's own
-vocabulary and are not generated here."
-  (let ((values
-         '(nil :json-false t 0 1.5 "" [] [1] [nil] [:json-false] [t]
-               ((a . 1)) ((a . :json-false))))
-        (refusals 0))
-    (org-mcp-test--with-add-todo-setup test-file
-        org-mcp-test--content-empty
-      (dolist (name
-               (org-mcp-test--registered-tool-properties
-                "org-node-create"))
-        (dolist (value values)
-          (let* ((param (intern name))
-                 (params
-                  (cons
-                   (cons param value)
-                   (assq-delete-all
-                    param
-                    `((title . "Task")
-                      (parent . ,(concat "file:" test-file))))))
-                 (response
-                  (mcp-server-lib-process-jsonrpc-parsed
-                   (mcp-server-lib-create-tools-call-request
-                    "org-node-create" 1 params)
-                   mcp-server-lib-ert-server-id))
-                 (result (alist-get 'result response))
-                 (message
-                  (cond
-                   ((eq (alist-get 'isError result) t)
-                    (alist-get
-                     'text (aref (alist-get 'content result) 0)))
-                   ((alist-get 'error response)
-                    (alist-get 'message (alist-get 'error response))))))
-            (when message
-              (setq refusals (1+ refusals))
-              (should-not
-               (string-match-p
-                org-mcp-test--elisp-spelling-regexp message)))))))
-    ;; The sweep has to reach refusals to say anything about them.
-    (should (> refusals 40))))
+kind, a refusal names what arrived in JSON's words or not at all.
+The parameters are the ones the schema lists, so a parameter added
+later is covered without being named here.  The `files' rows name
+the parent by ID, so each value reaches the check of `files' itself.
+Values inside a `properties' object are that map's own vocabulary and
+are not generated here."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-sweep
+      '("sweep-parent")
+    (org-mcp-test--sweep-json-spellings
+     "org-node-create"
+     (lambda (name)
+       `((title . "Task")
+         (parent
+          .
+          ,(if (equal name "files")
+               "id:sweep-parent"
+             (org-mcp-test--file-link test-file "*Parent")))))
+     3)))
+
+(ert-deftest org-mcp-test-clock-in-refuses-in-json-spelling ()
+  "No refusal of org-clock-in spells a JSON value the Elisp way.
+The sweep runs with no clock running, which is where `clock_out' is
+refused for being sent at all, the refusal that once echoed the
+value.  Every published parameter is swept, the `files' rows naming
+the heading by ID, and a clock a row opens is closed before the
+next."
+  (org-mcp-test--with-id-setup test-file org-mcp-test--content-sweep
+      '("sweep-parent")
+    (org-mcp-test--sweep-json-spellings
+     "org-clock-in"
+     (lambda (name)
+       `((link
+          .
+          ,(if (equal name "files")
+               "id:sweep-parent"
+             (org-mcp-test--file-link test-file "*Parent")))
+         (start_time . "2026-09-21T09:00")))
+     3
+     (lambda ()
+       (when (org-clock-is-active)
+         (org-clock-out nil t))))))
+
+(ert-deftest org-mcp-test-clock-times-read-a-blank-as-now ()
+  "A blank `start_time' or `end_time' is the current time; other non-text is refused.
+Both are optional, so every blank a client fills an unused parameter
+with asks for the default, as leaving it out does, and the clock is
+opened and closed.  A value that is neither text nor blank is
+refused naming the parameter and the JSON kind of what arrived, where
+it once crossed the MCP boundary as an internal error."
+  (dolist (blank '(nil :json-false "" []))
+    (org-mcp-test--with-temp-org-files
+        ((test-file org-mcp-test--content-sweep))
+      (let ((link (org-mcp-test--file-link test-file "*Parent")))
+        (should
+         (eq (alist-get
+              'clocked_in
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-clock-in"
+                `((link . ,link) (start_time . ,blank)))))
+             t))
+        (should
+         (eq (alist-get
+              'success
+              (json-read-from-string
+               (mcp-server-lib-ert-call-tool
+                "org-clock-out"
+                `((link . ,link) (end_time . ,blank)))))
+             t))
+        (should-not (org-clock-is-active)))))
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-sweep))
+    (let ((link (org-mcp-test--file-link test-file "*Parent")))
+      (org-mcp-test--call-tool-refused
+       "org-clock-in" `((link . ,link) (start_time . t))
+       "\\`start_time must be a string, not true\\'" test-file)
+      (mcp-server-lib-ert-call-tool
+       "org-clock-in" `((link . ,link) (start_time . "2026-09-21T09:00")))
+      (unwind-protect
+          (org-mcp-test--call-tool-refused
+           "org-clock-out" `((link . ,link) (end_time . ((a . 1))))
+           "\\`end_time must be a string, not an object\\'")
+        (when (org-clock-is-active)
+          (org-clock-out nil t))))))
+
+(defun org-mcp-test--optional-link-params ()
+  "Return (TOOL . PARAMETER) for every optional link parameter published.
+A link parameter is one whose schema description starts with
+\"Link\", which every link parameter's does; it is optional when the
+tool does not list it as required."
+  (let (found)
+    (dolist (tool (org-mcp-test--registered-tool-ids))
+      (let* ((schema
+              (alist-get 'inputSchema (org-mcp-test--registered-tool tool)))
+             (required (append (alist-get 'required schema) nil)))
+        (dolist (property (alist-get 'properties schema))
+          (let ((name (symbol-name (car property)))
+                (description (alist-get 'description (cdr property))))
+            (when (and (stringp description)
+                       (string-prefix-p "Link" description)
+                       (not (member name required)))
+              (push (cons tool name) found))))))
+    (nreverse found)))
+
+(defconst org-mcp-test--content-optional-links
+  "* Parent\n** Child\n* Mover\n"
+  "A parent with a child, and a heading to create beside or refile.")
+
+(defun org-mcp-test--optional-link-base (tool file)
+  "Return the arguments of a valid TOOL call on FILE naming no optional link.
+A tool with an optional link parameter the suite has no call for
+fails the test that asks, so a new one cannot go unswept."
+  (pcase tool
+    ("org-config-todo" nil)
+    ("org-node-create"
+     `((title . "Task")
+       (parent . ,(org-mcp-test--file-link file "*Parent"))))
+    ("org-node-refile"
+     (let ((link (org-mcp-test--file-link file "*Mover")))
+       `((link . ,link)
+         (before . ,(org-mcp-test--verbs-digest link))
+         (parent . ,(org-mcp-test--file-link file "*Parent")))))
+    ("org-clock-in"
+     `((link . ,(org-mcp-test--file-link file "*Mover"))
+       (start_time . "2026-09-21T09:00")))
+    (_ (ert-fail (format "No valid call of %s to sweep" tool)))))
+
+(defun org-mcp-test--optional-link-outcome (tool param value)
+  "Call TOOL on a fresh file with PARAM set to VALUE, or left out for `omit'.
+Return the response text and the file after it, the file's name
+replaced by FILE so fresh files compare alike.  A clock the call
+opened is closed once the file has been read."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--content-optional-links))
+    (let* ((base (org-mcp-test--optional-link-base tool test-file))
+           (args
+            (if (eq value 'omit)
+                base
+              (cons (cons (intern param) value) base)))
+           (response (mcp-server-lib-ert-call-tool tool args))
+           (image (org-mcp-test--read-file-raw test-file)))
+      (when (org-clock-is-active)
+        (org-clock-out nil t))
+      (mapcar
+       (lambda (text)
+         (replace-regexp-in-string
+          (regexp-quote (file-name-nondirectory test-file)) "FILE" text
+          t t))
+       (list response image)))))
+
+(ert-deftest org-mcp-test-an-optional-link-reads-every-blank-as-none ()
+  "Every optional link parameter reads a blank as none, and only text as a link.
+The parameters are found in the published schema, not listed here.
+For each, every blank spelling gives the response and the file that
+leaving the parameter out gives, and a value that is not text is
+refused naming the parameter and the JSON kind of what arrived,
+with the file left as it was."
+  (let ((params
+         (org-mcp-test--with-enabled
+           (org-mcp-test--optional-link-params))))
+    (should params)
+    (pcase-dolist (`(,tool . ,param) params)
+      (let ((omitted
+             (org-mcp-test--optional-link-outcome tool param 'omit)))
+        (dolist (blank '(nil :json-false "" "   " []))
+          (should
+           (equal
+            (org-mcp-test--optional-link-outcome tool param blank)
+            omitted))))
+      (pcase-dolist (`(,value ,kind)
+                     '((t "true")
+                       (0 "0")
+                       ([1] "an array")
+                       (((a . 1)) "an object")))
+        (org-mcp-test--with-temp-org-files
+            ((test-file org-mcp-test--content-optional-links))
+          (org-mcp-test--call-tool-refused
+           tool
+           (cons (cons (intern param) value)
+                 (org-mcp-test--optional-link-base tool test-file))
+           (format "\\`%s must be a string, not %s\\'" param kind)
+           test-file))))))
 
 (defconst org-mcp-test--content-create-examples
   "* Projects\n** Draft the plan\n* Plan the kickoff\n"

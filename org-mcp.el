@@ -1030,12 +1030,18 @@ Every tool taking `files' reads it through here."
     (unless (org-mcp--blank-param-p files)
       files)))
 
-(defun org-mcp--optional-link-given (link)
+(defun org-mcp--optional-link-given (link &optional name)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
 Clients may fill an optional parameter they do not use with an empty
 value, so every blank, see `org-mcp--blank-param-p', and a string
-holding nothing but whitespace mean that the call names no link.  Any
-other value is returned for `org-mcp--link-given' to check.
+holding nothing but whitespace mean that the call names no link.
+
+NAME is the parameter as the call spells it.  When it is given, a
+LINK that is not blank and not a string is refused as
+`org-mcp--text-param-given' refuses one, naming NAME and the JSON
+kind of what arrived, so that no later message echoes the value in
+the Elisp reader\\='s spelling of it.  A string is returned for
+`org-mcp--link-target' to check.
 
 The required counterpart is `org-mcp--link-given', which refuses a
 blank instead of reading it as none: an optional parameter has a
@@ -1043,7 +1049,9 @@ meaning for a parameter that was not sent, and a required one has
 none."
   (unless (or (org-mcp--blank-param-p link)
               (and (stringp link) (string-blank-p link)))
-    link))
+    (if name
+        (org-mcp--text-param-given link name)
+      link)))
 
 (defun org-mcp--link-given (link name)
   "Return LINK, the link the required parameter NAME carries.
@@ -2995,7 +3003,8 @@ ask the user about it.  Nothing is changed.
 A CLOCK-OUT that disagrees with the running clock is a conflict: the
 client believed something about the world that no longer holds, and
 reading the clock again is what puts it right."
-  (let ((clock-out (org-mcp--optional-link-given clock-out)))
+  (let ((clock-out
+         (org-mcp--optional-link-given clock-out "clock_out")))
     (cond
      ((not active)
       (when clock-out
@@ -4784,11 +4793,12 @@ a file, which is the very confusion this parameter is here to end.
 
 MCP Parameters:
   link - Link to the file to answer for, or to a heading in it
-         (string, optional)
+         (string, optional); left out, or null, false, \"\", [] or
+         whitespace, the global configuration
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link, and with no link"
-  (let ((link (org-mcp--optional-link-given link)))
+  (let ((link (org-mcp--optional-link-given link "link")))
     (when (and (not link) (org-mcp--files-given files))
       (org-mcp--tool-validation-error
        "files names where to look up an id: link, and this call sent \
@@ -5143,7 +5153,9 @@ MCP Parameters:
        ;; before the parent's buffer is changed.
        (sibling-target
         (when-let* ((sibling
-                     (org-mcp--optional-link-given previous_sibling)))
+                     (org-mcp--optional-link-given
+                      previous_sibling
+                      "previous_sibling")))
           (org-mcp--link-target sibling "previous_sibling"
                                 nil
                                 file-path))))
@@ -7359,7 +7371,8 @@ MCP Parameters:
          (sibling-target
           (when-let* ((sibling
                        (org-mcp--optional-link-given
-                        previous_sibling)))
+                        previous_sibling
+                        "previous_sibling")))
             (org-mcp--link-target sibling "previous_sibling"
                                   nil
                                   (plist-get parent-target :file))))
@@ -7856,7 +7869,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00),
-          naming a time that exists
+          naming a time that exists; left out, or null, false, \"\"
+          or [], the current time
   resolve - true or \"true\" to delete dangling clocks before clocking
             in; false, \"false\" and null mean not to, and any other
             value is refused
@@ -7866,6 +7880,8 @@ MCP Parameters:
   clock_out - Link to the heading of the running clock, which is
               closed first; required while a clock runs, refused
               while none does"
+  (setq start_time
+        (org-mcp--optional-text-given start_time "start_time"))
   (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (resolve (org-mcp--boolean-param resolve "resolve"))
@@ -7984,7 +8000,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00),
-          naming a time that exists
+          naming a time that exists; left out, or null, false, \"\"
+          or [], the current time
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link
@@ -7995,6 +8012,7 @@ MCP Parameters:
   ;; the clock would report on something the call never got to ask
   ;; about.
   (setq link (org-mcp--link-given link "link"))
+  (setq end_time (org-mcp--optional-text-given end_time "end_time"))
   (setq note (org-string-nw-p note))
   (let ((active (org-mcp--clock-find-active)))
     (unless active
@@ -8352,7 +8370,8 @@ Parameters:
          A file carrying no `#+TODO:', `#+SEQ_TODO:' or
          `#+TYP_TODO:' setting of its own inherits the global
          sequences and is answered with them.
-         Omitted, the answer is the global configuration.
+         Left out, or null, false, \"\", [] or whitespace, the
+         answer is the global configuration.
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link, and with no link
@@ -8679,8 +8698,8 @@ Parameters:
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo - TODO keyword from org-todo-keywords (string, optional)
-         Left out, or null, false or \"\", makes a heading with no
-         keyword: a node that is not a task.  A value that names no
+         Left out, or null, false, \"\" or [], makes a heading
+         with no keyword: a node that is not a task.  A value that names no
          keyword is refused
   tags - Tags for the node (string or array, optional)
          Single tag: \"urgent\"
@@ -8692,7 +8711,7 @@ Parameters:
          Respects mutually exclusive tag groups
          Left out, or null, false, \"\" or [], sets no tags
   content - Body content of the node (string, optional)
-            Left out, or null, false or \"\", writes no body
+            Left out, or null, false, \"\" or [], writes no body
             Cannot contain headlines at same or higher level as new
             item
             If #+BEGIN/#+END blocks are present, they must be balanced
@@ -8708,8 +8727,8 @@ Parameters:
                      a direct child of the parent, or a top-level
                      heading of the file when parent names the whole
                      file.  Its id: link is looked up in the parent's
-                     file.  null, false, \"\" and [] mean none.
-                     If omitted, appends as last child of parent
+                     file.  Left out, or null, false, \"\", [] or
+                     whitespace, appends as last child of parent
   properties - Properties for the new node (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
@@ -9429,9 +9448,10 @@ Parameters:
   previous_sibling - Link to the child of parent the node is to
                      follow (string, optional), in any form link
                      takes, looked up in the parent's file.
-                     Omitted, null, false or blank, the node becomes
-                     the parent's last child, or, at the top level,
-                     the file's first heading
+                     Left out, or null, false, \"\", [] or
+                     whitespace, the node becomes the parent's last
+                     child, or, at the top level, the file's first
+                     heading
   files - Files and directories to look up the id: link in link in
           (array of strings, optional); see org-node-read.  It
           applies to link only - it says where to find the node the
@@ -9778,7 +9798,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
-               If omitted, uses current time (or continuous time)
+               Left out, or null, false, \"\" or [], uses the current
+               time (or continuous time)
                Must not be before the running clock's start
   resolve - true or \"true\" to delete the dangling (unclosed) CLOCK
             lines the heading itself carries, before clocking in
@@ -9790,8 +9811,9 @@ Parameters:
   clock_out - Link to the heading of the running clock (string);
               required while a clock runs, refused while none does.
               The link a refusal names for it is accepted as sent;
-              an id: link is looked up in the running clock's file;
-              null, false and \"\" mean no link
+              an id: link is looked up in the running clock's file.
+              Left out, or null, false, \"\", [] or whitespace, names
+              no clock to close
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -9840,7 +9862,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
-             If omitted, uses current time
+             Left out, or null, false, \"\" or [], uses the current
+             time
   files - Files and directories to look up an id: link in
           (array of strings, optional); see org-node-read
   note - Prose to record against the clock being closed (string,
