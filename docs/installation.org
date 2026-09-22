@@ -129,7 +129,8 @@ validate against.
 
 A client that checks its arguments against that schema therefore cannot send a
 JSON array for the parameters documented as taking one — =fields=,
-=properties=, =computed=, =files= and =tags=. It sends the array as its own
+=properties= on =org-node-read=, =org-query= and =org-view=, =computed=,
+=files= and =tags=. It sends the array as its own
 JSON text instead, and org-mcp reads that text back as the array. The two
 calls below ask the same thing:
 

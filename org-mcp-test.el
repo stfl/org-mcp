@@ -22206,11 +22206,13 @@ id: link, and a special property, which is refused."
       (should (string-match-p "\"success\":true" text))
       (should
        (string-match-p
-        (concat "^\\* TODO New Task\n"
+        (concat "\\`\\* TODO New Task\n"
                 ":PROPERTIES:\n"
                 ":Effort: +1:00\n"
                 ":Rank: +3\n"
-                ":END:")
+                ":END:\n"
+                "\\* TODO Simple Task\n"
+                "Task body text.\n?\\'")
         image)))
     (pcase-let ((`(,refused ,text ,_image) (nth 3 pinned)))
       (should-not refused)
@@ -22333,9 +22335,11 @@ planning assertion, which a repeating heading refuses."
           (before . "TODO")
           (after . "DONE")
           (before_planning . ,value)))))
-  "Each object parameter: its tool, its name, the refusal a value that
-is not an object gets, and a function of a file and a value returning
-a call to Simple Task in that file carrying the value there.")
+  "The parameters that take a JSON object, one entry each.
+An entry holds the tool, the parameter's name, the refusal a value
+that is not an object gets, and a function of a file and a value
+returning a call to Simple Task in that file carrying the value
+there.")
 
 (ert-deftest org-mcp-test-object-text-other-strings-still-refused ()
   "A string that does not open an object is refused as it was.
