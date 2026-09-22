@@ -218,6 +218,24 @@ the org-query tool."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'org-mcp)
 
+(defcustom org-mcp-view-catalogue-function nil
+  "Function writing the views part of the org-view tool description.
+When nil, the description lists every view in `org-mcp-views', one
+line each, with what it takes.  When non-nil, it is a function of
+no arguments returning a string, and that string stands in place of
+those lines, indented as the caller wants it and ending its last
+line with a newline, which is added when it is missing.
+
+It suits a workflow whose views follow a rule, such as an area and a
+question joined into one name, where the rule tells a client more
+than the list of every name it produces.  The function is called
+when `org-mcp-enable' registers the tools.  It changes what a client
+reads and nothing a call does: a view runs by the name
+`org-mcp-views' gives it, and an unknown name or a parameter the
+view does not take is refused, whatever the description says."
+  :type '(choice (const :tag "List every view" nil) function)
+  :group 'org-mcp)
+
 (defcustom org-mcp-query-sort-fn nil
   "Sort comparator the org-view tool answers in the order of.
 Passed as the `:sort' argument to `org-ql-select'.
@@ -9733,11 +9751,25 @@ reads them."
              org-mcp-views
              ""))
 
+(defun org-mcp--view-catalogue-text ()
+  "Return the views part of the org-view description.
+The text `org-mcp-view-catalogue-function' writes when one is set,
+ended with a newline so the next parameter starts a line of its own,
+and the per-view lines of `org-mcp--view-catalogue' otherwise."
+  (if org-mcp-view-catalogue-function
+      (let ((text (funcall org-mcp-view-catalogue-function)))
+        (if (string-suffix-p "\n" text)
+            text
+          (concat text "\n")))
+    (org-mcp--view-catalogue)))
+
 (defun org-mcp--view-tool-description ()
   "Return the description of the org-view tool for what is configured.
 The views and the filters are the user's, and a vocabulary is only
 closed to a client that can see it, so the description names them
-rather than describing a shape a client would have to guess at."
+rather than describing a shape a client would have to guess at.
+The views are named by `org-mcp-view-catalogue-function' when one
+is set."
   (concat
    "Run a named view: a question the workflow has a name for, asked
 over the allowed files.  Only the names below are accepted, and a
@@ -9749,7 +9781,7 @@ Parameters:
   view - Name of the view to run (string, required)
          Configured views, each with what it takes:
 "
-   (org-mcp--view-catalogue)
+   (org-mcp--view-catalogue-text)
    "  filter - Name of the filter to restrict the view by (string,
           optional); a view that takes no filter refuses one.
           Configured filters: "
