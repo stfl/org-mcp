@@ -9768,54 +9768,67 @@ and the per-view lines of `org-mcp--view-catalogue' otherwise."
 The views and the filters are the user's, and a vocabulary is only
 closed to a client that can see it, so the description names them
 rather than describing a shape a client would have to guess at.
-The views are named by `org-mcp-view-catalogue-function' when one
-is set."
-  (concat
-   "Run a named view: a question the workflow has a name for, asked
-over the allowed files.  Only the names below are accepted, and a
+The views are described by `org-mcp-view-catalogue-function' when
+one is set, and the sentences that point into the per-view lines
+give way to ones that hold for any text, since nothing in it is
+marked."
+  (let ((custom org-mcp-view-catalogue-function))
+    (concat
+     "Run a named view: a question the workflow has a name for, asked
+over the allowed files.  "
+     (if custom
+         "Only configured views are accepted"
+       "Only the names below are accepted")
+     ", and a
 view refuses a parameter it does not take rather than ignoring it.
 Use org-query to write a query of your own, or to search files
 outside the allowed ones.
 
 Parameters:
   view - Name of the view to run (string, required)
-         Configured views, each with what it takes:
-"
-   (org-mcp--view-catalogue-text)
-   "  filter - Name of the filter to restrict the view by (string,
+         "
+     (if custom
+         "Views:\n"
+       "Configured views, each with what it takes:\n")
+     (org-mcp--view-catalogue-text)
+     "  filter - Name of the filter to restrict the view by (string,
           optional); a view that takes no filter refuses one.
           Configured filters: "
-   (org-mcp--configured-names org-mcp-filters) "
+     (org-mcp--configured-names org-mcp-filters) "
   range - Name of the range to run the view at (string, optional);
           a view that takes no range refuses one, and one that takes
-          a range runs at the range marked unasked above.
+          a range runs at "
+     (if custom
+         "its default when the call names none."
+       "the range marked unasked above.")
+     "
   fields - How much of each matching node to return (array of
           strings, or a string, optional)
           Defaults to every field below but content, children and
           the two digests, which a match list would read every
           matched subtree to fill; naming one asks for exactly that.
 "
-   org-mcp--fields-description
-   "  properties - Which Org drawer properties to return (array of
+     org-mcp--fields-description
+     "  properties - Which Org drawer properties to return (array of
           strings, or a string, optional)
           Defaults to all: a view is a query with a name, and a
           query is the call that asks about properties.  \"none\"
           turns it off.
 "
-   org-mcp--properties-description
-   "  computed - Which computed fields to return (array of strings,
+     org-mcp--properties-description
+     "  computed - Which computed fields to return (array of strings,
           or a string, optional)
           Defaults to all: a workflow configures these for the
           matches it ranks and groups.  \"none\" turns them off.
 "
-   org-mcp--computed-description "
+     org-mcp--computed-description "
 Returns JSON object:
   children - Array of matching nodes, the shape org-node-read
              returns, each carrying the fields the call asked for.
   total - Number of matches (number)
   files_searched - Number of files searched (number)
 "
-   org-mcp--node-description))
+     org-mcp--node-description)))
 
 (defun org-mcp--view-tool-specs ()
   "Return the spec for org-view when `org-mcp-views' configures one.

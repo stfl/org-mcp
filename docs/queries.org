@@ -220,8 +220,11 @@ text:
 
 When it is set, the string it returns stands in the =org-view= description
 where the per-view lines would be, under the =view= parameter, so it carries
-its own indentation; a missing final newline is added. When it is =nil=, the
-default, the description lists every view. It is called when =org-mcp-enable=
+its own indentation; a missing final newline is added. Nothing in that text is
+marked, so the description introduces it as =Views:= and says that a view
+taking a range runs at its default when the call names none, rather than
+pointing at a range marked unasked. When it is =nil=, the default, the
+description lists every view with what it takes. It is called when =org-mcp-enable=
 registers the tools, as =org-mcp-views= is read, and needs the same re-enable
 to publish a change.
 

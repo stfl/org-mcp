@@ -18054,8 +18054,11 @@ CATALOGUE is the value of `org-mcp-view-catalogue-function'."
 
 (ert-deftest org-mcp-test-view-catalogue-function-replaces-the-view-lines ()
   "The catalogue function's text stands where the per-view lines stood.
-Everything else in the description is what the views alone build, so
-the filters and the parameters after the catalogue are kept."
+The three sentences that point into those lines -- the names below,
+what each takes, the range marked unasked -- give way to ones that
+hold for any text, since nothing in it is marked.  Everything else is
+what the views alone build, so the filters and the other parameters
+are kept."
   (let ((default
          (org-mcp-test--with-views
            (org-mcp-test--registered-tool-description "org-view")))
@@ -18067,18 +18070,33 @@ the filters and the parameters after the catalogue are kept."
       (should
        (equal
         (org-mcp-test--registered-tool-description "org-view")
-        (string-replace
-         lines org-mcp-test--view-catalogue-text default))))))
+        (thread-last
+         default
+         (string-replace
+          "Only the names below are accepted"
+          "Only configured views are accepted")
+         (string-replace
+          "Configured views, each with what it takes:\n" "Views:\n")
+         (string-replace
+          "a range runs at the range marked unasked above."
+          "a range runs at its default when the call names none.")
+         (string-replace lines org-mcp-test--view-catalogue-text)))))))
 
 (ert-deftest org-mcp-test-view-catalogue-function-nil-keeps-the-view-lines ()
-  "With no catalogue function the description carries the per-view lines."
+  "With no catalogue function the description lists and marks every view.
+The per-view lines are there, and so are the sentences that point
+into them."
   (org-mcp-test--with-view-catalogue nil
-    (should
-     (string-match-p
-      (regexp-quote
-       (let ((org-mcp-views org-mcp-test--views))
-         (org-mcp--view-catalogue)))
-      (org-mcp-test--registered-tool-description "org-view")))))
+    (let ((description
+           (org-mcp-test--registered-tool-description "org-view")))
+      (dolist (text
+               (list
+                (let ((org-mcp-views org-mcp-test--views))
+                  (org-mcp--view-catalogue))
+                "Only the names below are accepted"
+                "Configured views, each with what it takes:\n"
+                "a range runs at the range marked unasked above."))
+        (should (string-match-p (regexp-quote text) description))))))
 
 (ert-deftest org-mcp-test-view-catalogue-function-text-ends-its-line ()
   "Text without a final newline leaves the next parameter on a line of its own."
