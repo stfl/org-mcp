@@ -113,8 +113,8 @@ behind it is: completing a monthly task last done two years ago steps it
 twenty-four months on, in one call and without asking. Org stops to ask a
 person at the tenth step; a call has nobody to ask, and the answer taken here
 is the one that carries the repeater out. A warning period is the =-3d= form, and
-it may stand alone or beside a repeater; on a DEADLINE it brings the headline
-into the agenda three days early, and on a SCHEDULED it holds the headline back
+it may stand alone or beside a repeater; on a DEADLINE it brings the node
+into the agenda three days early, and on a SCHEDULED it holds the node back
 until three days before the date. Doubling the hyphen narrows it to the first
 occurrence: =-3d= warns before every repeat and =--3d= before the first date
 only. The day name is Org's to write: send it, misspell it or leave it out, and
@@ -142,11 +142,11 @@ and not here, where a date and a time are parted by a space.
 
 Because the raw string a read returns is itself a value =after= takes, a client
 that read a repeating SCHEDULED can send it straight back — to restore it, or to
-put it on another headline — without taking the string apart first.
+put it on another node — without taking the string apart first.
 
 An =after= naming only a date leaves a repeater alone. Moving a repeating task
 on a month is =after: "2026-07-20"=, and the repeater and warning period the
-headline carried are carried to the new date.
+node carried are carried to the new date.
 
 =before= is not one of these. It is the Org timestamp the heading carries now,
 compared with what is in the file and never read as a date, so a repeater, a
@@ -180,7 +180,7 @@ half alone. How close its halves fall changes nothing —
 =<2026-03-27 Fri 09:00>--<2026-03-27 Fri 10:00>= is refused for the reason
 =<2026-06-20 Sat>--<2026-06-21 Sun>= is, and so is a range written inside one
 pair of brackets, =2026-03-27 09:00--2026-03-27 10:00=, which Org reads up to
-the separator and no further. A headline can carry a SCHEDULED that is a range
+the separator and no further. A node can carry a SCHEDULED that is a range
 and =before= asserts one by the whole string, but =after= names the one date the
 field is to carry.
 
@@ -377,7 +377,7 @@ one =org-node-set-content= works inside. A subtree is =digest=, because
 everything under the node goes with it.
 
 One call asserts a field it does not write. =org-node-set-todo= names a keyword,
-and Org may move the headline's planning dates on the way there, so where it
+and Org may move the node's planning dates on the way there, so where it
 can it carries =before_planning= beside =before=: what you would destroy, which
 is not always what you asked to change (see [[*A repeat redirects the call]]).
 
@@ -485,7 +485,7 @@ a read with an empty title, and a =::*title= link would address whichever
 heading normalizes to nothing rather than that one:
 
 #+begin_example
-Headline title reads as nothing: '[0/0]'.  Org takes a statistics cookie out of a heading, so nothing would be left to name it by
+Title reads as nothing: '[0/0]'.  Org takes a statistics cookie out of a heading, so nothing would be left to name it by
 #+end_example
 
 A cookie beside text is fine and is kept: =Ship v3 [2/5]= is the title =Ship v3=
@@ -594,7 +594,7 @@ None of the three substitutes for another, so a call that clears a field
 translates as it goes:
 
 #+begin_src json
-# The read.  There is no `scheduled' key: the headline has no SCHEDULED,
+# The read.  There is no `scheduled' key: the node has no SCHEDULED,
 # and a node carries no key for a field it has no value for
 {"title": "Write the report", "deadline": "<2026-04-15 Wed>", "link": "id:abc-123"}
 
@@ -742,25 +742,25 @@ one construct two guards that spell an assertion differently.
 * Write tools
 
 ** org-node-set-todo
-- *Description:* Move the TODO state of a headline, or take it off
+- *Description:* Move the TODO state of a node, or take it off
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): The TODO state the headline holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
-  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the headline stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out. It names the keyword only: a planning date this call moves is Org's doing
-  - =before_planning= (object, optional): what the headline's planning fields hold now, as ={"scheduled": "<2026-06-20 Sat +1w>"}=. Name a field the headline carries one for, and leave out a field it carries none for — leaving it out is how the map asserts that it holds nothing, so =""= and =null= are refused. A field holding something else is a conflict and nothing is written. Required for a headline whose state change would move a planning value, and refused there when it is missing (see [[*A repeat redirects the call]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): The TODO state the node holds now. =""= asserts that it holds no TODO keyword; any other state is a conflict and nothing is written
+  - =after= (string, required): New TODO state (must be valid in org-todo-keywords). =null= takes the keyword off, so the node stops being a task. =""= is no keyword and is refused as one; =false= is the parameter left out. It names the keyword only: a planning date this call moves is Org's doing
+  - =before_planning= (object, optional): what the node's planning fields hold now, as ={"scheduled": "<2026-06-20 Sat +1w>"}=. Name a field the node carries one for, and leave out a field it carries none for — leaving it out is how the map asserts that it holds nothing, so =""= and =null= are refused. A field holding something else is a conflict and nothing is written. Required for a node whose state change would move a planning value, and refused there when it is missing (see [[*A repeat redirects the call]])
   - =note= (string, optional): Note to attach to this state transition; stored in LOGBOOK as the prose of the state change entry. Every blank — =""=, whitespace, =null=, =false= and =[]= — is the parameter left out: the state change is made and no prose recorded
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, a =clock= report when the transition closed the Emacs session's own clock (see [[*A done keyword can close the clock]]), and the link to the updated headline — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
-- *Refuses with:* =conflict:= when =before= is not the state the headline holds or =before_planning= is not what its planning fields hold, =blocked:= when Org vetoes the change, unmarked validation otherwise — a missing =before_planning= on a headline that needs one among them (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =scheduled=, =deadline= or =closed= report for a planning field the call moved, a =clock= report when the transition closed the Emacs session's own clock (see [[*A done keyword can close the clock]]), and the link to the updated node — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the state the node holds or =before_planning= is not what its planning fields hold, =blocked:= when Org vetoes the change, unmarked validation otherwise — a missing =before_planning= on a node that needs one among them (see [[*How a refusal is classed]])
 
 =before= and =after= both name a TODO state, so the call reads as the
-transition it performs. A headline that carries no TODO keyword is asserted
-with =""=, and that is the only spelling of it: the refusal writes a headline
+transition it performs. A node that carries no TODO keyword is asserted
+with =""=, and that is the only spelling of it: the refusal writes a node
 with no keyword as =(no state)= to keep the message readable, but the value to
 send is the empty string.
 
-The response's =after= reports the state Org left the headline in, which is not
-always the one asked for: a headline that repeats is moved on rather than
+The response's =after= reports the state Org left the node in, which is not
+always the one asked for: a node that repeats is moved on rather than
 finished, and the response reports where it went (see [[*A repeat redirects the call]]).
 
 =org-log-done=, =org-todo-log-states= and =org-log-repeat= each record a
@@ -793,7 +793,7 @@ Example:
   "link": "file:~/org/projects.org::*Project Alpha"
 }
 
-# Request giving a headline its first TODO keyword:
+# Request giving a node its first TODO keyword:
 {
   "link": "file:/home/user/org/projects.org::*Project Beta",
   "before": "",
@@ -812,7 +812,7 @@ Example:
   "error": "conflict: State mismatch: expected 'TODO', found 'IN-PROGRESS'"
 }
 
-# Same error, on a headline that carries no TODO keyword:
+# Same error, on a node that carries no TODO keyword:
 {
   "error": "conflict: State mismatch: expected 'TODO', found '(no state)'"
 }
@@ -826,7 +826,7 @@ Example:
 *** A done keyword can close the clock
 
 A move to a done keyword closes the Emacs session's own clock where it is
-running in that headline, because =org-clock-out-when-done= is on by default.
+running in that node, because =org-clock-out-when-done= is on by default.
 Org does it as it does for the =C-c C-t= you would have typed, so the CLOCK
 line is closed in place and Emacs's own clock stops with it.
 
@@ -868,16 +868,16 @@ and then finishing it is the ordinary sequence: the CLOCK line stays open, this
 call says nothing about it, and [[file:clocking.org::*org-clock-out][org-clock-out]] is what closes it.
 
 A repeat closes the clock all the same, which is the case worth knowing. Org
-closes it while the headline is done and moves the keyword back afterwards, so
+closes it while the node is done and moves the keyword back afterwards, so
 a repeating task comes back in =TODO= with its clock stopped, and the response
 carries both the =scheduled= Org moved and the =clock= it closed (see [[*A repeat redirects the call]]).
 
 *** A repeat redirects the call
 
-A headline whose SCHEDULED or DEADLINE carries a repeater does not become done.
+A node whose SCHEDULED or DEADLINE carries a repeater does not become done.
 Org runs the repeat instead: the keyword goes back to a not-done one — =TODO=,
 or whatever =org-todo-repeat-to-state= or a =REPEAT_TO_STATE= property on the
-headline names — and every timestamp in the entry that carries a repeater steps
+node names — and every timestamp in the entry that carries a repeater steps
 on by its own interval. A SCHEDULED carrying no repeater is taken away rather
 than moved, as Org holds it no longer relevant once the task has moved on.
 
@@ -891,7 +891,7 @@ a planning date the call moved, carrying the state that field was in and the
 state it is in now, each read the way a =before= is read:
 
 #+begin_src json
-# Request.  The headline has no DEADLINE, so the map leaves it out:
+# Request.  The node has no DEADLINE, so the map leaves it out:
 {
   "link": "file:/home/user/org/tasks.org::*Water the plants",
   "before": "TODO",
@@ -899,7 +899,7 @@ state it is in now, each read the way a =before= is read:
   "after": "DONE"
 }
 
-# Response.  Org repeated the headline instead of finishing it:
+# Response.  Org repeated the node instead of finishing it:
 {
   "success": true,
   "saved": true,
@@ -931,13 +931,13 @@ state it is in now, each read the way a =before= is read:
 }
 
 # The same call sent without before_planning.  The refusal names what
-# the headline holds, so the next one needs no read:
+# the node holds, so the next one needs no read:
 {
-  "error": "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds SCHEDULED '<2026-06-18 Thu>' and DEADLINE '<2026-06-20 Sat +1w>'"
+  "error": "before_planning is required here: this node repeats, so the state change moves or removes its planning dates.  It holds SCHEDULED '<2026-06-18 Thu>' and DEADLINE '<2026-06-20 Sat +1w>'"
 }
 #+end_src
 
-A field is there only when the call moved it, so its absence says the headline
+A field is there only when the call moved it, so its absence says the node
 still holds what you last read. Its =after= is the next call's =before=:
 [[*org-node-set-scheduled][org-node-set-scheduled]] compares your =before= against the date in the file, so
 one read before this call is a conflict afterwards, and the reported value is
@@ -952,33 +952,33 @@ the field back after Org has decided it, which is what the report is for.
 *=before_planning= guards the date, and you are asked for it only where a date
 is at risk.* An accurate map is accepted wherever you send it, so a client that
 asserts the planning fields on every state change is never refused for it; what
-the headline decides is whether leaving it out is refused. Every write that destroys something takes a =before= for the thing it
+the node decides is whether leaving it out is refused. Every write that destroys something takes a =before= for the thing it
 destroys and is refused when the file disagrees (see [[*Knowing what you are about to change]]).
 A repeat destroys a planning value, so the call asserts that value too — but
 only a repeat can, so an ordinary transition carries no assertion at all and
-costs nothing. Send =before_planning= when the headline repeats, and org-mcp
-refuses the call without it exactly there, naming what the headline holds so
+costs nothing. Send =before_planning= when the node repeats, and org-mcp
+refuses the call without it exactly there, naming what the node holds so
 you can send it again without reading first.
 
-*Name a field the headline carries; leave out one it does not.* Silence about a
+*Name a field the node carries; leave out one it does not.* Silence about a
 field is not a field skipped — it asserts that the field holds nothing, and a
-headline that does carry a DEADLINE refuses the call that said nothing about
-it. That is what spares you spelling out an empty DEADLINE on every headline
+node that does carry a DEADLINE refuses the call that said nothing about
+it. That is what spares you spelling out an empty DEADLINE on every node
 that never had one. It also means there is one spelling and not two: =""= and
 =null= inside the map are refused, because leaving the name out already says
 what they would say.
 
 *Assert both fields, whichever one carries the repeater.* A repeat reaches
-every planning date on the headline, and it takes away a SCHEDULED that carries
+every planning date on the node, and it takes away a SCHEDULED that carries
 no repeater of its own. The repeater need not even be on the planning line: one
-on a plain timestamp in the body repeats the headline and removes a plain
-SCHEDULED with it. So which field is at risk is a fact about the headline, not
+on a plain timestamp in the body repeats the node and removes a plain
+SCHEDULED with it. So which field is at risk is a fact about the node, not
 about the repeaters you can see on its dates, and org-mcp decides it for you —
-when it asks for an assertion, assert everything the headline holds.
+when it asks for an assertion, assert everything the node holds.
 
 CLOSED is the third field of Org's planning line, and you never assert it. Org
-writes it when a headline reaches a done keyword and clears it when the
-headline leaves one, so it is Org's record of the transition rather than
+writes it when a node reaches a done keyword and clears it when the
+node leaves one, so it is Org's record of the transition rather than
 anything you chose. The response reports it like the other two: you assert what
 you could have destroyed, and you are told everything that moved.
 
@@ -992,19 +992,19 @@ body. It steps on with the rest, and it shows up in the body rather than in a
 planning field, so it is [[*org-node-set-content][org-node-set-content]] whose =before= goes stale.
 
 ** org-node-set-title
-- *Description:* Rename the title of an existing headline while preserving its TODO state, tags, and properties
+- *Description:* Rename the title of an existing node while preserving its TODO state, tags, and properties
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): Current headline title (without TODO state or tags) - must be the title the headline holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
-  - =after= (string, required): New headline title (without TODO state or tags), and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]]). =null=, =false= and =[]= are the parameter left out and are refused: a headline always has a title, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): Current title (without TODO state or tags) - must be the title the node holds, compared as Org compares titles: letter case, runs of whitespace and statistics cookies make no difference, so the title a read returns is always accepted (see [[file:reading.org::*The node][The node]])
+  - =after= (string, required): New title (without TODO state or tags), and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]]). =null=, =false= and =[]= are the parameter left out and are refused: a title cannot be taken away, so there is nothing a blank could ask for (see [[*What a blank parameter means]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed headline. Both titles are the ones the file held and holds, as a read returns them — Org collapses a run of spaces and leaves a statistics cookie out — so =after= is what the next call sends as its =before=
-- *Refuses with:* =conflict:= when =before= is not the title the headline holds, unmarked validation otherwise — a blank =after=, and either parameter carrying something that is not text (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =before= and =after= titles, and the link to the renamed node. Both titles are the ones the file held and holds, as a read returns them — Org collapses a run of spaces and leaves a statistics cookie out — so =after= is what the next call sends as its =before=
+- *Refuses with:* =conflict:= when =before= is not the title the node holds, unmarked validation otherwise — a blank =after=, and either parameter carrying something that is not text (see [[*How a refusal is classed]])
 
-A statistics cookie on the headline survives the rename. A read leaves the
+A statistics cookie on the node survives the rename. A read leaves the
 cookie out of the title it returns, so an =after= composed from one carries
 none, and a cookie written away would not come back: Org refreshes a cookie
-that is already there and never adds one, which would cost the headline its
+that is already there and never adds one, which would cost the node its
 progress display for good. The kept cookie goes at the end of the new title.
 An =after= that names a cookie of its own is written as it stands, cookie
 included — that one was asked for.
@@ -1036,14 +1036,14 @@ Example:
 ** org-node-create
 - *Description:* Add a new node to an Org file. It is a task when =todo= names a state and a plain heading when it does not
 - *Parameters:*
-  - =title= (string, required): The headline text, and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]])
+  - =title= (string, required): The new node's title, and text Org reads as a title (see [[*A title is the title, not a line of Org grammar]])
   - =todo= (string, optional): TODO state from =org-todo-keywords=. Left out, or blank — =null=, =false=, =""= or =[]= — the new node carries no keyword and is a heading rather than a task, which is the node a read reports by carrying no =todo= at all. A value that names no keyword is refused
   - =tags= (string or array, optional): Tags to add (e.g., "urgent" or ["work", "urgent"]), or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]])
   - =content= (string, optional): Body text to add under the heading. A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
   - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. If not given, or =null=, =false= or blank, append as last child of parent, or at the top level put the new item after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent= in, instead of the ID index; it applies to =parent= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new headline has no line for it to take away, so the state it asks for is the one the headline is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new node has no line for it to take away, so the state it asks for is the one the node is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title. The title is the one the file now holds, as a read returns it, which is the title the link beside it names
 - *Refuses with:* =blocked:= when Org vetoes =todo= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
@@ -1089,21 +1089,21 @@ Example:
 #+end_src
 
 ** org-node-set-content
-- *Description:* Replace or empty the body content of an Org headline, either a unique substring of the body or the body entire, whichever =before= names
+- *Description:* Replace or empty the body content of an Org node, either a unique substring of the body or the body entire, whichever =before= names
 - *Parameters:*
-  - =link= (string, required): link to the headline to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a whole file is refused: this verb acts on headings
-  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The headline's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to a headline whose body is empty. Every other blank is the parameter left out (see [[*What a blank parameter means]])
+  - =link= (string, required): link to the node to edit (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). A link naming a whole file is refused: this verb acts on headings
+  - =before= (string, required): What the body holds now, in one of two forms. A substring of the body, which must be unique, replaces that substring. The node's =content_digest=, as a read returned it, replaces the body entire. Use empty string "" to add content to a node whose body is empty. Every other blank is the parameter left out (see [[*What a blank parameter means]])
   - =after= (string, required): The replacement text; =""= leaves nothing in the place of what =before= named, which over a =content_digest= empties the body. A body has an empty value of its own, so =""= is how you empty it and =null=, =false= and =[]= are the parameter left out and are refused (see [[*What a blank parameter means]]). A star line inside a block must be escaped as =,*= (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and the link to the updated headline
+- *Returns:* Success status, =saved= flag, and the link to the updated node
 - *Refuses with:* =conflict:= for every refusal over the value =before= asserts, in either form; unmarked validation for a =before= or an =after= that was never sent, and otherwise (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
-- *Special behavior:* An empty =before= asserts the headline has no content. That is how initial content reaches a headline that has none; a headline that already has some is refused, and the refusal asks for the part of the content to replace
+- *Special behavior:* An empty =before= asserts the node has no content. That is how initial content reaches a node that has none; a node that already has some is refused, and the refusal asks for the part of the content to replace
 
 Every body write is a transition: =before= is what the body holds and =after= is
 what takes its place. How much of the body =after= takes the place of follows
 the form =before= arrives in, and nothing else — there is no flag to set. A
 substring names a part of the body and replaces that part. The =content_digest=
-a read of the headline returned names the region entire and replaces the region,
+a read of the node returned names the region entire and replaces the region,
 which is how a body too long to echo back is rewritten. The =sha256:= prefix is
 the whole of what tells the two apart, because a short body could itself be
 sixteen hexadecimal characters and a client must still be able to assert it.
@@ -1134,9 +1134,9 @@ conflict: Content mismatch: expected 'sha256:…'; the body has changed since th
 
 Each of them answers a =before= you believed you read: the body you planned
 against is not the body the file holds, whether the part you named has gone,
-has been duplicated, was never there because the headline has no body, or the
+has been duplicated, was never there because the node has no body, or the
 whole region has moved. The recovery is the same one every conflict has — read
-the headline again and plan against what it holds now — so they carry the
+the node again and plan against what it holds now — so they carry the
 marker that says it. A digest is a stricter assertion than a substring, not a
 different kind of one: it asserts the region rather than a part of it, and it
 fails on a change a substring would have written straight through.
@@ -1180,7 +1180,7 @@ Example:
   "after": "The whole body, written afresh."
 }
 
-# Adding content to a headline whose body is empty:
+# Adding content to a node whose body is empty:
 {
   "link": "file:/home/user/org/projects.org::*New task",
   "before": "",
@@ -1189,9 +1189,9 @@ Example:
 #+end_src
 
 ** org-node-set-properties
-- *Description:* Set or remove properties in the PROPERTIES drawer of an Org headline or of a whole file
+- *Description:* Set or remove properties in the PROPERTIES drawer of an Org heading or of a whole file
 - *Parameters:*
-  - =link= (string, required): link to the headline, or to a whole file for its own drawer (see [[file:links.org::*Addressing headings with links][Addressing headings with links]] and [[*A file's own property drawer]])
+  - =link= (string, required): link to a heading, or to a whole file for its own drawer (see [[file:links.org::*Addressing headings with links][Addressing headings with links]] and [[*A file's own property drawer]])
   - =before= (object, required): JSON object of what those properties hold now, one entry per property =after= writes and no other. A property =after= writes and =before= omits is refused, and so is one =before= names and =after= leaves alone: a call asserts exactly what it changes, and a property it does not write is none of its business. =null= asserts the drawer carries no such line, =""= asserts a line carrying no value, and any other string asserts the line holds that text (see [[*The three states of a drawer line]]). Names are matched without regard to case, as Org reads them
   - =after= (object, required): JSON object of property name-value pairs. A string value sets the property (numbers are accepted) and must fit on one line; =true= sets it to the text =t= and =false= to the text =nil=, as the strings ="t"= and ="nil"= do. =""= writes a line carrying no value, and =null= takes the line away, guarded by what =before= says it holds (see [[*The three states of a drawer line]]). =ID= and =CUSTOM_ID= can be set like any other property: values are written as given, and an =ID= is not added to Org's ID index. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden — use dedicated tools instead — and so is a name ending in =+=
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
@@ -1582,25 +1582,25 @@ Org acts on the new value at once, in the buffer the user has open as well as on
 disk.
 
 ** org-node-set-scheduled
-- *Description:* Move the SCHEDULED timestamp of an Org headline, or take it off
+- *Description:* Move the SCHEDULED timestamp of an Org node, or take it off
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the SCHEDULED timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no SCHEDULED
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): the SCHEDULED timestamp the node carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the node has no SCHEDULED
   - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the headline's CLOSED with it, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the node's CLOSED with it, and the node's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the node carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
-=before= is the date the headline carries today and =after= the date it is to
+=before= is the date the node carries today and =after= the date it is to
 carry instead. Rescheduling a repeating entry keeps its repeater, which is one
 reason =before= is the whole Org string rather than a date.
 
 That inheritance has one condition: the =after= brings neither a repeater nor a
 warning period of its own. Where it brings neither — a bare date, or one
-carrying a time of day or a span of the day — the headline's repeater and
+carrying a time of day or a span of the day — the node's repeater and
 warning stay where they are and the date moves under them. Where it brings
-either, it replaces both, and the headline ends up carrying exactly what was
+either, it replaces both, and the node ends up carrying exactly what was
 sent. The same rule governs =org-node-set-deadline=.
 
 Against =<2026-06-20 Sat +1w -3d>=, an =after= of =2026-07-02= writes
@@ -1609,9 +1609,9 @@ Against =<2026-06-20 Sat +1w -3d>=, an =after= of =2026-07-02= writes
 writes =<2026-07-02 Thu +2w>=, the warning gone. Name the repeater alongside
 the warning — =2026-07-02 +1w -2d= — to move all three at once. The response
 reads the timestamp back from the file, so its =after= reports the whole of
-what the headline ended up with.
+what the node ended up with.
 
-A headline whose SCHEDULED is itself a date range —
+A node whose SCHEDULED is itself a date range —
 =<2026-06-20 Sat>--<2026-06-21 Sun>= — is asserted by that whole string, and
 =after= replaces the range with the one date it names. This tool reads and
 replaces a range but never writes one: a range in =after= is refused. An
@@ -1622,10 +1622,10 @@ reschedule you make by hand; see [[*What a write records in the LOGBOOK]].
 
 *** A planning write takes the CLOSED with it
 
-Writing a date to a headline that carries a =CLOSED:= timestamp takes the
+Writing a date to a node that carries a =CLOSED:= timestamp takes the
 CLOSED away. Org builds the planning line afresh when it writes a date to it
 and does not carry the closing timestamp onto the new one — which is what your
-own =C-c C-s= does to the same headline. org-mcp reports that rather than
+own =C-c C-s= does to the same node. org-mcp reports that rather than
 putting it back: repairing what an Org command does to the line would part your
 file from what Org itself would have written in it.
 
@@ -1661,8 +1661,8 @@ differ here, and the difference is Org's rather than org-mcp's.
 [[*org-node-set-deadline][org-node-set-deadline]] does all of this too:
 =org-deadline= builds the line the same way =org-schedule= does.
 
-You never assert CLOSED. Org writes it when a headline reaches a done keyword
-and clears it when the headline leaves one, so it holds Org's record of the
+You never assert CLOSED. Org writes it when a node reaches a done keyword
+and clears it when the node leaves one, so it holds Org's record of the
 transition rather than a date you chose — and a =before= names what you chose.
 [[*org-node-set-todo][org-node-set-todo]] reports it on the same terms, when a
 state change out of a done keyword takes it away.
@@ -1731,20 +1731,20 @@ Example:
 #+end_src
 
 ** org-node-set-deadline
-- *Description:* Move the DEADLINE timestamp of an Org headline, or take it off
+- *Description:* Move the DEADLINE timestamp of an Org node, or take it off
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the DEADLINE timestamp the headline carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the headline has no DEADLINE
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): the DEADLINE timestamp the node carries now, as a read returns it — the raw Org string, brackets, repeater, delay and date range included, such as =<2026-06-20 Sat +1w -3d>=. It compares as the stored string and takes no other spelling of the same date, unlike =after=. An empty string asserts the node has no DEADLINE
   - =after= (string, required): the timestamp to write — a date, optionally with a time, a repeater and a warning period; see [[*A date has to be a date]]. =null= takes the timestamp away, guarded by =before=. =""= is no date and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the headline's CLOSED with it, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
-- *Refuses with:* =conflict:= when =before= is not the timestamp the headline carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, a =closed= report when the write took the node's CLOSED with it, and the node's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]] and [[*A planning write takes the CLOSED with it]])
+- *Refuses with:* =conflict:= when =before= is not the timestamp the node carries, unmarked validation otherwise — a date Org does not read as the date it names, and an =after= of =""=, =false= or =[]=, since none of those names a date (see [[*How a refusal is classed]], [[*A date has to be a date]] and [[*What a blank parameter means]])
 
 =before= and =after= are the two ends of a move, not the two ends of a range:
-=before= is the date the headline carries today and =after= the date it is to
+=before= is the date the node carries today and =after= the date it is to
 carry instead.
 
-A warning period is what a deadline says it early: =-3d= puts the headline in
+A warning period is what a deadline says it early: =-3d= puts the node in
 the agenda three days before the day it is due. Sending one to a repeating
 deadline replaces its repeater, because an =after= carrying a repeater or a
 warning replaces both — name the repeater alongside the warning to keep it
@@ -1807,16 +1807,16 @@ So a client that knows which tags it means to change reaches for a delta and
 pays nothing, and a client that means to impose an exact set pays for the blast
 radius it chose.
 
-All three write the tags on the headline itself and leave inherited ones where
+All three write the tags on the node itself and leave inherited ones where
 they are, and all three report that partition back: =before= and =after= are the
-headline's own tags, =inherited= the tags in effect on it from elsewhere. Those
+node's own tags, =inherited= the tags in effect on it from elsewhere. Those
 are the =local_tags= and the rest of the =tags= of a read (see [[file:reading.org::*The two tag fields][The two tag fields]]).
 The =before= of =org-node-set-tags= is the own set too — never the set in
 effect. The call writes local tags only, so asserting the effective set would
 assert values it cannot change, and would refuse because an /ancestor/ was
 edited.
 
-Clearing a headline's tags has two spellings and neither is a blank parameter:
+Clearing a node's tags has two spellings and neither is a blank parameter:
 name the tags a read returned as its own to =org-node-remove-tags=, or send
 =after: []= to =org-node-set-tags= with the full prior own set in =before=. A
 blank tag set is a required parameter left out and is refused on all three,
@@ -1825,20 +1825,20 @@ spelling of the =""= a field holding text takes
 (see [[*What a blank parameter means]]).
 
 ** org-node-add-tags
-- *Description:* Add tags to an Org headline, leaving its other tags alone
+- *Description:* Add tags to an Org node, leaving its other tags alone
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string or array, required): Single tag ="work"=, array =["work", "urgent"]=, or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]]). Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the node's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
-A tag the headline already has is left alone rather than written a second time,
+A tag the node already has is left alone rather than written a second time,
 whether it has it of its own or by inheritance — writing an inherited tag on the
-headline would make a local copy of it rather than add anything. So the call is
+node would make a local copy of it rather than add anything. So the call is
 idempotent, and two clients adding different tags both keep theirs.
 
-A call that asks for nothing the headline does not already have writes nothing
+A call that asks for nothing the node does not already have writes nothing
 at all, and the file is left byte for byte as it was.
 
 Example:
@@ -1851,16 +1851,16 @@ Example:
 #+end_src
 
 ** org-node-remove-tags
-- *Description:* Remove tags from an Org headline, leaving its other tags alone
+- *Description:* Remove tags from an Org node, leaving its other tags alone
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =after= (string or array, required): Single tag ="work"=, array =["work", "urgent"]=, or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]]). Every other tag is left alone
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the node's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
-A tag the headline does not have is nothing to take away and the call passes
-over it. A tag it only /inherits/ is refused, and the refusal names the headline
+A tag the node does not have is nothing to take away and the call passes
+over it. A tag it only /inherits/ is refused, and the refusal names the heading
 the tag is written on, or the file when =#+FILETAGS:= is where it comes from:
 
 #+begin_example
@@ -1871,10 +1871,10 @@ That refusal is unmarked validation rather than a conflict. Nothing about your
 belief is stale — a read showing the tag under =tags= and not under =local_tags=
 said exactly this — so reading again resolves nothing, and Org vetoed nothing
 either. What has to change is the call: drop the tag from it, or address the
-headline that carries it.
+node that carries it.
 
 Two tags of one mutually exclusive group can be removed together: the group is a
-rule about the tags a headline ends up carrying, and a call that only takes tags
+rule about the tags a node ends up carrying, and a call that only takes tags
 away cannot break it.
 
 Example:
@@ -1885,7 +1885,7 @@ Example:
   "after": "urgent"
 }
 
-# Clear the tags a read returned as the headline's own:
+# Clear the tags a read returned as the node's own:
 {
   "link": "id:abc-123",
   "after": ["work", "urgent"]
@@ -1893,14 +1893,14 @@ Example:
 #+end_src
 
 ** org-node-set-tags
-- *Description:* Replace the tags written on an Org headline
+- *Description:* Replace the tags written on an Org node
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string or array, required): The tags the headline carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here. Every member is a tag name, checked as the members of =after= are; a value that is no tag name is refused as a malformed call, and a digest is no tag wherever in the set it appears (see [[*Knowing what you are about to change][Knowing what you are about to change]])
-  - =after= (string or array, required): Single tag ="work"=, array =["work", "urgent"]=, or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]]). =[]= leaves the headline carrying no tags of its own. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string or array, required): The tags the node carries itself now — the =local_tags= of a read, not its =tags=. Send =[]= to assert that it carries none of its own. Compared as a set: order carries no meaning in Org and none here. Every member is a tag name, checked as the members of =after= are; a value that is no tag name is refused as a malformed call, and a digest is no tag wherever in the set it appears (see [[*Knowing what you are about to change][Knowing what you are about to change]])
+  - =after= (string or array, required): Single tag ="work"=, array =["work", "urgent"]=, or the JSON text of that array (see [[file:installation.org::*When your client cannot send an array][When your client cannot send an array]]). =[]= leaves the node carrying no tags of its own. Validated against =org-tag-alist= if configured; respects mutually exclusive tag groups
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the headline's link
-- *Refuses with:* =conflict:= when =before= is not the set the headline carries, unmarked validation otherwise (see [[*How a refusal is classed]])
+- *Returns:* Success status, =saved= flag, =before=, =after= and =inherited= arrays, plus the node's link
+- *Refuses with:* =conflict:= when =before= is not the set the node carries, unmarked validation otherwise (see [[*How a refusal is classed]])
 
 The call takes away every tag it does not list, so =before= asserts the entire
 prior set rather than the part of it you mean to change. A refusal names both
@@ -1908,7 +1908,7 @@ sets, each written in one order, because what it reports is a comparison of sets
 and an order would invite you to look for a difference that is not there.
 
 What =before= holds decides which class refuses it. Org writes tags from
-=[[:alnum:]_@#%]=, so a value outside that set names a tag no headline could
+=[[:alnum:]_@#%]=, so a value outside that set names a tag no node could
 carry: no version of the file satisfies the assertion, and reading the file
 again would tell you nothing. It is refused as the malformed call it is,
 unmarked validation, and a digest among the members keeps the wording written
@@ -1920,8 +1920,8 @@ Invalid tag name: not a tag!
 Tags is asserted with the value it holds, not with a digest: 'sha256:…' covers a region and this call changes one field
 #+end_example
 
-A set of real tag names the headline does not carry is the other case, and it
-is the =conflict:= this assertion exists to report: there is a headline to read
+A set of real tag names the node does not carry is the other case, and it
+is the =conflict:= this assertion exists to report: there is a node to read
 again and a set to read off it.
 
 Example:
@@ -1933,7 +1933,7 @@ Example:
   "after": ["work", "urgent"]
 }
 
-# Leave the headline no tags of its own:
+# Leave the node no tags of its own:
 {
   "link": "id:abc-123",
   "before": ["work", "urgent"],
@@ -1945,7 +1945,7 @@ Example:
   "error": "conflict: Tags mismatch: expected 'work', found 'urgent, work'"
 }
 
-# A headline that carries no tags of its own:
+# A node that carries no tags of its own:
 {
   "error": "conflict: Tags mismatch: expected '(no tags)', found 'urgent, work'"
 }
@@ -1957,14 +1957,14 @@ Example:
 #+end_src
 
 ** org-node-set-priority
-- *Description:* Set the priority of an Org headline, or take it off
+- *Description:* Set the priority of an Org node, or take it off
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
-  - =before= (string, required): the priority character the headline carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the headline has no priority
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =before= (string, required): the priority character the node carries now, just the letter, not the =[#A]= form Org writes it in on the heading. An empty string asserts the node has no priority
   - =after= (string, required): Single character in the range the target file admits — the Org configuration's, or the one a =#+PRIORITIES:= line in that file sets. Use =org-config-priority= to check the configured range. A character outside the file's range is refused. =null= takes the priority away, guarded by =before=. =""= is no character and is refused as one; =false= is the parameter left out
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, =before=, =after=, and the headline's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
-- *Refuses with:* =conflict:= when =before= is not the priority the headline carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a priority character (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
+- *Returns:* Success status, =saved= flag, =before=, =after=, and the node's link — =before= and =after= are the states the field was in and is in, so a response's =after= is the next call's =before= (see [[*What a blank parameter means]])
+- *Refuses with:* =conflict:= when =before= is not the priority the node carries, unmarked validation otherwise — an =after= of =""=, =false= or =[]= among it, since none of those names a priority character (see [[*How a refusal is classed]] and [[*What a blank parameter means]])
 
 Example:
 #+begin_src json
@@ -2005,12 +2005,12 @@ Example:
 #+end_src
 
 ** org-node-add-note
-- *Description:* Add a timestamped note to the LOGBOOK drawer of an Org headline. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
+- *Description:* Add a timestamped note to the LOGBOOK drawer of an Org node. Creates the LOGBOOK drawer if it doesn't exist. Note is inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =note= (string, required): Note text to add. Cannot be empty or whitespace-only, and a blank is refused as the parameter left out — the note is what this call is for. Multi-line notes are properly indented
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Success status, =saved= flag, and the headline's link
+- *Returns:* Success status, =saved= flag, and the node's link
 - *Refuses with:* unmarked validation only (see [[*How a refusal is classed]])
 
 Example:

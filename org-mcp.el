@@ -3910,13 +3910,12 @@ to address it by."
             ;; In Emacs 27.2, [[:space:]] doesn't match NBSP (U+00A0)
             (string-match-p "^[\u00A0]*$" title))
     (org-mcp--tool-validation-error
-     "Headline title cannot be empty or contain only whitespace"))
+     "Title cannot be empty or contain only whitespace"))
   (when (string-match-p "[\n\r]" title)
-    (org-mcp--tool-validation-error
-     "Headline title cannot contain newlines"))
+    (org-mcp--tool-validation-error "Title cannot contain newlines"))
   (when (string-empty-p (org-link--normalize-string title))
     (org-mcp--tool-validation-error
-     "Headline title reads as nothing: '%s'.  Org takes a \
+     "Title reads as nothing: '%s'.  Org takes a \
 statistics cookie out of a heading, so nothing would be left to \
 name it by"
      title)))
@@ -4819,7 +4818,7 @@ Mirrors the set Org's interactive tag completion offers via
 `org-global-tags-completion-table': configured tags from
 `org-tag-alist' / `org-tag-persistent-alist', any per-file
 `#+TAGS:' / `#+FILETAGS:', plus every tag actually present on
-headlines in those files.  Group keywords (`:startgroup' etc.)
+nodes in those files.  Group keywords (`:startgroup' etc.)
 are filtered out.  Tags are returned sorted and deduplicated.
 
 MCP Parameters:
@@ -4879,24 +4878,24 @@ lists those roots as absolute paths."
 
 (defun org-mcp--tool-node-set-todo
     (link before after &optional before_planning note files)
-  "Move the TODO state of the headline LINK names, or take it off.
-Returns the link to the updated headline, and as the response's
+  "Move the TODO state of the node LINK names, or take it off.
+Returns the link to the updated node, and as the response's
 `after' the state Org left it in, which is the state asked for
 unless Org made another of it: a repeating entry moved to a done
 keyword comes back in its not-done keyword.  The same repeat moves
-the headline's planning dates, and a `scheduled' or `deadline' field
+the node\\='s planning dates, and a `scheduled' or `deadline' field
 reports the one it moved, with the state that field was in and the
 state it is in now; see `org-mcp--planning-moves'.  A change Org
 vetoes is refused and nothing is written; see
 `org-mcp--set-todo-state'.
-BEFORE is the TODO state the headline is asserted to hold, \"\" for
-a headline that has none.  A headline in any other state is a
+BEFORE is the TODO state the node is asserted to hold, \"\" for
+a node that has none.  A node in any other state is a
 conflict and nothing is written.
 AFTER is the new TODO state to set, or null to take the keyword off
-so that the headline stops being a task.  It names the keyword only:
+so that the node stops being a task.  It names the keyword only:
 the planning fields are Org's to decide and no parameter writes them
 here.
-BEFORE_PLANNING is what the call asserts the headline's planning
+BEFORE_PLANNING is what the call asserts the node\\='s planning
 fields hold, naming a field it says holds a timestamp and leaving out
 one it says holds nothing; see `org-mcp--planning-map-given'.  A
 field holding anything else is a conflict and nothing is written.
@@ -4909,13 +4908,13 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  before - The TODO state the headline holds now (string, required)
+  before - The TODO state the node holds now (string, required)
            Send \"\" to assert that it has no TODO keyword; any
            other state is refused and nothing is written
   after - New TODO state (must be in `org-todo-keywords')
@@ -4924,7 +4923,7 @@ MCP Parameters:
           the parameter left out
           It sets the keyword only: a planning date this call moves
           is Org's doing, and the response reports it
-  before_planning - What the headline's planning fields hold now
+  before_planning - What the node's planning fields hold now
            (object, optional):
              {\"scheduled\": \"<2026-06-20 Sat +1w>\"}
            Each value is the raw Org timestamp a read returns,
@@ -5031,9 +5030,9 @@ MCP Parameters:
      properties
      files)
   "Add a new TODO item to an Org file.
-Returns the new headline's link; no identifier is created, so the
+Returns the new node\\='s link; no identifier is created, so the
 link is `id:' only when PROPERTIES sets an ID.
-TITLE is the headline text.
+TITLE is the new node\\='s title.
 TODO is the TODO state from `org-todo-keywords'.  It is optional, and
 a blank one, see `org-mcp--blank-param-p', makes a heading carrying no
 keyword — a node that is not a task, which is the node a read reports
@@ -5060,7 +5059,7 @@ FILES, when not blank, names the files an `id:' PARENT is looked
 up in; see `org-mcp--link-target'.  It applies to PARENT only.
 
 MCP Parameters:
-  title - The headline text, and text Org reads as a title: a
+  title - The new node's title, and text Org reads as a title: a
           trailing :tag:, a leading COMMENT, a leading TODO
           keyword and a leading [#A] are each refused, because
           Org would take them out of the title
@@ -5089,13 +5088,13 @@ MCP Parameters:
                        - file:{absolute-path}::*{title} (first match)
                        - any of these as [[link]] or
                          [[link][description]]
-  properties - JSON object of properties for the new headline
+  properties - JSON object of properties for the new node
                (optional), such as ID or CUSTOM_ID
                Values take the three states a drawer line has, as
                in org-node-set-properties: a single-line string or
                number is written as given, \"\" writes a line
                carrying no value, and null writes nothing at all,
-               there being no line on a new headline to take away.
+               there being no line on a new node to take away.
                true or false writes the text t or nil
                Special properties (TODO, TAGS, PRIORITY, etc.) are
                forbidden
@@ -5284,14 +5283,14 @@ message."
 
 (defun org-mcp--tool-node-set-title
     (link before after &optional files)
-  "Rename the headline LINK names from BEFORE to AFTER.
+  "Rename the node LINK names from BEFORE to AFTER.
 Preserves the current TODO state and tags.
-Returns the link to the renamed headline.
+Returns the link to the renamed node.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -5305,10 +5304,10 @@ MCP Parameters:
           text Org reads as a title: a trailing :tag:, a leading
           COMMENT, a leading TODO keyword and a leading [#A] are
           each refused, because Org would take them out of the
-          title.  A statistics cookie on the headline is kept
+          title.  A statistics cookie on the node is kept
           unless after names one of its own.  Null, false and []
-          are the parameter left out; a headline always has a
-          title, so there is nothing a blank could ask for
+          are the parameter left out; a title cannot be taken
+          away, so there is nothing a blank could ask for
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -5826,7 +5825,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline, or to a whole file for its own
+  link - Link to a heading, or to a whole file for its own
          property drawer
          Formats:
            - id:{id}
@@ -6593,7 +6592,7 @@ named by its record\\='s label."
   (if (null asserted)
       (when (org-mcp--planning-assertion-required-p found)
         (org-mcp--tool-validation-error
-         "before_planning is required here: this headline repeats, so the state change moves or removes its planning dates.  It holds %s"
+         "before_planning is required here: this node repeats, so the state change moves or removes its planning dates.  It holds %s"
          (org-mcp--planning-holdings found)))
     (pcase-dolist (`(,name . ,value) asserted)
       (let ((holds (alist-get name found)))
@@ -6764,7 +6763,7 @@ asked here first."
 
 (defun org-mcp--tool-node-set-scheduled
     (link before after &optional files)
-  "Move SCHEDULED on the headline LINK names from BEFORE to AFTER.
+  "Move SCHEDULED on the node LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
 AFTER is an ISO date string, or null to take the timestamp away.
@@ -6772,7 +6771,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -6802,7 +6801,7 @@ MCP Parameters:
 
 (defun org-mcp--tool-node-set-deadline
     (link before after &optional files)
-  "Move DEADLINE on the headline LINK names from BEFORE to AFTER.
+  "Move DEADLINE on the node LINK names from BEFORE to AFTER.
 BEFORE is the raw Org timestamp the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
 AFTER is an ISO date string, or null to take the timestamp away.
@@ -6810,7 +6809,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -6990,16 +6989,16 @@ and `tags'."
                (lambda (tag) (member tag (cdr sets))) (car sets)))))))
 
 (defun org-mcp--tool-node-add-tags (link after &optional files)
-  "Add tags to the headline LINK names.
+  "Add tags to the node LINK names.
 AFTER is the tags to add, one as a string or several as an array.
-A tag the headline already has, written on it or inherited, is left
+A tag the node already has, written on it or inherited, is left
 alone.  Nothing is taken away, so the call destroys nothing and
 asserts nothing: it takes no `before'.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -7010,7 +7009,7 @@ MCP Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          A tag the headline already has or inherits is left alone
+          A tag the node already has or inherits is left alone
           Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -7024,18 +7023,18 @@ MCP Parameters:
        (org-mcp--tags-after-add added own effective)))))
 
 (defun org-mcp--tool-node-remove-tags (link after &optional files)
-  "Remove tags from the headline LINK names.
+  "Remove tags from the node LINK names.
 AFTER is the tags to remove, one as a string or several as an array.
 Every other tag is left alone, so a tag the client never saw
 survives and the call destroys nothing unseen: it takes no `before'.
-A tag the headline does not have is nothing to take away; a tag it
+A tag the node does not have is nothing to take away; a tag it
 only inherits is refused, since this call writes nowhere but on the
-headline.
+node.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -7046,7 +7045,7 @@ MCP Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          A tag the headline does not have is passed over
+          A tag the node does not have is passed over
           A tag it only inherits is refused
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -7060,8 +7059,8 @@ MCP Parameters:
        (org-mcp--tags-after-remove removed own effective)))))
 
 (defun org-mcp--tool-node-set-tags (link before after &optional files)
-  "Replace the tags written on the headline LINK names.
-BEFORE is the entire set of tags the headline is asserted to carry
+  "Replace the tags written on the node LINK names.
+BEFORE is the entire set of tags the node is asserted to carry
 itself, `[]' for one that carries none, compared as a set since Org
 tag order carries no meaning.  Any other set is a conflict and
 nothing is written.  The assertion covers the whole set because the
@@ -7070,7 +7069,7 @@ never saw; a client that knows which tags it means to change reaches
 for `org-node-add-tags' or `org-node-remove-tags' and asserts
 nothing.
 
-The assertion is over the headline's own tags, never the set in
+The assertion is over the node\\='s own tags, never the set in
 effect on it: `org-set-tags' writes local tags only, so asserting
 the effective set would assert values this call cannot change and
 would refuse because an ancestor was edited.
@@ -7088,19 +7087,19 @@ Every other member of BEFORE is a tag name, checked as the tags in
 AFTER are; `org-mcp--tag-set-asserted' says why a value that is not
 one is a malformed call rather than a stale belief about the file.
 
-AFTER is the tags to write, `[]' to leave the headline carrying none
+AFTER is the tags to write, `[]' to leave the node carrying none
 of its own.  Inherited tags are untouched either way.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
-  before - The tags the headline carries itself now (string or
+  before - The tags the node carries itself now (string or
            array, required); the `local_tags' of a read, not its
            `tags'.  Send [] to assert that it carries none.  Order
            makes no difference; any other set of tag names is
@@ -7112,7 +7111,7 @@ MCP Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          [] leaves the headline carrying no tags of its own
+          [] leaves the node carrying no tags of its own
           Validated against org-tag-alist if configured
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
@@ -7132,7 +7131,7 @@ MCP Parameters:
 
 (defun org-mcp--tool-node-set-priority
     (link before after &optional files)
-  "Move the priority of the headline LINK names from BEFORE to AFTER.
+  "Move the priority of the node LINK names from BEFORE to AFTER.
 BEFORE is the priority character the heading carries, or \"\" when it
 carries none; the call is refused when the heading says otherwise.
 AFTER is a single-character string, or null to take the priority
@@ -7141,7 +7140,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -7167,12 +7166,12 @@ MCP Parameters:
    "set priority"))
 
 (defun org-mcp--tool-node-add-note (link note &optional files)
-  "Add a timestamped note to the LOGBOOK of the headline LINK names.
+  "Add a timestamped note to the LOGBOOK of the node LINK names.
 FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -7842,7 +7841,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.  It does not apply to CLOCK_OUT.
 
 MCP Parameters:
-  link - Link to the headline to clock in
+  link - Link to the node to clock in
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -8081,7 +8080,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -8140,7 +8139,7 @@ FILES, when non-nil, names the files an `id:' LINK is looked up in;
 see `org-mcp--link-target'.
 
 MCP Parameters:
-  link - Link to the headline
+  link - Link to the node
          Formats:
            - id:{id}
            - file:{absolute-path}::#{custom-id}
@@ -8412,7 +8411,7 @@ allowed files, or across the files named in `files'.
 Mirrors Org's interactive tag completion (C-c C-q): the result is
 the union of configured tags from `org-tag-alist' /
 `org-tag-persistent-alist', any per-file `#+TAGS:' / `#+FILETAGS:'
-keywords, and every tag actually present on a headline in any of
+keywords, and every tag actually present on a node in any of
 those files.  Group keywords like `:startgroup' are filtered out.
 
 Parameters:
@@ -8558,36 +8557,35 @@ answers with.")
     :id "org-node-set-todo"
     :description
     (concat
-     "Move an Org headline's TODO state, or take it off.  A null
-after leaves the headline with no keyword, so it stops being a
-task.  The headline title, tags and properties are preserved
-either way.
+     "Move an Org node's TODO state, or take it off.  A null
+after leaves the node with no keyword, so it stops being a
+task.  Its title, tags and properties are preserved either way.
 
 Parameters:
-  link - Link to the headline to update (string, required)
+  link - Link to the node to update (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The TODO state the headline holds now (string, required)
+     "  before - The TODO state the node holds now (string, required)
            Send \"\" to assert that it has no TODO keyword
            Any other state is refused as a conflict and nothing is
-           written; read the headline again and re-plan
+           written; read the node again and re-plan
   after - New TODO state to set (string, required)
           Must be a valid keyword from org-todo-keywords
-          null takes the keyword off, so the headline stops being
+          null takes the keyword off, so the node stops being
           a task; \"\" is no keyword and is refused as one, and
           false is the parameter left out
           It sets the keyword only.  A planning date that moves is
           Org's doing and comes back in the response
-  before_planning - The headline's planning fields as they are now
+  before_planning - The node's planning fields as they are now
            (object, optional)
              {\"scheduled\": \"<2026-06-20 Sat +1w>\"}
            Each value is the raw Org timestamp a read returns,
            brackets, repeater and delay included
-           Name a field the headline has one for; leave out a field
+           Name a field the node has one for; leave out a field
            it has none for, which asserts that it has none.  \"\"
            and null are refused, so one state keeps one spelling
            A field holding something else is refused as a conflict
-           and nothing is written; read the headline again and
+           and nothing is written; read the node again and
            re-plan
            Required for a heading whose state change would move a
            planning value -- a repeating heading that carries one --
@@ -8621,7 +8619,7 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - The TODO state the headline held (string, empty for none)
+  before - The TODO state the node held (string, empty for none)
   after - The TODO state Org left it in (string, empty when the
           keyword was taken off): the one asked for, unless Org
           made another of it, as it does when it repeats a
@@ -8653,7 +8651,7 @@ Returns JSON object:
           inactive timestamp and as org-clock-add reports them;
           org-clock-out spells its own start without brackets, so
           compare the two as instants, not as strings
-  link - Link to the updated headline (string): id:{id} when it has
+  link - Link to the updated node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -8662,20 +8660,21 @@ Returns JSON object:
     :id "org-node-create"
     :description
     "Add a new node to an Org file at a specified location.
-Creates the headline with an optional TODO state, optional tags,
+Creates it with an optional TODO state, optional tags,
 optional body content, and optional properties.  A node that names no
 state is a heading rather than a task.  No ID or CUSTOM_ID is created:
-set one in properties to give the headline a stable link.
+set one in properties to give the node a stable link.
 
 Parameters:
-  title - Headline text without TODO state or tags (string, required)
+  title - The node's title, without TODO state or tags (string,
+          required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo - TODO keyword from org-todo-keywords (string, optional)
          Left out, or null, false or \"\", makes a heading with no
          keyword: a node that is not a task.  A value that names no
          keyword is refused
-  tags - Tags for the headline (string or array, optional)
+  tags - Tags for the node (string or array, optional)
          Single tag: \"urgent\"
          Multiple tags: [\"work\", \"urgent\"]
          A client that sends every argument as a string sends the
@@ -8683,7 +8682,7 @@ Parameters:
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
-  content - Body content under the headline (string, optional)
+  content - Body content of the node (string, optional)
             Left out, or null, false or \"\", writes no body
             Cannot contain headlines at same or higher level as new
             item
@@ -8702,7 +8701,7 @@ Parameters:
                      file.  Its id: link is looked up in the parent's
                      file.  null, false and \"\" mean none.
                      If omitted, appends as last child of parent
-  properties - Properties for the new headline (object, optional)
+  properties - Properties for the new node (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
                Values are strings (numbers and booleans are
@@ -8713,7 +8712,7 @@ Parameters:
                in org-node-set-properties: a string or number is
                written as given, \"\" writes a line carrying no
                value, which a read returns as \"\", and null writes
-               nothing, a new headline having no line to take away
+               nothing, a new node having no line to take away
                true or false writes the text t or nil, so false
                writes the property where null passes it over
                Special properties (TODO, TAGS, PRIORITY, SCHEDULED,
@@ -8730,11 +8729,11 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  link - Link to the new headline (string): id:{id} when it has
+  link - Link to the new node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
   file - Filename (not full path) where item was added
-  title - The headline title that was created
+  title - The title the node was created with
 
 Positioning behavior:
   - With parent only: Appends as last child of parent
@@ -8752,17 +8751,17 @@ top-level heading and its subtree"
     :id "org-node-set-title"
     :description
     (concat
-     "Rename an Org headline's title while preserving its TODO state,
+     "Rename an Org node's title while preserving its TODO state,
 tags, properties, and body content.
 
 Parameters:
-  link - Link to the headline to rename (string, required)
+  link - Link to the node to rename (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The title the headline holds now, without TODO state
+     "  before - The title the node holds now, without TODO state
            or tags (string, required)
            Any other title is refused as a conflict and nothing is
-           written; read the headline again and re-plan
+           written; read the node again and re-plan
   after - New title without TODO state or tags (string, required)
           Cannot be empty or whitespace-only
           Cannot contain newlines
@@ -8772,7 +8771,7 @@ Parameters:
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
-Example - renaming a headline:
+Example - renaming a node:
   {\"link\": \"id:abc-123\", \"before\": \"Draft the spec\",
    \"after\": \"Draft the write-safety spec\"}
 
@@ -8780,9 +8779,9 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - The previous headline title (string)
+  before - The previous title (string)
   after - The new title that was set (string)
-  link - Link to the renamed headline (string): id:{id} when it has
+  link - Link to the renamed node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -8791,13 +8790,13 @@ Returns JSON object:
     :id "org-node-set-content"
     :description
     (concat
-     "Replace or empty the body content of an Org headline.  Replaces
-either a unique substring of the headline's body text or the body
+     "Replace or empty the body content of an Org node.  Replaces
+either a unique substring of the node's body text or the body
 entire, whichever before names; an empty after leaves nothing in
 its place.
 
 Parameters:
-  link - Link to the headline to edit (string, required)
+  link - Link to the node to edit (string, required)
 "
      org-mcp--heading-link-formats
      "  before - What the body holds now (string, required)
@@ -8832,7 +8831,7 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  link - Link to the edited headline (string): id:{id} when it has
+  link - Link to the edited node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
 
@@ -8864,10 +8863,10 @@ Refusals:
     :id "org-node-set-properties"
     :description
     (concat
-     "Set or remove properties on an Org headline or on a whole file.
+     "Set or remove properties on an Org heading or on a whole file.
 Updates the PROPERTIES drawer: a value writes the property and null
 takes it away, guarded by what before says it holds.  Setting ID or
-CUSTOM_ID gives the headline a stable link; org-mcp creates neither
+CUSTOM_ID gives a heading a stable link; org-mcp creates neither
 itself.
 
 A link naming a whole file writes that file's own drawer, the one
@@ -8879,7 +8878,7 @@ link naming a file; a file's #+TITLE, #+TODO and #+FILETAGS are not
 properties and are not reached here.
 
 Parameters:
-  link - Link to the headline, or to a whole file for its own
+  link - Link to a heading, or to a whole file for its own
          property drawer (string, required)
 "
      org-mcp--node-link-formats
@@ -8922,7 +8921,7 @@ Returns JSON object:
   before - JSON object of the values these properties held, one
            entry per name before asserted; nothing in the file
            records a removed value once the call returns
-  link - Link to the node (string): for a headline, id:{id} when it
+  link - Link to the node (string): for a heading, id:{id} when it
          has an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}; for a file, id:{id}
          of its own drawer when it has one, else file:{path}")
@@ -9008,9 +9007,9 @@ Refusals:
     :id "org-node-set-scheduled"
     :description
     (concat
-     "Move an Org headline's SCHEDULED timestamp, or take it off.  before
+     "Move an Org node's SCHEDULED timestamp, or take it off.  before
 and after are the two ends of that move, not the ends of a range:
-before is the date the headline carries now and after is the date
+before is the date the node carries now and after is the date
 it is to carry instead, or \"\" to leave it with none.  Moving a task
 from Sunday the 20th to Sunday the 27th:
 
@@ -9018,22 +9017,22 @@ from Sunday the 20th to Sunday the 27th:
    \"after\": \"2026-09-27\"}
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The SCHEDULED timestamp the headline carries now
+     "  before - The SCHEDULED timestamp the node carries now
            (string, required)
            The raw Org timestamp a read returns, brackets,
            repeater and delay included, such as
            \"<2026-06-20 Sat +1w -3d>\" - not the ISO shorthand
            after takes
-           Empty string asserts the headline has no SCHEDULED
+           Empty string asserts the node has no SCHEDULED
   after - ISO date string (string, required), naming a date that
           exists: 2026-02-30 and 2026-13-45 are refused rather
           than rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by what before
-          says the headline carries.  \"\" is not a date and is
+          says the node carries.  \"\" is not a date and is
           refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
@@ -9043,13 +9042,13 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous SCHEDULED value (string, empty if none)
-  after - The SCHEDULED the headline now carries (string, empty when
+  after - The SCHEDULED the node now carries (string, empty when
           taken away)
           A timestamp here is a value: send it back as the next
           call's before, or as its after to write it again.  The
           empty string is a state and not a value, and a removal is
           asked for again with null
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9058,9 +9057,9 @@ Returns JSON object:
     :id "org-node-set-deadline"
     :description
     (concat
-     "Move an Org headline's DEADLINE timestamp, or take it off.  before
+     "Move an Org node's DEADLINE timestamp, or take it off.  before
 and after are the two ends of that move, not the ends of a range:
-before is the date the headline carries now and after is the date
+before is the date the node carries now and after is the date
 it is to carry instead, or \"\" to leave it with none.  Pushing a deadline
 from Sunday the 20th to Sunday the 27th:
 
@@ -9068,22 +9067,22 @@ from Sunday the 20th to Sunday the 27th:
    \"after\": \"2026-09-27\"}
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The DEADLINE timestamp the headline carries now
+     "  before - The DEADLINE timestamp the node carries now
            (string, required)
            The raw Org timestamp a read returns, brackets,
            repeater and delay included, such as
            \"<2026-06-20 Sat +1w -3d>\" - not the ISO shorthand
            after takes
-           Empty string asserts the headline has no DEADLINE
+           Empty string asserts the node has no DEADLINE
   after - ISO date string (string, required), naming a date that
           exists: 2026-02-30 and 2026-13-45 are refused rather
           than rolled over to another date
           Examples: \"2026-03-27\", \"2026-03-27 09:00\"
           null takes the timestamp away, guarded by what before
-          says the headline carries.  \"\" is not a date and is
+          says the node carries.  \"\" is not a date and is
           refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
@@ -9093,13 +9092,13 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous DEADLINE value (string, empty if none)
-  after - The DEADLINE the headline now carries (string, empty when
+  after - The DEADLINE the node now carries (string, empty when
           taken away)
           A timestamp here is a value: send it back as the next
           call's before, or as its after to write it again.  The
           empty string is a state and not a value, and a removal is
           asked for again with null
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9108,10 +9107,10 @@ Returns JSON object:
     :id "org-node-add-tags"
     :description
     (concat
-     "Add tags to an Org headline, leaving its other tags alone.
+     "Add tags to an Org node, leaving its other tags alone.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
      "  after - Tags to add (string or array, required)
@@ -9119,7 +9118,7 @@ Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          A tag the headline already has, written on it or
+          A tag the node already has, written on it or
           inherited, is left alone rather than written twice
           Must follow Org tag rules (alphanumeric, _, @)
           Respects mutually exclusive tag groups
@@ -9137,10 +9136,10 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - Array of the tags the headline carried itself
+  before - Array of the tags the node carried itself
   after - Array of the tags it carries itself now
   inherited - Array of the tags in effect on it from elsewhere
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9149,10 +9148,10 @@ Returns JSON object:
     :id "org-node-remove-tags"
     :description
     (concat
-     "Remove tags from an Org headline, leaving its other tags alone.
+     "Remove tags from an Org node, leaving its other tags alone.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
      "  after - Tags to remove (string or array, required)
@@ -9160,7 +9159,7 @@ Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          A tag the headline does not have is passed over
+          A tag the node does not have is passed over
           A tag it only inherits is refused, naming where the tag
           is written
   files - Files and directories to look up an id: link in (array of
@@ -9177,10 +9176,10 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - Array of the tags the headline carried itself
+  before - Array of the tags the node carried itself
   after - Array of the tags it carries itself now
   inherited - Array of the tags in effect on it from elsewhere
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9189,13 +9188,13 @@ Returns JSON object:
     :id "org-node-set-tags"
     :description
     (concat
-     "Replace the tags written on an Org headline.
+     "Replace the tags written on an Org node.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The tags the headline carries itself now (string or
+     "  before - The tags the node carries itself now (string or
            array, required)
            This is the local_tags of a read, not its tags
            Send [] to assert that it carries none of its own
@@ -9208,7 +9207,7 @@ Parameters:
           Multiple tags: [\"work\", \"urgent\"]
           A client that sends every argument as a string sends the
           array as its JSON text, those characters in a string
-          [] leaves the headline carrying no tags of its own
+          [] leaves the node carrying no tags of its own
           Must follow Org tag rules (alphanumeric, _, @)
           Respects mutually exclusive tag groups
   files - Files and directories to look up an id: link in (array of
@@ -9225,7 +9224,7 @@ Example - replacing the set:
   {\"link\": \"id:abc-123\", \"before\": [\"work\"],
    \"after\": [\"work\", \"urgent\"]}
 
-Example - leaving the headline no tags of its own:
+Example - leaving the node no tags of its own:
   {\"link\": \"id:abc-123\", \"before\": [\"work\", \"urgent\"],
    \"after\": []}
 
@@ -9233,10 +9232,10 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  before - Array of the tags the headline carried itself
+  before - Array of the tags the node carried itself
   after - Array of the tags it carries itself now
   inherited - Array of the tags in effect on it from elsewhere
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9245,21 +9244,21 @@ Returns JSON object:
     :id "org-node-set-priority"
     :description
     (concat
-     "Set or remove priority on an Org headline.
+     "Set or remove priority on an Org node.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
-     "  before - The priority character the headline carries now
+     "  before - The priority character the node carries now
            (string, required)
            Just the letter, without the [# ] Org writes around it
-           Empty string asserts the headline has no priority
+           Empty string asserts the node has no priority
   after - Priority character (string, required)
           Must be in the configured range (default \"A\" to \"C\")
           Use org-config-priority to check the valid range
           null takes the priority away, guarded by what before
-          says the headline carries.  \"\" is no character and is
+          says the node carries.  \"\" is no character and is
           refused as one; false is the parameter left out
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
@@ -9269,12 +9268,12 @@ Returns JSON object:
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
   before - Previous priority (string, empty if none)
-  after - The priority the headline now carries (string, empty when
+  after - The priority the node now carries (string, empty when
           taken away)
           before and after are states the field was in and is in,
           not values to write: send either back as the next call's
           before, never as its after
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9283,11 +9282,11 @@ Returns JSON object:
     :id "org-node-add-note"
     :description
     (concat
-     "Add a timestamped note to the LOGBOOK drawer of an Org headline.
+     "Add a timestamped note to the LOGBOOK drawer of an Org node.
 Creates the LOGBOOK drawer if it doesn't exist.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
      "  note - Note text to add (string, required)
@@ -9301,7 +9300,7 @@ Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in the user's open Emacs
           buffer, not on disk; tell the user it needs saving (boolean)
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9521,9 +9520,9 @@ org-mcp-file-scope-override.")
     :id "org-node-text"
     :description
     (concat
-     "Read Org headline or file as plain text.  Takes a native Org link.
-Returns headline with TODO state, tags, properties, body text, and all
-nested subheadings.
+     "Read an Org file or heading as plain text.  Takes a native Org
+link.  Returns the node as Org writes it: TODO state, tags,
+properties, body text, and all nested subheadings.
 
 Parameters:
   link - Link to a heading or a file (string, required)
@@ -9533,7 +9532,8 @@ Parameters:
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
-Returns: Plain text content of the headline and its subtree (or file)")
+Returns: Plain text content of the heading and its subtree, or of
+the whole file")
     :read-only t)
    (list
     #'org-mcp--tool-query
@@ -9764,7 +9764,7 @@ a done keyword leaves the line open and reports no clock, and
 org-clock-out is what closes it.
 
 Parameters:
-  link - Link to the headline to clock in (string, required)
+  link - Link to the node to clock in (string, required)
 "
      org-mcp--heading-link-formats
      "  start_time - ISO 8601 start time (string, optional)
@@ -9792,7 +9792,7 @@ Returns JSON object:
   clocked_in - Always true (boolean)
   start - Formatted start timestamp (string)
   heading - The heading's title, as a read reports it (string)
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}
   resolved - Number of dangling clocks deleted (integer, only if
@@ -9851,7 +9851,7 @@ Returns JSON object:
   start - Start timestamp (string)
   end - End timestamp (string)
   duration - Duration as H:MM (string)
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9867,7 +9867,7 @@ of the LOGBOOK.
 Rounding is applied per org-clock-rounding-minutes.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
      "  start - ISO 8601 start time (string, required)
@@ -9886,7 +9886,7 @@ Returns JSON object:
   start - Formatted start timestamp (string)
   end - Formatted end timestamp (string)
   duration - Duration as H:MM (string)
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)
@@ -9911,7 +9911,7 @@ Rounding is applied per org-clock-rounding-minutes, so two starts a
 few minutes apart can be written as one time and become such a pair.
 
 Parameters:
-  link - Link to the headline (string, required)
+  link - Link to the node (string, required)
 "
      org-mcp--heading-link-formats
      "  start - ISO 8601 start time of the clock entry to delete,
@@ -9929,7 +9929,7 @@ Returns JSON object:
   start - Start timestamp of deleted entry (string)
   end - End timestamp of deleted entry (string, present if closed)
   duration - Duration as H:MM (string, present if closed)
-  link - Link to the headline (string): id:{id} when it has
+  link - Link to the node (string): id:{id} when it has
          an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")
     :read-only nil)

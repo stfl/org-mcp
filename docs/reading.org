@@ -532,7 +532,7 @@ the same data as the resource for the same link; =org-node-text= is a
 tool-only variant with no resource counterpart.
 
 ** org-node-read
-- *Description:* Read Org file or headline with structured JSON output
+- *Description:* Read Org file or heading with structured JSON output
 - *Parameters:*
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
@@ -546,13 +546,13 @@ tool-only variant with no resource counterpart.
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 
 ** org-node-text
-- *Description:* Read Org headline or file as plain text
+- *Description:* Read Org file or heading as plain text
 - *Parameters:*
   - =link= (string, required): link (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Formats:
     - =id:<id>=, =file:/path/to/file.org::#<custom-id>= or =file:/path/to/file.org::*<title>= - heading
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - returns entire file
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* Plain text content of the file or headline subtree
+- *Returns:* Plain text content of the file, or of the heading and its subtree
 - *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
 - *Note:* Use this when you need plain text instead of structured JSON
 
@@ -716,7 +716,7 @@ Example return value:
 #+end_src
 
 ** org-config-tag-candidates
-- *Description:* Get every tag a user might want to set on a headline,
+- *Description:* Get every tag a user might want to set on a node,
   combining configured tags with the tags actually present in allowed
   files, or in the files named in =files=.  Mirrors what Org's interactive
   tag completion (=C-c C-q=) offers.
@@ -729,7 +729,7 @@ Example return value:
 The union covers:
 - =org-tag-alist= and =org-tag-persistent-alist=
 - Per-file =#+TAGS:= / =#+FILETAGS:=
-- Every tag present on any headline across those files
+- Every tag present on any node across those files
 
 Group keywords (=:startgroup=, =:endgroup=, =:startgrouptag=,
 =:grouptags=, =:endgrouptag=) are filtered out.
