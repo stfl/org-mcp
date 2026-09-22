@@ -10154,6 +10154,59 @@ at 11:10."
                  (equal (org-mcp-test--read-file other-file)
                         (or other "* Nothing clocked here\n")))))))))))
 
+(defconst org-mcp-test--continuous-rounded-foreign-content
+  (concat
+   "* TODO Task One\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 10:30]--[2026-01-01 Thu 10:50] =>  0:20\n"
+   ":END:\n"
+   "* TODO Elsewhere\n"
+   ":LOGBOOK:\n"
+   "CLOCK: [2026-01-01 Thu 11:00]--[2026-01-01 Thu 11:10] =>  0:10\n"
+   ":END:\n"
+   "* TODO Task Two\n")
+  "Clocks ending at 10:50 and at 11:10, and a task to clock in to.")
+
+(ert-deftest org-mcp-test-clock-in-continuous-rounding-skips-a-foreign-future-end ()
+  "Rounding widens the present only for the clock this call closes.
+At 11:08 with `org-clock-rounding-minutes' 5 and no clock running,
+the present rounds to 11:10, but a clock ending at 11:10 that this
+call did not close still ends after the present.  It is passed over,
+and the new clock continues from 10:50."
+  (org-mcp-test--with-temp-org-files
+      ((test-file org-mcp-test--continuous-rounded-foreign-content))
+    (let ((org-clock-continuously t)
+          (org-mcp-clock-continuous-threshold 30)
+          (org-clock-rounding-minutes 5))
+      (org-mcp-test--at-time
+          (time-add org-mcp-test--continuous-last-end 480)
+        (let ((result
+               (org-mcp-test--call-clock-in
+                (org-mcp-test--file-link test-file "*Task Two"))))
+          (should (equal (alist-get 'success result) t))
+          (should
+           (string-match-p
+            "\\`\\[?2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\]?\\'"
+            (alist-get 'start result)))
+          (org-mcp-test--verify-file-matches
+           test-file
+           (concat
+            "\\`\\* TODO Task One\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:30\\]"
+            "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\] =>  0:20\n"
+            ":END:\n"
+            "\\* TODO Elsewhere\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 11:00\\]"
+            "--\\[2026-01-01 [A-Za-z]\\{2,3\\} 11:10\\] =>  0:10\n"
+            ":END:\n"
+            "\\* TODO Task Two\n"
+            ":LOGBOOK:\n"
+            "CLOCK: \\[2026-01-01 [A-Za-z]\\{2,3\\} 10:50\\]\n"
+            ":END:\n"
+            "\\'")))))))
+
 (defconst org-mcp-test--continuous-switch-cases
   `(("no rounding" 0 -1200
      ,(concat

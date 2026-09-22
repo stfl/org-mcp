@@ -7926,15 +7926,14 @@ MCP Parameters:
             (when (and org-clock-continuously (not explicit-start))
               ;; A clock-out still to come is not one this clock-in
               ;; follows, so the latest one at or before the present
-              ;; is.  The present is taken rounded up where rounding
-              ;; moves it forward, because the close above writes the
-              ;; running clock's end there, and that end is the one
-              ;; the new clock continues from.
+              ;; is.  Where the close above wrote the running clock's
+              ;; end after the present, as rounding can, the present
+              ;; reaches that end, because it is the one the new
+              ;; clock continues from.  No other clock gains from it.
               (let* ((present
-                      (let ((rounded (org-mcp--clock-round-time now)))
-                        (if (time-less-p now rounded)
-                            rounded
-                          now)))
+                      (if (and active (time-less-p now close-at))
+                          close-at
+                        now))
                      (last-end
                       (org-mcp--clock-find-last-closed present)))
                 (when last-end
