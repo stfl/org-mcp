@@ -160,7 +160,9 @@ end the walk -- so raising it raises what one call may return."
   "Max minutes since last clock-out for continuous clocking.
 When `org-clock-continuously' is non-nil and a new clock-in occurs
 within this many minutes of the last clock-out, the new clock starts
-at the previous clock's end time."
+at the previous clock's end time.  A gap of exactly this many minutes
+still continues the previous clock; one a second longer starts the
+new clock at the current time."
   :type 'integer
   :group 'org-mcp)
 
