@@ -8792,7 +8792,7 @@ Returns JSON object:
     (concat
      "Replace or empty the body content of an Org node.  Replaces
 either a unique substring of the node's body text or the body
-entire, whichever before names; an empty after leaves nothing in
+entire, whichever before names; an after of \"\" leaves nothing in
 its place.
 
 Parameters:
@@ -9010,7 +9010,7 @@ Refusals:
      "Move an Org node's SCHEDULED timestamp, or take it off.  before
 and after are the two ends of that move, not the ends of a range:
 before is the date the node carries now and after is the date
-it is to carry instead, or \"\" to leave it with none.  Moving a task
+it is to carry instead, or null to leave it with none.  Moving a task
 from Sunday the 20th to Sunday the 27th:
 
   {\"link\": \"id:abc\", \"before\": \"<2026-09-20 Sun>\",
@@ -9060,7 +9060,7 @@ Returns JSON object:
      "Move an Org node's DEADLINE timestamp, or take it off.  before
 and after are the two ends of that move, not the ends of a range:
 before is the date the node carries now and after is the date
-it is to carry instead, or \"\" to leave it with none.  Pushing a deadline
+it is to carry instead, or null to leave it with none.  Pushing a deadline
 from Sunday the 20th to Sunday the 27th:
 
   {\"link\": \"id:abc\", \"before\": \"<2026-09-20 Sun>\",

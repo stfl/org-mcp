@@ -26975,6 +26975,262 @@ advertisement a client can obey and one it cannot: the line is
        test-file "\\`\\* TODO Task\nBody\\.\n\\'")
       values)))
 
+;; A description advertises too, and the advertisement a client is
+;; likeliest to copy is the one that takes a value away: "null takes
+;; the timestamp away", "[] leaves the node carrying no tags".  The
+;; spellings of nothing -- null, "", [], {} and false -- mean
+;; different things at different positions, so a description naming
+;; the wrong one sends a client into a refusal that its own summary
+;; told it to provoke.
+;;
+;; What is measured has two halves.  A tool with an entry in
+;; `org-mcp-test--clearing-writes' is guarded whatever its wording:
+;; its descriptions have to go on naming a clearing value the phrases
+;; below find, and every value they name is sent.  A tool without an
+;; entry is found only when a sentence of its fits one of the phrases
+;; below, since a value is recognised by the words around it: a new
+;; tool advertising a clearing value in other words is not seen.
+;;
+;; A value found in a parameter's schema description is known to be
+;; that parameter's, and has to be `after', the one every fixture
+;; writes.  A value found in the tool's own description carries no
+;; parameter, since that text names its parameters in prose, and is
+;; sent to `after' on the strength of the phrase alone.
+
+(defconst org-mcp-test--clearing-advertisement-regexps
+  (let ((value "\\([Nn]ull\\|[Ff]alse\\|\"\"\\|\\[\\]\\|{}\\)")
+        (before "\\(?:\\`\\|[ (,:]\\)"))
+    (list
+     ;; "null takes the timestamp away", "A null after leaves the node
+     ;; with no keyword", "[] leaves the node carrying no tags"
+     (concat
+      before value " \\(?:after \\)?"
+      "\\(?:takes? [^.;]*?\\_<\\(?:away\\|off\\)\\_>"
+      "\\|leaves? [^.;]*?\\_<\\(?:none\\|nothing\\|no\\)\\_>"
+      "\\|\\(?:empties\\|clears\\|removes\\)\\_>\\)")
+     ;; "or null to leave it with none"
+     (concat
+      before value " to \\(?:leave\\|take\\|clear\\|remove\\|empty\\)\\_>")
+     ;; "a removal is asked for again with null"
+     (concat "\\_<removal\\_>[^.;]*? with " value)
+     ;; "Example - taking the keyword off: {... \"after\": null}"
+     (concat
+      "Example - \\(?:taking\\|leaving\\|removing\\|clearing\\|emptying\\)"
+      "[^:]*: {[^}]*\"after\": " value)))
+  "Regexps whose first group is a value a description says clears a field.
+Each is matched against a description with its whitespace folded to
+single spaces, since a description wraps its sentences over lines.
+Null and false are matched capitalised too, since a sentence may
+open on one.")
+
+(defun org-mcp-test--clearing-values-in (text)
+  "Return the values TEXT tells a client to send to clear a field.
+Each is spelled as the JSON TEXT names it, a null or false opening a
+sentence written in the lower case JSON spells it in.  The regexps' word
+boundaries are read under the standard syntax table, since the
+current buffer's would make them mean whatever that buffer's mode
+says a word is."
+  (let ((case-fold-search nil)
+        (text (replace-regexp-in-string "[ \t\n]+" " " text))
+        (values nil))
+    (with-syntax-table (standard-syntax-table)
+      (dolist (regexp org-mcp-test--clearing-advertisement-regexps)
+        (let ((start 0))
+          (while (string-match regexp text start)
+            (push (downcase (match-string 1 text)) values)
+            (setq start (match-end 0))))))
+    (delete-dups (nreverse values))))
+
+(defun org-mcp-test--clearing-advertisements ()
+  "Return (TOOL . VALUES) for each published tool advertising a clearing value.
+The descriptions are those of every tool tools/list publishes with a
+view configured, so the list is every tool there is.  Both the tool's
+description and each parameter's description in its input schema are
+read, because a client may plan from either.
+
+Each of VALUES is (PARAMETER . TEXT): TEXT the value as JSON, and
+PARAMETER the symbol of the parameter whose schema description named
+it, or nil when the tool's own description did."
+  (org-mcp-test--with-views
+    (delq
+     nil
+     (mapcar
+      (lambda (tool)
+        (let ((values
+               (delete-dups
+                (mapcan
+                 (lambda (source)
+                   (mapcar
+                    (lambda (text) (cons (car source) text))
+                    (org-mcp-test--clearing-values-in (cdr source))))
+                 (cons
+                  (cons nil (alist-get 'description tool))
+                  (delq
+                   nil
+                   (mapcar
+                    (lambda (parameter)
+                      (let ((text
+                             (alist-get 'description (cdr parameter))))
+                        (and text (cons (car parameter) text))))
+                    (alist-get
+                     'properties (alist-get 'inputSchema tool)))))))))
+          (and values (cons (alist-get 'name tool) values))))
+      (org-mcp-test--registered-tools)))))
+
+(defun org-mcp-test--advertised-clearing-accepted
+    (tool content search params expected)
+  "Assert TOOL clears a field of CONTENT, leaving the file matching EXPECTED.
+SEARCH names the heading the call's link reaches, or is nil for a
+link to the whole file.  PARAMS is a function of that link returning
+the arguments."
+  (org-mcp-test--with-temp-org-files
+      ((test-file content))
+    (let* ((link
+            (if search
+                (org-mcp-test--file-link test-file search)
+              (concat "file:" (abbreviate-file-name test-file))))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool tool (funcall params link)))))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches test-file expected))))
+
+(defun org-mcp-test--clearing-planning (tool keyword value)
+  "Assert TOOL takes the KEYWORD timestamp away when after is VALUE."
+  (org-mcp-test--advertised-clearing-accepted
+   tool
+   (concat "* TODO Task\n" keyword ": <2026-03-27 Fri>\nBody.\n")
+   "*Task"
+   (lambda (link)
+     `((link . ,link) (before . "<2026-03-27 Fri>") (after . ,value)))
+   "\\`\\* TODO Task\nBody\\.\n\\'"))
+
+(defconst org-mcp-test--clearing-writes
+  `(("org-node-set-todo"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-todo" "* TODO Task\nBody.\n" "*Task"
+           (lambda (link)
+             `((link . ,link) (before . "TODO") (after . ,value)))
+           "\\`\\* Task\nBody\\.\n\\'")))
+    ("org-node-set-scheduled"
+     . ,(lambda (value)
+          (org-mcp-test--clearing-planning
+           "org-node-set-scheduled" "SCHEDULED" value)))
+    ("org-node-set-deadline"
+     . ,(lambda (value)
+          (org-mcp-test--clearing-planning
+           "org-node-set-deadline" "DEADLINE" value)))
+    ("org-node-set-priority"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-priority" "* TODO [#A] Task\nBody.\n" "*Task"
+           (lambda (link)
+             `((link . ,link) (before . "A") (after . ,value)))
+           "\\`\\* TODO Task\nBody\\.\n\\'")))
+    ("org-node-set-properties"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-properties"
+           "* Task\n:PROPERTIES:\n:FOO: bar\n:KEEP: yes\n:END:\nBody.\n"
+           "*Task"
+           (lambda (link)
+             `((link . ,link)
+               (before . ((FOO . "bar")))
+               (after . ((FOO . ,value)))))
+           "\\`\\* Task\n *:PROPERTIES:\n *:KEEP: +yes\n *:END:\nBody\\.\n\\'")))
+    ("org-node-set-content"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-node-set-content" "* Task\nFirst line.\nSecond line.\n"
+           "*Task"
+           ;; The digest names the body entire, so the value empties
+           ;; the field rather than cutting a part of it out.
+           (lambda (link)
+             `((link . ,link)
+               (before . ,(org-mcp-test--content-digest-of link))
+               (after . ,value)))
+           ;; Org keeps the line break that ended the body.
+           "\\`\\* Task\n\n?\\'")))
+    ("org-node-set-tags"
+     . ,(lambda (value) (org-mcp-test--advertised-tags-accepted value nil)))
+    ("org-file-set-setting"
+     . ,(lambda (value)
+          (org-mcp-test--advertised-clearing-accepted
+           "org-file-set-setting" "#+TITLE: Old\n* Task\n" nil
+           (lambda (link)
+             `((link . ,link)
+               (setting . "TITLE")
+               (before . ["Old"])
+               (after . ,value)))
+           "\\`\\* Task\n\\'"))))
+  "The write tools a description may name a clearing value for, and how.
+Each entry is (TOOL . FUNCTION): FUNCTION sends the value it is given
+as TOOL's `after' -- inside the property map, for
+org-node-set-properties -- to a field that holds something, and
+asserts the call succeeds and the field is left holding nothing.")
+
+(defun org-mcp-test--advertisement-clearing-values ()
+  "The values the published descriptions name for taking a value away.
+Every tool naming one has an entry in `org-mcp-test--clearing-writes',
+so a description naming a clearing value on a tool nobody has asked
+about fails here, and every entry there still names one, so a
+reworded description whose value the regexps stop finding fails too.
+Each value goes to its tool as the JSON it is spelled in."
+  (let ((advertised (org-mcp-test--clearing-advertisements))
+        (asserted nil))
+    (dolist (entry org-mcp-test--clearing-writes)
+      (ert-info ((car entry) :prefix "Names no clearing value: ")
+        (should (assoc (car entry) advertised))))
+    (pcase-dolist (`(,tool . ,values) advertised)
+      (ert-info (tool :prefix "Names a clearing value: ")
+        (let ((clear
+               (alist-get tool org-mcp-test--clearing-writes nil nil #'equal)))
+          (should clear)
+          (pcase-dolist (`(,parameter . ,text) values)
+            (ert-info ((format "%s in %s" text (or parameter "description"))
+                       :prefix "Value: ")
+              ;; A schema description says which parameter it is
+              ;; about, and every fixture writes `after'.
+              (should (memq parameter '(nil after)))))
+          (dolist (text (delete-dups (mapcar #'cdr values)))
+            (ert-info (text :prefix "Value: ")
+              (funcall clear
+                       (json-parse-string
+                        text
+                        :null-object nil
+                        :false-object :json-false)))
+            (push (cons tool text) asserted)))))
+    asserted))
+
+(ert-deftest org-mcp-test-clearing-values-are-read-out-of-each-phrase ()
+  "Each phrase a description advertises a clearing value in is read.
+The census over the published descriptions finds a value only where
+its phrase is one these regexps know, so each shape is pinned here
+against a sentence of its own, a null or false opening a sentence
+among them, which the census hands on in the lower case JSON spells
+it in.  A sentence naming a spelling of nothing without saying it
+clears anything is read as naming no value."
+  (dolist (row
+           '(("null takes the timestamp away, guarded by before" "null")
+             ("A null after leaves the node with no keyword" "null")
+             ("[] leaves the node carrying no tags of its own" "[]")
+             ("an after of \"\" leaves nothing in\n  its place" "\"\"")
+             ("or null to leave it with none" "null")
+             ("Null takes the property line away" "null")
+             ("False empties the field" "false")
+             ("{} clears the map" "{}")
+             ("a removal is asked for again with null" "null")
+             ("Example - taking the keyword off, so it stops being a task:
+  {\"link\": \"id:abc\", \"before\": \"TODO\", \"after\": null}"
+              "null")
+             ("Null, false and [] are the parameter left out")
+             ("\"\" is no date and is refused, and false is the parameter left out")
+             ("Empty string asserts the node has no priority")))
+    (ert-info ((car row) :prefix "Sentence: ")
+      (should
+       (equal (org-mcp-test--clearing-values-in (car row)) (cdr row))))))
+
 (defconst org-mcp-test--advertisements
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
     ("the date under unread text"
@@ -27001,7 +27257,9 @@ advertisement a client can obey and one it cannot: the line is
      . org-mcp-test--advertisement-array-as-json-text)
     ("the tag sets a write takes" . org-mcp-test--advertisement-tag-sets)
     ("the settings a file write takes"
-     . org-mcp-test--advertisement-file-settings))
+     . org-mcp-test--advertisement-file-settings)
+    ("the values a description names for taking a value away"
+     . org-mcp-test--advertisement-clearing-values))
   "Every advertisement this suite guards, and how to provoke it.
 Each entry is (WHAT . FUNCTION).  FUNCTION provokes the
 advertisement from the running server, reads the values out of the
