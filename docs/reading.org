@@ -289,40 +289,16 @@ answered empty.
 Org lets a heading inherit a property from an ancestor's drawer or from a
 =#+PROPERTY:= line, and =org-use-property-inheritance= — =t=, =nil=, a list of
 names or a regexp — says which properties do. =properties= is not that answer.
-It is the node's own drawer under every value of the setting: a child whose
-parent holds =AREA= comes back without =AREA=, whether it is read with
-=org-node-read=, walked into with =depth=, served as a resource, or matched by
-=org-query= or =org-view=.
+It is the node's own drawer under every value of the setting: a heading whose
+parent or grandparent holds =AREA= comes back without =AREA= from
+=org-node-read=, walked into with =depth=, or as an =org-query= or =org-view=
+match, and a file node's =properties= never carry a =#+PROPERTY:= value. The
+=org://{link}= resource carries no properties at all, so nothing inherited
+reaches it either.
 
-The one read that inherits is org-ql's =property= predicate in a query, a view
-or a filter, and only when the query asks it to:
-
-| The query                                      | Matches a node when                                            |
-|------------------------------------------------+----------------------------------------------------------------|
-| =(property "AREA" "work")=                     | its own drawer holds the value                                 |
-| =(property "AREA" "work" :inherit t)=          | it, an ancestor or a =#+PROPERTY:= line holds it, whatever the setting says |
-| =(property "AREA" "work" :inherit 'selective)= | Org gives it the value: inherited where the setting selects =AREA=, its own drawer otherwise |
-
-So a query can match a node on a value its =properties= does not carry. The
-predicate found the value where the node inherits it, and =properties= answers
-with what the node holds.
-
-A write works on the node's own drawer, as =properties= does, and here the two
-disagree with the inheriting query. =org-node-set-properties= asserts in its
-=before= what the drawer of the node it names holds, so at a node that only
-inherits =AREA= the assertion that holds is =null=, and asserting the value in
-force is refused:
-
-#+begin_example
-conflict: Property 'AREA' mismatch: expected 'work', found (absent)
-#+end_example
-
-The value is written into that node's drawer, as a line of its own that takes
-the place of the inherited one there; the ancestor's line is left as it was. A removal at the inheriting node finds no line and takes
-nothing away. To change what every descendant inherits, write to the node that
-holds the line — which is not the node an inheriting query matched, unless that
-node holds it too. =org-node-create= writes the properties its call sends and
-copies nothing the new heading inherits into its drawer.
+A query can ask for inherited values, and then matches a node on a value its
+=properties= do not carry (see [[file:queries.org::*Inherited properties in a query][Inherited properties in a query]]). What a write does
+where a value is inherited is [[file:writing.org::*Inherited properties][Inherited properties]] on the writing page.
 
 ** Asking for computed fields
 

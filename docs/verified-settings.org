@@ -21,7 +21,7 @@ documents.
 |---------+----------------|
 | =org-use-tag-inheritance= | =t=, =nil=, a list of tags, a regexp |
 | =org-tags-exclude-from-inheritance= | =nil=, a list of tags |
-| =org-use-property-inheritance= | =t=, =nil=, a list of names, a regexp; see [[file:reading.org::*Inherited properties][Inherited properties]] |
+| =org-use-property-inheritance= | =t=, =nil=, a list of names, a regexp. What moves across them is org-ql's =property= predicate asked with =:inherit 'selective= and nothing else: every =properties= read answers the same under all four, and so do =ARCHIVE=, =LOG_INTO_DRAWER= and =NOBLOCKING=. See [[file:queries.org::*Inherited properties in a query][Inherited properties in a query]] |
 | =org-todo-keywords= | nine shapes: one and several sequences, =type= sets, fast-access keys, log cookies |
 | =org-tag-alist= | plain lists, fast-access keys, mutually exclusive groups, group tags |
 | =org-tag-persistent-alist= | =nil=, plain, fast-access keys, groups |

@@ -17032,12 +17032,18 @@ a view's range default is stated where the caller reads it."
 :OWNER:    stefan
 :END:
 ** TODO Inheriting Child
-Child body."
-  "A child holding no property, below a parent that holds two.
+Child body.
+*** TODO Inheriting Grandchild"
+  "A child and a grandchild holding no property, below a parent holding two.
 SCOPE comes from the file's `#+PROPERTY:' line and AREA and OWNER
 from the parent's drawer, so an inherited value has both sources
-Org gives it.  AREA is the one name the list and the regexp in
+Org gives it, and the grandchild inherits through two ancestors.
+AREA is the one name the list and the regexp in
 `org-mcp-test--property-inheritance-settings' select.")
+
+(defconst org-mcp-test--inheriting-titles
+  '("Inheriting Child" "Inheriting Grandchild")
+  "The headings of the inherited-properties fixture that hold no drawer.")
 
 (defconst org-mcp-test--pattern-inherited-properties-parent
   (concat
@@ -17053,7 +17059,8 @@ Org gives it.  AREA is the one name the list and the regexp in
   (concat
    org-mcp-test--pattern-inherited-properties-parent
    "\\*\\* TODO Inheriting Child\n"
-   "Child body\\.\n?\\'")
+   "Child body\\.\n"
+   "\\*\\*\\* TODO Inheriting Grandchild\n?\\'")
   "The whole of `org-mcp-test--content-inherited-properties' unchanged.")
 
 (defconst org-mcp-test--pattern-inherited-properties-child-holds-area
@@ -17063,7 +17070,8 @@ Org gives it.  AREA is the one name the list and the regexp in
    ":PROPERTIES:\n"
    ":AREA: +home\n"
    ":END:\n"
-   "Child body\\.\n?\\'")
+   "Child body\\.\n"
+   "\\*\\*\\* TODO Inheriting Grandchild\n?\\'")
   "The file after a write of AREA to the child: a drawer of its own.
 The parent's line, the one the child inherited, is left as it was.")
 
@@ -17076,7 +17084,8 @@ The parent's line, the one the child inherited, is left as it was.")
    ":OWNER:    stefan\n"
    ":END:\n"
    "\\*\\* TODO Inheriting Child\n"
-   "Child body\\.\n?\\'")
+   "Child body\\.\n"
+   "\\*\\*\\* TODO Inheriting Grandchild\n?\\'")
   "The file after a write of AREA to the parent, which holds it.
 The child is left without a drawer: what it inherits changes because
 the line it inherits from did.")
@@ -17086,6 +17095,7 @@ the line it inherits from did.")
    org-mcp-test--pattern-inherited-properties-parent
    "\\*\\* TODO Inheriting Child\n"
    "Child body\\.\n"
+   "\\*\\*\\* TODO Inheriting Grandchild\n"
    "\\*\\* TODO New Child\n"
    ":PROPERTIES:\n"
    ":OWNER: +ada\n"
@@ -17171,31 +17181,48 @@ properties are the ones its own drawer holds."
 (defun org-mcp-test--assert-property-reads (test-file inherited)
   "Assert every read path answers TEST-FILE under the setting in force.
 TEST-FILE holds `org-mcp-test--content-inherited-properties'.
-INHERITED names the properties the child inherits under it.
+INHERITED names the properties the child and the grandchild inherit
+under it.
 
-The drawer paths are org-node-read, alone and walked into with
-`depth', the org://{link} resource, and the `properties' of an
-org-query or org-view match: each answers with the drawer the node
-holds, which does not move with the setting.  The predicate paths
-are org-ql's `property', which matches on the drawer unless asked to
+The drawer paths are org-node-read of a heading, of the file node
+and walked into with `depth', and the `properties' of an org-query
+or org-view match: each answers with the drawer the node holds,
+which does not move with the setting.  The predicate paths are
+org-ql's `property', which matches on the drawer unless asked to
 inherit, and matches as Org does when its `:inherit' is the symbol
-selective — whether in org-query, in a view's query or in a
-view's filter."
-  (let ((child (org-mcp-test--file-link test-file "*Inheriting Child"))
-        (parent (org-mcp-test--file-link test-file "*Holding Parent")))
-    ;; org-node-read, the whole drawer and every inheritable name.
+selective — whether in org-query, in a view's query or in a view's
+filter.
+
+The org://{link} resource carries no drawer at all, under any
+setting, so its assertion shows only that no inherited value reaches
+it: an answer that began to inherit would fail it, and an answer
+that dropped the drawer could not."
+  (let ((parent (org-mcp-test--file-link test-file "*Holding Parent"))
+        (every-inheriting (cons "Holding Parent" org-mcp-test--inheriting-titles)))
+    ;; org-node-read of each heading, the whole drawer and every
+    ;; inheritable name.
     (dolist (asked (list "all" ["AREA" "OWNER" "SCOPE"]))
-      (should
-       (equal
-        (org-mcp-test--read-properties child asked)
-        '((title . "Inheriting Child"))))
+      (dolist (title org-mcp-test--inheriting-titles)
+        (should
+         (equal
+          (org-mcp-test--read-properties
+           (org-mcp-test--file-link test-file (concat "*" title)) asked)
+          `((title . ,title)))))
       (should
        (equal
         (org-mcp-test--read-properties parent asked)
         `((title . "Holding Parent")
           (properties
            . ,org-mcp-test--inherited-properties-parent-drawer)))))
-    ;; org-node-read walking into the child with `depth'.
+    ;; org-node-read of the file node, which has no drawer of its
+    ;; own: the `#+PROPERTY:' line is not one.
+    (should
+     (equal
+      (org-mcp-test--read-properties
+       (concat "file:" (abbreviate-file-name test-file)) "all")
+      `((title . ,(file-name-nondirectory test-file)))))
+    ;; org-node-read walking into the child and the grandchild with
+    ;; `depth'.
     (let* ((node
             (json-read-from-string
              (mcp-server-lib-ert-call-tool
@@ -17203,54 +17230,60 @@ view's filter."
               `((link . ,parent)
                 (fields . ["title" "children"])
                 (properties . "all")
-                (depth . 1)))))
-           (walked (aref (alist-get 'children node) 0)))
+                (depth . 2)))))
+           (walked (aref (alist-get 'children node) 0))
+           (walked-further (aref (alist-get 'children walked) 0)))
       (should
        (equal
         (alist-get 'properties node)
         org-mcp-test--inherited-properties-parent-drawer))
       (should (equal (alist-get 'title walked) "Inheriting Child"))
-      (should-not (assq 'properties walked)))
-    ;; The resource, which answers as an org-node-read asking nothing.
+      (should-not (assq 'properties walked))
+      (should
+       (equal (alist-get 'title walked-further) "Inheriting Grandchild"))
+      (should-not (assq 'properties walked-further)))
+    ;; The resource: no drawer, and so no inherited value either.
     (let ((resource
            (json-read-from-string
-            (org-mcp-test--read-resource (concat "org://" child)))))
-      (should (equal (alist-get 'title resource) "Inheriting Child"))
+            (org-mcp-test--read-resource
+             (concat
+              "org://"
+              (org-mcp-test--file-link
+               test-file "*Inheriting Grandchild"))))))
+      (should (equal (alist-get 'title resource) "Inheriting Grandchild"))
       (should-not (assq 'properties resource)))
     ;; org-query's matches carry their own drawers.
     (should
      (equal
       (org-mcp-test--inherited-property-query "(todo)")
-      (org-mcp-test--answered-with-drawers
-       '("Holding Parent" "Inheriting Child"))))
+      (org-mcp-test--answered-with-drawers every-inheriting)))
     ;; org-ql's `property' predicate, in its three forms.
     (pcase-dolist (`(,name ,value ,holder)
                    org-mcp-test--inherited-property-values)
-      (let ((both '("Holding Parent" "Inheriting Child")))
-        (should
-         (equal
-          (org-mcp-test--inherited-property-query
-           (format "(property %S %S)" name value))
-          (org-mcp-test--answered-with-drawers
-           (and holder (list holder)))))
-        (should
-         (equal
-          (org-mcp-test--inherited-property-query
-           (format "(property %S %S :inherit t)" name value))
-          (org-mcp-test--answered-with-drawers both)))
-        (should
-         (equal
-          (org-mcp-test--inherited-property-query
-           (format "(property %S %S :inherit 'selective)" name value))
-          (org-mcp-test--answered-with-drawers
-           (if (member name inherited)
-               both
-             (and holder (list holder))))))))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-query
+         (format "(property %S %S)" name value))
+        (org-mcp-test--answered-with-drawers
+         (and holder (list holder)))))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-query
+         (format "(property %S %S :inherit t)" name value))
+        (org-mcp-test--answered-with-drawers every-inheriting)))
+      (should
+       (equal
+        (org-mcp-test--inherited-property-query
+         (format "(property %S %S :inherit 'selective)" name value))
+        (org-mcp-test--answered-with-drawers
+         (if (member name inherited)
+             every-inheriting
+           (and holder (list holder)))))))
     ;; org-view, the predicate as a view's query and as its filter.
     (let ((area
            (org-mcp-test--answered-with-drawers
             (if (member "AREA" inherited)
-                '("Holding Parent" "Inheriting Child")
+                every-inheriting
               '("Holding Parent")))))
       (should
        (equal
@@ -17265,10 +17298,10 @@ view's filter."
 
 (ert-deftest org-mcp-test-properties-inherited-agree-across-read-paths ()
   "With inheritance on, only the inheriting predicate sees the ancestor's value.
-The child inherits AREA and OWNER from its parent and SCOPE from the
-file.  A read of its drawer, on every path, answers with none of
-them; `property' with the symbol selective as its `:inherit' matches it on
-all three."
+The child and the grandchild inherit AREA and OWNER from the parent
+and SCOPE from the file.  A read of either drawer, on every path,
+answers with none of them; `property' with the symbol selective as
+its `:inherit' matches both on all three."
   (org-mcp-test--with-property-inheritance t
     (org-mcp-test--assert-property-reads test-file '("AREA" "OWNER" "SCOPE"))))
 
@@ -17394,7 +17427,7 @@ setting that selects AREA and nothing under the one that does not."
        (org-mcp-test--inherited-property-query
         "(property \"AREA\" \"home\" :inherit 'selective)"))
       (if (member "AREA" inherited)
-          '("Holding Parent" "Inheriting Child")
+          (cons "Holding Parent" org-mcp-test--inheriting-titles)
         '("Holding Parent"))))))
 
 (ert-deftest org-mcp-test-node-create-writes-only-the-properties-it-sends ()
@@ -17424,6 +17457,198 @@ is copied into its drawer: a read of it answers with OWNER alone."
       (org-mcp-test--read-properties
        (org-mcp-test--file-link test-file "*New Child") "all")
       '((title . "New Child") (properties . ((OWNER . "ada"))))))))
+
+(ert-deftest org-mcp-test-query-keeps-an-inheriting-answer-until-the-file-changes ()
+  "A selective `property' match outlives a change of the setting.
+org-ql remembers what the predicate answered at each heading until
+the buffer changes, and the setting is not part of what it
+remembers.  So the query answers as it did under t after the setting
+turns off, and a write to the file is what brings it up to date."
+  (org-mcp-test--with-property-inheritance t
+    (let ((query "(property \"AREA\" \"work\" :inherit 'selective)")
+          (inheriting
+           (cons "Holding Parent" org-mcp-test--inheriting-titles)))
+      (should
+       (equal
+        (mapcar #'car (org-mcp-test--inherited-property-query query))
+        inheriting))
+      (let ((org-use-property-inheritance nil))
+        (should
+         (equal
+          (mapcar #'car (org-mcp-test--inherited-property-query query))
+          inheriting))
+        (let ((written
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-set-properties"
+                 `((link
+                    .
+                    ,(org-mcp-test--file-link
+                      test-file "*Holding Parent"))
+                   (before . ((OWNER . "stefan")))
+                   (after . ((OWNER . "ada"))))))))
+          (should (equal (alist-get 'success written) t)))
+        (should
+         (equal
+          (mapcar #'car (org-mcp-test--inherited-property-query query))
+          '("Holding Parent")))))))
+
+;; Three properties org-mcp's writes consult on their own account.  Org
+;; reads ARCHIVE and LOG_INTO_DRAWER with inheritance whatever
+;; `org-use-property-inheritance' says, and NOBLOCKING at the node
+;; alone, so each of these asserts one outcome under all four values.
+
+(defmacro org-mcp-test--for-each-property-setting (content &rest body)
+  "Run BODY over a fresh file of CONTENT under every setting under test.
+`test-file' is bound in BODY, and `org-use-property-inheritance' is
+each value `org-mcp-test--property-inheritance-settings' names."
+  (declare (indent 1) (debug t))
+  (let ((setting (gensym "setting")))
+    `(dolist (,setting org-mcp-test--property-inheritance-settings)
+       (org-mcp-test--with-temp-org-files
+           ((test-file ,content))
+         (let ((org-use-property-inheritance (car ,setting)))
+           ,@body)))))
+
+(defconst org-mcp-test--content-inherited-archive
+  "* Holder
+:PROPERTIES:
+:ARCHIVE:  ::* Archived
+:END:
+** TODO Leaf
+* Archived"
+  "A leaf below a heading whose ARCHIVE names a heading in the file.")
+
+(defconst org-mcp-test--pattern-inherited-archive-done
+  (concat
+   "\\`\\* Holder\n"
+   ":PROPERTIES:\n"
+   ":ARCHIVE:  ::\\* Archived\n"
+   ":END:\n"
+   "\\* Archived\n"
+   "\n"
+   "\\*\\* TODO Leaf\n"
+   ":PROPERTIES:\n"
+   "\\(?::ARCHIVE_[A-Z]+: .*\n\\)+"
+   ":END:\n?\\'")
+  "The file after Leaf is archived where its parent's ARCHIVE says.")
+
+(ert-deftest org-mcp-test-archive-location-is-inherited-under-every-setting ()
+  "A parent's ARCHIVE sends its child's archive where it names.
+Org reads ARCHIVE with inheritance whatever the setting, so the leaf
+goes to the heading in its own file under all four values and never
+to the `_archive' file `org-archive-location' names."
+  (org-mcp-test--for-each-property-setting
+      org-mcp-test--content-inherited-archive
+    (let* ((link (org-mcp-test--file-link test-file "*Leaf"))
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-archive"
+              `((link . ,link)
+                (before . ,(org-mcp-test--verbs-digest link)))))))
+      (should (eq (alist-get 'success result) t))
+      (should
+       (equal
+        (alist-get 'archive_file result)
+        (abbreviate-file-name test-file)))
+      (should-not (file-exists-p (concat test-file "_archive")))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-inherited-archive-done))))
+
+(defconst org-mcp-test--content-inherited-log-drawer
+  "* Holder
+:PROPERTIES:
+:LOG_INTO_DRAWER: NOTES
+:END:
+** TODO Leaf"
+  "A leaf below a heading whose LOG_INTO_DRAWER names a drawer.")
+
+(defconst org-mcp-test--pattern-inherited-log-drawer-note
+  (concat
+   "\\`\\* Holder\n"
+   ":PROPERTIES:\n"
+   ":LOG_INTO_DRAWER: NOTES\n"
+   ":END:\n"
+   "\\*\\* TODO Leaf\n"
+   ":NOTES:\n"
+   "- Note taken on \\[[-0-9]+ [A-Z][a-z]+ [0-9:]+ *\\] \\\\\\\\\n"
+   "  Logged below the holder\\.\n"
+   ":END:\n?\\'")
+  "The file after a note on Leaf goes into the drawer its parent names.")
+
+(ert-deftest org-mcp-test-log-drawer-is-inherited-under-every-setting ()
+  "A note goes into the drawer a parent's LOG_INTO_DRAWER names.
+`org-log-into-drawer' is nil, so the drawer comes from the parent
+alone, and Org reads it with inheritance under all four values."
+  (org-mcp-test--for-each-property-setting
+      org-mcp-test--content-inherited-log-drawer
+    (let* ((org-log-into-drawer nil)
+           (result
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-add-note"
+              `((link . ,(org-mcp-test--file-link test-file "*Leaf"))
+                (note . "Logged below the holder."))))))
+      (should (equal (alist-get 'success result) t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-inherited-log-drawer-note))))
+
+(defconst org-mcp-test--content-inherited-noblocking
+  "* TODO Exempt Parent
+:PROPERTIES:
+:NOBLOCKING: t
+:END:
+** TODO Middle
+*** TODO Unfinished"
+  "A parent exempt from blocking, over a child with an unfinished child.")
+
+(defconst org-mcp-test--pattern-inherited-noblocking-parent-done
+  (concat
+   "\\`\\* DONE Exempt Parent\n"
+   ":PROPERTIES:\n"
+   ":NOBLOCKING: t\n"
+   ":END:\n"
+   "\\*\\* TODO Middle\n"
+   "\\*\\*\\* TODO Unfinished\n?\\'")
+  "The file after the exempt parent is finished over its open child.")
+
+(ert-deftest org-mcp-test-noblocking-is-not-inherited-under-any-setting ()
+  "NOBLOCKING exempts the heading that holds it and no heading below.
+The middle heading is blocked by its unfinished child under all four
+values, and the parent, which holds the line, finishes over its own
+unfinished child under all four."
+  (org-mcp-test--for-each-property-setting
+      org-mcp-test--content-inherited-noblocking
+    (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+          (org-log-done nil)
+          (org-enforce-todo-dependencies t)
+          (org-blocker-hook
+           '(org-block-todo-from-children-or-siblings-or-parent)))
+      (org-mcp-test--call-tool-refused
+       "org-node-set-todo"
+       `((link . ,(org-mcp-test--file-link test-file "*Middle"))
+         (before . "TODO")
+         (after . "DONE"))
+       (concat
+        "\\`"
+        "blocked: "
+        "TODO state change from TODO to DONE blocked")
+       test-file)
+      (should
+       (equal
+        (alist-get
+         'success
+         (json-read-from-string
+          (mcp-server-lib-ert-call-tool
+           "org-node-set-todo"
+           `((link
+              . ,(org-mcp-test--file-link test-file "*Exempt Parent"))
+             (before . "TODO")
+             (after . "DONE")))))
+        t))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--pattern-inherited-noblocking-parent-done))))
 
 ;;; Native link tests
 

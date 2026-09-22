@@ -231,7 +231,7 @@ The clock tools take ISO 8601 with a =T=, and ask the same question of it (see
 Your Org log settings decide what a change writes down, and a write through
 org-mcp records the entry your own command would have. Placement is Org's: the
 entry goes into the drawer =org-log-into-drawer= names, or into the one a
-=LOG_INTO_DRAWER= property on the heading names instead, under the heading line
+=LOG_INTO_DRAWER= property on the heading or above it names instead, under the heading line
 your =org-log-note-headings= holds for that kind of change.
 
 | Setting                        | Records                                    | Written by                             |
@@ -739,6 +739,33 @@ settings line is not a property, and =org-file-set-setting= writes six of them â
 property line in settings clothing, and admitting it to either tool would give
 one construct two guards that spell an assertion differently.
 
+* Inherited properties
+
+A write reaches the drawer of the node its link names and no other, whatever
+=org-use-property-inheritance= says. =org-node-set-properties= asserts in its
+=before= what that drawer holds, so at a node that only inherits a property the
+assertion that holds is =null=, and asserting the inherited value is a conflict
+like any other value the drawer does not hold (see
+[[*The three states of a drawer line]]).
+
+The value is written as a line in that node's own drawer, which takes the place
+of the inherited one there and for the headings that inherit from it; the
+ancestor's line is left as it was. A removal at a node that only inherits
+finds no line and takes nothing away. To change what every heading below
+inherits, write to the node that holds the line â€” which is not the node an
+inheriting query matched, unless that node holds it too (see
+[[file:queries.org::*Inherited properties in a query][Inherited properties in a query]]). =org-node-create= writes the properties its call
+sends and copies nothing the new heading inherits into its drawer.
+
+Three properties a write consults on its own account are read the way Org reads
+them, and the setting does not enter into it:
+
+| Property          | Read from                                    | Decides                                                      |
+|-------------------+----------------------------------------------+--------------------------------------------------------------|
+| =ARCHIVE=         | the node or any heading above it, always     | where =org-node-archive= sends the node, and its =archive_file= |
+| =LOG_INTO_DRAWER= | the node or any heading above it, always     | the drawer a note or a log entry goes into                   |
+| =NOBLOCKING=      | the node alone, always                       | whether a TODO change at that node is exempt from =org-blocker-hook= |
+
 * Write tools
 
 ** org-node-set-todo
@@ -1201,9 +1228,8 @@ Example:
 Every assertion is checked before the first property is written, so a call
 refused over its second property has not written its first.
 
-A write reaches the drawer of the node its link names and no other. A value that
-node only inherits is not in that drawer, so its =before= is =null=; see
-[[file:reading.org::*Inherited properties][Inherited properties]] for where that parts from a query that inherits.
+A write reaches the drawer of the node its link names and no other, so a value
+that node only inherits is asserted as =null= (see [[*Inherited properties]]).
 
 *** The three states of a drawer line
 
