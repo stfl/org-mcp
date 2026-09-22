@@ -27382,5 +27382,156 @@ client reads as well as in what Emacs renders."
          (and (re-search-forward "\\(?:\\`\\|[^\\\\]\\)\\\\=" nil t)
               (format "%s:%d" source (line-number-at-pos))))))))
 
+;;; A node is a node in what a client and a user read
+
+(defconst org-mcp-test--headlines-published
+  '(("org-node-create"
+     "Cannot contain headlines at same or higher level"
+     "A line of the body that Org's syntax reads as a headline starts a node of its own, so the
+word names Org's syntax here, not the node the call creates.")
+    ("org-node-set-content"
+     "Cannot introduce headlines at same or higher level"
+     "A line of the body that Org's syntax reads as a headline starts a node of its own, so the
+word names Org's syntax here, not the node the call writes."))
+  "Where a published text says headline and means Org\\='s own construct.
+Each entry is (WHERE PHRASE REASON): WHERE names the text as
+`org-mcp-test--published-texts' does, PHRASE is the words that carry
+it, and REASON is why they mean Org's construct rather than a node.")
+
+(defconst org-mcp-test--headlines-on-pages
+  '(("docs/writing.org"
+     "written into the headline line"
+     "The line Org's syntax writes a title into, which Org calls the headline.")
+    ("docs/writing.org"
+     "what Org makes of the whole headline line"
+     "The same line, whose grammar decides what a title reads as.")
+    ("docs/writing.org"
+     "What the headline grammar claims"
+     "The grammar of that line, which is Org's and asked of the file.")
+    ("docs/writing.org"
+     "are written on a headline, and a file has no headline. =org-node-set-title= renames a \
+headline; a file's title is its =#+TITLE:= line, a keyword and not a headline"
+     "The element types Org's parser gives a heading and a #+TITLE: line.  The paragraph turns
+on that distinction to say why a field setter refuses a link naming a file."))
+  "Where a user-facing page says headline and means Org\\='s own construct.
+Each entry is (WHERE PHRASE REASON), WHERE being the page's path
+from the repository root, as `org-mcp-test--page-texts' names it.")
+
+(defun org-mcp-test--headline-findings (texts kept)
+  "Return each place TEXTS call a node a headline, and each KEPT they lack.
+TEXTS is a list of (WHERE . TEXT).  KEPT is a list of (WHERE PHRASE
+REASON), a phrase the text at WHERE carries that says headline and
+means Org\\='s own construct: the headline line, its grammar, the
+element Org\\='s parser gives a heading.  Runs of whitespace are made
+single spaces before anything is compared, so a phrase matches across
+the line breaks its text is wrapped over.
+
+A finding is a string naming WHERE: the words around each headline,
+of either case, still there once the kept phrases are taken out, or
+a kept phrase its text no longer carries, so that the exceptions
+cannot outlast what they excuse."
+  (let ((case-fold-search t)
+        (findings nil))
+    (pcase-dolist (`(,where . ,_) kept)
+      (unless (assoc where texts)
+        (push (format "%s: no text of that name" where) findings)))
+    (pcase-dolist (`(,where . ,text) texts)
+      (let ((flat (replace-regexp-in-string "[ \t\n]+" " " text))
+            (start 0))
+        (pcase-dolist (`(,kept-where ,phrase ,_reason) kept)
+          (when (equal kept-where where)
+            (if (string-search phrase flat)
+                (setq flat (string-replace phrase "" flat))
+              (push (format "%s: no longer says %S" where phrase) findings))))
+        (while (string-match "headline" flat start)
+          (push (format "%s: ...%s..."
+                        where
+                        (substring flat
+                                   (max 0 (- (match-beginning 0) 40))
+                                   (min (length flat) (+ (match-end 0) 40))))
+                findings)
+          (setq start (match-end 0)))))
+    (nreverse findings)))
+
+(defun org-mcp-test--published-texts ()
+  "Return (WHERE . TEXT) for the prose the running server publishes.
+That is each tool\\='s description, under its id, each parameter\\='s,
+under the id and the parameter name, and each resource template\\='s
+name and description, under its URI template.  They are read from
+the registry, so a tool added later is in the set the moment it is
+registered."
+  (append
+   (mapcan
+    (lambda (tool)
+      (let ((id (alist-get 'name tool)))
+        (cons
+         (cons id (alist-get 'description tool))
+         (mapcar
+          (lambda (property)
+            (cons (format "%s %s" id (car property))
+                  (or (alist-get 'description (cdr property)) "")))
+          (alist-get 'properties (alist-get 'inputSchema tool))))))
+    (org-mcp-test--registered-tools))
+   (mapcar
+    (lambda (template)
+      (cons (alist-get 'uriTemplate template)
+            (format "%s\n%s"
+                    (alist-get 'name template)
+                    (or (alist-get 'description template) ""))))
+    (append (mcp-server-lib-ert-get-resource-templates-list) nil))))
+
+(defun org-mcp-test--page-texts ()
+  "Return (WHERE . TEXT) for every user-facing page, WHERE its path.
+The pages are the ones `just lint' org-lints: README.org,
+CONTRIBUTING.org and every Org file under docs/, at any depth, so a
+page added later is read without being named here."
+  (let ((root (file-name-directory (find-library-name "org-mcp"))))
+    (mapcar
+     (lambda (page)
+       (cons page
+             (with-temp-buffer
+               (insert-file-contents (expand-file-name page root))
+               (buffer-string))))
+     (append
+      '("README.org" "CONTRIBUTING.org")
+      (mapcar
+       (lambda (file) (file-relative-name file root))
+       (directory-files-recursively (expand-file-name "docs" root) "[.]org\\'"))))))
+
+(ert-deftest org-mcp-test-no-published-text-calls-a-node-a-headline ()
+  "No tool or resource template description calls a node a headline.
+CONTEXT.md names the thing a call addresses a node, and a model
+answers in the words the tool descriptions hand it, so a description
+that says headline teaches it a second name for the one thing.
+
+Every tool description, every parameter description and every
+resource template\\='s name and description is read from the
+registry, with views configured so that org-view is among them.  The word stays only where it means
+Org\\='s own construct, each such phrase listed with its reason in
+`org-mcp-test--headlines-published', and a failure names the tool
+and the words around what it found."
+  (let ((org-mcp-views org-mcp-test--views)
+        (org-mcp-filters org-mcp-test--filters))
+    (org-mcp-test--with-enabled
+      (should (member "org-view" (org-mcp-test--registered-tool-ids)))
+      (let ((findings
+             (org-mcp-test--headline-findings
+              (org-mcp-test--published-texts) org-mcp-test--headlines-published)))
+        (should-not findings)))))
+
+(ert-deftest org-mcp-test-no-page-calls-a-node-a-headline ()
+  "No user-facing page calls a node a headline.
+The pages describe the calls in the words the descriptions use, and
+a sweep of them holds only until the next paragraph is written, so
+the rule is checked where the prose is: README.org, CONTRIBUTING.org
+and every page under docs/.  The word stays only where it means
+Org\\='s own construct, each such phrase listed with its reason in
+`org-mcp-test--headlines-on-pages', and a failure names the page and
+the words around what it found."
+  (let ((findings
+         (org-mcp-test--headline-findings
+          (org-mcp-test--page-texts) org-mcp-test--headlines-on-pages)))
+    (should-not findings)))
+
 (provide 'org-mcp-test)
 ;;; org-mcp-test.el ends here
