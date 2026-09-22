@@ -10052,6 +10052,17 @@ call that let continuity win would fail every row."
       (org-mcp-test--check-continuous-clock-in
        continuously 30 600 (car row) (cadr row)))))
 
+(ert-deftest org-mcp-test-clock-in-continuous-never-starts-in-the-future ()
+  "A clock-out still to come is not one a clock-in continues from.
+A closed clock can end after the present: written by hand, added for
+later, or synced from a machine whose clock runs ahead.  For every
+moment before its 11:00 end, a second, ten minutes or an hour early,
+the new clock opens at the present rather than at 11:00, which would
+leave a running clock that has not started yet."
+  (dolist (row '((-1 "10:59") (-600 "10:50") (-3600 "10:00")))
+    (org-mcp-test--check-continuous-clock-in
+     t 30 (car row) nil (cadr row))))
+
 (defconst org-mcp-test--continuous-latest-cases
   `(("in the second line of a drawer"
      ,(concat

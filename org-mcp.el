@@ -162,7 +162,8 @@ When `org-clock-continuously' is non-nil and a new clock-in occurs
 within this many minutes of the last clock-out, the new clock starts
 at the previous clock's end time.  A gap of exactly this many minutes
 still continues the previous clock; one a second longer starts the
-new clock at the current time."
+new clock at the current time.  So does a last clock-out that lies
+after the current time, since a clock never starts in the future."
   :type 'integer
   :group 'org-mcp)
 
@@ -7915,7 +7916,11 @@ MCP Parameters:
                 (when last-end
                   (let ((elapsed
                          (float-time (time-subtract now last-end))))
-                    (when (<= elapsed
+                    ;; A clock-out still to come is not one this
+                    ;; clock-in follows: starting there would leave
+                    ;; a running clock that has not started yet.
+                    (when (<= 0
+                              elapsed
                               (* 60
                                  org-mcp-clock-continuous-threshold))
                       last-end))))))
