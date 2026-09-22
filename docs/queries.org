@@ -57,6 +57,31 @@ Both tag fields come with a result asked nothing, so a client about to replace a
 heading's tags has the =local_tags= that =org-node-set-tags= asserts without
 reading the heading again (see [[file:reading.org::*The two tag fields][The two tag fields]]).
 
+*** Inherited properties in a query
+
+A match's =properties= are its own drawer, whatever =org-use-property-inheritance=
+says (see [[file:reading.org::*Inherited properties][Inherited properties]]). org-ql's =property= predicate — in a
+query, a view's query or a filter — matches on that drawer too, unless the query
+asks it to inherit:
+
+| The query                                      | Matches a node when                                            |
+|------------------------------------------------+----------------------------------------------------------------|
+| =(property "AREA" "work")=                     | its own drawer holds the value, under every value of the setting |
+| =(property "AREA" "work" :inherit t)=          | it, a heading above it or a =#+PROPERTY:= line holds it, under every value of the setting |
+| =(property "AREA" "work" :inherit 'selective)= | Org gives it the value: inherited where the setting selects =AREA=, its own drawer otherwise |
+
+So an inheriting query can match a node whose =properties= do not carry the
+value it matched on: the predicate found the value where the node inherits it,
+and =properties= answer with what the node holds. The node that holds the line
+is the one a write changes it at (see [[file:writing.org::*Inherited properties][Inherited properties]]).
+
+org-ql remembers what the =:inherit 'selective= form answered at each heading
+until that file's buffer changes, and the setting is not part of what it
+remembers. After =org-use-property-inheritance= changes in the running Emacs,
+such a query keeps answering as it did under the old value, and the next change
+to the file — a write through org-mcp or an edit in Emacs — brings it up to
+date.
+
 ** org-view
 - *Description:* Run a named view — a question the workflow has a name for — restricted by a named filter, at a named range
 - *Parameters:*
