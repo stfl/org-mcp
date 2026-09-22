@@ -1069,14 +1069,14 @@ Every tool taking `files' reads it through here."
     (unless (org-mcp--blank-param-p files)
       files)))
 
-(defun org-mcp--optional-link-given (link &optional name)
+(defun org-mcp--optional-link-given (link name)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
 Clients may fill an optional parameter they do not use with an empty
 value, so every blank, see `org-mcp--blank-param-p', and a string
 holding nothing but whitespace mean that the call names no link.
 
-NAME is the parameter as the call spells it.  When it is given, a
-LINK that is not blank and not a string is refused as
+NAME is the parameter as the call spells it.  A LINK that is not
+blank and not a string is refused as
 `org-mcp--text-param-given' refuses one, naming NAME and the JSON
 kind of what arrived, so that no later message echoes the value in
 the Elisp reader\\='s spelling of it.  A string is returned for
@@ -1088,9 +1088,7 @@ meaning for a parameter that was not sent, and a required one has
 none."
   (unless (or (org-mcp--blank-param-p link)
               (and (stringp link) (string-blank-p link)))
-    (if name
-        (org-mcp--text-param-given link name)
-      link)))
+    (org-mcp--text-param-given link name)))
 
 (defun org-mcp--link-given (link name)
   "Return LINK, the link the required parameter NAME carries.
@@ -1108,7 +1106,7 @@ reader\\='s spelling of the client\\='s JSON — `nil', `t', a list of
 dotted pairs.  A string is returned for that parser to check, which
 is where a string that is no link is refused."
   (org-mcp--text-param-given
-   (org-mcp--optional-link-given link) name))
+   (org-mcp--optional-link-given link name) name))
 
 (defmacro org-mcp--closing-opened-buffers (files &rest body)
   "Run BODY, then kill the buffers it opened to visit FILES.
@@ -5207,8 +5205,7 @@ MCP Parameters:
        (sibling-target
         (when-let* ((sibling
                      (org-mcp--optional-link-given
-                      previous_sibling
-                      "previous_sibling")))
+                      previous_sibling "previous_sibling")))
           (org-mcp--link-target sibling "previous_sibling"
                                 nil
                                 file-path))))
@@ -7435,8 +7432,7 @@ MCP Parameters:
          (sibling-target
           (when-let* ((sibling
                        (org-mcp--optional-link-given
-                        previous_sibling
-                        "previous_sibling")))
+                        previous_sibling "previous_sibling")))
             (org-mcp--link-target sibling "previous_sibling"
                                   nil
                                   (plist-get parent-target :file))))
@@ -7933,8 +7929,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00),
-          naming a time that exists; left out, or null, false, \"\"
-          or [], the current time
+          naming a time that exists; left out, or null, false, \"\",
+          [] or whitespace, the current time
   resolve - true or \"true\" to delete dangling clocks before clocking
             in; false, \"false\" and null mean not to, and any other
             value is refused
@@ -8075,8 +8071,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00),
-          naming a time that exists; left out, or null, false, \"\"
-          or [], the current time
+          naming a time that exists; left out, or null, false, \"\",
+          [] or whitespace, the current time
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link
@@ -9881,8 +9877,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
-               Left out, or null, false, \"\" or [], uses the current
-               time (or continuous time)
+               Left out, or null, false, \"\", [] or whitespace, uses
+               the current time (or continuous time)
                Must not be before the running clock's start
   resolve - true or \"true\" to delete the dangling (unclosed) CLOCK
             lines the heading itself carries, before clocking in
@@ -9945,8 +9941,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
-             Left out, or null, false, \"\" or [], uses the current
-             time
+             Left out, or null, false, \"\", [] or whitespace, uses
+             the current time
   files - Files and directories to look up an id: link in
           (array of strings, optional); see org-node-read
   note - Prose to record against the clock being closed (string,

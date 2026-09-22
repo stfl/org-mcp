@@ -7094,15 +7094,27 @@ opened is closed once the file has been read."
 
 (ert-deftest org-mcp-test-an-optional-link-reads-every-blank-as-none ()
   "Every optional link parameter reads a blank as none, and only text as a link.
-The parameters are found in the published schema, not listed here.
-For each, every blank spelling gives the response and the file that
-leaving the parameter out gives, and a value that is not text is
-refused naming the parameter and the JSON kind of what arrived,
-with the file left as it was."
+The parameters are found in the published schema, and the census is
+pinned to the four there are: a new optional link, however its
+description is worded, changes the list and fails here until it is
+added to it and given a call to sweep.  For each, every blank
+spelling gives the response and the file that leaving the parameter
+out gives, and a value that is not text is refused naming the
+parameter and the JSON kind of what arrived, with the file left as
+it was."
   (let ((params
          (org-mcp-test--with-enabled
            (org-mcp-test--optional-link-params))))
-    (should params)
+    (should
+     (equal
+      (sort (copy-sequence params)
+            (lambda (a b)
+              (string< (concat (car a) " " (cdr a))
+                       (concat (car b) " " (cdr b)))))
+      '(("org-clock-in" . "clock_out")
+        ("org-config-todo" . "link")
+        ("org-node-create" . "previous_sibling")
+        ("org-node-refile" . "previous_sibling"))))
     (pcase-dolist (`(,tool . ,param) params)
       (let ((omitted
              (org-mcp-test--optional-link-outcome tool param 'omit)))
