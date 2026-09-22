@@ -12,8 +12,35 @@
 (require 'mcp-server-lib-ert)
 (require 'json)
 (require 'find-func)
+(require 'org-persist)
 
 (setq mcp-server-lib-ert-server-id "org-mcp")
+
+;; Org keeps the element cache of each Org file it visits in `org-persist-directory', and an
+;; Emacs that exits can delete the files there that its own index does not list.  Org gives an
+;; Emacs without an init file a directory of its own, but eask sets `user-init-file', so under
+;; `eask test' the suite would share the default directory with every other Emacs using it, such
+;; as another checkout's `eask test'.  One of those exiting while a test visits a file can take
+;; the cache file, or its directory, that Org is writing for the visit: `org-mode' then stops
+;; partway, and the tools go on to read a buffer Org has only half set up.  An interactive Emacs
+;; running the suite keeps the directory it has.
+(when noninteractive
+  (setq org-persist-directory (make-temp-file "org-mcp-test-persist-" t))
+  ;; Depth 100 runs it after Org's own exit hooks, which write into the directory.
+  (add-hook 'kill-emacs-hook
+            (lambda ()
+              (when (file-directory-p org-persist-directory)
+                (delete-directory org-persist-directory t)))
+            100))
+
+(ert-deftest org-mcp-test-org-persist-store-is-private-to-the-run ()
+  "Org keeps its element caches in a directory this run alone uses.
+The directory Org picks by default is shared with every Emacs using
+it, and one of them exiting can delete a cache file a visit in this
+run is writing.  This run uses a `make-temp-file' directory under
+`temporary-file-directory', a name no other Emacs is given."
+  (skip-unless noninteractive)
+  (should (file-in-directory-p org-persist-directory temporary-file-directory)))
 
 ;;; Test Data Constants
 
