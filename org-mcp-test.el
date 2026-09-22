@@ -22015,6 +22015,379 @@ nothing it can do instead."
         "array as its JSON text"
         (org-mcp-test--registered-tool-description tool))))))
 
+;;; An object from a client that cannot send one
+
+;; The same schema keeps a validating client from sending a JSON object,
+;; and four parameters take nothing else: `before' and `after' on
+;; org-node-set-properties, `properties' on org-node-create and
+;; `before_planning' on org-node-set-todo.  None of them takes a string
+;; that is not blank, so text whose first non-blank character is a
+;; brace can only be the object's text.  The claim is that the text of
+;; an object means that object, for every object: each test here sends
+;; a set of maps both ways, refused ones among them, and compares what
+;; the client reads and what the file holds.
+
+(defun org-mcp-test--object-call-outcome (content tool params)
+  "Call TOOL on a fresh file holding CONTENT and return the outcome.
+PARAMS is a function of the file returning the call's parameters.
+The outcome is (REFUSED TEXT IMAGE): whether the call was refused,
+the text the client reads with the file's path and name written FILE, so that
+two files' outcomes compare, and what the file holds afterwards."
+  (let ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (org-log-repeat nil)
+        (org-log-done nil))
+    (org-mcp-test--with-temp-org-files ((file content))
+      (let* ((response
+              (mcp-server-lib-process-jsonrpc-parsed
+               (mcp-server-lib-create-tools-call-request
+                tool 1 (funcall params file))
+               mcp-server-lib-ert-server-id))
+             (result (alist-get 'result response))
+             (text
+              (if result
+                  (alist-get 'text (aref (alist-get 'content result) 0))
+                (alist-get 'message (alist-get 'error response)))))
+        (list
+         (eq (alist-get 'isError result) t)
+         (seq-reduce
+          (lambda (text name)
+            (replace-regexp-in-string (regexp-quote name) "FILE" text t t))
+          (list
+           file (abbreviate-file-name file) (file-name-nondirectory file))
+          text)
+         (org-mcp-test--read-file file))))))
+
+(defun org-mcp-test--object-spellings (map)
+  "Return the spellings a client may send MAP, an alist, in.
+The first is MAP itself, which the request encodes as a JSON object;
+the rest are that object's JSON text, bare and behind blank space."
+  (let ((text (json-encode map)))
+    (list map text (concat " \n\t" text))))
+
+(defun org-mcp-test--assert-object-spellings-agree
+    (content tool params maps)
+  "Assert every spelling of each of MAPS gets the object\\='s outcome.
+PARAMS is a function of the file and a spelling of one of MAPS
+returning the call's parameters; TOOL is called on a fresh file
+holding CONTENT for each.  The outcome of the object is the one each
+text spelling must reproduce, refused or not.  Return the outcomes
+of the objects, in the order of MAPS."
+  (mapcar
+   (lambda (map)
+     (let* ((spellings (org-mcp-test--object-spellings map))
+            (expected
+             (org-mcp-test--object-call-outcome
+              content tool
+              (lambda (file) (funcall params file (car spellings))))))
+       (dolist (spelling (cdr spellings))
+         (should
+          (equal
+           (org-mcp-test--object-call-outcome
+            content tool (lambda (file) (funcall params file spelling)))
+           expected)))
+       expected))
+   maps))
+
+(ert-deftest org-mcp-test-object-text-set-properties ()
+  "`before' and `after' sent as text write what the objects write.
+Every pairing of the two spellings is sent — both as text, either one
+alone — over maps covering each value a drawer line takes: a string,
+a number, true and false, \"\", null that takes a line away, a string
+that itself begins with a brace, which is written as it stands, and
+a special property, which is refused as it is in an object."
+  (let* ((bare org-mcp-test--content-bare-todo)
+         (props org-mcp-test--content-todo-with-props)
+         (cases
+          `((,bare "*Simple Task" ((Effort)) ((Effort . "1:00")))
+            (,bare
+             "*Simple Task"
+             ((A) (B) (C) (D))
+             ((A . 2) (B . t) (C . :json-false) (D . "")))
+            (,bare "*Simple Task" ((Foo)) ((Foo . "{not json}")))
+            (,props
+             "*Task with Properties"
+             ((EFFORT . "1:00") (Owner))
+             ((EFFORT) (Owner . "me")))
+            (,props "*Task with Properties" ((EFFORT . "2:00"))
+                    ((EFFORT . "3:00")))
+            (,bare "*Simple Task" ((TODO)) ((TODO . "DONE"))))))
+    (let ((refused '()))
+      (dolist (case cases)
+        (pcase-let ((`(,content ,search ,before ,after) case))
+          (let* ((params
+                  (lambda (file before after)
+                    `((link . ,(org-mcp-test--file-link file search))
+                      (before . ,before)
+                      (after . ,after))))
+                 (expected
+                  (org-mcp-test--object-call-outcome
+                   content "org-node-set-properties"
+                   (lambda (file) (funcall params file before after)))))
+            (push (car expected) refused)
+            (dolist (before-spelling
+                     (org-mcp-test--object-spellings before))
+              (dolist (after-spelling
+                       (org-mcp-test--object-spellings after))
+                (should
+                 (equal
+                  (org-mcp-test--object-call-outcome
+                   content "org-node-set-properties"
+                   (lambda (file)
+                     (funcall params file before-spelling after-spelling)))
+                  expected)))))))
+      ;; The last two are refused, a stale assertion and a special
+      ;; property, and the rest are written.
+      (should (equal (nreverse refused) '(nil nil nil nil t t))))
+    ;; The outcomes compared above are the ones an object gets, so
+    ;; each shape is pinned once in its own words as well.
+    (pcase-let ((`(,refused ,text ,image)
+                 (org-mcp-test--object-call-outcome
+                  bare "org-node-set-properties"
+                  (lambda (file)
+                    `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+                      (before . "{\"Effort\": null, \"Foo\": null}")
+                      (after . "{\"Effort\": \"1:00\", \"Foo\": \"{x}\"}"))))))
+      (should-not refused)
+      (let ((result (json-read-from-string text)))
+        (should (equal (alist-get 'properties_set result) ["Effort" "Foo"]))
+        (should (equal (alist-get 'properties_deleted result) []))
+        (should (equal (alist-get 'before result) '((Effort) (Foo)))))
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Simple Task\n"
+                ":PROPERTIES:\n"
+                ":Effort: +1:00\n"
+                ":Foo: +{x}\n"
+                ":END:\n"
+                "Task body text.\n?\\'")
+        image)))
+    (pcase-let ((`(,refused ,text ,image)
+                 (org-mcp-test--object-call-outcome
+                  props "org-node-set-properties"
+                  (lambda (file)
+                    `((link
+                       . ,(org-mcp-test--file-link
+                           file "*Task with Properties"))
+                      (before . "{\"EFFORT\": \"1:00\"}")
+                      (after . "{\"EFFORT\": null}"))))))
+      (should-not refused)
+      (should
+       (equal (alist-get 'properties_deleted (json-read-from-string text))
+              ["EFFORT"]))
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Task with Properties\n"
+                ":PROPERTIES:\n"
+                ":CATEGORY: work\n"
+                ":END:\n"
+                "Some body.\n?\\'")
+        image)))))
+
+(ert-deftest org-mcp-test-object-text-create-properties ()
+  "`properties' sent as text gives the new node what the object gives.
+The maps cover a string, a number, true and false, \"\", null, which
+writes nothing on a new node, an ID, which makes the returned link an
+id: link, and a special property, which is refused."
+  (let ((pinned
+         (org-mcp-test--assert-object-spellings-agree
+          org-mcp-test--content-bare-todo "org-node-create"
+          (lambda (file properties)
+            `((title . "New Task")
+              (todo . "TODO")
+              (parent . ,(concat "file:" file))
+              (properties . ,properties)))
+          '(((Effort . "1:00") (Rank . 3))
+            ((Done . t) (Open . :json-false) (Blank . ""))
+            ((Gone) (Kept . "k"))
+            ((ID . "0b5e7cc2-2c55-4d8c-9d4e-7d0c3e2d4a11"))
+            ((TAGS . "x"))))))
+    (pcase-let ((`(,refused ,text ,image) (car pinned)))
+      (should-not refused)
+      (should (string-match-p "\"success\":true" text))
+      (should
+       (string-match-p
+        (concat "^\\* TODO New Task\n"
+                ":PROPERTIES:\n"
+                ":Effort: +1:00\n"
+                ":Rank: +3\n"
+                ":END:")
+        image)))
+    (pcase-let ((`(,refused ,text ,_image) (nth 3 pinned)))
+      (should-not refused)
+      (should
+       (equal
+        (alist-get 'link (json-read-from-string text))
+        "id:0b5e7cc2-2c55-4d8c-9d4e-7d0c3e2d4a11")))
+    (should (car (nth 4 pinned)))))
+
+(ert-deftest org-mcp-test-object-text-before-planning ()
+  "`before_planning' sent as text guards what the object guards.
+A map naming both dates lets the repeat through, one leaving a date
+out asserts it holds nothing and is refused as stale, and one naming
+a field the call does not assert is refused by name."
+  (let ((pinned
+         (org-mcp-test--assert-object-spellings-agree
+          org-mcp-test--content-task-both-repeat "org-node-set-todo"
+          (lambda (file planning)
+            `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+              (before . "TODO")
+              (after . "DONE")
+              (before_planning . ,planning)))
+          '(((scheduled . "<2026-01-01 Thu +1w>")
+             (deadline . "<2026-01-08 Thu +2w>"))
+            ((scheduled . "<2026-01-01 Thu +1w>"))
+            ((closed . "[2026-01-01 Thu]"))))))
+    (pcase-let ((`(,refused ,_text ,image) (car pinned)))
+      (should-not refused)
+      (should
+       (string-match-p
+        (concat "\\`\\* TODO Weekly Task\n"
+                "SCHEDULED: <2026-01-08 [^ >]+ \\+1w> "
+                "DEADLINE: <2026-01-22 [^ >]+ \\+2w>")
+        image)))
+    (should (car (nth 1 pinned)))
+    (should (car (nth 2 pinned)))))
+
+(ert-deftest org-mcp-test-object-text-blanks-keep-their-meaning ()
+  "Every blank spelling of an object parameter means what it meant.
+null, false, \"\", [] and {} are the parameter left out, and so is the
+text of an empty object, with or without blank space around it: no
+properties on a new node, a missing `before' or `after', and no
+planning assertion, which a repeating heading refuses."
+  (let ((blanks (list nil :json-false "" [] (make-hash-table) "{}" " { } ")))
+    (let ((unsent
+           (org-mcp-test--object-call-outcome
+            org-mcp-test--content-bare-todo "org-node-create"
+            (lambda (file)
+              `((title . "New Task") (parent . ,(concat "file:" file)))))))
+      (should-not (car unsent))
+      (should-not (string-match-p ":PROPERTIES:" (nth 2 unsent)))
+      (dolist (blank blanks)
+        (should
+         (equal
+          (org-mcp-test--object-call-outcome
+           org-mcp-test--content-bare-todo "org-node-create"
+           (lambda (file)
+             `((title . "New Task")
+               (parent . ,(concat "file:" file))
+               (properties . ,blank))))
+          unsent))))
+    (dolist (blank blanks)
+      (dolist (side '(before after))
+        (let ((outcome
+               (org-mcp-test--object-call-outcome
+                org-mcp-test--content-bare-todo "org-node-set-properties"
+                (lambda (file)
+                  `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+                    (before . ,(if (eq side 'before) blank '((Effort))))
+                    (after
+                     . ,(if (eq side 'after) blank '((Effort . "1:00")))))))))
+          (should (car outcome))
+          (should
+           (equal (nth 1 outcome)
+                  (format "Missing required parameter: %s" side)))
+          (should
+           (equal (nth 2 outcome) org-mcp-test--content-bare-todo)))))
+    (let ((unsent
+           (org-mcp-test--object-call-outcome
+            org-mcp-test--content-task-both-repeat "org-node-set-todo"
+            (lambda (file)
+              `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+                (before . "TODO")
+                (after . "DONE"))))))
+      (should (car unsent))
+      (should
+       (string-match-p "\\`before_planning is required here" (nth 1 unsent)))
+      (dolist (blank blanks)
+        (should
+         (equal
+          (org-mcp-test--object-call-outcome
+           org-mcp-test--content-task-both-repeat "org-node-set-todo"
+           (lambda (file)
+             `((link . ,(org-mcp-test--file-link file "*Weekly Task"))
+               (before . "TODO")
+               (after . "DONE")
+               (before_planning . ,blank))))
+          unsent))))))
+
+(defconst org-mcp-test--object-params
+  `(("org-node-set-properties" "after" "after must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . ((Effort)))
+          (after . ,value))))
+    ("org-node-set-properties" "before" "before must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . ,value)
+          (after . ((Effort . "1:00"))))))
+    ("org-node-create" "properties" "properties must be a non-empty JSON object"
+     ,(lambda (file value)
+        `((title . "New Task")
+          (parent . ,(concat "file:" file))
+          (properties . ,value))))
+    ("org-node-set-todo" "before_planning"
+     "before_planning must be an object naming"
+     ,(lambda (file value)
+        `((link . ,(org-mcp-test--file-link file "*Simple Task"))
+          (before . "TODO")
+          (after . "DONE")
+          (before_planning . ,value)))))
+  "Each object parameter: its tool, its name, the refusal a value that
+is not an object gets, and a function of a file and a value returning
+a call to Simple Task in that file carrying the value there.")
+
+(ert-deftest org-mcp-test-object-text-other-strings-still-refused ()
+  "A string that does not open an object is refused as it was.
+Only a brace is read as an object\\='s text, so the text of any other
+JSON value — null, a string, an array, a number — and blank space
+alone reach the parameter\\='s own refusal unchanged."
+  (dolist (param org-mcp-test--object-params)
+    (pcase-let ((`(,tool ,_name ,refusal ,params) param))
+      (dolist (value '("x" "  " "null" "\"{}\"" "[\"Effort\"]" "1" "}"))
+        (org-mcp-test--with-temp-org-files
+            ((file org-mcp-test--content-bare-todo))
+          (org-mcp-test--call-tool-refused
+           tool (funcall params file value)
+           (concat "\\`" (regexp-quote refusal))
+           file))))))
+
+(ert-deftest org-mcp-test-object-text-malformed-refused ()
+  "Text that opens an object and is not one is refused by parameter.
+The refusal names the parameter and echoes the text, and the file is
+left as it was."
+  (dolist (param org-mcp-test--object-params)
+    (pcase-let ((`(,tool ,name ,_refusal ,params) param))
+      (dolist (broken
+               '("{"
+                 "{\"Effort\":"
+                 "{\"Effort\": \"1:00\"} trailing"
+                 "{\"Effort\": \"1:00\"}}"
+                 " {Effort: 1}"
+                 "{\"Effort\": \"1:00\",}"))
+        (org-mcp-test--with-temp-org-files
+            ((file org-mcp-test--content-bare-todo))
+          (should
+           (equal
+            (org-mcp-test--refusal-message
+             tool (funcall params file broken))
+            (format "%s begins with { but is not a JSON object: %s"
+                    name broken)))
+          (should
+           (equal
+            (org-mcp-test--read-file file)
+            org-mcp-test--content-bare-todo)))))))
+
+(ert-deftest org-mcp-test-object-text-said-in-the-tool-description ()
+  "A tool taking an object parameter says the text form is taken."
+  (org-mcp-test--with-enabled
+    (dolist (tool
+             '("org-node-set-properties" "org-node-create" "org-node-set-todo"))
+      (should
+       (string-match-p
+        "object as its JSON text"
+        (org-mcp-test--registered-tool-description tool))))))
+
 ;;; Reading a subtree in one call
 
 ;; `depth' expands that many generations of children in place, and the
@@ -27216,7 +27589,7 @@ functions that modify the buffer"
     "Failed to refresh buffer for file %s: %s. Check your Emacs hooks (`before-revert-hook', \
 `after-revert-hook', `revert-buffer-function')"
     "The change was made%s, but no link to it could be made: %s"
-    "%s begins with [ but is not a JSON array: %s"
+    "%s begins with %s but is not a JSON %s: %s"
     "%s must be true or false: %s"
     "depth must be a whole number of generations, not: %s"
     "org-store-link changed %s while linking to it; org-mcp creates no identifiers, so advice \

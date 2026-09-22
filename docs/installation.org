@@ -120,11 +120,12 @@ field, so a client can name the server and the version it is talking to.
 
 To remove the installed wrapper, run =M-x org-mcp-uninstall=.
 
-* When your client cannot send an array
+* When your client cannot send an array or an object
 
 org-mcp's tool schema types every parameter as a string. The schema is built
 from the Elisp handler's argument list, and =mcp-server-lib= gives every
-argument the type =string=, so there is no =array= in it to validate against.
+argument the type =string=, so there is no =array= or =object= in it to
+validate against.
 
 A client that checks its arguments against that schema therefore cannot send a
 JSON array for the parameters documented as taking one — =fields=,
@@ -149,5 +150,32 @@ what it meant — a single tag, a single file path, ="all"=, ="none"= and the
 name of a configured field list. A value that begins with =[= and is not a
 JSON array is refused, naming the parameter.
 
-Nothing has to be encoded this way. A client that can send a real JSON array
-sends one, and org-mcp reads it directly.
+The same holds for the parameters documented as taking a JSON object —
+=before= and =after= on =org-node-set-properties=, =properties= on
+=org-node-create= and =before_planning= on =org-node-set-todo=. Such a client
+sends the object as its own JSON text, and org-mcp reads that text back as the
+object. These two calls set the same property:
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "before": {"Effort": null},
+ "after": {"Effort": "1:00"}}
+#+end_src
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "before": "{\"Effort\": null}",
+ "after": "{\"Effort\": \"1:00\"}"}
+#+end_src
+
+None of these four parameters takes a string of its own: =""= is the parameter
+left out, like =null=, =false=, =[]= and ={}=, and any other string is refused.
+So a ={= at the start of the text can only begin the object, and every value a
+parameter already takes keeps meaning what it meant. The text ="{}"= is the
+empty object, and means what ={}= means there. A value that begins with ={=
+and is not a JSON object is refused, naming the parameter. Only the parameter
+itself is read back: a property value that happens to begin with ={= is written
+as the text it is.
+
+Nothing has to be encoded this way. A client that can send a real JSON array or
+object sends one, and org-mcp reads it directly.
