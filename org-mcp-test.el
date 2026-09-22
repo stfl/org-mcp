@@ -13,6 +13,7 @@
 (require 'json)
 (require 'find-func)
 (require 'org-persist)
+(require 'org-id)
 
 (setq mcp-server-lib-ert-server-id "org-mcp")
 
@@ -41,6 +42,83 @@ run is writing.  This run uses a `make-temp-file' directory under
 `temporary-file-directory', a name no other Emacs is given."
   (skip-unless noninteractive)
   (should (file-in-directory-p org-persist-directory temporary-file-directory)))
+
+;; Org saves its ID index to `org-id-locations-file' whenever a rescan finds an ID, and a tool
+;; rescans on every `id:' link the index does not know.  The default file lies in
+;; `user-emacs-directory': the checkout's `.eask/' under `eask test', but the user's own Emacs
+;; directory under `eask exec', so a test resolving such a link while any Org buffer holding an
+;; ID is open would write a temporary file's path into the user's index.  In batch the run keeps
+;; the index in a `make-temp-file' directory, deleted at exit, and refuses any save that would
+;; land outside `temporary-file-directory'.  An interactive Emacs running the suite keeps its
+;; own index, unguarded.
+(define-error 'org-mcp-test-id-index-outside-temp
+              "A test saved the ID index outside `temporary-file-directory'"
+              ;; A child of `quit', not of `error', only so that `ignore-errors', which the tools
+              ;; rescan in, cannot swallow it; a `with-local-quit' on the path would.  What fails
+              ;; the test is the condition's own name: ERT records a bare `quit' as QUIT, which a
+              ;; run does not count as unexpected, and any other condition as FAILED.  Signalling
+              ;; `quit' itself would let a refused save pass.
+              'quit)
+
+(defun org-mcp-test--refuse-id-index-outside-temp (save &rest args)
+  "Run SAVE on ARGS unless it would write the ID index outside the temp dir.
+SAVE is `org-id-locations-save'.  A save that would write `org-id-locations-file' outside
+`temporary-file-directory' writes nothing and signals
+`org-mcp-test-id-index-outside-temp', which fails the running test.
+The condition for writing is `org-id-locations-save''s own."
+  (if (and org-id-track-globally
+           org-id-locations
+           org-id-locations-file
+           (not (file-in-directory-p org-id-locations-file temporary-file-directory)))
+      (signal 'org-mcp-test-id-index-outside-temp (list org-id-locations-file))
+    (apply save args)))
+
+(when noninteractive
+  (let ((dir (make-temp-file "org-mcp-test-id-" t)))
+    (setq org-id-locations-file (expand-file-name ".org-id-locations" dir))
+    (add-hook 'kill-emacs-hook
+              (lambda ()
+                (when (file-directory-p dir)
+                  (delete-directory dir t)))
+              100))
+  (advice-add 'org-id-locations-save :around #'org-mcp-test--refuse-id-index-outside-temp))
+
+(ert-deftest org-mcp-test-id-index-is-private-to-the-run ()
+  "Org saves the ID index to a file under `temporary-file-directory'.
+The default file lies in `user-emacs-directory', which under `eask
+exec' is the user's own Emacs directory."
+  (skip-unless noninteractive)
+  (should (file-in-directory-p (default-value 'org-id-locations-file)
+                               temporary-file-directory)))
+
+(ert-deftest org-mcp-test-id-index-guard-fails-rather-than-quits ()
+  "The guard's condition fails a test, even signalled inside `ignore-errors'.
+ERT records a bare `quit' as QUIT, which a run does not count as
+unexpected, so a guard signalling `quit' would let a save outside the
+temp dir pass; one signalling an `error' would be swallowed by the
+`ignore-errors' the tools rescan in.  This test is expected to fail."
+  :expected-result :failed
+  (ignore-errors (signal 'org-mcp-test-id-index-outside-temp (list "/nope"))))
+
+(ert-deftest org-mcp-test-id-index-save-outside-temp-fails-the-test ()
+  "A save of the ID index outside the temp dir writes nothing and fails.
+The failure is signalled past `ignore-errors', the form the tools
+rescan in.  The target lies in a directory that does not exist, so
+even an unguarded save could not write it."
+  (skip-unless noninteractive)
+  (let* ((org-id-track-globally t)
+         (org-id-locations '(("/tmp/org-mcp-test.org" "org-mcp-test-id")))
+         (org-id-locations-file "/org-mcp-test-no-such-directory/.org-id-locations")
+         (signalled
+          (condition-case err
+              (progn
+                (ignore-errors
+                  (org-id-locations-save))
+                nil)
+            (org-mcp-test-id-index-outside-temp err))))
+    (should (equal signalled
+                   (list 'org-mcp-test-id-index-outside-temp org-id-locations-file)))
+    (should-not (file-exists-p org-id-locations-file))))
 
 ;;; Test Data Constants
 
