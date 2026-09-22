@@ -124,7 +124,7 @@ Example responses:
 ** org-clock-in
 - *Description:* Clock in to the specified heading. Supports continuous clocking and time rounding. Only one clock runs at a time: while one runs, the call must name it in =clock_out=, and that clock is closed at the new clock's start before the new one opens. Naming it makes sure the client knows which clock it closes, so it can ask the user first
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =start_time= (string, optional): ISO 8601 start time (e.g. =2026-03-23T14:30:00=). Defaults to current time (or previous clock end if continuous clocking applies). The running clock closes at this time, so it must not be before that clock's start
   - =resolve= (=true= / =false= or ="true"= / ="false"=, optional): true deletes the dangling (unclosed) CLOCK entries the heading itself carries, before clocking in — every open one of that heading but the running clock. A dangling clock on a child is that child's, and survives a call naming its parent. The running clock is never deleted: =clock_out= names it, and it is closed. =false=, ="false"=, =null=, =""= and =[]= mean no; any other value is refused
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =link= in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
@@ -278,7 +278,7 @@ CLOCK: [2026-03-23 Mon 14:30]--[2026-03-23 Mon 16:45] =>  2:15
 ** org-clock-add
 - *Description:* Add a completed clock entry to a heading. Creates a LOGBOOK drawer if one doesn't exist. New entries are inserted at the top of the LOGBOOK
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =start= (string, required): ISO 8601 start time (e.g. =2026-03-23T14:30:00=)
   - =end= (string, required): ISO 8601 end time (e.g. =2026-03-23T16:45:00=). Must be after start
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
@@ -309,7 +309,7 @@ Example:
 ** org-clock-delete
 - *Description:* Delete a clock entry from a heading. The call reaches the heading =link= names and no further: a CLOCK line under one of its children is that child's, and only a =link= naming the child deletes it. Removes the LOGBOOK drawer if it becomes empty after deletion
 - *Parameters:*
-  - =link= (string, required): link to the headline (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
+  - =link= (string, required): link to the node (see [[file:links.org::*Addressing headings with links][Addressing headings with links]])
   - =start= (string, required): ISO 8601 start time of the clock entry to delete (e.g. =2026-03-23T14:30:00=). It is the whole of what names the entry, so two entries of the one heading beginning there name neither. Rounded per =org-clock-rounding-minutes=, as clocking in and adding round the starts they write
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* JSON object with success status, =saved= flag, and the deleted entry details. The =link= it carries is the heading whose CLOCK line went, which is the heading the call named
@@ -371,7 +371,7 @@ Example response:
 
 * A clock can stop without a clock tool
 
-=org-clock-out= is not the only call that closes a clock. Moving a headline to
+=org-clock-out= is not the only call that closes a clock. Moving a node to
 a done keyword does too, because =org-clock-out-when-done= is on by default:
 =org-node-set-todo= finishes the task and Org stops the clock it is running
 there, exactly as it does for the =C-c C-t= you would have typed. A repeating
