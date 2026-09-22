@@ -6651,6 +6651,160 @@ crosses the MCP boundary as an internal error naming no parameter."
      "\\`Title cannot be empty or contain only whitespace\\'"
      test-file)))
 
+(ert-deftest org-mcp-test-node-create-sets-no-tags-for-every-blank ()
+  "A create whose `tags' is blank writes a heading carrying no tags.
+`tags' is optional, so leaving it out and every spelling a client
+fills an unused parameter with mean one thing: the new node has no
+tags, as it has no body for a blank `content'.  `false' and \"\" are
+among them, where a tool that replaces a tag set refuses them as a
+parameter left out, because a creation has no tags to take away."
+  (dolist (params
+           '(()
+             ((tags . nil))
+             ((tags . ""))
+             ((tags . :json-false))
+             ((tags . []))))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (let ((result
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-create"
+               `((title . "Task")
+                 (todo . "TODO")
+                 (parent . ,(concat "file:" test-file))
+                 ,@params)))))
+        (should (equal (alist-get 'success result) t))
+        (should (eq (alist-get 'saved result) t))
+        (should (equal (alist-get 'title result) "Task"))
+        (should
+         (equal (alist-get 'link result)
+                (org-mcp-test--file-link test-file "*Task"))))
+      (org-mcp-test--verify-file-matches
+       test-file org-mcp-test--regex-todo-without-body))))
+
+(ert-deftest org-mcp-test-node-create-takes-a-blank-link-as-none ()
+  "A link parameter of a create reads a blank as every parameter does.
+`[]' is blank like null and false: on the required `parent' it is
+the parameter left out, and on the optional `previous_sibling' it
+names no sibling, so the new heading goes where leaving it out puts
+it."
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (org-mcp-test--call-tool-refused
+     "org-node-create"
+     '((title . "Task") (todo . "TODO") (parent . []))
+     "\\`Missing required parameter: parent\\'"
+     test-file))
+  (org-mcp-test--with-add-todo-setup test-file
+      org-mcp-test--content-empty
+    (let ((result
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-create"
+             `((title . "Task")
+               (todo . "TODO")
+               (parent . ,(concat "file:" test-file))
+               (previous_sibling . []))))))
+      (should (equal (alist-get 'success result) t))
+      (should
+       (equal (alist-get 'link result)
+              (org-mcp-test--file-link test-file "*Task"))))
+    (org-mcp-test--verify-file-matches
+     test-file org-mcp-test--regex-todo-without-body)))
+
+(ert-deftest org-mcp-test-node-create-refuses-a-link-that-is-not-text ()
+  "A link parameter that is not text is refused as not text.
+A link is parsed as text, so a number, a boolean, an array or an
+object is refused before any parsing, in the words every text
+parameter is refused in, naming the parameter and the JSON kind of
+what arrived.  Nothing is written."
+  (dolist (case '((parent t "true")
+                  (parent 0 "0")
+                  (parent [nil] "an array")
+                  (parent ((a . 1)) "an object")
+                  (previous_sibling t "true")
+                  (previous_sibling [:json-false] "an array")
+                  (previous_sibling ((a . 1)) "an object")))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (let ((param (nth 0 case)))
+        (org-mcp-test--call-tool-refused
+         "org-node-create"
+         `((title . "Task")
+           (todo . "TODO")
+           (parent
+            .
+            ,(if (eq param 'parent)
+                 (nth 1 case)
+               (concat "file:" test-file)))
+           ,@
+           (when (eq param 'previous_sibling)
+             `((previous_sibling . ,(nth 1 case)))))
+         (format "\\`%s must be a string, not %s\\'"
+                 param
+                 (nth 2 case))
+         test-file)))))
+
+(defconst org-mcp-test--elisp-spelling-regexp
+  (concat
+   "((\\| \\. \\|"
+   "\\(?:\\`\\|[] ['\"(]\\)"
+   "\\(?:nil\\|t\\|:json-false\\)"
+   "\\(?:\\'\\|[] .,')\"]\\)")
+  "Matches the Elisp reader's spelling of a decoded JSON value.
+JSON null reads as `nil', false as `:json-false', true as `t', an
+object as a list of dotted pairs, and an array holding any of them
+prints with the same members.")
+
+(ert-deftest org-mcp-test-node-create-refuses-in-json-spelling ()
+  "No refusal of org-node-create spells a JSON value the Elisp way.
+For every parameter the tool publishes, and a value of every JSON
+kind — each blank, each scalar, arrays holding a number, a null, a
+false and a true, and objects — a refusal names what arrived in
+JSON's words or not at all.  The parameters are the ones the schema
+lists, so a parameter added later is covered without being named
+here.  Values inside a `properties' object are that map's own
+vocabulary and are not generated here."
+  (let ((values
+         '(nil :json-false t 0 1.5 "" [] [1] [nil] [:json-false] [t]
+               ((a . 1)) ((a . :json-false))))
+        (refusals 0))
+    (org-mcp-test--with-add-todo-setup test-file
+        org-mcp-test--content-empty
+      (dolist (name
+               (org-mcp-test--registered-tool-properties
+                "org-node-create"))
+        (dolist (value values)
+          (let* ((param (intern name))
+                 (params
+                  (cons
+                   (cons param value)
+                   (assq-delete-all
+                    param
+                    `((title . "Task")
+                      (parent . ,(concat "file:" test-file))))))
+                 (response
+                  (mcp-server-lib-process-jsonrpc-parsed
+                   (mcp-server-lib-create-tools-call-request
+                    "org-node-create" 1 params)
+                   mcp-server-lib-ert-server-id))
+                 (result (alist-get 'result response))
+                 (message
+                  (cond
+                   ((eq (alist-get 'isError result) t)
+                    (alist-get
+                     'text (aref (alist-get 'content result) 0)))
+                   ((alist-get 'error response)
+                    (alist-get 'message (alist-get 'error response))))))
+            (when message
+              (setq refusals (1+ refusals))
+              (should-not
+               (string-match-p
+                org-mcp-test--elisp-spelling-regexp message)))))))
+    ;; The sweep has to reach refusals to say anything about them.
+    (should (> refusals 40))))
+
 (defconst org-mcp-test--content-create-examples
   "* Projects\n** Draft the plan\n* Plan the kickoff\n"
   "A project with one child, and a second top-level heading after it.
@@ -15111,7 +15265,7 @@ is a test of each member and not of the parameter as a whole."
 (ert-deftest org-mcp-test-tag-tools-refuse-a-set-that-is-no-tag-set ()
   "A tag set arrives as a string or an array, and nothing else does.
 A number or a boolean is neither, and is refused as the format it
-is.  A JSON object decodes to a list of pairs, so it arrives as a
+is, named as JSON spells it.  A JSON object decodes to a list of pairs, so it arrives as a
 list like any other by the time a tag set is read, and it is refused
 for the pair it holds, which is no tag.  Either way nothing is
 written, and the internal error a wrong type would raise is out of
@@ -15126,7 +15280,7 @@ this test adds is the whole parameter rather than a member of it."
       (pcase-dolist
           (`(,value ,refusal)
            '((5 "Invalid tags format: 5")
-             (t "Invalid tags format: t")
+             (t "Invalid tags format: true")
              (((a . "b")) "A tag must be a string: an object")))
         (org-mcp-test--call-tool-refused
          "org-node-set-tags"

@@ -77,6 +77,13 @@ org-mcp refuses:
   connection is opened for a remote path.
 - a regexp search (=::/regexp/=), which Org answers by building a sparse tree
   in your buffer.
+- a value that is not text: a number, =true=, an array or an object. The
+  refusal names the parameter and what arrived, in JSON's words, before any
+  parsing:
+
+  #+begin_example
+  parent must be a string, not true
+  #+end_example
 - a string that is no link: a bare ID, a bare path, a path with an outline
   path such as =/home/user/org/projects.org#Parent/Child=, a title on its own,
   or a link behind =org://=. The error names the link forms to send instead,
@@ -90,8 +97,9 @@ for what the classes are and why this one carries no marker.
 
 ** A link parameter left blank
 
-A link parameter is blank when it carries =null=, =false=, =""= or nothing but
-whitespace — the values a client fills a parameter it is not using with (see
+A link parameter is blank when it carries =null=, =false=, =""=, =[]=, ={}= or
+nothing but whitespace — the values a client fills a parameter it is not using
+with (see
 [[file:writing.org::*What a blank parameter means][What a blank parameter means]]). What that means depends on whether the
 parameter is required, and it is the same on every tool that takes a link:
 

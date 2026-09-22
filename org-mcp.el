@@ -1033,15 +1033,15 @@ Every tool taking `files' reads it through here."
 (defun org-mcp--optional-link-given (link)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
 Clients may fill an optional parameter they do not use with an empty
-value, so JSON null, false and a string holding nothing but whitespace
-all mean that the call names no link.  Any other value is returned
-for `org-mcp--link-parse' to check.
+value, so every blank, see `org-mcp--blank-param-p', and a string
+holding nothing but whitespace mean that the call names no link.  Any
+other value is returned for `org-mcp--link-given' to check.
 
 The required counterpart is `org-mcp--link-given', which refuses a
 blank instead of reading it as none: an optional parameter has a
 meaning for a parameter that was not sent, and a required one has
 none."
-  (unless (or (memq link '(nil :json-false))
+  (unless (or (org-mcp--blank-param-p link)
               (and (stringp link) (string-blank-p link)))
     link))
 
@@ -1050,16 +1050,18 @@ none."
 A blank LINK is the parameter the call did not send and is refused as
 one, naming NAME, the way every required text parameter is refused by
 `org-mcp--text-param-given'.  A link is blank on the same terms an
-optional one is, see `org-mcp--optional-link-given': JSON null, false
-and a string holding nothing but whitespace.
+optional one is, see `org-mcp--optional-link-given': every blank of
+`org-mcp--blank-param-p' and a string holding nothing but whitespace.
+A LINK that is not blank and not a string is refused as that function
+refuses one, naming NAME and the JSON kind of what arrived.
 
-A blank is read here rather than left to `org-mcp--link-parse', which
-has no parameter to name and would answer a JSON null with `nil',
-the Elisp reader\\='s spelling of the client\\='s own value.  Anything
-that is not blank is returned for that parser to check, which is where
-a string that is no link is refused."
-  (or (org-mcp--optional-link-given link)
-      (org-mcp--missing-param-error name)))
+Both are read here rather than left to `org-mcp--link-parse', which
+has no parameter to name and would echo the value back in the Elisp
+reader\\='s spelling of the client\\='s JSON — `nil', `t', a list of
+dotted pairs.  A string is returned for that parser to check, which
+is where a string that is no link is refused."
+  (org-mcp--text-param-given
+   (org-mcp--optional-link-given link) name))
 
 (defmacro org-mcp--closing-opened-buffers (files &rest body)
   "Run BODY, then kill the buffers it opened to visit FILES.
@@ -4327,7 +4329,8 @@ growing a guard of its own."
             (list tags)) ; Single tag string
            (t
             (org-mcp--tool-validation-error "Invalid tags format: %s"
-                                            tags)))))
+                                            (org-mcp--json-name
+                                             tags))))))
     (dolist (tag tag-list)
       (unless (stringp tag)
         (org-mcp--tool-validation-error "A tag must be a string: %s"
@@ -5047,7 +5050,9 @@ blank CONTENT, see `org-mcp--blank-param-p', writes no body, as
 leaving it out does.  Anything else has to be text.
 PARENT is the link to the parent item, or to a whole file for
 its top level.
-TAGS is an optional single tag string or list of tag strings.
+TAGS is an optional single tag string or list of tag strings.  A
+blank TAGS, see `org-mcp--blank-param-p', sets none: a creation has
+no tags to take away, so no blank can ask for more than that.
 PREVIOUS_SIBLING is an optional link to the sibling to insert after: a
 direct child of the parent, or a heading with no parent when
 PARENT names a whole file.  An `id:' PREVIOUS_SIBLING is looked up in
@@ -5077,7 +5082,8 @@ MCP Parameters:
   content - Optional body text; null, false and \"\" write no body,
             as leaving it out does
   tags - Tags to add (optional, single string or array of strings,
-         or the JSON text of such an array)
+         or the JSON text of such an array); null, false, \"\"
+         and [] add none, as leaving it out does
   previous_sibling - Link to the sibling to insert after (optional),
                      a direct child of the parent, or a top-level
                      heading of the file when parent names a whole
@@ -5110,7 +5116,9 @@ MCP Parameters:
           (org-mcp--text-param-given todo "todo")))
   (let*
       ((written nil)
-       (tag-list (org-mcp--validate-and-normalize-tags tags))
+       (tag-list
+        (unless (org-mcp--blank-param-p tags)
+          (org-mcp--validate-and-normalize-tags tags)))
        ;; The body is inserted and checked as text, so a number, an
        ;; object or a non-empty array would reach that as a wrong type
        ;; and cross the MCP boundary as an internal error, which names
@@ -8682,6 +8690,7 @@ Parameters:
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
+         Left out, or null, false, \"\" or [], sets no tags
   content - Body content of the node (string, optional)
             Left out, or null, false or \"\", writes no body
             Cannot contain headlines at same or higher level as new
@@ -8699,7 +8708,7 @@ Parameters:
                      a direct child of the parent, or a top-level
                      heading of the file when parent names the whole
                      file.  Its id: link is looked up in the parent's
-                     file.  null, false and \"\" mean none.
+                     file.  null, false, \"\" and [] mean none.
                      If omitted, appends as last child of parent
   properties - Properties for the new node (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
