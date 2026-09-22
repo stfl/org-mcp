@@ -26983,15 +26983,22 @@ advertisement a client can obey and one it cannot: the line is
 ;; the wrong one sends a client into a refusal that its own summary
 ;; told it to provoke.
 ;;
-;; These are read out of every tool tools/list publishes, not out of
-;; the tools known to clear something, so a new tool, or a sentence
-;; added to an old one, is asked the question the moment it is
-;; published.  A value is recognised by the words around it rather
-;; than found by hand, which is the limit of the census: an
-;; advertisement worded outside the phrases below is not seen.
+;; What is measured has two halves.  A tool with an entry in
+;; `org-mcp-test--clearing-writes' is guarded whatever its wording:
+;; its descriptions have to go on naming a clearing value the phrases
+;; below find, and every value they name is sent.  A tool without an
+;; entry is found only when a sentence of its fits one of the phrases
+;; below, since a value is recognised by the words around it: a new
+;; tool advertising a clearing value in other words is not seen.
+;;
+;; A value found in a parameter's schema description is known to be
+;; that parameter's, and has to be `after', the one every fixture
+;; writes.  A value found in the tool's own description carries no
+;; parameter, since that text names its parameters in prose, and is
+;; sent to `after' on the strength of the phrase alone.
 
 (defconst org-mcp-test--clearing-advertisement-regexps
-  (let ((value "\\(null\\|false\\|\"\"\\|\\[\\]\\|{}\\)")
+  (let ((value "\\([Nn]ull\\|[Ff]alse\\|\"\"\\|\\[\\]\\|{}\\)")
         (before "\\(?:\\`\\|[ (,:]\\)"))
     (list
      ;; "null takes the timestamp away", "A null after leaves the node
@@ -27012,11 +27019,14 @@ advertisement a client can obey and one it cannot: the line is
       "[^:]*: {[^}]*\"after\": " value)))
   "Regexps whose first group is a value a description says clears a field.
 Each is matched against a description with its whitespace folded to
-single spaces, since a description wraps its sentences over lines.")
+single spaces, since a description wraps its sentences over lines.
+Null and false are matched capitalised too, since a sentence may
+open on one.")
 
 (defun org-mcp-test--clearing-values-in (text)
   "Return the values TEXT tells a client to send to clear a field.
-Each is spelled as the JSON TEXT names it.  The regexps' word
+Each is spelled as the JSON TEXT names it, a null or false opening a
+sentence written in the lower case JSON spells it in.  The regexps' word
 boundaries are read under the standard syntax table, since the
 current buffer's would make them mean whatever that buffer's mode
 says a word is."
@@ -27027,7 +27037,7 @@ says a word is."
       (dolist (regexp org-mcp-test--clearing-advertisement-regexps)
         (let ((start 0))
           (while (string-match regexp text start)
-            (push (match-string 1 text) values)
+            (push (downcase (match-string 1 text)) values)
             (setq start (match-end 0))))))
     (delete-dups (nreverse values))))
 
@@ -27036,7 +27046,11 @@ says a word is."
 The descriptions are those of every tool tools/list publishes with a
 view configured, so the list is every tool there is.  Both the tool's
 description and each parameter's description in its input schema are
-read, because a client may plan from either."
+read, because a client may plan from either.
+
+Each of VALUES is (PARAMETER . TEXT): TEXT the value as JSON, and
+PARAMETER the symbol of the parameter whose schema description named
+it, or nil when the tool's own description did."
   (org-mcp-test--with-views
     (delq
      nil
@@ -27045,14 +27059,19 @@ read, because a client may plan from either."
         (let ((values
                (delete-dups
                 (mapcan
-                 #'org-mcp-test--clearing-values-in
+                 (lambda (source)
+                   (mapcar
+                    (lambda (text) (cons (car source) text))
+                    (org-mcp-test--clearing-values-in (cdr source))))
                  (cons
-                  (alist-get 'description tool)
+                  (cons nil (alist-get 'description tool))
                   (delq
                    nil
                    (mapcar
                     (lambda (parameter)
-                      (alist-get 'description (cdr parameter)))
+                      (let ((text
+                             (alist-get 'description (cdr parameter))))
+                        (and text (cons (car parameter) text))))
                     (alist-get
                      'properties (alist-get 'inputSchema tool)))))))))
           (and values (cons (alist-get 'name tool) values))))
@@ -27125,9 +27144,14 @@ the arguments."
           (org-mcp-test--advertised-clearing-accepted
            "org-node-set-content" "* Task\nFirst line.\nSecond line.\n"
            "*Task"
+           ;; The digest names the body entire, so the value empties
+           ;; the field rather than cutting a part of it out.
            (lambda (link)
-             `((link . ,link) (before . "First line.") (after . ,value)))
-           "\\`\\* Task\n\nSecond line\\.\n\\'")))
+             `((link . ,link)
+               (before . ,(org-mcp-test--content-digest-of link))
+               (after . ,value)))
+           ;; Org keeps the line break that ended the body.
+           "\\`\\* Task\n\n?\\'")))
     ("org-node-set-tags"
      . ,(lambda (value) (org-mcp-test--advertised-tags-accepted value nil)))
     ("org-file-set-setting"
@@ -27142,9 +27166,9 @@ the arguments."
            "\\`\\* Task\n\\'"))))
   "The write tools a description may name a clearing value for, and how.
 Each entry is (TOOL . FUNCTION): FUNCTION sends the value it is given
-where TOOL's description says it goes, to a field that holds
-something, and asserts the call succeeds and the field is left
-holding nothing.")
+as TOOL's `after' -- inside the property map, for
+org-node-set-properties -- to a field that holds something, and
+asserts the call succeeds and the field is left holding nothing.")
 
 (defun org-mcp-test--advertisement-clearing-values ()
   "The values the published descriptions name for taking a value away.
@@ -27163,7 +27187,13 @@ Each value goes to its tool as the JSON it is spelled in."
         (let ((clear
                (alist-get tool org-mcp-test--clearing-writes nil nil #'equal)))
           (should clear)
-          (dolist (text values)
+          (pcase-dolist (`(,parameter . ,text) values)
+            (ert-info ((format "%s in %s" text (or parameter "description"))
+                       :prefix "Value: ")
+              ;; A schema description says which parameter it is
+              ;; about, and every fixture writes `after'.
+              (should (memq parameter '(nil after)))))
+          (dolist (text (delete-dups (mapcar #'cdr values)))
             (ert-info (text :prefix "Value: ")
               (funcall clear
                        (json-parse-string
@@ -27172,6 +27202,34 @@ Each value goes to its tool as the JSON it is spelled in."
                         :false-object :json-false)))
             (push (cons tool text) asserted)))))
     asserted))
+
+(ert-deftest org-mcp-test-clearing-values-are-read-out-of-each-phrase ()
+  "Each phrase a description advertises a clearing value in is read.
+The census over the published descriptions finds a value only where
+its phrase is one these regexps know, so each shape is pinned here
+against a sentence of its own, a null or false opening a sentence
+among them, which the census hands on in the lower case JSON spells
+it in.  A sentence naming a spelling of nothing without saying it
+clears anything is read as naming no value."
+  (dolist (row
+           '(("null takes the timestamp away, guarded by before" "null")
+             ("A null after leaves the node with no keyword" "null")
+             ("[] leaves the node carrying no tags of its own" "[]")
+             ("an after of \"\" leaves nothing in\n  its place" "\"\"")
+             ("or null to leave it with none" "null")
+             ("Null takes the property line away" "null")
+             ("False empties the field" "false")
+             ("{} clears the map" "{}")
+             ("a removal is asked for again with null" "null")
+             ("Example - taking the keyword off, so it stops being a task:
+  {\"link\": \"id:abc\", \"before\": \"TODO\", \"after\": null}"
+              "null")
+             ("Null, false and [] are the parameter left out")
+             ("\"\" is no date and is refused, and false is the parameter left out")
+             ("Empty string asserts the node has no priority")))
+    (ert-info ((car row) :prefix "Sentence: ")
+      (should
+       (equal (org-mcp-test--clearing-values-in (car row)) (cdr row))))))
 
 (defconst org-mcp-test--advertisements
   '(("a date a planning field takes" . org-mcp-test--advertisement-date-forms)
