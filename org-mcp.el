@@ -1069,36 +1069,44 @@ Every tool taking `files' reads it through here."
     (unless (org-mcp--blank-param-p files)
       files)))
 
-(defun org-mcp--optional-link-given (link)
+(defun org-mcp--optional-link-given (link name)
   "Return LINK, an optional link parameter of a call, or nil when it is blank.
 Clients may fill an optional parameter they do not use with an empty
-value, so JSON null, false and a string holding nothing but whitespace
-all mean that the call names no link.  Any other value is returned
-for `org-mcp--link-parse' to check.
+value, so every blank, see `org-mcp--blank-param-p', and a string
+holding nothing but whitespace mean that the call names no link.
+
+NAME is the parameter as the call spells it.  A LINK that is not
+blank and not a string is refused as
+`org-mcp--text-param-given' refuses one, naming NAME and the JSON
+kind of what arrived, so that no later message echoes the value in
+the Elisp reader\\='s spelling of it.  A string is returned for
+`org-mcp--link-target' to check.
 
 The required counterpart is `org-mcp--link-given', which refuses a
 blank instead of reading it as none: an optional parameter has a
 meaning for a parameter that was not sent, and a required one has
 none."
-  (unless (or (memq link '(nil :json-false))
+  (unless (or (org-mcp--blank-param-p link)
               (and (stringp link) (string-blank-p link)))
-    link))
+    (org-mcp--text-param-given link name)))
 
 (defun org-mcp--link-given (link name)
   "Return LINK, the link the required parameter NAME carries.
 A blank LINK is the parameter the call did not send and is refused as
 one, naming NAME, the way every required text parameter is refused by
 `org-mcp--text-param-given'.  A link is blank on the same terms an
-optional one is, see `org-mcp--optional-link-given': JSON null, false
-and a string holding nothing but whitespace.
+optional one is, see `org-mcp--optional-link-given': every blank of
+`org-mcp--blank-param-p' and a string holding nothing but whitespace.
+A LINK that is not blank and not a string is refused as that function
+refuses one, naming NAME and the JSON kind of what arrived.
 
-A blank is read here rather than left to `org-mcp--link-parse', which
-has no parameter to name and would answer a JSON null with `nil',
-the Elisp reader\\='s spelling of the client\\='s own value.  Anything
-that is not blank is returned for that parser to check, which is where
-a string that is no link is refused."
-  (or (org-mcp--optional-link-given link)
-      (org-mcp--missing-param-error name)))
+Both are read here rather than left to `org-mcp--link-parse', which
+has no parameter to name and would echo the value back in the Elisp
+reader\\='s spelling of the client\\='s JSON — `nil', `t', a list of
+dotted pairs.  A string is returned for that parser to check, which
+is where a string that is no link is refused."
+  (org-mcp--text-param-given
+   (org-mcp--optional-link-given link name) name))
 
 (defmacro org-mcp--closing-opened-buffers (files &rest body)
   "Run BODY, then kill the buffers it opened to visit FILES.
@@ -3032,7 +3040,8 @@ ask the user about it.  Nothing is changed.
 A CLOCK-OUT that disagrees with the running clock is a conflict: the
 client believed something about the world that no longer holds, and
 reading the clock again is what puts it right."
-  (let ((clock-out (org-mcp--optional-link-given clock-out)))
+  (let ((clock-out
+         (org-mcp--optional-link-given clock-out "clock_out")))
     (cond
      ((not active)
       (when clock-out
@@ -4371,7 +4380,8 @@ growing a guard of its own."
             (list tags)) ; Single tag string
            (t
             (org-mcp--tool-validation-error "Invalid tags format: %s"
-                                            tags)))))
+                                            (org-mcp--json-name
+                                             tags))))))
     (dolist (tag tag-list)
       (unless (stringp tag)
         (org-mcp--tool-validation-error "A tag must be a string: %s"
@@ -4825,11 +4835,12 @@ a file, which is the very confusion this parameter is here to end.
 
 MCP Parameters:
   link - Link to the file to answer for, or to a heading in it
-         (string, optional)
+         (string, optional); left out, or null, false, \"\", [] or
+         whitespace, the global configuration
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link, and with no link"
-  (let ((link (org-mcp--optional-link-given link)))
+  (let ((link (org-mcp--optional-link-given link "link")))
     (when (and (not link) (org-mcp--files-given files))
       (org-mcp--tool-validation-error
        "files names where to look up an id: link, and this call sent \
@@ -5093,7 +5104,9 @@ blank CONTENT, see `org-mcp--blank-param-p', writes no body, as
 leaving it out does.  Anything else has to be text.
 PARENT is the link to the parent item, or to a whole file for
 its top level.
-TAGS is an optional single tag string or list of tag strings.
+TAGS is an optional single tag string or list of tag strings.  A
+blank TAGS, see `org-mcp--blank-param-p', sets none: a creation has
+no tags to take away, so no blank can ask for more than that.
 PREVIOUS_SIBLING is an optional link to the sibling to insert after: a
 direct child of the parent, or a heading with no parent when
 PARENT names a whole file.  An `id:' PREVIOUS_SIBLING is looked up in
@@ -5125,7 +5138,8 @@ MCP Parameters:
   content - Optional body text; null, false and \"\" write no body,
             as leaving it out does
   tags - Tags to add (optional, single string or array of strings,
-         or the JSON text of such an array)
+         or the JSON text of such an array); null, false, \"\"
+         and [] add none, as leaving it out does
   previous_sibling - Link to the sibling to insert after (optional),
                      a direct child of the parent, or a top-level
                      heading of the file when parent names a whole
@@ -5161,7 +5175,9 @@ MCP Parameters:
           (org-mcp--text-param-given todo "todo")))
   (let*
       ((written nil)
-       (tag-list (org-mcp--validate-and-normalize-tags tags))
+       (tag-list
+        (unless (org-mcp--blank-param-p tags)
+          (org-mcp--validate-and-normalize-tags tags)))
        ;; The body is inserted and checked as text, so a number, an
        ;; object or a non-empty array would reach that as a wrong type
        ;; and cross the MCP boundary as an internal error, which names
@@ -5188,7 +5204,8 @@ MCP Parameters:
        ;; before the parent's buffer is changed.
        (sibling-target
         (when-let* ((sibling
-                     (org-mcp--optional-link-given previous_sibling)))
+                     (org-mcp--optional-link-given
+                      previous_sibling "previous_sibling")))
           (org-mcp--link-target sibling "previous_sibling"
                                 nil
                                 file-path))))
@@ -7415,7 +7432,7 @@ MCP Parameters:
          (sibling-target
           (when-let* ((sibling
                        (org-mcp--optional-link-given
-                        previous_sibling)))
+                        previous_sibling "previous_sibling")))
             (org-mcp--link-target sibling "previous_sibling"
                                   nil
                                   (plist-get parent-target :file))))
@@ -7912,7 +7929,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   start_time - Optional ISO 8601 start time (e.g. 2026-03-23T14:30:00),
-          naming a time that exists
+          naming a time that exists; left out, or null, false, \"\",
+          [] or whitespace, the current time
   resolve - true or \"true\" to delete dangling clocks before clocking
             in; false, \"false\" and null mean not to, and any other
             value is refused
@@ -7922,6 +7940,8 @@ MCP Parameters:
   clock_out - Link to the heading of the running clock, which is
               closed first; required while a clock runs, refused
               while none does"
+  (setq start_time
+        (org-mcp--optional-text-given start_time "start_time"))
   (let* ((target (org-mcp--link-target link "link" files))
          (file-path (plist-get target :file))
          (resolve (org-mcp--boolean-param resolve "resolve"))
@@ -8051,7 +8071,8 @@ MCP Parameters:
            - file:{absolute-path}::*{title} (first match)
            - any of these as [[link]] or [[link][description]]
   end_time - Optional ISO 8601 end time (e.g. 2026-03-23T16:45:00),
-          naming a time that exists
+          naming a time that exists; left out, or null, false, \"\",
+          [] or whitespace, the current time
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link
@@ -8062,6 +8083,7 @@ MCP Parameters:
   ;; the clock would report on something the call never got to ask
   ;; about.
   (setq link (org-mcp--link-given link "link"))
+  (setq end_time (org-mcp--optional-text-given end_time "end_time"))
   (setq note (org-string-nw-p note))
   (let ((active (org-mcp--clock-find-active)))
     (unless active
@@ -8419,7 +8441,8 @@ Parameters:
          A file carrying no `#+TODO:', `#+SEQ_TODO:' or
          `#+TYP_TODO:' setting of its own inherits the global
          sequences and is answered with them.
-         Omitted, the answer is the global configuration.
+         Left out, or null, false, \"\", [] or whitespace, the
+         answer is the global configuration.
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link, and with no link
@@ -8748,8 +8771,8 @@ Parameters:
           Cannot be empty or whitespace-only
           Cannot contain newlines
   todo - TODO keyword from org-todo-keywords (string, optional)
-         Left out, or null, false or \"\", makes a heading with no
-         keyword: a node that is not a task.  A value that names no
+         Left out, or null, false, \"\" or [], makes a heading
+         with no keyword: a node that is not a task.  A value that names no
          keyword is refused
   tags - Tags for the node (string or array, optional)
          Single tag: \"urgent\"
@@ -8759,8 +8782,9 @@ Parameters:
          Validated against org-tag-alist if configured
          Must follow Org tag rules (alphanumeric, _, @)
          Respects mutually exclusive tag groups
+         Left out, or null, false, \"\" or [], sets no tags
   content - Body content of the node (string, optional)
-            Left out, or null, false or \"\", writes no body
+            Left out, or null, false, \"\" or [], writes no body
             Cannot contain headlines at same or higher level as new
             item
             If #+BEGIN/#+END blocks are present, they must be balanced
@@ -8776,8 +8800,8 @@ Parameters:
                      a direct child of the parent, or a top-level
                      heading of the file when parent names the whole
                      file.  Its id: link is looked up in the parent's
-                     file.  null, false and \"\" mean none.
-                     If omitted, appends as last child of parent
+                     file.  Left out, or null, false, \"\", [] or
+                     whitespace, appends as last child of parent
   properties - Properties for the new node (object, optional)
                e.g. {\"ID\": \"...\", \"CUSTOM_ID\": \"...\",
                      \"EFFORT\": \"1:00\"}
@@ -9503,9 +9527,10 @@ Parameters:
   previous_sibling - Link to the child of parent the node is to
                      follow (string, optional), in any form link
                      takes, looked up in the parent's file.
-                     Omitted, null, false or blank, the node becomes
-                     the parent's last child, or, at the top level,
-                     the file's first heading
+                     Left out, or null, false, \"\", [] or
+                     whitespace, the node becomes the parent's last
+                     child, or, at the top level, the file's first
+                     heading
   files - Files and directories to look up the id: link in link in
           (array of strings, optional); see org-node-read.  It
           applies to link only - it says where to find the node the
@@ -9852,7 +9877,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  start_time - ISO 8601 start time (string, optional)
                Example: 2026-03-23T14:30:00
-               If omitted, uses current time (or continuous time)
+               Left out, or null, false, \"\", [] or whitespace, uses
+               the current time (or continuous time)
                Must not be before the running clock's start
   resolve - true or \"true\" to delete the dangling (unclosed) CLOCK
             lines the heading itself carries, before clocking in
@@ -9864,8 +9890,9 @@ Parameters:
   clock_out - Link to the heading of the running clock (string);
               required while a clock runs, refused while none does.
               The link a refusal names for it is accepted as sent;
-              an id: link is looked up in the running clock's file;
-              null, false and \"\" mean no link
+              an id: link is looked up in the running clock's file.
+              Left out, or null, false, \"\", [] or whitespace, names
+              no clock to close
 
 Returns JSON object:
   success - Always true on success (boolean)
@@ -9914,7 +9941,8 @@ Parameters:
      org-mcp--heading-link-formats
      "  end_time - ISO 8601 end time (string, optional)
              Example: 2026-03-23T16:45:00
-             If omitted, uses current time
+             Left out, or null, false, \"\", [] or whitespace, uses
+             the current time
   files - Files and directories to look up an id: link in
           (array of strings, optional); see org-node-read
   note - Prose to record against the clock being closed (string,
