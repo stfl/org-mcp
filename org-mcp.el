@@ -9370,8 +9370,8 @@ Parameters:
 Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in an open Emacs buffer, not
-          on disk; it answers for the archive file as well as for
-          the file the node left (boolean)
+          on disk; tell the user it needs saving.  It answers for the
+          archive file as well as for the file the node left (boolean)
   link - The link the node had in the file it left (string)
   archive_file - The file the node was archived to (string)")
     :read-only nil)
@@ -9434,8 +9434,8 @@ Parameters:
 Returns JSON object:
   success - Always true on success (boolean)
   saved - False when the change is only in an open Emacs buffer, not
-          on disk; when the node went to another file, it answers
-          for both files (boolean)
+          on disk; tell the user it needs saving.  When the node went
+          to another file, it answers for both files (boolean)
   link - Link to the node in its new place (string): id:{id} when it
          has an ID, else file:{path}::#{custom-id} when it has a
          CUSTOM_ID, else file:{path}::*{title}")

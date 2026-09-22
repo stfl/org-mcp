@@ -74,7 +74,7 @@ human-facing page links to them.
 ### Issue tracker
 
 GitHub issues on `stfl/org-mcp`, driven through `gh`, with an umbrella issue per
-body of work and its children in dependency order. See
+body of work and its children linked as its sub-issues in dependency order. See
 `docs/agents/issue-tracker.md`.
 
 ### Triage labels
@@ -99,6 +99,12 @@ one, so a `.omc/plans/…` path is stripped before anything is published.
 
 Work ends committed, never stashed: the stash is shared with every worktree of
 this repository and other sessions pop it.
+
+Before the push, every ticket whose work this session merged is closed, and
+every ticket this session filed into a set is linked as a sub-issue of its
+umbrella; `docs/agents/issue-tracker.md`, "Umbrella issues", says how. A set
+that has drifted from the tracker is corrected on the tracker in the same pass:
+a handoff under `.omc/` records it where no reader of the issue will look.
 
 A session ends with the branch pushed, then `git status` to confirm the branch
 tracks its remote. `dev` is published and tracks `origin`; `main` is where it is

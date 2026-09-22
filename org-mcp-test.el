@@ -3555,6 +3555,19 @@ list does not mention."
      (org-mcp-test--registered-tools)))
    #'string<))
 
+(defun org-mcp-test--write-tools ()
+  "Return the tools/list entries not published as read-only.
+MCP reads a missing `readOnlyHint' as false, so a tool registered
+without `:read-only' is a write tool here, as it is to a client.
+
+The set is read from the published list for the reason
+`org-mcp-test--node-write-tools-taking-a-link' gives: the write tool
+somebody adds afterwards is the one a list typed out by hand misses."
+  (seq-remove
+   (lambda (tool)
+     (eq (alist-get 'readOnlyHint (alist-get 'annotations tool)) t))
+   (org-mcp-test--registered-tools)))
+
 (defun org-mcp-test--registered-tool-required (id)
   "Return the required parameter names tools/list publishes for tool ID."
   (append
@@ -3643,6 +3656,33 @@ carry is in neither array.")
         (regexp-quote "null takes the property line away")
         description))
       (should-not (string-match-p "empty after" description)))))
+
+(ert-deftest org-mcp-test-write-tools-say-to-relay-an-unsaved-change ()
+  "Every write tool's description tells a client to relay an unsaved change.
+A change left in the user's buffer reaches disk only when the user
+saves it, and the user hears of it only through the client, so the
+`saved' field does its work only when the client passes it on.  A
+model reads the tool's own description before it calls the tool, so
+that is where the instruction has to be.
+
+The census runs over every tool tools/list publishes as not
+read-only rather than over a list of them, so a write tool is held
+to the sentence from the moment it is registered.  A failure names
+each tool whose description lacks it."
+  (org-mcp-test--with-enabled
+    (let ((tools (org-mcp-test--write-tools)))
+      (should tools)
+      (should-not
+       (delq
+        nil
+        (mapcar
+         (lambda (tool)
+           (unless (string-search
+                    "tell the user it needs saving"
+                    (replace-regexp-in-string
+                     "[ \t\n]+" " " (alist-get 'description tool)))
+             (alist-get 'name tool)))
+         tools))))))
 
 (ert-deftest org-mcp-test-registered-tool-ids-without-views ()
   "The registered tools are exactly the unconditional ones."
