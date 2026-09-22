@@ -23,6 +23,7 @@ owns the question, never to a second page that repeats it:
 | `writing.org` | what a write does to buffers and files, and the sixteen write tools |
 | `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
 | `clocking.org` | the seven clock tools and `org-mcp-clock-continuous-threshold` |
+| `verified-settings.org` | the Org settings org-mcp honours and tests, the ones it ignores on purpose, and the ones nothing measures |
 
 The README is a primer, not a shorter copy of these pages: a fact earns a place
 there only by changing what org-mcp is or what it costs to run — the tool count,
