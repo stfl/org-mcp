@@ -249,19 +249,19 @@ When nil, no sorting is applied."
 
 (defconst org-records-mcp-version
   (eval-when-compile
-    (require 'lisp-mnt)
-    ;; `byte-compile-current-file' names the file while the compiler
-    ;; runs.  Loading from source binds it only when some dependency has
-    ;; already pulled in bytecomp, which is not ours to rely on, so read
-    ;; it defensively.
-    (lm-version
-     (or (bound-and-true-p byte-compile-current-file)
-         load-file-name
-         buffer-file-name)))
+    (require 'package)
+    ;; `package-get-version' finds this file whether it is byte-compiled
+    ;; from the repository checkout or from an installed package: it
+    ;; reads the version from the `<name>-<version>' directory an ELPA
+    ;; install unpacks into, and only falls back to this file's header
+    ;; (`Version:' or `Package-Version:', an install can carry either)
+    ;; when the directory name does not carry one, e.g. a checkout run
+    ;; straight from source.
+    (package-get-version))
   "Version org-records-mcp reports as `serverInfo.version' in the handshake.
-Read from this file's `Version:' header, at compile time when the
-package is byte-compiled, so it cannot drift from the package
-metadata the way a second copy of the string would.")
+Computed once, at compile time, by `package-get-version', so it cannot
+drift from the package metadata the way a second copy of the string
+would.")
 
 ;; Error handling helpers
 ;;
@@ -4631,7 +4631,10 @@ Everything under the heading goes with it, its drawers and its
 LOGBOOK included, because `org-cut-subtree' takes the region Org
 gives the headline rather than one measured here.  The text comes
 back, so that a caller putting the subtree down elsewhere pastes what
-it cut and a caller that only removes it lets it go.
+it cut and a caller that only removes it lets it go.  It is read from
+`org-subtree-clip', the variable `org-cut-subtree' and
+`org-paste-subtree' hand text through by contract; `org-cut-subtree'
+is `(interactive)' and no Org version promises what it returns.
 
 The cut ends the way Org ends its own: `org-archive-subtree' and
 `org-refile' both call `org-inlinetask-remove-END-maybe' after
@@ -4641,7 +4644,8 @@ reaches that cleanup through `org-archive-subtree'; org-node-delete
 and org-node-refile reach it here, so the three verbs leave a file
 in the same state."
   (prog1 (org-records-mcp--with-private-kill-ring
-           (org-cut-subtree))
+           (org-cut-subtree)
+           org-subtree-clip)
     (when (featurep 'org-inlinetask)
       (org-inlinetask-remove-END-maybe))))
 

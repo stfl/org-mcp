@@ -1151,6 +1151,16 @@ BODY is executed with org-records-mcp enabled."
          (cleanups (mapcar
                     (lambda (temp-var)
                       `(when ,temp-var
+                         ;; A buffer BODY left visiting the file, open
+                         ;; or modified, is killed before the file
+                         ;; goes: `make-temp-file' can hand a later
+                         ;; test the same name back, and a buffer
+                         ;; still around for it would serve that test
+                         ;; stale content instead of what it wrote.
+                         (when-let* ((buffer (find-buffer-visiting ,temp-var)))
+                           (with-current-buffer buffer
+                             (set-buffer-modified-p nil))
+                           (kill-buffer buffer))
                          (delete-file ,temp-var)))
                     temp-vars)))
     `(let (,@temp-vars)
@@ -7934,7 +7944,29 @@ client which part of the title it has to spell another way.")
     "the COMMENT code"
     "Buy milk :fresh:x")
   "Titles carrying a colon, a bracket or the word COMMENT and no grammar.
-Each writes, and reads back exactly as it was sent.")
+Each writes, and reads back exactly as it was sent — on the Org
+release this claim was written against.  Org's own tag-line grammar is
+not the same claim across releases: a colon block with no leading
+space, `Buy milk:fresh:' here, is tags on Org 9.7 and plain text on
+Org 9.8.  `org-records-mcp-test--title-org-claims' asks the Org
+actually running the suite, so a title moving between what a release
+leaves alone and what it claims does not itself fail the test that
+uses this list.")
+
+(defun org-records-mcp-test--title-org-claims (title)
+  "Return what Org's own grammar claims of TITLE, or nil.
+Delegates to `org-records-mcp--title-claimed-by-org' with no
+`#+TODO:' or `#+PRIORITIES:' line in force beyond what the caller's
+own dynamic `org-todo-keywords' binding contributes, so the answer is
+whichever Org release is running the suite's own grammar, not one a
+test hard-codes.  `org-records-mcp-test--titles-org-leaves-alone' and
+`org-records-mcp-test--titles-org-would-claim' read this to sort a
+title into the write that succeeds or the refusal that names what was
+claimed, whichever the running Org answers."
+  (with-temp-buffer
+    (let ((org-inhibit-startup t))
+      (delay-mode-hooks (org-mode)))
+    (org-records-mcp--title-claimed-by-org title)))
 
 (defconst org-records-mcp-test--content-file-keywords
   "#+TODO: TODO NEXT | DONE\n* TODO Original\nBody.\n"
@@ -8177,60 +8209,85 @@ part a client cannot see from its own call."
 The check is what Org makes of the whole headline line, not a rule
 about punctuation, so a title is refused exactly when Org would read
 it as something else.  Each of these is read back through the server
-as the title that was sent."
+as the title that was sent — except a title the Org running the
+suite claims, which is refused instead, as
+`org-records-mcp-test-set-title-refuses-a-title-org-would-claim'
+checks for every title every Org release claims."
   (dolist (title org-records-mcp-test--titles-org-leaves-alone)
     (org-records-mcp-test--with-temp-org-files
         ((test-file "* TODO Original\nBody.\n"))
       (let* ((org-todo-keywords '((sequence "TODO" "|" "DONE")))
              (link (org-records-mcp-test--file-link test-file "*Original"))
-             (result
-              (json-read-from-string
-               (mcp-server-lib-ert-call-tool
-                "org-node-set-title"
-                `((link . ,link)
-                  (before . "Original")
-                  (after . ,title))))))
-        (should (equal (alist-get 'success result) t))
-        (should (eq (alist-get 'saved result) t))
-        (should (equal (alist-get 'before result) "Original"))
-        (should (equal (alist-get 'after result) title))
-        ;; What the server serves for the node is the title sent, so
-        ;; the round trip a client makes comes back whole.
-        (should
-         (equal
-          (alist-get
-           'title
-           (json-read-from-string
-            (mcp-server-lib-ert-call-tool
-             "org-node-read"
-             `((link
-                .
-                ,(org-records-mcp-test--file-link
-                  test-file (concat "*" title)))))))
-          title))))))
+             (claimed (org-records-mcp-test--title-org-claims title)))
+        (if claimed
+            (org-records-mcp-test--call-tool-refused
+             "org-node-set-title"
+             `((link . ,link) (before . "Original") (after . ,title))
+             (concat "\\`Not a title: '" (regexp-quote title)
+                     "'\\.  It " (regexp-quote claimed))
+             test-file)
+          (let ((result
+                 (json-read-from-string
+                  (mcp-server-lib-ert-call-tool
+                   "org-node-set-title"
+                   `((link . ,link)
+                     (before . "Original")
+                     (after . ,title))))))
+            (should (equal (alist-get 'success result) t))
+            (should (eq (alist-get 'saved result) t))
+            (should (equal (alist-get 'before result) "Original"))
+            (should (equal (alist-get 'after result) title))
+            ;; What the server serves for the node is the title sent,
+            ;; so the round trip a client makes comes back whole.
+            (should
+             (equal
+              (alist-get
+               'title
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-read"
+                 `((link
+                    .
+                    ,(org-records-mcp-test--file-link
+                      test-file (concat "*" title)))))))
+              title))))))))
 
 (ert-deftest org-records-mcp-test-node-create-takes-a-colon-that-is-no-tag ()
-  "org-node-create writes the same titles and reads them back whole."
+  "org-node-create writes the same titles and reads them back whole.
+Except a title the Org running the suite claims, which is refused
+instead, as
+`org-records-mcp-test-node-create-refuses-a-title-org-would-claim'
+checks for every title every Org release claims."
   (dolist (title org-records-mcp-test--titles-org-leaves-alone)
     (org-records-mcp-test--with-add-todo-setup test-file
         org-records-mcp-test--content-empty
-      (let ((result
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-create"
-               `((title . ,title)
-                 (todo . "TODO")
-                 (parent . ,(concat "file:" test-file)))))))
-        (should (equal (alist-get 'success result) t))
-        (should
-         (equal
-          (alist-get
-           'title
-           (json-read-from-string
-            (mcp-server-lib-ert-call-tool
-             "org-node-read"
-             `((link . ,(alist-get 'link result))))))
-          title))))))
+      (let ((claimed (org-records-mcp-test--title-org-claims title)))
+        (if claimed
+            (org-records-mcp-test--call-tool-refused
+             "org-node-create"
+             `((title . ,title)
+               (todo . "TODO")
+               (parent . ,(concat "file:" test-file)))
+             (concat "\\`Not a title: '" (regexp-quote title)
+                     "'\\.  It " (regexp-quote claimed))
+             test-file)
+          (let ((result
+                 (json-read-from-string
+                  (mcp-server-lib-ert-call-tool
+                   "org-node-create"
+                   `((title . ,title)
+                     (todo . "TODO")
+                     (parent . ,(concat "file:" test-file)))))))
+            (should (equal (alist-get 'success result) t))
+            (should
+             (equal
+              (alist-get
+               'title
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 "org-node-read"
+                 `((link . ,(alist-get 'link result))))))
+              title))))))))
 
 ;;; org-node-set-content tests
 
@@ -20910,8 +20967,18 @@ ID index is never consulted."
                      (seq-find
                       (lambda (child) (equal (alist-get 'title child) title))
                       (alist-get 'children parent)))))
+              ;; `file-truename' here, not the raw path `write-file'
+              ;; returned: the buffer org-records-mcp visits is opened
+              ;; through the scope check's own truename resolution
+              ;; (guarding against a symlink escaping the allowed
+              ;; directories), so on a platform where the temp
+              ;; directory is itself a symlink, such as macOS's
+              ;; /var -> /private/var, only the resolved path matches
+              ;; the link the server returns.
               (should
-               (equal after-link (org-records-mcp-test--file-link file search)))
+               (equal after-link
+                      (org-records-mcp-test--file-link
+                       (file-truename file) search)))
               (mcp-server-lib-ert-call-tool
                "org-node-create"
                `((title . "New Task")
@@ -22624,7 +22691,8 @@ Child Two has no tag of its own, so `local_tags' is left out while
       (should (equal (alist-get 'file node) test-file))
       (should (= (alist-get 'level node) 0))
       (should
-       (equal (alist-get 'link node) (concat "file:" test-file)))
+       (equal (alist-get 'link node)
+              (concat "file:" (abbreviate-file-name test-file))))
       (should
        (equal (alist-get 'content node)
               "#+TITLE: Node Shapes\nPreamble text."))

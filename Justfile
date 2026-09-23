@@ -51,7 +51,7 @@ shellcheck:
     @scripts/quiet.sh shellcheck scripts/quiet.sh scripts/run-tests.sh
 
 zizmor:
-    @scripts/quiet.sh zizmor .github/workflows/claude-code-review.yml .github/workflows/claude.yml .github/workflows/elisp-test.yml
+    @scripts/quiet.sh zizmor .github/workflows/elisp-test.yml
 
 # --- Passthrough ------------------------------------------------------------
 
