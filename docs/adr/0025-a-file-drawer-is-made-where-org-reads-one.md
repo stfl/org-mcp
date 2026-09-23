@@ -11,7 +11,7 @@ Where Org's placement rule and Org's reading rule disagree, the reading rule
 decides. A file whose first line is a heading has no region before that
 heading, and `org-set-property` at `point-min` writes that *heading's* drawer,
 because every Org property accessor starts from
-`org-back-to-heading-or-point-min`. org-mcp writes the two lines
+`org-back-to-heading-or-point-min`. org-records-mcp writes the two lines
 `org-insert-property-drawer` would have written above the heading instead, and
 reads a file node's drawer under the same rule, so such a file reports no
 properties of its own until a write gives it some.
@@ -21,7 +21,7 @@ makes nothing: its assertions were all of absence, and all of them held.
 Making one anyway would leave the same bytes, because `org-entry-delete`
 removes a drawer it has emptied — but it would write and save the file for a
 call that changed nothing, and it would rest the outcome on Org cleaning up
-after a drawer org-mcp had no reason to make.
+after a drawer org-records-mcp had no reason to make.
 
 We chose this over calling `org-set-property` at `point-min` and letting Org
 place the drawer, which sets a property on the first heading while the response

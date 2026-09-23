@@ -1,7 +1,7 @@
 # docs/
 
 The user-facing reference. Every `.org` page here is addressed to a human
-reading about org-mcp, not to an agent changing it, and that decides what may go
+reading about org-records-mcp, not to an agent changing it, and that decides what may go
 in and which way the links run.
 
 Two Markdown subdirectories sit outside that rule and are described at the
@@ -17,19 +17,25 @@ owns the question, never to a second page that repeats it:
 | Page | Owns |
 |---|---|
 | `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports, how a client that cannot send an array or an object sends one |
-| `file-access.org` | the allowed files, `org-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
-| `links.org` | the link forms a call takes, what is refused, the link every response carries |
+| `file-access.org` | the allowed files, `org-records-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
+| `links.org` | the link forms a call takes, how they resolve, the link every response carries |
 | `reading.org` | the `org://{link}` resource, `org-node-read`, `org-node-text`, and the six configuration and discovery tools |
 | `writing.org` | what a write does to buffers and files, and the sixteen write tools |
 | `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
-| `clocking.org` | the seven clock tools and `org-mcp-clock-continuous-threshold` |
-| `verified-settings.org` | the Org settings org-mcp honours and tests, the ones it ignores on purpose, and the ones nothing measures |
+| `clocking.org` | the seven clock tools and `org-records-mcp-clock-continuous-threshold` |
+| `verified-settings.org` | the Org settings org-records-mcp honours and tests, the ones it ignores on purpose, and the ones nothing measures |
+| `org-mcp-comparison.org` | how org-records-mcp differs from upstream org-mcp, what upstream has that it does not, and moving from one to the other; the credit to the upstream author lives here and in the README's "Prior art" |
 
 The README is a primer, not a shorter copy of these pages: a fact earns a place
-there only by changing what org-mcp is or what it costs to run — the tool count,
+there only by changing what org-records-mcp is or what it costs to run — the tool count,
 the quickstart, a limit. `CONTRIBUTING.org` states the same admission test for
 contributors, and `CONTRIBUTING.org` itself owns everything about changing the
 code.
+
+A page says what org-records-mcp supports, not what it does not: `links.org`
+names the two link forms a call takes and never lists the link types, relative
+forms or searches it refuses. The refusal message is where a client learns the
+rest.
 
 ## Links run outward
 
@@ -70,7 +76,7 @@ a second-level heading.
 ## docs/adr/
 
 Numbered Markdown records of decisions that shaped the interface, one decision
-per file: what org-mcp does, and what that was chosen over. They are short and
+per file: what org-records-mcp does, and what that was chosen over. They are short and
 written in the present tense, and nothing links to them from the user-facing
 pages — they are for whoever asks why the interface is shaped this way. A
 decision that survives a design discussion belongs here; the discussion itself

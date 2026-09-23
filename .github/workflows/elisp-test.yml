@@ -43,11 +43,11 @@ jobs:
 
       - name: Run tests
         env:
-          EMACS_TEST_JUNIT_REPORT: org-mcp-test.xml
+          EMACS_TEST_JUNIT_REPORT: org-records-mcp-test.xml
         run: |
           eask clean all
           eask package
-          eask install
+          eask install-deps
           eask compile
           eask lint elisp-lint
           eask lint keywords
@@ -58,14 +58,14 @@ jobs:
         uses: actions/upload-artifact@v4 # zizmor: ignore[unpinned-uses]
         with:
           name: test-results-${{ matrix.os }}-emacs-${{ matrix.emacs_version }}
-          path: org-mcp-test.xml
+          path: org-records-mcp-test.xml
           retention-days: 30
 
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action@v2 # zizmor: ignore[unpinned-uses]
         if: matrix.os == 'ubuntu-latest'
         with:
-          files: org-mcp-test.xml
+          files: org-records-mcp-test.xml
           check_name: Test Results (Emacs ${{ matrix.emacs_version }})
           comment_mode: off
 
@@ -74,5 +74,5 @@ jobs:
         if: matrix.os == 'macos-latest'
         with:
           name: Test Results (macOS, Emacs ${{ matrix.emacs_version }})
-          path: org-mcp-test.xml
+          path: org-records-mcp-test.xml
           reporter: java-junit

@@ -1,13 +1,16 @@
 #+TITLE: Addressing headings with links
 
-This page answers how a call names a heading, which links org-mcp refuses,
+This page answers how a call names a heading, which links org-records-mcp takes,
 and which link it gives back. The [[file:../README.org][README]] introduces the server itself.
 
 * Addressing headings with links
 
 Every tool that names a heading takes a native Org link, the text Org
-resolves inside =[[…]]=, and nothing else, so a link copied out of Emacs
-works unchanged:
+resolves inside =[[…]]=, and nothing else, and resolves it the way Org does:
+Org's own link parser, Org's ID index for =id:=, and =org-link-search= for
+=::*Title= and =::#custom-id=. The heading a call reaches is the heading
+=C-c C-o= opens in Emacs, so a link copied out of Emacs works unchanged, and a
+link a client finds in a body is the next call's =link=:
 
 | Link                               | Addresses                                  |
 |------------------------------------+--------------------------------------------|
@@ -20,18 +23,18 @@ works unchanged:
 - A link may be bare or bracketed, with or without a description:
   =id:abc=, =[[id:abc]]= and =[[id:abc][Project Alpha]]= name the same
   heading.
-- org-mcp resolves a link with Org's own lookup. For an ID, that is Emacs's ID
+- org-records-mcp resolves a link with Org's own lookup. For an ID, that is Emacs's ID
   index, read with =org-id-find-id-file=, or =org-id-find-id-in-file= in each
   file a call names in =files= (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]). The file
-  the index names must be one of the allowed files before org-mcp reads it, so
+  the index names must be one of the allowed files before org-records-mcp reads it, so
   an index entry for a remote or outside file is refused without touching that
   file. When the index lacks the ID, or names a file that does not hold it,
-  org-mcp rescans the index once, as =org-id-find= does. For the part after
+  org-records-mcp rescans the index once, as =org-id-find= does. For the part after
   =::=, it is =org-link-search=. The search part of an =id:= link, as in
   =id:<id>::*Review=, runs within that heading's subtree; a =file:= link
   searches the whole file. A title that matches several headings resolves to
   the first, as it does in Org, and =::<n>= in a =file:= link goes to line /n/.
-  A search that matches nothing is an error; org-mcp never offers to create
+  A search that matches nothing is an error; org-records-mcp never offers to create
   the heading.
 - A heading is whatever Org's parser takes for one. A line that starts with
   stars and a space is a heading even inside a block such as
@@ -46,7 +49,7 @@ works unchanged:
   visiting the heading's file; when no buffer visits it, the tool opens one and
   leaves it open.
 - A =file:= link names its file, so it reaches the allowed files and any Org
-  file =org-mcp-file-scope-override= permits (see
+  file =org-records-mcp-file-scope-override= permits (see
   [[file:file-access.org::*Configuring the scope override][Configuring the scope override]]). An =id:= link names no file and
   resolves only within the allowed files, unless the call names its file in
   =files=.
@@ -66,17 +69,12 @@ works unchanged:
   other write tool needs a heading and refuses it
   (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
 
-org-mcp refuses:
+Two link forms are taken: =id:=, and =file:= with a full local path, with or
+without a =::*Title=, =::#custom-id= or =::<n>= search. A link is resolved,
+never run or opened, and anything else is refused before any file is opened.
 
-- every other link type, such as =shell:=, =elisp:=, =https:=, =help:= and
-  =file+sys:=, before any file is opened. org-mcp never runs or opens a link.
-- a link that names no local file by its full path: a relative path
-  (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
-  =[[Title]]=) and a remote TRAMP path, including one that becomes remote only
-  once =.=, =..= or =~= is expanded. Send the full local path instead. No
-  connection is opened for a remote path.
-- a regexp search (=::/regexp/=), which Org answers by building a sparse tree
-  in your buffer.
+org-records-mcp also refuses:
+
 - a value that is not text: a number, =true=, or a non-empty array or object. The
   refusal names the parameter and what arrived, in JSON's words, before any
   parsing:
@@ -91,7 +89,7 @@ org-mcp refuses:
   such a path is a link to a file that does not exist, refused as outside the
   allowed files with the same hint.
 
-A link that org-mcp takes but cannot resolve, =Cannot find ID '...'= among
+A link that org-records-mcp takes but cannot resolve, =Cannot find ID '...'= among
 them, is refused in the unmarked default class; see [[file:writing.org::*How a refusal is classed][How a refusal is classed]]
 for what the classes are and why this one carries no marker.
 
@@ -135,21 +133,21 @@ For a stable address, give the heading an identifier:
 - A =CUSTOM_ID=, unique within its file, in any other file. The link is
   =file:<path>::#<custom-id>=.
 
-org-mcp adds neither on its own. Set one with the =properties= parameter of
+org-records-mcp adds neither on its own. Set one with the =properties= parameter of
 =org-node-create= when the heading is created, or with =org-node-set-properties=
-afterwards. Once a heading has one, every link org-mcp returns for it is the
-stable one (see [[*Links org-mcp returns]]).
+afterwards. Once a heading has one, every link org-records-mcp returns for it is the
+stable one (see [[*Links org-records-mcp returns]]).
 
 An =id:= link names no file, so on its own it resolves only within the allowed
-files, through Emacs's ID index. org-mcp does not add a new =ID= to that index,
+files, through Emacs's ID index. org-records-mcp does not add a new =ID= to that index,
 so the first lookup of it rescans the index; a call that names the heading's
 file in =files= avoids the rescan. For an ID in a file outside the allowed
 files, name that file in =files= on each call that sends the link, as far as
-=org-mcp-file-scope-override= permits (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
+=org-records-mcp-file-scope-override= permits (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]).
 
-* Links org-mcp returns
+* Links org-records-mcp returns
 
-Every =link= field org-mcp returns is a native Org link: a write returns the
+Every =link= field org-records-mcp returns is a native Org link: a write returns the
 link to the node it changed, and every node in a read result, a query result
 or an outline carries its own (see [[file:reading.org::*The node][The node]]). For a heading it is the link
 =org-store-link= makes when it may only use the identifiers the heading already
@@ -171,11 +169,11 @@ title link leaves out the TODO keyword, the priority, statistics cookies and the
 tags. It reaches the first heading with that title and breaks on rename; see
 [[*Stable links]] for a link that does neither.
 
-org-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
+org-records-mcp creates no identifiers. No tool adds an =ID= or a =CUSTOM_ID= to a
 heading, and a read leaves the file byte-for-byte unchanged, whether or not a
 buffer visits it. A client that wants a stable link sets the identifier itself.
 
-Your link settings do not change the returned link. org-mcp calls
+Your link settings do not change the returned link. org-records-mcp calls
 =org-store-link= non-interactively and, for that call only, binds
 =org-id-link-to-org-use-id= to =use-existing=, keeps =id:= links free of an
 inherited ID and a search part, keeps the heading's search on =file:= links, and

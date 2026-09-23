@@ -10,11 +10,11 @@ check: fmt lint test
 
 fmt: elisp-autofmt shfmt
 
-# Format org-mcp.el with the devshell's Emacs and elisp-autofmt.
+# Format org-records-mcp.el with the devshell's Emacs and elisp-autofmt.
 # The script is silent unless it fails, and its message is the one to
 # read, so it runs without scripts/quiet.sh.
 elisp-autofmt:
-    @emacs -Q --batch -l scripts/format-elisp.el org-mcp.el
+    @emacs -Q --batch -l scripts/format-elisp.el org-records-mcp.el
 
 shfmt:
     @shfmt -i 4 -l -w scripts/quiet.sh scripts/run-tests.sh
@@ -51,7 +51,7 @@ shellcheck:
     @scripts/quiet.sh shellcheck scripts/quiet.sh scripts/run-tests.sh
 
 zizmor:
-    @scripts/quiet.sh zizmor .github/workflows/claude-code-review.yml .github/workflows/claude.yml .github/workflows/elisp-test.yml
+    @scripts/quiet.sh zizmor .github/workflows/elisp-test.yml
 
 # --- Passthrough ------------------------------------------------------------
 

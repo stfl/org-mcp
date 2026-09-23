@@ -7,7 +7,7 @@ the server itself.
 * How a write reaches disk
 
 Write tools create no identifiers. Each write response carries, as =link=, the
-link to the heading it changed (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]).
+link to the heading it changed (see [[file:links.org::*Links org-records-mcp returns][Links org-records-mcp returns]]).
 
 A write that replaces one value answers with =before= and =after=: the value the
 tool found and the value it left, under the same two words the call sends. A
@@ -28,11 +28,11 @@ Write tools (e.g. =org-node-set-todo=, =org-node-set-content=, =org-clock-in=,
 file, preserving any unsaved edits the user may have. The auto-save behaviour
 depends on the buffer state:
 
-- *No existing buffer:* org-mcp opens the file's canonical visited buffer,
+- *No existing buffer:* org-records-mcp opens the file's canonical visited buffer,
   performs the edit, and saves the buffer to disk.
-- *Clean buffer already visiting the file:* org-mcp edits the buffer and saves
+- *Clean buffer already visiting the file:* org-records-mcp edits the buffer and saves
   it to disk.
-- *Dirty (modified) buffer:* org-mcp edits the buffer in place but does /not/
+- *Dirty (modified) buffer:* org-records-mcp edits the buffer in place but does /not/
   auto-save. The user's unsaved changes are preserved, and the file on disk
   remains unchanged. The buffer stays modified.
 
@@ -49,7 +49,7 @@ separate recovery file, never to the visited file itself.
 
 Every write tool response carries a =saved= boolean next to =success=, so a
 client can tell these outcomes apart. =saved= is =true= when the change reached
-the file on disk: org-mcp saved the buffer (no existing buffer, or a clean
+the file on disk: org-records-mcp saved the buffer (no existing buffer, or a clean
 one), or a hook of the user's saved it during the call. It is =false= when the
 change sits only in a buffer that already had unsaved edits. A client that
 receives =false= should tell the user that the buffer needs saving.
@@ -57,10 +57,10 @@ receives =false= should tell the user that the buffer needs saving.
 unsaved in such a buffer, even though the file it clocks in to reaches disk.
 
 A write that fails leaves the buffer and the file as they were. When the edit
-or the save signals an error, org-mcp undoes its edit, in a buffer with undo
+or the save signals an error, org-records-mcp undoes its edit, in a buffer with undo
 turned off as well, and a buffer that was clean reads unmodified again, so the
 next write saves it as usual. When a hook saved that buffer partway through the
-call, org-mcp saves it once more to put the file back. When the buffer already
+call, org-records-mcp saves it once more to put the file back. When the buffer already
 held the user's unsaved edits, or that second save fails, the file keeps what
 the hook wrote. One failure keeps the change: when the save has written the
 file and a function it runs afterwards, such as one on =after-save-hook=,
@@ -156,7 +156,7 @@ delay and a date range all pass through it as written.
 
 Org parses the shape of a timestamp; it does not ask whether the day exists. Its
 writer resolves the fields against the calendar afterwards, and =2026-02-30=
-becomes the second of March. org-mcp asks both and refuses where the two
+becomes the second of March. org-records-mcp asks both and refuses where the two
 disagree, so a day nobody can keep never reaches the file:
 
 #+begin_example
@@ -229,20 +229,20 @@ The clock tools take ISO 8601 with a =T=, and ask the same question of it (see
 * What a write records in the LOGBOOK
 
 Your Org log settings decide what a change writes down, and a write through
-org-mcp records the entry your own command would have. Placement is Org's: the
+org-records-mcp records the entry your own command would have. Placement is Org's: the
 entry goes into the drawer =org-log-into-drawer= names, or into the one a
 =LOG_INTO_DRAWER= property on the heading or above it names instead, under the heading line
 your =org-log-note-headings= holds for that kind of change.
 
-| Setting                        | Records                                    | Written by                             |
-|--------------------------------+--------------------------------------------+----------------------------------------|
-| =org-log-done= set to =note=   | a closing note on a heading reaching a done keyword | =org-node-set-todo=, =org-node-create= |
-| =org-todo-log-states=          | a move into or out of the keyword it names | =org-node-set-todo=, =org-node-create= |
-| =org-log-repeat=               | the repeat a done keyword triggers         | =org-node-set-todo=                    |
-| =org-log-reschedule=           | a SCHEDULED moved, and one taken away      | =org-node-set-scheduled=               |
-| =org-log-redeadline=           | a DEADLINE moved, and one taken away       | =org-node-set-deadline=                |
-| =org-log-refile=               | the move                                   | =org-node-refile=                      |
-| =org-log-note-clock-out=       | a clock closing                            | =org-clock-out=, =org-clock-in=        |
+| Setting                      | Records                                             | Written by                             |
+|------------------------------+-----------------------------------------------------+----------------------------------------|
+| =org-log-done= set to =note= | a closing note on a heading reaching a done keyword | =org-node-set-todo=, =org-node-create= |
+| =org-todo-log-states=        | a move into or out of the keyword it names          | =org-node-set-todo=, =org-node-create= |
+| =org-log-repeat=             | the repeat a done keyword triggers                  | =org-node-set-todo=                    |
+| =org-log-reschedule=         | a SCHEDULED moved, and one taken away               | =org-node-set-scheduled=               |
+| =org-log-redeadline=         | a DEADLINE moved, and one taken away                | =org-node-set-deadline=                |
+| =org-log-refile=             | the move                                            | =org-node-refile=                      |
+| =org-log-note-clock-out=     | a clock closing                                     | =org-clock-out=, =org-clock-in=        |
 
 =org-todo-log-states= is what a =!= or an =@= in =org-todo-keywords= fills, so
 keywords written as =TODO(t!)= record their own transitions. =org-log-done= set
@@ -278,7 +278,7 @@ you can be asked for yours after the write has left.
 
 * How a refusal is classed
 
-A refusal arrives as a message and never as an error code: the protocol org-mcp
+A refusal arrives as a message and never as an error code: the protocol org-records-mcp
 speaks carries none, and the =org://{link}= resource hands on the very message
 the tool refused with. The class a client acts on is therefore a marker at the
 front of the message, and it reads the same whichever path carried it.
@@ -289,7 +289,7 @@ front of the message, and it reads the same whichever path carried it.
 | =blocked:=  | the change cannot be made here        | tell the user what stands in the way |
 | /unmarked/  | the call was malformed                | correct the call and send it again   |
 
-Unmarked is the default, and it is the largest class: a link org-mcp does not
+Unmarked is the default, and it is the largest class: a link org-records-mcp does not
 take, a state that is no TODO keyword, a timestamp that will not parse, a
 priority outside the configured range. Sending the same call again refuses it
 again, so something in the call has to change.
@@ -297,7 +297,7 @@ again, so something in the call has to change.
 A =conflict:= says the opposite: the call was well formed, and the file has
 moved on from what the call asserted about it. The =before= a write carries,
 and the link a clock operation names — =clock_out= on a clock-in, =link= on a
-clock-out — are the assertions org-mcp checks, and a conflict names what it
+clock-out — are the assertions org-records-mcp checks, and a conflict names what it
 found instead, so the recovery is to read the heading or the active clock again
 and decide afresh.
 
@@ -324,11 +324,11 @@ blocked: Property 'OWNER' is written twice in this drawer, so it holds no one va
 
 Three refusals stay unmarked on purpose. A link that resolves to no heading —
 =Cannot find ID '...'= — may be a heading that has gone, which is a conflict,
-or one that never existed, which is a malformed call, and org-mcp cannot tell
+or one that never existed, which is a malformed call, and org-records-mcp cannot tell
 the two apart. It leaves the refusal in the default class rather than guess,
 and a client that cares reads the file to find out which it was. A =before=
 that the node disagrees with is not the same case, however much it reads like
-one: the node was found, and what disagrees is its content, which org-mcp can
+one: the node was found, and what disagrees is its content, which org-records-mcp can
 see. There is a file to read again and a fact to read out of it, so those
 refusals are conflicts.
 
@@ -363,7 +363,7 @@ kept token goes stale for reasons a client causes itself (see [[file:reading.org
 A token is opaque, and it is echoed rather than computed. What you send is the
 string a read handed you, prefix and all; the region it covers is a region of
 the file, and a client holds at most part of it. The published recipe is in
-[[file:reading.org::*The two digests][The two digests]], so that org-mcp's answer can be checked — not so that a client
+[[file:reading.org::*The two digests][The two digests]], so that org-records-mcp's answer can be checked — not so that a client
 can build a token of its own.
 
 Which token to ask for follows what you are about to change, because what you
@@ -441,12 +441,12 @@ the property — is a fact about the node, and it is yours to act on.
 A title is written into the headline line as you send it, and that line has a
 grammar of its own. Four parts of it would take a piece of your title away:
 
-| A title like        | Org reads it as                              |
-|---------------------+----------------------------------------------|
-| =Buy milk :fresh:=  | the title =Buy milk=, tagged =:fresh:=       |
-| =COMMENT the code=  | a heading commented out of export and agenda |
-| =TODO buy milk=     | the TODO keyword =TODO=, title =buy milk=    |
-| =[#A] buy milk=     | the priority =A=, title =buy milk=           |
+| A title like       | Org reads it as                              |
+|--------------------+----------------------------------------------|
+| =Buy milk :fresh:= | the title =Buy milk=, tagged =:fresh:=       |
+| =COMMENT the code= | a heading commented out of export and agenda |
+| =TODO buy milk=    | the TODO keyword =TODO=, title =buy milk=    |
+| =[#A] buy milk=    | the priority =A=, title =buy milk=           |
 
 =org-node-create= and =org-node-set-title= refuse all four rather than writing
 a heading that does not carry the title you named. The refusal says what Org
@@ -584,11 +584,11 @@ becomes =""=, and one turning it into an =after= has to know that /absent/ is
 asked for with =null=. One condition, three spellings, and a client meets all
 three on its first removal:
 
-| Where         | Nothing is spelled | Because                                                                                                                       |
-|---------------+--------------------+-------------------------------------------------------------------------------------------------------------------------------|
+| Where         | Nothing is spelled | Because                                                                                      |
+|---------------+--------------------+----------------------------------------------------------------------------------------------|
 | a read's node | the key is absent  | a node carries no key for a field it has no value for, and never sends =null= (see [[file:reading.org::*The node][The node]]) |
-| a =before=    | =""=               | an assertion names a state, and /empty/ is one of the states a field can be in                                                |
-| an =after=    | =null=             | a value names what the field will hold, and these four fields have no empty value to name                                     |
+| a =before=    | =""=               | an assertion names a state, and /empty/ is one of the states a field can be in               |
+| an =after=    | =null=             | a value names what the field will hold, and these four fields have no empty value to name    |
 
 None of the three substitutes for another, so a call that clears a field
 translates as it goes:
@@ -690,13 +690,13 @@ most of what a write changes is a heading construct that a file has no
 counterpart for, so the tool a file's link reaches is the tool whose construct
 Org keeps at file level too.
 
-| Tool                      | What a link naming a whole file does       |
-|---------------------------+--------------------------------------------|
-| =org-file-set-setting=    | writes one of that file's =#+= settings    |
-| =org-node-set-properties= | writes that file's own property drawer     |
-| =org-node-create=         | as =parent=: the file's top level          |
-| =org-node-refile=         | as =parent=: the file's top level          |
-| every other write tool    | refused: the link has to name a heading    |
+| Tool                      | What a link naming a whole file does    |
+|---------------------------+-----------------------------------------|
+| =org-file-set-setting=    | writes one of that file's =#+= settings |
+| =org-node-set-properties= | writes that file's own property drawer  |
+| =org-node-create=         | as =parent=: the file's top level       |
+| =org-node-refile=         | as =parent=: the file's top level       |
+| every other write tool    | refused: the link has to name a heading |
 
 =org-file-set-setting= is the one whose subject is always a file: a heading has
 no =#+= settings of its own, so a link naming one writes the heading's file (see
@@ -760,11 +760,11 @@ sends and copies nothing the new heading inherits into its drawer.
 Three properties a write consults on its own account are read the way Org reads
 them, and the setting does not enter into it:
 
-| Property          | Read from                                    | Decides                                                      |
-|-------------------+----------------------------------------------+--------------------------------------------------------------|
-| =ARCHIVE=         | the node or any heading above it, always     | where =org-node-archive= sends the node, and its =archive_file= |
-| =LOG_INTO_DRAWER= | the node or any heading above it, always     | the drawer a note or a log entry goes into                   |
-| =NOBLOCKING=      | the node alone, always                       | whether a TODO change at that node is exempt from =org-blocker-hook= |
+| Property          | Read from                                | Decides                                                              |
+|-------------------+------------------------------------------+----------------------------------------------------------------------|
+| =ARCHIVE=         | the node or any heading above it, always | where =org-node-archive= sends the node, and its =archive_file=      |
+| =LOG_INTO_DRAWER= | the node or any heading above it, always | the drawer a note or a log entry goes into                           |
+| =NOBLOCKING=      | the node alone, always                   | whether a TODO change at that node is exempt from =org-blocker-hook= |
 
 * Write tools
 
@@ -888,9 +888,9 @@ the field out. An open CLOCK line the session is not clocking is one such case:
 a clock left open by an earlier session, and a clock
 [[file:clocking.org::*org-clock-in][org-clock-in]] started, which is a line in
 the file and never Emacs's running clock
-(see [[file:clocking.org::*A clock org-mcp starts is a line in the file][A clock org-mcp starts is a line in the file]]).
+(see [[file:clocking.org::*A clock org-records-mcp starts is a line in the file][A clock org-records-mcp starts is a line in the file]]).
 
-That last one is the case to expect, because clocking a task through org-mcp
+That last one is the case to expect, because clocking a task through org-records-mcp
 and then finishing it is the ordinary sequence: the CLOCK line stays open, this
 call says nothing about it, and [[file:clocking.org::*org-clock-out][org-clock-out]] is what closes it.
 
@@ -973,7 +973,7 @@ the one to send. Plan from it rather than from what you read a moment earlier.
 *The reported date comes from Org, and there is no working it out.* =.+= counts
 its interval from today and =++= steps the stored date on until it is past
 today, so applying the repeater to the old date yourself is wrong for two of
-the three forms — and a plausible wrong date is worse than none. org-mcp reads
+the three forms — and a plausible wrong date is worse than none. org-records-mcp reads
 the field back after Org has decided it, which is what the report is for.
 
 *=before_planning= guards the date, and you are asked for it only where a date
@@ -983,7 +983,7 @@ the node decides is whether leaving it out is refused. Every write that destroys
 destroys and is refused when the file disagrees (see [[*Knowing what you are about to change]]).
 A repeat destroys a planning value, so the call asserts that value too — but
 only a repeat can, so an ordinary transition carries no assertion at all and
-costs nothing. Send =before_planning= when the node repeats, and org-mcp
+costs nothing. Send =before_planning= when the node repeats, and org-records-mcp
 refuses the call without it exactly there, naming what the node holds so
 you can send it again without reading first.
 
@@ -1000,7 +1000,7 @@ every planning date on the node, and it takes away a SCHEDULED that carries
 no repeater of its own. The repeater need not even be on the planning line: one
 on a plain timestamp in the body repeats the node and removes a plain
 SCHEDULED with it. So which field is at risk is a fact about the node, not
-about the repeaters you can see on its dates, and org-mcp decides it for you —
+about the repeaters you can see on its dates, and org-records-mcp decides it for you —
 when it asks for an assertion, assert everything the node holds.
 
 CLOSED is the third field of Org's planning line, and you never assert it. Org
@@ -1070,7 +1070,7 @@ Example:
   - =parent= (string, required): link to the parent item (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]). Use =file:/path/to/file.org=, or the =id:= link of its file-level property drawer, for top-level items in a file
   - =previous_sibling= (string, optional): link to the sibling to insert after, in any form that addresses a heading, and looked up in the parent's file. It must be a direct child of the parent, or, when =parent= names the whole file, a top-level heading of that file; any other heading, in that file or another, is refused as not found under the parent. The new item goes after the sibling and its subtree. Left out, or blank — =null=, =false=, =""=, =[]= or only whitespace — the new item goes last among the parent's children, or, at the top level, after the file's preamble (a file-level property drawer, keyword lines such as =#+TITLE= and any text before the first heading), before every existing heading
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in =parent= in, instead of the ID index; it applies to =parent= only. See [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new node has no line for it to take away, so the state it asks for is the one the node is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties. The object is also taken as its JSON text (see [[file:installation.org::*When your client cannot send an array or an object][When your client cannot send an array or an object]])
+  - =properties= (object, optional): Properties to write on the new item, such as =ID= or =CUSTOM_ID=, so the item has a stable link (see [[file:links.org::*Stable links][Stable links]]) from the call that creates it; org-records-mcp creates no identifier itself. Values are strings (numbers are accepted) and must fit on one line, as Org property values do. Beyond that they are written as given, the strings ="t"= and ="nil"= included: org-records-mcp does not check them and does not add an =ID= to Org's ID index, just as when the property is typed by hand. Values take the three states a drawer line has, exactly as in =org-node-set-properties= (see [[*The three states of a drawer line]]): a string or number is written as given, =""= writes =:FOO:=, a line carrying no value, and =null= writes nothing at all — a new node has no line for it to take away, so the state it asks for is the one the node is already in. A boolean writes the text =t= for =true= and =nil= for =false=, so =false= writes the property where =null= passes it over. Special properties (TODO, TAGS, PRIORITY, SCHEDULED, DEADLINE, etc.) are forbidden, as in =org-node-set-properties= — use =todo=, =tags= and the dedicated tools instead. A blank =properties= parameter, =null=, =false=, =""= or ={}=, sets no properties. The object is also taken as its JSON text (see [[file:installation.org::*When your client cannot send an array or an object][When your client cannot send an array or an object]])
 - *Returns:* Object with success status, =saved= flag, the link to the new item (=id:= when =properties= sets an =ID=, a custom ID link when it sets only a =CUSTOM_ID=, else its title link), file name, and title. The title is the one the file now holds, as a read returns it, which is the title the link beside it names
 - *Refuses with:* =blocked:= when Org vetoes =todo= for the new item, such as a done keyword under an ordered parent whose earlier children are unfinished — no item is added — and unmarked validation otherwise (see [[*How a refusal is classed]])
 
@@ -1236,11 +1236,11 @@ that node only inherits is asserted as =null= (see [[*Inherited properties]]).
 A drawer line is in one of three states, and a property map spells all three,
 on either side of the call:
 
-| State                | Spelled                    | =after= writes             | =before= asserts             |
-|----------------------+----------------------------+----------------------------+------------------------------|
-| no line              | =null=                     | the line goes              | there is no such line        |
-| a line with no value | =""=                       | =:FOO:=                    | a line carrying no value     |
-| a line holding text  | the text, or =false= for =nil= | =:FOO: that text=      | the line holds that text     |
+| State                | Spelled                        | =after= writes    | =before= asserts         |
+|----------------------+--------------------------------+-------------------+--------------------------|
+| no line              | =null=                         | the line goes     | there is no such line    |
+| a line with no value | =""=                           | =:FOO:=           | a line carrying no value |
+| a line holding text  | the text, or =false= for =nil= | =:FOO: that text= | the line holds that text |
 
 =false= and the string ="nil"= are two spellings of one state: both write the
 text =nil=, which is a line holding text like any other.
@@ -1446,7 +1446,7 @@ away rather than reaching into the heading below:
 #+end_example
 
 *The link the response carries* is the file's: =id:<id>= when its drawer holds
-one and =file:<path>= otherwise (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]). Writing an =ID=
+one and =file:<path>= otherwise (see [[file:links.org::*Links org-records-mcp returns][Links org-records-mcp returns]]). Writing an =ID=
 into a file's drawer therefore changes the link the next response reports, and
 taking it away changes it back.
 
@@ -1487,7 +1487,7 @@ what the file is and how Org treats it: its title, the workflow its headings are
 held to, where a subtree of it is archived, the category its entries carry in
 the agenda, the tags every heading in it inherits, and how it opens. They are
 the settings a client setting a file up has to be able to write and whose effect
-on what is already written org-mcp can account for.
+on what is already written org-records-mcp can account for.
 
 Two kinds stay out on purpose. =#+SETUPFILE:= and =#+INCLUDE:= reach another
 file: a write here would change what this file means by naming a file the call
@@ -1550,10 +1550,10 @@ word, and for the start of its title when they do not.* So rewriting the
 sequences is not a change to one line. It moves headings across that boundary,
 in both directions:
 
-| The sequences        | =* WAIT Hear back= reads as                |
-|----------------------+--------------------------------------------|
-| name =WAIT=          | a WAIT heading titled =Hear back=          |
-| do not name =WAIT=   | a heading with no keyword titled =WAIT Hear back= |
+| The sequences      | =* WAIT Hear back= reads as                       |
+|--------------------+---------------------------------------------------|
+| name =WAIT=        | a WAIT heading titled =Hear back=                 |
+| do not name =WAIT= | a heading with no keyword titled =WAIT Hear back= |
 
 A heading that crosses is rewritten by a call that named no heading, nothing in
 the file records what it was, and its =::*title= link changes with its title.
@@ -1655,7 +1655,7 @@ reschedule you make by hand; see [[*What a write records in the LOGBOOK]].
 Writing a date to a node that carries a =CLOSED:= timestamp takes the
 CLOSED away. Org builds the planning line afresh when it writes a date to it
 and does not carry the closing timestamp onto the new one — which is what your
-own =C-c C-s= does to the same node. org-mcp reports that rather than
+own =C-c C-s= does to the same node. org-records-mcp reports that rather than
 putting it back: repairing what an Org command does to the line would part your
 file from what Org itself would have written in it.
 
@@ -1686,7 +1686,7 @@ the response is the only place it survives:
 *Taking a date away leaves the CLOSED alone.* An =after= of =null= removes the
 one field it names and builds no new line, so the closing timestamp stays where
 it is and the response says nothing about it. The two halves of these tools
-differ here, and the difference is Org's rather than org-mcp's.
+differ here, and the difference is Org's rather than org-records-mcp's.
 
 [[*org-node-set-deadline][org-node-set-deadline]] does all of this too:
 =org-deadline= builds the line the same way =org-schedule= does.
@@ -2079,11 +2079,11 @@ before must be the digest a read of this node returned, starting `sha256:': "Tas
 They cost very different things to get wrong, and that is how to choose between
 them:
 
-| Tool               | If it was the wrong node                                                              |
-|--------------------+---------------------------------------------------------------------------------------|
-| =org-node-delete=  | nothing to undo: the text is gone, and nothing records it was there                   |
+| Tool               | If it was the wrong node                                                                              |
+|--------------------+-------------------------------------------------------------------------------------------------------|
+| =org-node-delete=  | nothing to undo: the text is gone, and nothing records it was there                                   |
 | =org-node-refile=  | refile it back, if you know where back was — the node does not say, and it may now be in another file |
-| =org-node-archive= | find it in the archive file, which carries the outline path it came from              |
+| =org-node-archive= | find it in the archive file, which carries the outline path it came from                              |
 
 ** org-node-delete
 - *Description:* Delete a node, and every descendant under it, from its file
@@ -2093,7 +2093,7 @@ them:
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Success status, =saved= flag, and =link= — the link the node had, read while it was still there. It resolves to nothing now
 - *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is deleted; unmarked validation otherwise, a node the Emacs session's clock is running in among them (see [[*How a refusal is classed]])
-- *Recovery:* none. The text leaves the file, org-mcp keeps no copy of it, and nothing in the file records that the node was ever there. For a node that is finished rather than mistaken, use [[*org-node-archive][org-node-archive]], which writes the node's origin into it as it moves it
+- *Recovery:* none. The text leaves the file, org-records-mcp keeps no copy of it, and nothing in the file records that the node was ever there. For a node that is finished rather than mistaken, use [[*org-node-archive][org-node-archive]], which writes the node's origin into it as it moves it
 
 A node the Emacs session's clock is running in is refused rather than deleted.
 The open CLOCK line would leave the file with the text while Emacs went on
@@ -2101,7 +2101,7 @@ clocking a node that is no longer there, and the next clock-out would fail
 with no line left to close. Reading the node again would not resolve that, so
 the refusal is not a conflict: close the clock with
 [[file:clocking.org::*org-clock-out][org-clock-out]] and delete the node after
-that. org-mcp does not close it for you — a call that stops your clock without
+that. org-records-mcp does not close it for you — a call that stops your clock without
 being asked for that is worse than one that declines. =org-node-refile= and
 =org-node-archive= put the CLOCK line down again where the node lands, so
 neither of them is refused for it.
@@ -2147,7 +2147,7 @@ above the node. It is reached whether or not it is among the allowed files,
 and it is created if it does not exist (see [[file:file-access.org::*The archive file][The archive file]]). Whether the
 archived node is also marked done, and whether inherited tags travel with it,
 are Org's own =org-archive-mark-done= and
-=org-archive-subtree-add-inherited-tags=; org-mcp changes neither.
+=org-archive-subtree-add-inherited-tags=; org-records-mcp changes neither.
 
 Example:
 #+begin_src json
@@ -2175,7 +2175,7 @@ Example:
   - =previous_sibling= (string, optional): link to the child of =parent= the node is to follow, looked up in the parent's file. Left out, or blank — =null=, =false=, =""=, =[]= or only whitespace — the node becomes the parent's last child, or, at the top level, the file's first heading. The same parameter =org-node-create= takes, meaning the same thing
   - =files= (array of strings, optional): Files and directories to look up the =id:= link in =link= in, instead of the ID index. It applies to =link= only — it says where to find the node the call refiles, never where to put it — so an =id:= =parent= must be one the ID index holds (see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]])
 - *Returns:* Success status, =saved= flag, and the link to the node in its new place
-- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is refiled; unmarked validation otherwise — a =parent= org-mcp cannot reach or cannot find, and a =parent= or =previous_sibling= that is the node itself or a node under it, which would leave the call nowhere to land (see [[*How a refusal is classed]])
+- *Refuses with:* =conflict:= when =before= is not the subtree's digest, and nothing is refiled; unmarked validation otherwise — a =parent= org-records-mcp cannot reach or cannot find, and a =parent= or =previous_sibling= that is the node itself or a node under it, which would leave the call nowhere to land (see [[*How a refusal is classed]])
 - *Recovery:* refile it back. The subtree arrives whole, its LOGBOOK and its drawers with it, but nothing in it records where it was, so undoing a refile means knowing where the node came from — and across files it means knowing the other file too, since the node and the gap it left are no longer in one place. When the node is being retired rather than rearranged, [[*org-node-archive][org-node-archive]] is the tool that writes that down for you
 
 The call names a destination: the parent the node goes under, and optionally

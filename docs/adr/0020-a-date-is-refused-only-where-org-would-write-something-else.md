@@ -64,7 +64,7 @@ was a date or a warning. The pairing is refused, and the refusal names the two
 timestamps that go in its place: the repeater by itself, and the `-3d` that
 warns before every repeat.
 
-That makes org-mcp stricter than Org here, which is the cost. Org accepts the
+That makes org-records-mcp stricter than Org here, which is the cost. Org accepts the
 pairing, and a person typing it in Emacs gets the shortened timestamp and no
 complaint. We pay it because the two readers are not alike: a person watches the
 line they typed collapse in the buffer in front of them, while a client is told
@@ -81,7 +81,7 @@ We chose this over refusing what reads as a mistake. Backwards hours are one,
 but Org accepts them, the agenda shows them, and a person editing the file in
 Emacs can write one. `after` takes the raw string a read returns, so a rule
 about how a date *reads* would refuse a value a read of an ordinary Org file
-produced, and org-mcp would be the one place in the round trip that cannot carry
+produced, and org-records-mcp would be the one place in the round trip that cannot carry
 what Org itself holds. The date range is the one break in that round trip, and
 it is there because the write would lose half of the value silently — which is
 the cost a refusal has to buy off before it is worth making.

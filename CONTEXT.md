@@ -1,8 +1,9 @@
-# org-mcp
+# org-records-mcp
 
-org-mcp gives MCP clients access to Emacs Org-mode: reading, querying and
-editing Org files through the running Emacs session. This fork shapes it around
-an agile-GTD workflow.
+org-records-mcp gives MCP clients access to Emacs Org-mode: reading, querying and
+editing Org files through the running Emacs session, and answering in typed
+records rather than Org text. It stays workflow-neutral: the views, filters and
+computed fields that give it a workflow come from a package such as agile-gtd.
 
 ## Scope
 
@@ -24,12 +25,6 @@ _Avoid_: override flag
 
 **Override root**:
 A directory under which the override policy permits scope overrides.
-
-**GTD query**:
-A query whose meaning comes from the GTD workflow itself, such as the inbox,
-next actions or the backlog. It always runs over the allowed files and never
-takes a scope override.
-_Avoid_: agenda query, GTD endpoint
 
 ## Nodes
 
@@ -77,8 +72,9 @@ _Avoid_: hash, fingerprint, checksum, etag
 **View**:
 A named query a workflow defines: one question asked of the outline, such as
 next actions or stuck projects. It is the atom an agenda command and a call
-are both composed from, so the two answer alike.
-_Avoid_: block, agenda, saved query, stored query, report
+are both composed from, so the two answer alike. It always runs over the allowed
+files and never takes a scope override.
+_Avoid_: GTD query, block, agenda, saved query, stored query, report
 
 **Filter**:
 A named restriction a view is asked under, such as one person's work or one
@@ -118,7 +114,7 @@ _Avoid_: URI, resource URI, headline path
 ## Writes
 
 **Unsaved change**:
-An edit org-mcp applied to an Emacs buffer that already held the user's own
+An edit org-records-mcp applied to an Emacs buffer that already held the user's own
 unsaved edits. It exists in that buffer but not on disk until the user saves.
 _Avoid_: staged change, dirty write
 

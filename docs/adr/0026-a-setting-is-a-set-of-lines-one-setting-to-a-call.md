@@ -30,7 +30,7 @@ one setting's sake, or report a part of itself done.
 The settings in scope are `#+TITLE:`, `#+TODO:`, `#+ARCHIVE:`, `#+CATEGORY:`,
 `#+FILETAGS:` and `#+STARTUP:`: the ones that say what the file is and how Org
 treats it, which a client setting a file up has to write, and whose effect on
-what is already written org-mcp can account for. We chose an allowlist over
+what is already written org-records-mcp can account for. We chose an allowlist over
 taking any `#+` line, because two kinds must not be reachable here. A setting
 that names another file — `#+SETUPFILE:`, `#+INCLUDE:` — would change what this
 file means by editing what a file the call never named says, and the allowed

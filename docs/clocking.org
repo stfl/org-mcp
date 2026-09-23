@@ -1,6 +1,6 @@
 #+TITLE: Clock tracking
 
-This page answers how org-mcp starts, stops, adds and repairs Org clocks, and
+This page answers how org-records-mcp starts, stops, adds and repairs Org clocks, and
 what the one clock setting does. The [[file:../README.org][README]] introduces the server itself.
 
 * A clock time has to be a time
@@ -28,7 +28,7 @@ second in a CLOCK line for it to be compared against.
 The planning setters take a different format, =YYYY-MM-DD= with an optional
 =HH:MM=, and ask the same question of it (see [[file:writing.org::*A date has to be a date][A date has to be a date]]).
 
-* A clock org-mcp starts is a line in the file
+* A clock org-records-mcp starts is a line in the file
 
 =org-clock-in= writes the CLOCK line itself. The heading ends up with an open
 CLOCK line, which is what a running clock looks like on disk, but the Emacs
@@ -36,12 +36,12 @@ session has no clock running: nothing appears in the mode line, there is no
 clock for =org-clock-idle-time= to time out, and =C-c C-x C-o= in Emacs
 answers =No active clock=.
 
-org-mcp's own tools reach the line where it is, so a client is not missing
+org-records-mcp's own tools reach the line where it is, so a client is not missing
 anything. [[*org-clock-active][org-clock-active]] reports it, [[*org-clock-dangling][org-clock-dangling]] lists it while it is
 open, and [[*org-clock-out][org-clock-out]] closes it.
 
 What it costs is the Org settings that need a clock running in the session.
-There is none for them to find, so against a clock org-mcp started they do
+There is none for them to find, so against a clock org-records-mcp started they do
 nothing:
 
 - =org-clock-in-switch-to-state= leaves the heading's keyword where it is.
@@ -52,14 +52,14 @@ nothing:
   done keyword — neither through [[file:writing.org::*org-node-set-todo][org-node-set-todo]] nor through =C-c C-t= in
   Emacs.
 
-These do act on a clock org-mcp started:
+These do act on a clock org-records-mcp started:
 
 - =org-clock-into-drawer= decides where the CLOCK line goes, so the drawer is
   made, or the line written bare under the heading, as it says.
 - =org-clock-rounding-minutes= rounds the start that gets written.
 - =org-clock-continuously= decides whether that start is taken from the
   previous clock's end rather than the current time, within
-  =org-mcp-clock-continuous-threshold= minutes of it.
+  =org-records-mcp-clock-continuous-threshold= minutes of it.
 - =org-clock-out-switch-to-state= moves the heading's keyword when
   [[*org-clock-out][org-clock-out]] closes the line.
 - =org-clock-out-remove-zero-time-clocks= takes a closed line of no length
@@ -67,13 +67,13 @@ These do act on a clock org-mcp started:
 - =org-clock-out-hook= runs on that close, and =org-log-note-clock-out= records
   it, as they do for a clock-out in Emacs.
 
-What sorts the two lists is that org-mcp writes the opening line itself and
+What sorts the two lists is that org-records-mcp writes the opening line itself and
 asks Org to write the close. A setting Org consults as it closes a clock
-therefore reaches an org-mcp clock the moment [[*org-clock-out][org-clock-out]] is called, and a
+therefore reaches an org-records-mcp clock the moment [[*org-clock-out][org-clock-out]] is called, and a
 setting that reaches for the clock Emacs is running finds none.
 
 A clock the user started in Emacs is Emacs's own clock, and every one of these
-settings acts on it as it always has. org-mcp reaches that clock too:
+settings acts on it as it always has. org-records-mcp reaches that clock too:
 =org-clock-active= reports it ahead of any open line found in a file, and
 =org-clock-out= closes it.
 
@@ -89,7 +89,7 @@ Example response:
   "org_clock_into_drawer": "\"LOGBOOK\"",
   "org_clock_rounding_minutes": 5,
   "org_clock_continuously": false,
-  "org_mcp_clock_continuous_threshold": 30
+  "org_records_mcp_clock_continuous_threshold": 30
 }
 #+end_src
 
@@ -143,7 +143,7 @@ Every check runs before anything changes, so a refused call changes no file, no 
 - the new clock's start, =start_time= or else the current time, is before the running clock's start, since closing that clock there would give it a negative duration.
 - =start_time= cannot be parsed.
 - =resolve= is neither true nor false.
-- =link= names no heading, or =link= or =clock_out= is no link org-mcp takes or names a file outside the allowed files.  These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
+- =link= names no heading, or =link= or =clock_out= is no link org-records-mcp takes or names a file outside the allowed files.  These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
 
 Example:
 #+begin_src json
@@ -220,7 +220,7 @@ opening one is closed without prose.
 
 A call is refused when:
 
-- a clock runs in a file outside the allowed files, as =org-clock-in= refuses one.  org-mcp writes no file outside the allowed files, and says nothing about that clock, neither its file nor its heading nor its start, so the user has to clock out of it in Emacs:
+- a clock runs in a file outside the allowed files, as =org-clock-in= refuses one.  org-records-mcp writes no file outside the allowed files, and says nothing about that clock, neither its file nor its heading nor its start, so the user has to clock out of it in Emacs:
   #+begin_example
   A clock is running in a file outside the allowed files.  Ask the user to clock out of it in Emacs
   #+end_example
@@ -233,7 +233,7 @@ A call is refused when:
   conflict: link does not name the running clock: file:~/org/tasks.org::*Write the report.  The clock runs on 'Implement feature X' (id:550e8400-e29b-41d4-a716-446655440000) since 2026-03-23 Mon 14:30
   #+end_example
 - =end_time= is before the running clock's start, or cannot be parsed.  An =end_time= before the start is the client's to fix and stays unmarked: reading the clock again does not make the time it sent valid.
-- =link= is no link org-mcp takes, or names a file outside the allowed files.  These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
+- =link= is no link org-records-mcp takes, or names a file outside the allowed files.  These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
 
 A clock running outside the allowed files is refused before =link= is read, so a link into the allowed files and one naming that clock's own file are answered alike and neither tells the client where the clock is.
 
@@ -326,7 +326,7 @@ A call is refused when:
   blocked: 2 clock entries on this heading start at [2026-03-23 Mon 14:30]: one ending [2026-03-23 Mon 15:30] and one ending [2026-03-23 Mon 16:45].  start names no one of them, so delete the one you mean in Emacs
   #+end_example
   An entry still running is named as =one still open=. =org-clock-rounding-minutes= is what makes such a pair ordinary: set to 5, it writes a clock added at 14:31 and one added at 14:32 both as beginning 14:30.
-- =start= cannot be parsed, or =link= is no link org-mcp takes, names no heading, or names a file outside the allowed files. These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
+- =start= cannot be parsed, or =link= is no link org-records-mcp takes, names no heading, or names a file outside the allowed files. These get the errors any link parameter gets (see [[file:links.org::*Addressing headings with links][Addressing headings with links]]).
 
 Example:
 #+begin_src json
@@ -382,12 +382,12 @@ is not clocking is a line in a file rather than a clock, and a done keyword
 leaves it as it is. One left by an earlier session is such a line, which
 [[*org-clock-dangling][org-clock-dangling]] is for, and so is one
 [[*org-clock-in][org-clock-in]] wrote
-(see [[*A clock org-mcp starts is a line in the file][A clock org-mcp starts is a line in the file]]) — which is the case
+(see [[*A clock org-records-mcp starts is a line in the file][A clock org-records-mcp starts is a line in the file]]) — which is the case
 a client meets, because clocking a task in and then finishing it is the
 ordinary sequence. The line stays open, and [[*org-clock-out][org-clock-out]]
 is what closes it.
 
-org-mcp does not close it for you. The end it would write is one nobody named,
+org-records-mcp does not close it for you. The end it would write is one nobody named,
 where =org-clock-out= takes the =end_time= and the =note= the close is recorded
 with and reports the start, end and duration back; and the condition under
 which a done keyword stops a clock is Org's, read back rather than restated
@@ -399,7 +399,7 @@ without calling =org-clock-out=. What the field holds and when it is there is
 in [[file:writing.org::*A done keyword can close the clock][A done keyword can close the clock]].
 
 * Configuring Clock Tracking
-** =org-mcp-clock-continuous-threshold=
+** =org-records-mcp-clock-continuous-threshold=
 
 When =org-clock-continuously= is non-nil, a clock-in without a =start_time= within this many minutes of the last clock-out starts at that clock-out rather than at the current time. A gap of exactly this many minutes still counts; one a second longer does not. Defaults to =30= minutes.
 
@@ -409,5 +409,5 @@ When =org-clock-continuously= is non-nil, a clock-in without a =start_time= with
 - Every start, continued or not, is written through =org-clock-rounding-minutes=, so under rounding the new clock can open a few minutes before or after the previous clock's end, and after the current time.
 
 #+begin_src emacs-lisp
-(setq org-mcp-clock-continuous-threshold 15)
+(setq org-records-mcp-clock-continuous-threshold 15)
 #+end_src

@@ -44,13 +44,13 @@ Its commentary carries why the `require` is soft and why it stays inside the
 
 ## format-elisp.el
 
-`just fmt` runs it on `org-mcp.el` under the devshell's Emacs. It refuses any
+`just fmt` runs it on `org-records-mcp.el` under the devshell's Emacs. It refuses any
 Emacs but 31, and any Emacs without elisp-autofmt, because the layout depends on
 both: formatting elsewhere would produce a diff that the next machine undoes. It
 sets `fill-column` to 70 itself, since batch Emacs refuses `.dir-locals.el` as a
 whole, and it turns file-local variables off while formatting.
 
-`org-mcp-format--passing-messages` is the subtle part. elisp-autofmt reports
+`org-records-mcp-format--passing-messages` is the subtle part. elisp-autofmt reports
 everything by `message`, including complaints after which it formatted the
 buffer anyway, such as a cache it could not write. Those prefixes are listed
 there and pass; every other `elisp-autofmt: ` message is raised as an error.

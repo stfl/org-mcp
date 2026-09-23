@@ -1,4 +1,4 @@
-#+TITLE: Installing org-mcp
+#+TITLE: Installing org-records-mcp
 
 This page has the full install: the package itself, the stdio shims, and
 registering the server with an MCP client. The [[file:../README.org][README]] has the short
@@ -8,75 +8,77 @@ version.
 
 Requires Emacs 30.1 or later. CI covers Emacs 30.2 and 31.1 on Linux and macOS.
 
-Which Org settings org-mcp is exercised against, which it ignores on purpose and
-which nothing measures is [[file:verified-settings.org][The Org configuration org-mcp is verified against]].
+Which Org settings org-records-mcp is exercised against, which it ignores on purpose and
+which nothing measures is [[file:verified-settings.org][The Org configuration org-records-mcp is verified against]].
 
-org-mcp builds on =mcp-server-lib= 0.4.0 and =org-ql= 0.9, which come in with
+org-records-mcp builds on =mcp-server-lib= 0.4.0 and =org-ql= 0.9, which come in with
 the package. Both live on MELPA, so keep MELPA in =package-archives= even though
-org-mcp itself does not come from there. The pins live in =Eask= and in the
-=Package-Requires= header of =org-mcp.el=.
+org-records-mcp itself does not come from there. The pins live in =Eask= and in the
+=Package-Requires= header of =org-records-mcp.el=.
 
-This fork installs from git. On Emacs 30 or later:
+org-records-mcp installs from git. On Emacs 30 or later:
 
-=M-x package-vc-install RET https://github.com/stfl/org-mcp RET=
+=M-x package-vc-install RET https://github.com/stfl/org-records-mcp RET=
 
-=package-vc-install= clones the whole repository, so =org-mcp-stdio.sh= lands
-beside =org-mcp.el=, which is where =M-x org-mcp-install= looks for it.
+=package-vc-install= clones the whole repository, so =org-records-mcp-stdio.sh= lands
+beside =org-records-mcp.el=, which is where =M-x org-records-mcp-install= looks for it.
 
 A recipe-based installer copies only what its recipe names, and the default set
 is Elisp and documentation, no shell scripts. With straight.el, name the script:
 
 #+begin_src emacs-lisp
 (straight-use-package
- '(org-mcp :host github :repo "stfl/org-mcp"
-           :files (:defaults "org-mcp-stdio.sh")))
+ '(org-records-mcp :host github :repo "stfl/org-records-mcp"
+                   :files (:defaults "org-records-mcp-stdio.sh")))
 #+end_src
 
 The Doom recipe below carries the same =:files= line, for the same reason.
 
-MELPA carries the upstream package, [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], not this fork.
-=M-x package-install RET org-mcp RET= gets you a server without the clock tools
-and the views these pages document.
+The package MELPA carries under the name =org-mcp= is a different server,
+[[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], which org-records-mcp grew out of. It has neither the
+clock tools nor the views these pages document, and its symbols carry the
+=org-mcp-= prefix, which org-records-mcp does not use; [[file:org-mcp-comparison.org][org-records-mcp and org-mcp]] sets
+the two side by side.
 
 * Doom Emacs
 
-To install this fork in Doom Emacs, add to =packages.el=:
+To install org-records-mcp in Doom Emacs, add to =packages.el=:
 
 #+begin_src emacs-lisp
-(package! org-mcp
-  :recipe (:host github :repo "stfl/org-mcp"
-           :files (:defaults "org-mcp-stdio.sh")))
+(package! org-records-mcp
+  :recipe (:host github :repo "stfl/org-records-mcp"
+           :files (:defaults "org-records-mcp-stdio.sh")))
 #+end_src
 
 Then configure in =config.el=:
 
 #+begin_src emacs-lisp
-(use-package org-mcp
+(use-package org-records-mcp
   :after org
-  ;; By default org-mcp falls back to `org-agenda-files' when
-  ;; `org-mcp-allowed-files' is nil, so no extra setup is needed
+  ;; By default org-records-mcp falls back to `org-agenda-files' when
+  ;; `org-records-mcp-allowed-files' is nil, so no extra setup is needed
   ;; if you already have an agenda configured.  Set
-  ;; `org-mcp-allowed-files' explicitly to expose a different (or
+  ;; `org-records-mcp-allowed-files' explicitly to expose a different (or
   ;; narrower) set of files to MCP.  Entries may be absolute or
   ;; relative; relative paths resolve against `org-directory'.
   ;; :custom
-  ;; (org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+  ;; (org-records-mcp-allowed-files '("inbox.org" "projects/work.org"))
   ;; Optional: let a call name Org files under these directories too
   ;; (default nil refuses; t permits every Org file Emacs can reach)
-  ;; (org-mcp-file-scope-override '("~/decisions"))
+  ;; (org-records-mcp-file-scope-override '("~/decisions"))
   ;; Optional: maximum minutes gap for continuous clocking (default 30)
-  ;; (org-mcp-clock-continuous-threshold 15)
+  ;; (org-records-mcp-clock-continuous-threshold 15)
   :config
-  (unless (file-exists-p (org-mcp--installed-script-path))
-    (org-mcp-install))
+  (unless (file-exists-p (org-records-mcp--installed-script-path))
+    (org-records-mcp-install))
   (if mcp-server-lib--running
-      (message "org-mcp: MCP server already running, skipping start")
+      (message "org-records-mcp: MCP server already running, skipping start")
     (mcp-server-lib-start)))
 #+end_src
 
 * Registering with an MCP Client
 
-org-mcp ships a thin wrapper, =org-mcp-stdio.sh=, that injects the
+org-records-mcp ships a thin wrapper, =org-records-mcp-stdio.sh=, that injects the
 correct =--server-id=, =--init-function=, and =--stop-function= so
 client configs only need to point at the script.  Install both shims
 into =mcp-server-lib-install-directory= (defaults to
@@ -84,7 +86,7 @@ into =mcp-server-lib-install-directory= (defaults to
 
 #+begin_example
 M-x mcp-server-lib-install RET   ;; installs emacs-mcp-stdio.sh
-M-x org-mcp-install RET          ;; installs org-mcp-stdio.sh
+M-x org-records-mcp-install RET  ;; installs org-records-mcp-stdio.sh
 #+end_example
 
 The actual install path depends on your Emacs setup, since
@@ -99,14 +101,14 @@ The actual install path depends on your Emacs setup, since
   =(setq mcp-server-lib-install-directory (expand-file-name "bin/" doom-emacs-dir))=
   before =mcp-server-lib= loads.
 
-=org-mcp-stdio.sh= resolves =emacs-mcp-stdio.sh= relative to its own
+=org-records-mcp-stdio.sh= resolves =emacs-mcp-stdio.sh= relative to its own
 directory, so co-locating both shims in the same directory (the
-default) requires no extra configuration.  Then register =org-mcp=
+default) requires no extra configuration.  Then register =org-records-mcp=
 with your MCP client (adjust the path to match your install
 directory):
 
 #+begin_src bash
-claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
+claude mcp add -s user -t stdio org-records-mcp -- ~/.emacs.d/org-records-mcp-stdio.sh
 #+end_src
 
 Extra arguments are forwarded to =emacs-mcp-stdio.sh=, so callers can
@@ -114,15 +116,15 @@ still pass =--socket=...= or override defaults if needed.
 
 Before using the MCP server, you must start it in Emacs with =M-x mcp-server-lib-start=. Stop it with =M-x mcp-server-lib-stop= when done.
 
-org-mcp names itself in the handshake: =initialize= reports =serverInfo= with
-the name =org-mcp= and org-mcp's own package version, and no =instructions=
+org-records-mcp names itself in the handshake: =initialize= reports =serverInfo= with
+the name =org-records-mcp= and org-records-mcp's own package version, and no =instructions=
 field, so a client can name the server and the version it is talking to.
 
-To remove the installed wrapper, run =M-x org-mcp-uninstall=.
+To remove the installed wrapper, run =M-x org-records-mcp-uninstall=.
 
 * When your client cannot send an array or an object
 
-org-mcp's tool schema types every parameter as a string. The schema is built
+org-records-mcp's tool schema types every parameter as a string. The schema is built
 from the Elisp handler's argument list, and =mcp-server-lib= gives every
 argument the type =string=, so there is no =array= or =object= in it to
 validate against.
@@ -131,7 +133,7 @@ A client that checks its arguments against that schema therefore cannot send a
 JSON array for the parameters documented as taking one — =fields=,
 =properties= on =org-node-read=, =org-query= and =org-view=, =computed=,
 =files= and =tags=. It sends the array as its own
-JSON text instead, and org-mcp reads that text back as the array. The two
+JSON text instead, and org-records-mcp reads that text back as the array. The two
 calls below ask the same thing:
 
 #+begin_src json
@@ -154,7 +156,7 @@ JSON array is refused, naming the parameter.
 The same holds for the parameters documented as taking a JSON object —
 =before= and =after= on =org-node-set-properties=, =properties= on
 =org-node-create= and =before_planning= on =org-node-set-todo=. Such a client
-sends the object as its own JSON text, and org-mcp reads that text back as the
+sends the object as its own JSON text, and org-records-mcp reads that text back as the
 object. These two calls set the same property:
 
 #+begin_src json
@@ -179,4 +181,4 @@ itself is read back: a property value that happens to begin with ={= is written
 as the text it is.
 
 Nothing has to be encoded this way. A client that can send a real JSON array or
-object sends one, and org-mcp reads it directly.
+object sends one, and org-records-mcp reads it directly.

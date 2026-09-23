@@ -1,7 +1,7 @@
-#+TITLE: Contributing to org-mcp
+#+TITLE: Contributing to org-records-mcp
 
-This page is for changing org-mcp: the environment, the checks a commit has to
-pass, and the conventions the code keeps. Using org-mcp is the [[file:README.org][README]].
+This page is for changing org-records-mcp: the environment, the checks a commit has to
+pass, and the conventions the code keeps. Using org-records-mcp is the [[file:README.org][README]].
 
 * The devshell
 
@@ -22,12 +22,12 @@ against a =PATH= that already has their tools, and the caller provides it.
 
 =just check= is the whole gate, and the pre-commit hook runs exactly it:
 
-| Recipe          | Does                                                                     |
-|-----------------+--------------------------------------------------------------------------|
-| =just fmt=      | elisp-autofmt on =org-mcp.el=, =shfmt -i 4= on the shell scripts         |
-| =just lint=     | byte-compile, elisp-lint, script byte-compile, org-lint, shellcheck, zizmor |
-| =just test=     | the ERT suite, through =scripts/run-tests.sh=                            |
-| =just check=    | all three, in that order                                                 |
+| Recipe       | Does                                                                        |
+|--------------+-----------------------------------------------------------------------------|
+| =just fmt=   | elisp-autofmt on =org-records-mcp.el=, =shfmt -i 4= on the shell scripts    |
+| =just lint=  | byte-compile, elisp-lint, script byte-compile, org-lint, shellcheck, zizmor |
+| =just test=  | the ERT suite, through =scripts/run-tests.sh=                               |
+| =just check= | all three, in that order                                                    |
 
 Both quiet stages keep their evidence: a failing lint stage writes
 =.lint-output.txt=, and the test run always writes =.test-output.txt=, with the
@@ -55,7 +55,7 @@ the Emacs of the devshell only.
 under an Emacs other than 31 or one without elisp-autofmt, so the layout is the
 same on every machine.
 
-=org-mcp.el= is laid out at 70 columns, which it carries as a file-local
+=org-records-mcp.el= is laid out at 70 columns, which it carries as a file-local
 variable; other Elisp in the repository goes to the 100 columns
 =.dir-locals.el= sets. =.dir-locals.el= also carries the =elisp-lint-indent-specs=
 for the macros in this repository — a new =with-= macro belongs in that list, or
@@ -76,25 +76,25 @@ active=.
 
 * Writing the code
 
-org-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful, stable
+org-records-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful, stable
 mapping between MCP primitives and Org's existing semantics, so a change does not
 reinvent what Org already does. Before adding or changing parsing, navigation,
 clock, drawer, tag or TODO-state logic, look for the Org API first:
 
-| Instead of                            | Use                                                        |
-|---------------------------------------+------------------------------------------------------------|
-| manual level-regex walks              | =org-find-olp=, =org-get-outline-path=                     |
-| a level regex over the tree           | =org-map-entries=, =org-map-tree=, =org-element-map=       |
-| hand-rolled drawer skipping           | =org-end-of-meta-data=                                     |
-| chained =org-entry-get=               | =org-heading-components=, =org-element-at-point=           |
-| inserting heading asterisks by hand   | =org-insert-subheading=                                    |
+| Instead of                            | Use                                                                  |
+|---------------------------------------+----------------------------------------------------------------------|
+| manual level-regex walks              | =org-find-olp=, =org-get-outline-path=                               |
+| a level regex over the tree           | =org-map-entries=, =org-map-tree=, =org-element-map=                 |
+| hand-rolled drawer skipping           | =org-end-of-meta-data=                                               |
+| chained =org-entry-get=               | =org-heading-components=, =org-element-at-point=                     |
+| inserting heading asterisks by hand   | =org-insert-subheading=                                              |
 | CLOCK regex scanners                  | =org-clock-in= / =-out=, =org-find-open-clocks=, =org-clock-resolve= |
-| custom drawer deletion                | =org-remove-empty-drawer-at=                               |
-| custom time and duration parsers      | =org-time-string-to-time=, =org-duration-from-minutes=     |
-| manual LOGBOOK formatting             | =org-add-log-setup= + =org-store-log-note=                 |
-| destructuring =org-todo-keywords=     | =org-todo-keywords-1=, =org-done-keywords=                 |
-| custom tag parsing or tag regexps     | =org-tag-alist-to-groups=, =org-tag-re=                    |
-| regex-based block or drawer detection | =org-element-parse-buffer=                                 |
+| custom drawer deletion                | =org-remove-empty-drawer-at=                                         |
+| custom time and duration parsers      | =org-time-string-to-time=, =org-duration-from-minutes=               |
+| manual LOGBOOK formatting             | =org-add-log-setup= + =org-store-log-note=                           |
+| destructuring =org-todo-keywords=     | =org-todo-keywords-1=, =org-done-keywords=                           |
+| custom tag parsing or tag regexps     | =org-tag-alist-to-groups=, =org-tag-re=                              |
+| regex-based block or drawer detection | =org-element-parse-buffer=                                           |
 
 When an Org API is genuinely missing or unsuitable, say why in a comment next to
 the workaround, so the next person can re-evaluate it when Org moves on. Code
@@ -129,7 +129,7 @@ it could be written. The surface has none.
 
 * Tests
 
-The suite lives in =org-mcp-test.el= and runs with =just test=.
+The suite lives in =org-records-mcp-test.el= and runs with =just test=.
 
 Org content under test is written as =defconst= constants, one for the file
 before the call and one for the file after it, rather than built inline. The
@@ -224,27 +224,27 @@ A change to anything a client or an Emacs user can observe updates the page that
 documents it, in the same commit. An MCP tool, a resource template and a
 =defcustom= are the obvious ones; so are a public variable, what the =initialize=
 handshake reports, and the text of a refusal a client is meant to act on. The
-test is whether someone outside =org-mcp.el= can see the difference, not which
+test is whether someone outside =org-records-mcp.el= can see the difference, not which
 kind of thing changed:
 
-| Change                                    | Page                                              |
-|-------------------------------------------+---------------------------------------------------|
-| a read tool, a resource, a discovery tool | [[file:docs/reading.org][Reading Org content]]              |
-| a write tool, or write behaviour          | [[file:docs/writing.org][Changing Org content]]             |
-| a query or view tool, or its settings     | [[file:docs/queries.org][Searching and GTD queries]]        |
-| a clock tool or clock setting             | [[file:docs/clocking.org][Clock tracking]]                   |
-| which files a call may reach              | [[file:docs/file-access.org][Which files a call reaches]]       |
-| link forms taken or returned              | [[file:docs/links.org][Addressing headings with links]]   |
-| installing, or registering with a client  | [[file:docs/installation.org][Installing org-mcp]]               |
-| what the =initialize= handshake reports   | [[file:docs/installation.org][Installing org-mcp]]               |
-| how a client encodes an argument          | [[file:docs/installation.org][Installing org-mcp]]               |
+| Change                                    | Page                           |
+|-------------------------------------------+--------------------------------|
+| a read tool, a resource, a discovery tool | [[file:docs/reading.org][Reading Org content]]            |
+| a write tool, or write behaviour          | [[file:docs/writing.org][Changing Org content]]           |
+| a query or view tool, or its settings     | [[file:docs/queries.org][Searching and named views]]      |
+| a clock tool or clock setting             | [[file:docs/clocking.org][Clock tracking]]                 |
+| which files a call may reach              | [[file:docs/file-access.org][Which files a call reaches]]     |
+| link forms taken or returned              | [[file:docs/links.org][Addressing headings with links]] |
+| installing, or registering with a client  | [[file:docs/installation.org][Installing org-records-mcp]]     |
+| what the =initialize= handshake reports   | [[file:docs/installation.org][Installing org-records-mcp]]     |
+| how a client encodes an argument          | [[file:docs/installation.org][Installing org-records-mcp]]     |
 
-The README changes only when what org-mcp /is/ changes, or what it costs to run:
+The README changes only when what org-records-mcp /is/ changes, or what it costs to run:
 the tool count, the quickstart, a new limit. Everything else belongs to a page
 above, linked from the README's table.
 
 Decisions that shape the interface are recorded in [[file:docs/adr][docs/adr/]], one numbered
-Markdown file each: what org-mcp does, and what that was chosen over. A change
+Markdown file each: what org-records-mcp does, and what that was chosen over. A change
 that settles such a question adds one.
 
 Terminology is fixed in [[file:CONTEXT.md][CONTEXT.md]]: the words there are the words the docs and the

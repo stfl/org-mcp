@@ -1,6 +1,6 @@
 # A scope override lasts one call
 
-org-mcp reaches its allowed files by default. A call reaches any other Org file
+org-records-mcp reaches its allowed files by default. A call reaches any other Org file
 by naming it, either as the file of a link or as an entry in a `files`
 parameter, and a server-side override policy decides whether that is refused,
 permitted for any Org file, or permitted only under listed roots. Nothing
