@@ -1,18 +1,16 @@
 # .github/workflows/
 
-Three workflows: `elisp-test.yml` (the test matrix), `claude.yml` and
-`claude-code-review.yml` (the Claude Code actions).
-
-`elisp-test.yml` runs on a push to any branch and on every pull request, so a
-feature branch carries its own evidence and a push that breaks the suite says so
-where the work is, not when it reaches `main`. A branch with an open pull
-request runs both events; the duplicate is the price of covering pushes from
-forks, which raise no push event here.
+One workflow: `elisp-test.yml`, the test matrix. It runs on a push to any
+branch and on every pull request, so a feature branch carries its own evidence
+and a push that breaks the suite says so where the work is, not when it
+reaches `main`. A branch with an open pull request runs both events; the
+duplicate is the price of covering pushes from forks, which raise no push
+event here.
 
 ## zizmor names its files
 
-`just lint` runs zizmor over the three workflows, and the `zizmor` recipe in the
-`Justfile` lists them by path — nothing globs. A fourth workflow is unlinted
+`just lint` runs zizmor over `elisp-test.yml`, and the `zizmor` recipe in the
+`Justfile` lists it by path — nothing globs. A second workflow is unlinted
 until it is added there.
 
 ## Pinning and suppressions
