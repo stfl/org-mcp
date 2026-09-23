@@ -6,8 +6,11 @@ and which link it gives back. The [[file:../README.org][README]] introduces the 
 * Addressing headings with links
 
 Every tool that names a heading takes a native Org link, the text Org
-resolves inside =[[…]]=, and nothing else, so a link copied out of Emacs
-works unchanged:
+resolves inside =[[…]]=, and nothing else, and resolves it the way Org does:
+Org's own link parser, Org's ID index for =id:=, and =org-link-search= for
+=::*Title= and =::#custom-id=. The heading a call reaches is the heading
+=C-c C-o= opens in Emacs, so a link copied out of Emacs works unchanged, and a
+link a client finds in a body is the next call's =link=:
 
 | Link                               | Addresses                                  |
 |------------------------------------+--------------------------------------------|
@@ -74,7 +77,11 @@ org-records-mcp refuses:
   (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
   =[[Title]]=) and a remote TRAMP path, including one that becomes remote only
   once =.=, =..= or =~= is expanded. Send the full local path instead. No
-  connection is opened for a remote path.
+  connection is opened for a remote path. A relative link found in a body
+  is relative to the file that holds it, and that file is the =file= of the
+  node the body came from, always a full path: =[[*Title]]= becomes
+  =file:<that file>::*Title=, =[[#slug]]= becomes =file:<that file>::#slug=, and
+  a relative =file:= path is joined to that file's directory.
 - a regexp search (=::/regexp/=), which Org answers by building a sparse tree
   in your buffer.
 - a value that is not text: a number, =true=, or a non-empty array or object. The
