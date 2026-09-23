@@ -16,7 +16,7 @@ the package. Both live on MELPA, so keep MELPA in =package-archives= even though
 org-records-mcp itself does not come from there. The pins live in =Eask= and in the
 =Package-Requires= header of =org-records-mcp.el=.
 
-This fork installs from git. On Emacs 30 or later:
+org-records-mcp installs from git. On Emacs 30 or later:
 
 =M-x package-vc-install RET https://github.com/stfl/org-records-mcp RET=
 
@@ -29,18 +29,20 @@ is Elisp and documentation, no shell scripts. With straight.el, name the script:
 #+begin_src emacs-lisp
 (straight-use-package
  '(org-records-mcp :host github :repo "stfl/org-records-mcp"
-           :files (:defaults "org-records-mcp-stdio.sh")))
+                   :files (:defaults "org-records-mcp-stdio.sh")))
 #+end_src
 
 The Doom recipe below carries the same =:files= line, for the same reason.
 
-MELPA carries the upstream package, [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], not this fork.
-=M-x package-install RET org-mcp RET= gets you a server without the clock tools
-and the views these pages document.
+The package MELPA carries under the name =org-mcp= is a different server,
+[[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], which org-records-mcp grew out of. It has neither the
+clock tools nor the views these pages document, and its symbols share the
+=org-mcp-= prefix org-records-mcp does not use; [[file:org-mcp-comparison.org][org-records-mcp and org-mcp]] sets
+the two side by side.
 
 * Doom Emacs
 
-To install this fork in Doom Emacs, add to =packages.el=:
+To install org-records-mcp in Doom Emacs, add to =packages.el=:
 
 #+begin_src emacs-lisp
 (package! org-records-mcp
@@ -84,7 +86,7 @@ into =mcp-server-lib-install-directory= (defaults to
 
 #+begin_example
 M-x mcp-server-lib-install RET   ;; installs emacs-mcp-stdio.sh
-M-x org-records-mcp-install RET          ;; installs org-records-mcp-stdio.sh
+M-x org-records-mcp-install RET  ;; installs org-records-mcp-stdio.sh
 #+end_example
 
 The actual install path depends on your Emacs setup, since

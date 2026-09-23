@@ -4,9 +4,9 @@ Issues and specs for this repo live as GitHub issues on `stfl/org-records-mcp`. 
 `gh` CLI for all operations.
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run
-inside a clone. `origin` is `stfl/org-records-mcp`, the fork this work happens on;
-`upstream` is `laurynas-biveinis/org-mcp` and has its own tracker. A ticket
-about this fork's roadmap goes to `origin`. Only a defect that reproduces
+inside a clone. `origin` is `stfl/org-records-mcp`, where this project lives;
+`upstream` is `laurynas-biveinis/org-mcp`, the project it grew out of, with its
+own tracker. A ticket about org-records-mcp goes to `origin`. Only a defect that reproduces
 against upstream belongs on `upstream`, and that is a decision Stefan makes,
 never a session.
 

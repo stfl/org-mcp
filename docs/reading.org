@@ -9,7 +9,7 @@ itself.
 
 A node is a file or a heading, and both come back in the same shape: from
 =org-node-read=, from the =org://{link}= resource, as a child inside another
-node, and as a query result (see [[file:queries.org][Searching and GTD queries]]). One vocabulary
+node, and as a query result (see [[file:queries.org][Searching and named views]]). One vocabulary
 walks a whole outline.
 
 A node carries the fields the call asked for, minus any of those it has no value

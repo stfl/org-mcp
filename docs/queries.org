@@ -1,7 +1,9 @@
-#+TITLE: Searching and GTD queries
+#+TITLE: Searching and named views
 
-This page answers how to search Org files with org-ql through org-records-mcp, and how
-to wire up the views a caller reaches by name. The [[file:../README.org][README]] introduces the
+This page answers how to search Org files with [[https://github.com/alphapapa/org-ql][org-ql]] through org-records-mcp,
+and how to wire up the views a caller reaches by name. org-ql is the query
+language on purpose: it is the one an Org agenda is already written in, so a
+client can ask the question your agenda asks rather than a paraphrase of it. The [[file:../README.org][README]] introduces the
 server itself.
 
 * Query tools
@@ -140,6 +142,12 @@ A view is a named question, a filter a named restriction. Both are
 configuration an external package populates — typically from the same
 definitions a workflow builds its agenda commands out of, so a view and the
 agenda block beside it cannot answer differently.
+
+[[https://github.com/stfl/agile-gtd.el][agile-gtd]] is built that way. Its agenda blocks — next actions, the backlog,
+stuck projects — each ask an org-ql query that a public function returns, such as
+=agile-gtd-agenda-query-next-actions=, and a view names that same function as its
+=:query=. Called from a view it reads no agenda buffer's state, so a client asking
+for the sprint gets the sprint whatever the agenda in Emacs shows at the time.
 
 #+begin_src emacs-lisp
 (setq org-records-mcp-views
