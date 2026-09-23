@@ -1151,6 +1151,16 @@ BODY is executed with org-records-mcp enabled."
          (cleanups (mapcar
                     (lambda (temp-var)
                       `(when ,temp-var
+                         ;; A buffer BODY left visiting the file, open
+                         ;; or modified, is killed before the file
+                         ;; goes: `make-temp-file' can hand a later
+                         ;; test the same name back, and a buffer
+                         ;; still around for it would serve that test
+                         ;; stale content instead of what it wrote.
+                         (when-let* ((buffer (find-buffer-visiting ,temp-var)))
+                           (with-current-buffer buffer
+                             (set-buffer-modified-p nil))
+                           (kill-buffer buffer))
                          (delete-file ,temp-var)))
                     temp-vars)))
     `(let (,@temp-vars)
