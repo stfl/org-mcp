@@ -29858,7 +29858,19 @@ it, and REASON is why they mean Org's construct rather than a node.")
      "are written on a headline, and a file has no headline. =org-node-set-title= renames a \
 headline; a file's title is its =#+TITLE:= line, a keyword and not a headline"
      "The element types Org's parser gives a heading and a #+TITLE: line.  The paragraph turns
-on that distinction to say why a field setter refuses a link naming a file."))
+on that distinction to say why a field setter refuses a link naming a file.")
+    ("docs/org-mcp-comparison.org"
+     "=org-headline://file#path= and =org-id://= URIs"
+     "Upstream org-mcp's URI scheme, named as upstream spells it.")
+    ("docs/org-mcp-comparison.org"
+     "=org-read-headline= returns the subtree"
+     "Upstream org-mcp's read tool, named as upstream spells it.")
+    ("docs/org-mcp-comparison.org"
+     "its =org-edit-headline= takes the title"
+     "Upstream org-mcp's edit tool, named as upstream spells it.")
+    ("docs/org-mcp-comparison.org"
+     "kept =org-id://= or =org-headline://= URIs"
+     "Upstream org-mcp's URI scheme, which a migrating client replaces."))
   "Where a user-facing page says headline and means Org\\='s own construct.
 Each entry is (WHERE PHRASE REASON), WHERE being the page's path
 from the repository root, as `org-records-mcp-test--page-texts' names it.")

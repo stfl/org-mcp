@@ -24,6 +24,7 @@ owns the question, never to a second page that repeats it:
 | `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
 | `clocking.org` | the seven clock tools and `org-records-mcp-clock-continuous-threshold` |
 | `verified-settings.org` | the Org settings org-records-mcp honours and tests, the ones it ignores on purpose, and the ones nothing measures |
+| `org-mcp-comparison.org` | how org-records-mcp differs from upstream org-mcp, what upstream has that it does not, and moving from one to the other; the credit to the upstream author lives here and in the README's "Prior art" |
 
 The README is a primer, not a shorter copy of these pages: a fact earns a place
 there only by changing what org-records-mcp is or what it costs to run — the tool count,

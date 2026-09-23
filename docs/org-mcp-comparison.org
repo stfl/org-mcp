@@ -1,0 +1,134 @@
+#+TITLE: org-records-mcp and org-mcp
+
+This page sets org-records-mcp beside [[https://github.com/laurynas-biveinis/org-mcp][org-mcp]], the server by Laurynas
+Biveinis it grew out of, for a reader choosing between them or moving from one to
+the other. The [[file:../README.org][README]] introduces org-records-mcp itself.
+
+The comparison is against org-mcp 1.0.0, as its repository stands in
+September 2026. Both projects move; where a row below matters to you, check the
+other project's own README.
+
+* Where it comes from
+
+org-records-mcp started as a fork of org-mcp and keeps its foundations: serving
+Org to an MCP client from inside the running Emacs, a set of allowed files a
+call may reach, and [[https://github.com/laurynas-biveinis/mcp-server-lib.el][mcp-server-lib.el]], also Laurynas Biveinis' work, which
+carries the protocol. Over 300 commits of org-records-mcp's history are his.
+Everything below is a difference in the answer to one question — what should a
+client get back — and none of it is a verdict on org-mcp, which is maintained,
+on MELPA, and the right choice for some setups.
+
+* The design in one line each
+
+|                        | org-mcp                                                                                                    | org-records-mcp                                                                                    |
+|------------------------+------------------------------------------------------------------------------------------------------------+----------------------------------------------------------------------------------------------------|
+| What a read returns    | a heading's path of ancestors as small JSON nodes, and the subtree as Org text                             | the node as typed fields, its children as further nodes; body text only when asked for             |
+| How Org is read        | from the file on disk, in a temporary Org buffer                                                           | from the buffer Emacs has open, through =org-element=, =org-ql= and Org's own functions            |
+| How a heading is named | =org-headline://file#path= and =org-id://= URIs                                                            | the Org link =org-store-link= would give: =id:=, =file:…::*Title=, =file:…::#custom-id=            |
+| Searching              | =org-grep=: a literal substring, answered line by line                                                     | =org-query=: any [[https://github.com/alphapapa/org-ql][org-ql]] expression, answered as nodes                                              |
+| Agenda                 | =org-get-agenda= runs a span or a key of =org-agenda-custom-commands= and returns its text and its entries | =org-view= runs views you declare from org-ql queries, with named filters and ranges               |
+| Unsaved edits in Emacs | a write is refused until you save the buffer                                                               | a write lands in the buffer beside your edits and answers =saved: false=                           |
+| IDs                    | every write adds an =ID= to the heading it touches                                                         | no tool creates an ID                                                                              |
+| Clocking               | none                                                                                                       | seven tools: in, out, add, delete, the active clock, dangling clocks, the clock settings           |
+| Extending it           | the allowed files are the one setting                                                                      | views, filters, sort order, computed fields and named field lists are settings a workflow fills in |
+| Installing             | MELPA and MELPA Stable, Emacs 28.2 or later                                                                | from git, Emacs 30.1 or later, with org-ql                                                         |
+
+* Records instead of text
+
+org-mcp's read tools answer with Org text: =org-read-headline= returns the
+subtree as it stands in the file, beside the chain of ancestors as small JSON
+nodes, and =org-read-file= returns the whole file. A client parses Org to find
+anything beyond the title, state, priority, tags and planning dates those nodes
+carry.
+
+org-records-mcp answers with the node. Each field is typed and named —
+=todo=, =priority=, =tags= and =local_tags=, =scheduled=, =deadline=, =closed=,
+=level=, =link= — the drawer arrives as a map under =properties=, and the
+children are nodes of the same shape, expanded as many generations deep as the
+call asks. A query returns no bodies unless it names =content=. The body is
+still there when a client wants it, as a field or through =org-node-text=, but
+the default answer is data a client reasons over without parsing, and it costs
+context in proportion to the headings asked about rather than to the text under
+them. [[file:reading.org::*The node][The node]] has the fields.
+
+* Org's semantics are the contract
+
+org-records-mcp reads and writes through Org rather than beside it. A heading
+is located with =org-element=, a query is run by =org-ql=, a clock is closed by
+=org-clock-out=, a subtree moves with Org's refile and archive commands, and a
+title is what Org's own normalizer makes of it. The few regular expressions of
+its own mostly check text a client sends before Org is handed it; where Org
+keeps a pattern in a variable, such as =org-property-re=, that variable is used.
+So a result follows your configuration — your TODO sequences, your tag
+inheritance, your property inheritance, your logging — the way Org would, and
+[[file:verified-settings.org][The Org configuration org-records-mcp is verified against]] lists which settings the
+test suite holds it to.
+
+org-mcp reads the file from disk into a temporary Org buffer and finds headings
+by their path of titles, which makes it independent of what Emacs has open and
+keeps its dependencies to =mcp-server-lib= alone.
+
+* Queries and your agenda
+
+=org-grep= finds a literal substring and reports each matching line under the
+heading that holds it. =org-query= takes any org-ql expression — TODO state,
+tags, priority, planning dates, properties, ancestry, text, combined with
+=and=, =or= and =not= — and returns the matching nodes. See [[file:queries.org][Searching and named views]].
+
+For a named question the two differ in where the definition lives.
+=org-get-agenda= runs what =org-agenda-custom-commands= already holds, with
+nothing to configure, and returns the agenda's text beside its entries.
+=org-view= runs views you declare in =org-records-mcp-views= from the same org-ql
+queries your agenda blocks are built from, so the agenda in Emacs and the answer
+a client gets come from one definition; a view takes a named filter and a named
+range, and anything else is refused with the names it would take. It costs a
+configuration step org-mcp does not ask for. [[https://github.com/stfl/agile-gtd.el][agile-gtd]] is a workflow built
+this way: its next actions, backlog and stuck projects are both agenda blocks
+and views.
+
+* Writing
+
+org-mcp makes a change in a temporary buffer, writes the file, and reverts any
+buffer visiting it; when such a buffer holds edits you have not saved, it
+refuses the write and asks you to save first. org-records-mcp makes the change
+in the buffer Emacs has open and saves it when it was clean. When it held your
+unsaved edits, the change joins them, nothing is saved, and the response says
+so with =saved: false=; your next save writes both. [[file:writing.org::*How a write reaches disk][How a write reaches disk]] has the rule.
+
+org-mcp gives every heading it writes to an =ID= property, so the URI it
+returns stays valid when the heading is renamed or moved. org-records-mcp
+creates no identifiers: it returns the link that names the heading now, and a
+client that wants a stable address sets the property itself. The trade is a
+stable handle against a file that changes only where the call said it would.
+
+org-records-mcp has one write tool per field — state, title, body, properties,
+each of the two planning dates, tags added, removed or replaced, priority, a
+note — and tools that create, delete, archive and refile a node or change a
+file's in-buffer settings. A write names the value it expects to replace, and a
+call that destroys or moves a whole node sends the digest of what it read, so a
+write against a heading that changed since the client read it is refused rather
+than applied. org-mcp edits a body by replacing a substring, and its
+=org-edit-headline= takes the title and a tag delta together.
+
+* What org-mcp has that org-records-mcp does not
+
+- *MELPA.* =M-x package-install RET org-mcp RET= and it is there, stable
+  releases included. org-records-mcp installs from git.
+- *Older Emacs.* org-mcp runs on Emacs 28.2; org-records-mcp needs 30.1.
+- *Your agenda with no setup.* =org-get-agenda= runs the custom agenda commands
+  you already have and returns the agenda text as Emacs shows it.
+- *Line-level search.* =org-grep= answers with line numbers and the matching
+  lines themselves.
+- *An outline resource.* =org-outline://= serves a file's first two heading
+  levels as a resource a client can attach.
+
+* Moving from org-mcp
+
+The two packages share no settings and no symbols: org-records-mcp's prefix is
+=org-records-mcp-=, so both can be installed side by side, and nothing set for
+one reaches the other. =org-mcp-allowed-files= becomes
+=org-records-mcp-allowed-files=, which also takes paths relative to
+=org-directory= and falls back to =org-agenda-files= when unset. Register the
+server under its own shim, as [[file:installation.org][Installing org-records-mcp]] shows. A client that
+kept =org-id://= or =org-headline://= URIs sends the link form instead: =id:=
+followed by the same UUID, or a =file:= link with a =::*Title= search.
