@@ -16,7 +16,7 @@ owns the question, never to a second page that repeats it:
 
 | Page | Owns |
 |---|---|
-| `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports, how a client that cannot send an array or an object sends one |
+| `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports, how a client that cannot send an array, an object or null sends one |
 | `file-access.org` | the allowed files, `org-records-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
 | `links.org` | the link forms a call takes, how they resolve, the link every response carries |
 | `reading.org` | the `org://{link}` resource, `org-node-read`, `org-node-text`, and the six configuration and discovery tools |
