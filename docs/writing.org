@@ -152,6 +152,13 @@ node carried are carried to the new date.
 compared with what is in the file and never read as a date, so a repeater, a
 delay and a date range all pass through it as written.
 
+What a write puts on the planning line is active whatever the node carried
+there. A node can hold an inactive SCHEDULED or DEADLINE, such as
+=DEADLINE: [2023-07-28]=, which Org's agenda passes over: =before=
+asserts it as it stands, brackets included, and =after= replaces it with the
+active timestamp it names, so =2023-07-28= makes it =<2023-07-28 Fri>=. =null=
+takes it away like any other.
+
 ** A date that is not a date is refused
 
 Org parses the shape of a timestamp; it does not ask whether the day exists. Its

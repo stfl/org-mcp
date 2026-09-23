@@ -14548,6 +14548,126 @@ call sent."
 SCHEDULED and DEADLINE carry an active one, written <\\.\\.\\.>\\'"
      test-file)))
 
+(defconst org-records-mcp-test--content-inactive-scheduled
+  "* TODO Scheduled Task
+SCHEDULED: [2023-07-28]
+Task body."
+  "TODO task whose SCHEDULED holds an inactive timestamp.
+Org\\='s agenda and its planning writer both pass over one: they look
+for the keyword followed by `<'.")
+
+(defconst org-records-mcp-test--content-inactive-deadline
+  "* TODO Deadline Task
+DEADLINE: [2023-07-28]
+Task body."
+  "TODO task whose DEADLINE holds an inactive timestamp.
+Shaped like `org-records-mcp-test--content-inactive-scheduled'.")
+
+(defconst org-records-mcp-test--dates-written-over-an-inactive-one
+  '("2023-07-28" "<2023-07-28 Fri>" "2023-08-04")
+  "Values an `after' written over an inactive planning timestamp takes.
+An ISO date and a raw active timestamp are the two forms a client
+sends.  The first two name the day the inactive one already names,
+where a write that changed nothing would read as done; the third moves
+the date, so a response cannot be right by accident.")
+
+(defun org-records-mcp-test--should-write-active-over-inactive
+    (tool content heading label)
+  "Assert TOOL writes an active timestamp over an inactive one.
+CONTENT is a file whose HEADING carries LABEL, the planning keyword
+TOOL writes, as the inactive `[2023-07-28]'.  Each value in
+`org-records-mcp-test--dates-written-over-an-inactive-one' is written in
+a file of its own, and has to leave the line holding the one active
+timestamp it names, with the response\\='s `after' saying so."
+  (dolist (after org-records-mcp-test--dates-written-over-an-inactive-one)
+    (let ((date (substring (string-trim after "<" ">") 0 10)))
+      (org-records-mcp-test--with-temp-org-files
+          ((test-file content))
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 tool
+                 `((link
+                    . ,(org-records-mcp-test--file-link test-file heading))
+                   (before . "[2023-07-28]")
+                   (after . ,after))))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'before result) "[2023-07-28]"))
+          (should
+           (string-match-p (format "\\`<%s [^ >]+>\\'" date)
+                           (alist-get 'after result)))
+          (org-records-mcp-test--verify-file-matches
+           test-file
+           (concat
+            "\\`\\* TODO " (substring heading 1) "\n"
+            label ": <" date " [^ >]+>\n"
+            "Task body\\.\n?\\'")))))))
+
+(ert-deftest org-records-mcp-test-set-scheduled-writes-active-over-inactive ()
+  "A SCHEDULED written over an inactive one is active.
+Org\\='s planning writer finds the value it replaces by the `<' an
+active timestamp opens with, so it passes over an inactive one.  The
+field still ends up holding the active value the agenda reads,
+whatever the heading carried before."
+  (org-records-mcp-test--should-write-active-over-inactive
+   "org-node-set-scheduled"
+   org-records-mcp-test--content-inactive-scheduled
+   "*Scheduled Task" "SCHEDULED"))
+
+(ert-deftest org-records-mcp-test-set-deadline-writes-active-over-inactive ()
+  "A DEADLINE written over an inactive one is active.
+See `org-records-mcp-test-set-scheduled-writes-active-over-inactive'."
+  (org-records-mcp-test--should-write-active-over-inactive
+   "org-node-set-deadline"
+   org-records-mcp-test--content-inactive-deadline
+   "*Deadline Task" "DEADLINE"))
+
+(ert-deftest org-records-mcp-test-null-after-takes-an-inactive-planning-date-off ()
+  "A null `after' takes an inactive SCHEDULED or DEADLINE away.
+Org\\='s planning remover passes over an inactive timestamp as its
+writer does, and would leave the field holding what the call
+destroyed."
+  (dolist (row `(("org-node-set-scheduled"
+                  ,org-records-mcp-test--content-inactive-scheduled
+                  "*Scheduled Task")
+                 ("org-node-set-deadline"
+                  ,org-records-mcp-test--content-inactive-deadline
+                  "*Deadline Task")))
+    (pcase-let ((`(,tool ,content ,heading) row))
+      (org-records-mcp-test--with-temp-org-files
+          ((test-file content))
+        (let ((result
+               (json-read-from-string
+                (mcp-server-lib-ert-call-tool
+                 tool
+                 `((link
+                    . ,(org-records-mcp-test--file-link test-file heading))
+                   (before . "[2023-07-28]")
+                   (after . nil))))))
+          (should (equal (alist-get 'success result) t))
+          (should (equal (alist-get 'before result) "[2023-07-28]"))
+          (should (equal (alist-get 'after result) "")))
+        (org-records-mcp-test--verify-file-matches
+         test-file
+         (concat
+          "\\`\\* TODO " (substring heading 1) "\n"
+          "Task body\\.\n?\\'"))))))
+
+(ert-deftest org-records-mcp-test-set-deadline-refuses-inactive-over-inactive ()
+  "An inactive `after' is refused over an inactive DEADLINE too.
+A heading already holding one does not make the form a value the
+field takes."
+  (org-records-mcp-test--with-temp-org-files
+      ((test-file org-records-mcp-test--content-inactive-deadline))
+    (org-records-mcp-test--call-tool-refused
+     "org-node-set-deadline"
+     `((link . ,(org-records-mcp-test--file-link test-file "*Deadline Task"))
+       (before . "[2023-07-28]")
+       (after . "[2023-07-28 Fri]"))
+     "\\`Date '\\[2023-07-28 Fri\\]' is an inactive timestamp - \
+SCHEDULED and DEADLINE carry an active one, written <\\.\\.\\.>\\'"
+     test-file)))
+
 (defconst org-records-mcp-test--dates-carrying-text-org-reads-past
   '(("<2026-03-27 Fri hello>" "hello" "<2026-03-27 [^ >]+>")
     ("<2026-03-27 Fri 09:00 +1w garbage>"

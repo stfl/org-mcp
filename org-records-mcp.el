@@ -6573,6 +6573,27 @@ written, so that guard is off here."
   (let ((org-read-date-force-compatible-dates nil))
     (funcall writer nil value)))
 
+(defun org-records-mcp--activate-planning-timestamp (key)
+  "Make the planning timestamp KEY of the heading at point active.
+KEY is `:scheduled' or `:deadline', the headline property holding it.
+A field holding an active timestamp, or none, is left as it is.
+
+Org finds the SCHEDULED or DEADLINE it replaces or removes by the
+keyword followed by `<', so `org-add-planning-info' passes over an
+inactive one: a write puts a second keyword in front of it, which the
+parser reads past in favour of the old one, and a removal takes
+nothing away.  No Org function replaces an inactive planning
+timestamp, so it is turned active with `org-toggle-timestamp-type'
+first, and Org then replaces it as it would any other.  Its first half is enough for a date range, because
+Org clears the entry up to the next keyword."
+  (let ((timestamp (org-element-property key (org-element-at-point))))
+    (when (memq
+           (org-element-property :type timestamp)
+           '(inactive inactive-range))
+      (save-excursion
+        (goto-char (org-element-property :begin timestamp))
+        (org-toggle-timestamp-type)))))
+
 (defconst org-records-mcp--field-scheduled
   (list
    :label "SCHEDULED"
@@ -6587,6 +6608,7 @@ written, so that guard is off here."
    ;; `org-schedule' would have set up for the same removal.
    :remove
    (lambda (previous)
+     (org-records-mcp--activate-planning-timestamp :scheduled)
      (org-add-planning-info nil nil 'scheduled)
      (when org-log-reschedule
        (org-records-mcp--insert-log-note "" 'delschedule
@@ -6594,6 +6616,7 @@ written, so that guard is off here."
                                          previous)))
    :write
    (lambda (value)
+     (org-records-mcp--activate-planning-timestamp :scheduled)
      (org-records-mcp--write-planning-timestamp
       #'org-schedule value)))
   "The SCHEDULED field, for `org-records-mcp--write-field'.
@@ -6614,6 +6637,7 @@ returns, with no second accessor to drift from it.")
    ;; See `org-records-mcp--field-scheduled' for why not `org-deadline'.
    :remove
    (lambda (previous)
+     (org-records-mcp--activate-planning-timestamp :deadline)
      (org-add-planning-info nil nil 'deadline)
      (when org-log-redeadline
        (org-records-mcp--insert-log-note "" 'deldeadline
@@ -6621,6 +6645,7 @@ returns, with no second accessor to drift from it.")
                                          previous)))
    :write
    (lambda (value)
+     (org-records-mcp--activate-planning-timestamp :deadline)
      (org-records-mcp--write-planning-timestamp
       #'org-deadline value)))
   "The DEADLINE field, for `org-records-mcp--write-field'.
