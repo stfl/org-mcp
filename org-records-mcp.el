@@ -4631,7 +4631,10 @@ Everything under the heading goes with it, its drawers and its
 LOGBOOK included, because `org-cut-subtree' takes the region Org
 gives the headline rather than one measured here.  The text comes
 back, so that a caller putting the subtree down elsewhere pastes what
-it cut and a caller that only removes it lets it go.
+it cut and a caller that only removes it lets it go.  It is read from
+`org-subtree-clip', the variable `org-cut-subtree' and
+`org-paste-subtree' hand text through by contract; `org-cut-subtree'
+is `(interactive)' and no Org version promises what it returns.
 
 The cut ends the way Org ends its own: `org-archive-subtree' and
 `org-refile' both call `org-inlinetask-remove-END-maybe' after
@@ -4641,7 +4644,8 @@ reaches that cleanup through `org-archive-subtree'; org-node-delete
 and org-node-refile reach it here, so the three verbs leave a file
 in the same state."
   (prog1 (org-records-mcp--with-private-kill-ring
-           (org-cut-subtree))
+           (org-cut-subtree)
+           org-subtree-clip)
     (when (featurep 'org-inlinetask)
       (org-inlinetask-remove-END-maybe))))
 
