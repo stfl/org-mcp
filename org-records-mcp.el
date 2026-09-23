@@ -419,6 +419,17 @@ down with it."
      "%s must be a string, not %s"
      name (org-records-mcp--json-name value)))))
 
+(defun org-records-mcp--null-text-p (value)
+  "Return non-nil when VALUE is the text a client sends for JSON null.
+The tool schema types every parameter as a string, so a client that
+validates its arguments against the schema cannot send null and
+sends the text null instead.  That text is exactly the four
+lower-case letters JSON spells null in: padded or capitalised, it is
+a string like any other.  Only an `after' that takes null to take a
+value away asks this, see `org-records-mcp--value-to-write'; every other
+parameter reads the text as the four letters it is."
+  (equal value "null"))
+
 (defun org-records-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
 A string is the value to write.  JSON null is nil here, and asks for
@@ -427,6 +438,17 @@ these fields have none of their own.  \"\" is not a timestamp, a
 priority character or a TODO keyword, so it passes through as the
 string it is and the field\\='s own validator refuses it, naming what
 the field does accept and the null that asks for none.
+
+The text null is nil too.  The tool schema types every parameter as a
+string, so a client that validates its arguments against the schema
+cannot send JSON null at all: it sends the text null instead, and
+without this would be refused by a message naming the one value it
+cannot produce.  `org-records-mcp--null-text-p' says what that text is.
+It is no timestamp and no priority character, so it
+takes away nothing a caller could have meant there.  A TODO keyword
+is the one field a file may spell null, so `org-node-set-todo' reads
+the text itself, once the file is known; see
+`org-records-mcp--todo-null-text'.
 
 Every other blank, see `org-records-mcp--blank-param-p', is a parameter the
 client filled but did not send, and is refused as one: false is a
@@ -439,7 +461,7 @@ field was in, and its states are the values plus the empty one, which
 field with no empty value has no such value to name — so the two stop
 being spelled alike exactly where the field stops having one."
   (cond
-   ((null value)
+   ((or (null value) (org-records-mcp--null-text-p value))
     nil)
    ((stringp value)
     value)
@@ -3764,6 +3786,24 @@ keyword is asked for with null, which never reaches this."
 no keyword"
      state (mapconcat #'identity org-todo-keywords-1 ", "))))
 
+(defun org-records-mcp--todo-null-text (state)
+  "Return STATE, the TODO keyword a call asks for, with the text null read.
+The text null is null, the keyword taken away, unless the current
+buffer\\='s `org-todo-keywords-1' holds a keyword spelled null: there
+the text names a state the file configures, and it stays that
+keyword.  JSON null still takes the keyword away in such a file, so
+only a client that cannot send null loses anything, and what it
+loses is a removal in the one file that chose that spelling, never a
+keyword.  Any other STATE is returned as it came.
+
+This is `org-records-mcp--value-to-write' reading the text, deferred to
+where the file is known, and it runs in the target buffer for the
+reason `org-records-mcp--validate-todo-state' does."
+  (if (and (org-records-mcp--null-text-p state)
+           (not (member state org-todo-keywords-1)))
+      nil
+    state))
+
 (defun org-records-mcp--todo-block-reason (from to)
   "Return what Org names for vetoing the change FROM to TO, or nil.
 Point is on the heading.  FROM is its TODO keyword, or nil when it
@@ -5077,6 +5117,9 @@ MCP Parameters:
           null takes the keyword off, so the heading stops being a
           task; \"\" names no keyword and is refused, and false is
           the parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null unless the file names a keyword
+          null
           It sets the keyword only: a planning date this call moves
           is Org's doing, and the response reports it
   before_planning - What the node's planning fields hold now
@@ -5106,7 +5149,10 @@ MCP Parameters:
           refused with any other link"
   (setq before (org-records-mcp--text-param-given before "before"))
   (org-records-mcp--assert-field-value before "State")
-  (setq after (org-records-mcp--value-to-write after "after"))
+  ;; The text null is left for the file to read, which may name a
+  ;; keyword null; see `org-records-mcp--todo-null-text'.
+  (unless (org-records-mcp--null-text-p after)
+    (setq after (org-records-mcp--value-to-write after "after")))
   ;; Before the link is resolved and before the change group opens:
   ;; the note is written inside the change the state change is made
   ;; in, so a note this call cannot write is refused while there is
@@ -5133,6 +5179,7 @@ MCP Parameters:
          (org-records-mcp--clock-closed-moves clock-reading))
       ;; Validate inside the Org buffer so `org-todo-keywords-1'
       ;; reflects merged user-customization + per-file `#+TODO:'.
+      (setq after (org-records-mcp--todo-null-text after))
       (when after
         (org-records-mcp--validate-todo-state after))
       (org-records-mcp--goto-heading target)
@@ -7040,6 +7087,8 @@ MCP Parameters:
           null takes the timestamp away, guarded by before;
           \"\" is no date and is refused, and false is the
           parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -7078,6 +7127,8 @@ MCP Parameters:
           null takes the timestamp away, guarded by before;
           \"\" is no date and is refused, and false is the
           parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -7414,6 +7465,8 @@ MCP Parameters:
           null takes the priority away, guarded by before; \"\"
           is no character and is refused, and false is the
           parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -8876,6 +8929,9 @@ Parameters:
           null takes the keyword off, so the node stops being
           a task; \"\" is no keyword and is refused as one, and
           false is the parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null unless the file names a keyword
+          null
           It sets the keyword only.  A planning date that moves is
           Org's doing and comes back in the response
   before_planning - The node's planning fields as they are now
@@ -9345,6 +9401,8 @@ Parameters:
           null takes the timestamp away, guarded by what before
           says the node carries.  \"\" is not a date and is
           refused as one; false is the parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -9395,6 +9453,8 @@ Parameters:
           null takes the timestamp away, guarded by what before
           says the node carries.  \"\" is not a date and is
           refused as one; false is the parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 
@@ -9571,6 +9631,8 @@ Parameters:
           null takes the priority away, guarded by what before
           says the node carries.  \"\" is no character and is
           refused as one; false is the parameter left out
+          A client that cannot send null sends the text null,
+          which is read as null
   files - Files and directories to look up an id: link in (array of
           strings, optional); see org-node-read
 

@@ -122,12 +122,12 @@ field, so a client can name the server and the version it is talking to.
 
 To remove the installed wrapper, run =M-x org-records-mcp-uninstall=.
 
-* When your client cannot send an array or an object
+* When your client cannot send an array, an object or null
 
 org-records-mcp's tool schema types every parameter as a string. The schema is built
 from the Elisp handler's argument list, and =mcp-server-lib= gives every
-argument the type =string=, so there is no =array= or =object= in it to
-validate against.
+argument the type =string=, so there is no =array=, =object= or =null= in it
+to validate against.
 
 A client that checks its arguments against that schema therefore cannot send a
 JSON array for the parameters documented as taking one — =fields=,
@@ -180,5 +180,32 @@ and is not a JSON object is refused, naming the parameter. Only the parameter
 itself is read back: a property value that happens to begin with ={= is written
 as the text it is.
 
-Nothing has to be encoded this way. A client that can send a real JSON array or
-object sends one, and org-records-mcp reads it directly.
+Such a client cannot send =null= either, and =null= in =after= is how
+=org-node-set-todo=, =org-node-set-scheduled=, =org-node-set-deadline= and
+=org-node-set-priority= take a value away. It sends the text =null= instead, and
+org-records-mcp reads that text in those four =after= parameters as =null=.
+These two calls take the same priority away:
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "before": "A",
+ "after": null}
+#+end_src
+
+#+begin_src json
+{"link": "id:550e8400-e29b-41d4-a716-446655440000",
+ "before": "A",
+ "after": "null"}
+#+end_src
+
+The text is exactly =null=, in lower case and with nothing around it; =NULL=
+and =" null"= are strings like any other. It is no date and no priority
+character, so it takes away nothing those fields could hold. A TODO keyword is
+the one exception: in a file whose workflow names a keyword =null=, the text
+sets that keyword, and only a real =null= takes the keyword away there. Every
+other parameter reads =null= as the four letters it is — a =before=, a title, a
+body, a settings line, and a value inside a property map, which already has a
+=null= of its own when the map is sent as JSON text.
+
+Nothing has to be encoded this way. A client that can send a real JSON array,
+object or =null= sends one, and org-records-mcp reads it directly.

@@ -24324,6 +24324,363 @@ left as it was."
         "object as its JSON text"
         (org-records-mcp-test--registered-tool-description tool))))))
 
+;;; A null from a client that cannot send one
+
+;; The same schema keeps a validating client from sending JSON null,
+;; and null in a top-level `after' is how a keyword, a SCHEDULED, a
+;; DEADLINE and a priority are taken away.  Such a client sends the
+;; text null instead, so that `after' reads the text as null.  The
+;; claim has two halves, and each is quantified over the published
+;; surface rather than over a list typed here: the text null clears
+;; wherever a description advertises null as clearing a top-level
+;; `after', and every other parameter of every tool reads it as
+;; something other than null.
+
+(defconst org-records-mcp-test--null-text-writes
+  '(("org-node-set-todo" "* TODO Task\nBody.\n" "TODO" "DONE")
+    ("org-node-set-scheduled"
+     "* TODO Task\nSCHEDULED: <2026-03-27 Fri>\nBody.\n" "<2026-03-27 Fri>"
+     "2026-04-01")
+    ("org-node-set-deadline"
+     "* TODO Task\nDEADLINE: <2026-03-27 Fri>\nBody.\n" "<2026-03-27 Fri>"
+     "2026-04-01")
+    ("org-node-set-priority" "* TODO [#A] Task\nBody.\n" "A" "B"))
+  "The tools whose top-level `after' takes null, and a field to clear.
+Each entry is (TOOL CONTENT BEFORE AFTER): CONTENT holds a heading
+Task whose field TOOL writes, BEFORE is what that field holds, and
+AFTER is a value the field takes.  The tools are the ones
+`org-records-mcp-test--null-text-clearing-tools' reads off the published
+descriptions, which `org-records-mcp-test-null-text-clears-every-advertised-null'
+checks.")
+
+(defconst org-records-mcp-test--content-null-text-bare
+  "* Task\nBody.\n"
+  "A heading holding no keyword, planning, priority or property.")
+
+(defconst org-records-mcp-test--content-null-text-keyword-head
+  "#+TODO: TODO null | DONE\n"
+  "A workflow line naming a keyword spelled null.")
+
+(defconst org-records-mcp-test--content-null-text-sweep
+  "* TODO [#A] Task :work:
+SCHEDULED: <2026-03-27 Fri> DEADLINE: <2026-03-28 Sat>
+:PROPERTIES:
+:EFFORT:   1:00
+:END:
+:LOGBOOK:
+CLOCK: [2026-09-21 Mon 09:00]--[2026-09-21 Mon 10:00] =>  1:00
+:END:
+Body.
+* Parent
+"
+  "A heading every tool has a valid call on, and a parent to refile to.
+Task carries a keyword, a priority, a tag, both planning dates, a
+property and a closed clock, so each write and each clock tool finds
+the field its call asserts.")
+
+(defun org-records-mcp-test--null-text-clearing-tools ()
+  "Return the tools whose top-level `after' takes null to clear, sorted.
+They are the tools whose published descriptions advertise null as a
+clearing value, as `org-records-mcp-test--clearing-advertisements' reads
+them, less org-node-set-properties: its null is a value inside the
+`after' map, where the text null is a property value."
+  (sort
+   (delq
+    nil
+    (mapcar
+     (lambda (entry)
+       (and (member "null" (mapcar #'cdr (cdr entry)))
+            (not (equal (car entry) "org-node-set-properties"))
+            (car entry)))
+     (org-records-mcp-test--clearing-advertisements)))
+   #'string<))
+
+(defun org-records-mcp-test--null-text-outcome (entry after)
+  "Return the outcome of ENTRY\\='s call with AFTER as its `after'.
+ENTRY is one of `org-records-mcp-test--null-text-writes'; the outcome
+is the one `org-records-mcp-test--object-call-outcome' returns."
+  (pcase-let ((`(,tool ,content ,before ,_after) entry))
+    (org-records-mcp-test--object-call-outcome
+     content tool
+     (lambda (file)
+       `((link . ,(org-records-mcp-test--file-link file "*Task"))
+         (before . ,before)
+         (after . ,after))))))
+
+(ert-deftest org-records-mcp-test-null-text-clears-every-advertised-null ()
+  "The text null clears every field a top-level `after' of null clears.
+Each tool is sent the text through its entry in
+`org-records-mcp-test--clearing-writes', which asserts the field is left
+holding nothing.  The fixtures of `org-records-mcp-test--null-text-writes'
+cover the same tools, so a tool that starts or stops advertising null
+fails here until they do."
+  (let ((tools (org-records-mcp-test--null-text-clearing-tools)))
+    (dolist (tool tools)
+      (ert-info (tool :prefix "Tool: ")
+        (funcall
+         (alist-get tool org-records-mcp-test--clearing-writes nil nil #'equal)
+         "null")))
+    (should
+     (equal tools
+            (sort (mapcar #'car org-records-mcp-test--null-text-writes)
+                  #'string<)))))
+
+(ert-deftest org-records-mcp-test-null-text-is-null ()
+  "The text null gets exactly what JSON null gets, response and file.
+Every other spelling near it — padded, capitalised, quoted, cut short
+— is not null and meets the field\\='s own refusal, leaving the file as
+it was."
+  (dolist (entry org-records-mcp-test--null-text-writes)
+    (ert-info ((car entry) :prefix "Tool: ")
+      (let ((expected (org-records-mcp-test--null-text-outcome entry nil)))
+        (should-not (car expected))
+        (should
+         (equal (org-records-mcp-test--null-text-outcome entry "null")
+                expected)))
+      (dolist (text '(" null" "null " "NULL" "Null" "\"null\"" "nul"))
+        (ert-info (text :prefix "Text: ")
+          (pcase-let ((`(,refused ,_text ,image)
+                       (org-records-mcp-test--null-text-outcome entry text)))
+            (should refused)
+            (should (equal image (nth 1 entry)))))))))
+
+(ert-deftest org-records-mcp-test-null-text-is-a-keyword-a-file-configures ()
+  "A file whose workflow names the keyword null keeps it as a keyword.
+There the text null names a state the file configures, so it sets
+that keyword, and a `before' of null asserts it; JSON null still
+takes the keyword away.  In a file without that keyword the text is
+null, which `org-records-mcp-test-null-text-is-null' pins."
+  (let ((head org-records-mcp-test--content-null-text-keyword-head))
+    (dolist (row
+             `(("* TODO Task\n" "TODO" "null" "\\* null Task\n")
+               ("* TODO Task\n" "TODO" nil "\\* Task\n")
+               ("* null Task\n" "null" nil "\\* Task\n")
+               ("* null Task\n" "null" "TODO" "\\* TODO Task\n")))
+      (pcase-let ((`(,heading ,before ,after ,expected) row))
+        (ert-info ((format "%S -> %S" before after) :prefix "Change: ")
+          (org-records-mcp-test--with-temp-org-files
+              ((file (concat head heading)))
+            (let ((result
+                   (json-read-from-string
+                    (mcp-server-lib-ert-call-tool
+                     "org-node-set-todo"
+                     `((link . ,(org-records-mcp-test--file-link file "*Task"))
+                       (before . ,before)
+                       (after . ,after))))))
+              (should (equal (alist-get 'success result) t))
+              (should (equal (alist-get 'after result) (or after "")))
+              (org-records-mcp-test--verify-file-matches
+               file
+               (concat "\\`" (regexp-quote head) expected "\\'")))))))))
+
+(ert-deftest org-records-mcp-test-null-text-before-is-a-conflict ()
+  "A `before' of the text null on a field holding nothing is a conflict.
+A `before' names a state the field was in, and \"\" spells the empty
+one, so the text null asserts a value the field does not hold rather
+than the \"\" that asserts none.  The refusal names both."
+  (dolist (entry org-records-mcp-test--null-text-writes)
+    (pcase-let ((`(,tool ,_content ,_before ,after) entry))
+      (ert-info (tool :prefix "Tool: ")
+        (org-records-mcp-test--with-temp-org-files
+            ((file org-records-mcp-test--content-null-text-bare))
+          (org-records-mcp-test--call-tool-refused
+           tool
+           `((link . ,(org-records-mcp-test--file-link file "*Task"))
+             (before . "null")
+             (after . ,after))
+           "\\`conflict: [A-Za-z]+ mismatch: expected 'null', found '\\(?:(no state)\\)?'\\'"
+           file))))))
+
+(ert-deftest org-records-mcp-test-null-text-is-written-as-text ()
+  "Where a parameter takes text, the text null is written as the four letters.
+A property value inside the `after' map, a title, a body and a
+settings line each hold text of their own, and each is written as
+null.  The property value stands inside an object, which the sweep
+over the published parameters does not reach."
+  (dolist (row
+           `(("org-node-set-properties"
+              ,(lambda (link)
+                 `((link . ,link) (before . ((FOO))) (after . ((FOO . "null")))))
+              "\\`\\* Task\n *:PROPERTIES:\n *:FOO: +null\n *:END:\nBody\\.\n\\'")
+             ("org-node-set-title"
+              ,(lambda (link)
+                 `((link . ,link) (before . "Task") (after . "null")))
+              "\\`\\* null\nBody\\.\n\\'")
+             ("org-node-set-content"
+              ,(lambda (link)
+                 `((link . ,link)
+                   (before . ,(org-records-mcp-test--content-digest-of link))
+                   (after . "null")))
+              "\\`\\* Task\nnull\n?\\'")
+             ("org-file-set-setting"
+              ,(lambda (link)
+                 `((link . ,(car (split-string link "::")))
+                   (setting . "TITLE")
+                   (before . [])
+                   (after . "null")))
+              "\\`#\\+TITLE: null\n\\* Task\nBody\\.\n\\'")))
+    (pcase-let ((`(,tool ,params ,expected) row))
+      (ert-info (tool :prefix "Tool: ")
+        (org-records-mcp-test--with-temp-org-files
+            ((file org-records-mcp-test--content-null-text-bare))
+          (let* ((link (org-records-mcp-test--file-link file "*Task"))
+                 (result
+                  (json-read-from-string
+                   (mcp-server-lib-ert-call-tool tool (funcall params link)))))
+            (should (equal (alist-get 'success result) t))
+            (org-records-mcp-test--verify-file-matches file expected)))))))
+
+(defun org-records-mcp-test--null-text-sweep-call (tool file)
+  "Return the arguments of a valid TOOL call on FILE, required ones only.
+FILE holds `org-records-mcp-test--content-null-text-sweep'.  A tool the
+suite has no call for fails the test that asks, so a new one cannot
+go unswept.  org-clock-out needs a running clock, which this starts."
+  (let ((link (org-records-mcp-test--file-link file "*Task")))
+    (pcase tool
+      ((or "org-config-todo" "org-config-tags" "org-config-tag-candidates"
+           "org-config-priority" "org-config-allowed-files" "org-config-clock"
+           "org-clock-active" "org-clock-dangling")
+       nil)
+      ((or "org-file-settings" "org-node-read" "org-node-text" "org-clock-in")
+       `((link . ,link)))
+      ("org-node-set-todo" `((link . ,link) (before . "TODO") (after . "DONE")))
+      ("org-node-create"
+       `((title . "New") (parent . ,(concat "file:" file))))
+      ("org-node-set-title"
+       `((link . ,link) (before . "Task") (after . "Renamed")))
+      ("org-node-set-content"
+       `((link . ,link)
+         (before . ,(org-records-mcp-test--content-digest-of link))
+         (after . "New body.")))
+      ("org-node-set-properties"
+       `((link . ,link) (before . ((EFFORT . "1:00")))
+         (after . ((EFFORT . "2:00")))))
+      ("org-file-set-setting"
+       `((link . ,(concat "file:" file)) (setting . "TITLE") (before . [])
+         (after . ["T"])))
+      ("org-node-set-scheduled"
+       `((link . ,link) (before . "<2026-03-27 Fri>") (after . "2026-04-01")))
+      ("org-node-set-deadline"
+       `((link . ,link) (before . "<2026-03-28 Sat>") (after . "2026-04-02")))
+      ("org-node-add-tags" `((link . ,link) (after . ["urgent"])))
+      ("org-node-remove-tags" `((link . ,link) (after . ["work"])))
+      ("org-node-set-tags"
+       `((link . ,link) (before . ["work"]) (after . ["urgent"])))
+      ("org-node-set-priority" `((link . ,link) (before . "A") (after . "B")))
+      ("org-node-add-note" `((link . ,link) (note . "A note.")))
+      ((or "org-node-delete" "org-node-archive")
+       `((link . ,link) (before . ,(org-records-mcp-test--verbs-digest link))))
+      ("org-node-refile"
+       `((link . ,link)
+         (before . ,(org-records-mcp-test--verbs-digest link))
+         (parent . ,(org-records-mcp-test--file-link file "*Parent"))))
+      ("org-query" '((query . "(todo)")))
+      ("org-view" '((view . "inbox")))
+      ("org-clock-out"
+       (mcp-server-lib-ert-call-tool "org-clock-in" `((link . ,link)))
+       `((link . ,link)))
+      ("org-clock-add"
+       `((link . ,link) (start . "2026-09-22T09:00") (end . "2026-09-22T10:00")))
+      ("org-clock-delete" `((link . ,link) (start . "2026-09-21T09:00")))
+      (_ (ert-fail (format "No valid call of %s to sweep" tool))))))
+
+(defun org-records-mcp-test--null-text-sweep-outcome (tool name value)
+  "Return what TOOL\\='s valid call answers with parameter NAME set to VALUE.
+NAME nil leaves the valid call as it is.  The call runs on a fresh
+file holding `org-records-mcp-test--content-null-text-sweep', and the
+outcome is (REFUSED TEXT IMAGE) with the file named FILE in TEXT, as
+`org-records-mcp-test--object-call-outcome' gives it.  A clock the call
+leaves running is closed after the file is read."
+  (org-records-mcp-test--with-temp-org-files
+      ((file org-records-mcp-test--content-null-text-sweep))
+    (unwind-protect
+        (let* ((params (org-records-mcp-test--null-text-sweep-call tool file))
+               (params
+                (if name
+                    (cons (cons (intern name) value)
+                          (assq-delete-all (intern name) (copy-alist params)))
+                  params))
+               (response
+                (mcp-server-lib-process-jsonrpc-parsed
+                 (mcp-server-lib-create-tools-call-request tool 1 params)
+                 mcp-server-lib-ert-server-id))
+               (result (alist-get 'result response))
+               (text
+                (if result
+                    (alist-get 'text (aref (alist-get 'content result) 0))
+                  (alist-get 'message (alist-get 'error response)))))
+          (list
+           (or (eq (alist-get 'isError result) t)
+               (and (alist-get 'error response) t))
+           (seq-reduce
+            (lambda (text name)
+              (replace-regexp-in-string (regexp-quote name) "FILE" text t t))
+            (list
+             file (abbreviate-file-name file) (file-name-nondirectory file))
+            text)
+           (org-records-mcp-test--read-file file)))
+      (when (org-clock-is-active)
+        (org-clock-out nil t)))))
+
+(ert-deftest org-records-mcp-test-null-text-elsewhere-is-not-null ()
+  "The text null is null in a clearing `after' and in no other parameter.
+Every parameter of every published tool is swept, bar the `after' of
+the tools `org-records-mcp-test--null-text-clearing-tools' names: a call
+valid without it is sent once with the parameter null and once with
+the text null, and the two must be answered differently.  Were the
+text read as null anywhere, that call would get null\\='s answer,
+response and file alike.  Each tool\\='s valid call is checked to go
+through first, so no row compares two refusals of something else."
+  (let ((clearing (org-records-mcp-test--null-text-clearing-tools))
+        (org-archive-location "::* Archived")
+        (org-todo-keywords '((sequence "TODO" "|" "DONE")))
+        (org-log-done nil)
+        (org-records-mcp-views org-records-mcp-test--views)
+        (org-records-mcp-filters org-records-mcp-test--filters)
+        (org-records-mcp-query-sort-fn nil)
+        (surface nil)
+        (swept nil))
+    ;; Each sweep call enables the server on its own file and stops it
+    ;; again, so the surface is read first.
+    (org-records-mcp-test--with-enabled
+      (dolist (tool (org-records-mcp-test--registered-tool-ids))
+        (push (cons tool (org-records-mcp-test--registered-tool-properties tool))
+              surface)))
+    (pcase-dolist (`(,tool . ,names) (nreverse surface))
+      (ert-info (tool :prefix "Tool: ")
+        (should-not
+         (car (org-records-mcp-test--null-text-sweep-outcome tool nil nil)))
+        (dolist (name names)
+          (unless (and (equal name "after") (member tool clearing))
+            (ert-info (name :prefix "Parameter: ")
+              (should-not
+               (equal
+                (org-records-mcp-test--null-text-sweep-outcome tool name nil)
+                (org-records-mcp-test--null-text-sweep-outcome
+                 tool name "null"))))
+            (push (cons tool name) swept)))))
+    ;; The census reached the parameters, not an empty tool list.
+    (should (assoc "org-node-create" swept))
+    (should (member '("org-view" . "filter") swept))))
+
+(ert-deftest org-records-mcp-test-null-text-said-in-the-tool-description ()
+  "A tool whose `after' takes null says the text null is taken too.
+Both the tool\\='s description and its `after' schema description say
+it, since a client may plan from either."
+  (org-records-mcp-test--with-enabled
+    (dolist (entry org-records-mcp-test--null-text-writes)
+      (let ((tool (org-records-mcp-test--registered-tool (car entry))))
+        (ert-info ((car entry) :prefix "Tool: ")
+          (should
+           (string-match-p "the text null" (alist-get 'description tool)))
+          (should
+           (string-match-p
+            "the text null"
+            (alist-get
+             'description
+             (alist-get
+              'after (alist-get 'properties (alist-get 'inputSchema tool)))))))))))
+
 ;;; Reading a subtree in one call
 
 ;; `depth' expands that many generations of children in place, and the
