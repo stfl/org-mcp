@@ -18036,6 +18036,94 @@ a view's range default is stated where the caller reads it."
                  "Configured filters: work, private"))
         (should (string-match-p (regexp-quote line) description))))))
 
+(defconst org-mcp-test--view-catalogue-text
+  "         Every view is <area>-<question>, such as work-next.\n"
+  "The text the catalogue-function tests have their function return.")
+
+(defmacro org-mcp-test--with-view-catalogue (catalogue &rest body)
+  "Run BODY as `org-mcp-test--with-views' does, CATALOGUE writing the views.
+CATALOGUE is the value of `org-mcp-view-catalogue-function'."
+  (declare (indent 1) (debug t))
+  `(org-mcp-test--with-configured-server
+       ((test-file org-mcp-test--content-views))
+       ((org-mcp-views org-mcp-test--views)
+        (org-mcp-filters org-mcp-test--filters)
+        (org-mcp-query-sort-fn nil)
+        (org-mcp-view-catalogue-function ,catalogue))
+     ,@body))
+
+(ert-deftest org-mcp-test-view-catalogue-function-replaces-the-view-lines ()
+  "The catalogue function's text stands where the per-view lines stood.
+The three sentences that point into those lines -- the names below,
+what each takes, the range marked unasked -- give way to ones that
+hold for any text, since nothing in it is marked.  Everything else is
+what the views alone build, so the filters and the other parameters
+are kept."
+  (let ((default
+         (org-mcp-test--with-views
+           (org-mcp-test--registered-tool-description "org-view")))
+        (lines
+         (let ((org-mcp-views org-mcp-test--views))
+           (org-mcp--view-catalogue))))
+    (org-mcp-test--with-view-catalogue
+        (lambda () org-mcp-test--view-catalogue-text)
+      (should
+       (equal
+        (org-mcp-test--registered-tool-description "org-view")
+        (thread-last
+         default
+         (string-replace
+          "Only the names below are accepted"
+          "Only configured views are accepted")
+         (string-replace
+          "Configured views, each with what it takes:\n" "Views:\n")
+         (string-replace
+          "a range runs at the range marked unasked above."
+          "a range runs at its default when the call names none.")
+         (string-replace lines org-mcp-test--view-catalogue-text)))))))
+
+(ert-deftest org-mcp-test-view-catalogue-function-nil-keeps-the-view-lines ()
+  "With no catalogue function the description lists and marks every view.
+The per-view lines are there, and so are the sentences that point
+into them."
+  (org-mcp-test--with-view-catalogue nil
+    (let ((description
+           (org-mcp-test--registered-tool-description "org-view")))
+      (dolist (text
+               (list
+                (let ((org-mcp-views org-mcp-test--views))
+                  (org-mcp--view-catalogue))
+                "Only the names below are accepted"
+                "Configured views, each with what it takes:\n"
+                "a range runs at the range marked unasked above."))
+        (should (string-match-p (regexp-quote text) description))))))
+
+(ert-deftest org-mcp-test-view-catalogue-function-text-ends-its-line ()
+  "Text without a final newline leaves the next parameter on a line of its own."
+  (org-mcp-test--with-view-catalogue
+      (lambda () (string-trim-right org-mcp-test--view-catalogue-text))
+    (should
+     (string-match-p
+      (regexp-quote
+       (concat org-mcp-test--view-catalogue-text "  filter - "))
+      (org-mcp-test--registered-tool-description "org-view")))))
+
+(ert-deftest org-mcp-test-view-catalogue-function-leaves-calls-alone ()
+  "A catalogue function changes what a client reads, not what a call runs.
+A configured view still runs, and an unknown name and an undeclared
+parameter are still refused with the configured vocabulary."
+  (org-mcp-test--with-view-catalogue
+      (lambda () org-mcp-test--view-catalogue-text)
+    (should
+     (equal (org-mcp-test--view-titles '((view . "inbox"))) '("Gamma")))
+    (org-mcp-test--view-refused
+     '((view . "nope"))
+     "Unknown view: nope.  Configured views: inbox, stuck, next, \
+tangling")
+    (org-mcp-test--view-refused
+     '((view . "inbox") (filter . "work"))
+     "The inbox view takes no filter.  It takes no parameters")))
+
 ;;; Property inheritance tests
 ;;
 ;; A property reaches a heading from an ancestor's drawer or from a
