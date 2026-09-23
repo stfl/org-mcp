@@ -1,7 +1,7 @@
 # Triage labels
 
 The skills speak in terms of five canonical triage roles. This file maps those
-roles to the label strings on `stfl/org-mcp`.
+roles to the label strings on `stfl/org-records-mcp`.
 
 | Role in the skills | Label in this tracker | Meaning |
 |---|---|---|

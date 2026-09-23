@@ -23,8 +23,8 @@ actually gets resolved.
 ├── docs/adr/
 │   ├── 0001-scope-override-lasts-one-call.md
 │   └── 0002-unsaved-buffers-are-not-saved.md
-├── org-mcp.el
-└── org-mcp-test.el
+├── org-records-mcp.el
+└── org-records-mcp-test.el
 ```
 
 There is no `CONTEXT-MAP.md`: a single Emacs package is one context.

@@ -19,7 +19,7 @@ moving the file. `org-node-create` and `org-node-refile` still take a file link
 as their `parent`, where it names that file's top level.
 
 We chose this over letting the answer fall out of which tools happen to call
-`org-mcp--goto-heading`, which is how the split arose: the read surface treated
+`org-records-mcp--goto-heading`, which is how the split arose: the read surface treated
 a file as a node and the write surface refused one, so a client could read a
 file's `ID` and had no way to set it. We chose it over widening every tool at
 once, which would have made `org-node-set-title` write `#+TITLE:` — a keyword

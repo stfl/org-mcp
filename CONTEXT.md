@@ -1,6 +1,6 @@
-# org-mcp
+# org-records-mcp
 
-org-mcp gives MCP clients access to Emacs Org-mode: reading, querying and
+org-records-mcp gives MCP clients access to Emacs Org-mode: reading, querying and
 editing Org files through the running Emacs session. This fork shapes it around
 an agile-GTD workflow.
 
@@ -118,7 +118,7 @@ _Avoid_: URI, resource URI, headline path
 ## Writes
 
 **Unsaved change**:
-An edit org-mcp applied to an Emacs buffer that already held the user's own
+An edit org-records-mcp applied to an Emacs buffer that already held the user's own
 unsaved edits. It exists in that buffer but not on disk until the user saves.
 _Avoid_: staged change, dirty write
 

@@ -1,6 +1,6 @@
-#+TITLE: org-mcp
+#+TITLE: org-records-mcp
 
-org-mcp turns your running Emacs into an MCP server over your Org files. An MCP
+org-records-mcp turns your running Emacs into an MCP server over your Org files. An MCP
 client — Claude Code, Claude Desktop, any other — reads your outline, searches it
 with org-ql, and writes back to it through 33 tools and one resource, while the
 files stay where Org keeps them.
@@ -20,37 +20,37 @@ strongly advised.
 * Quickstart
 
 1. Install the package from git — =M-x package-vc-install RET
-   https://github.com/stfl/org-mcp RET=, or in Doom Emacs, in =packages.el=:
+   https://github.com/stfl/org-records-mcp RET=, or in Doom Emacs, in =packages.el=:
 
    #+begin_src emacs-lisp
-   (package! org-mcp
-     :recipe (:host github :repo "stfl/org-mcp"
-              :files (:defaults "org-mcp-stdio.sh")))
+   (package! org-records-mcp
+     :recipe (:host github :repo "stfl/org-records-mcp"
+              :files (:defaults "org-records-mcp-stdio.sh")))
    #+end_src
 
-   MELPA carries upstream org-mcp, not this fork; [[file:docs/installation.org][Installing org-mcp]] has the
+   MELPA carries upstream org-mcp, not this fork; [[file:docs/installation.org][Installing org-records-mcp]] has the
    difference and the other routes.
 
 2. Decide which files clients may touch. With an agenda already configured,
-   there is nothing to do: org-mcp falls back to =org-agenda-files=. Otherwise
+   there is nothing to do: org-records-mcp falls back to =org-agenda-files=. Otherwise
    name them, absolute or relative to =org-directory=:
 
    #+begin_src emacs-lisp
-   (setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+   (setq org-records-mcp-allowed-files '("inbox.org" "projects/work.org"))
    #+end_src
 
 3. Install the two stdio shims and start the server, in Emacs:
 
    #+begin_example
    M-x mcp-server-lib-install RET
-   M-x org-mcp-install RET
+   M-x org-records-mcp-install RET
    M-x mcp-server-lib-start RET
    #+end_example
 
 4. Register the server with your client:
 
    #+begin_src bash
-   claude mcp add -s user -t stdio org-mcp -- ~/.emacs.d/org-mcp-stdio.sh
+   claude mcp add -s user -t stdio org-records-mcp -- ~/.emacs.d/org-records-mcp-stdio.sh
    #+end_src
 
 A client that then calls =org-node-read= with
@@ -89,15 +89,15 @@ the next call sends — the same text =org-store-link= gives you in Emacs.
   your unsaved edits stays in that buffer and answers =saved: false=; the file on
   disk keeps what it had until you save.
 - *It reaches the files you allow, and no others.* A file outside
-  =org-mcp-allowed-files= is refused unless =org-mcp-file-scope-override= permits
+  =org-records-mcp-allowed-files= is refused unless =org-records-mcp-file-scope-override= permits
   it, and then for one call only. Remote (TRAMP) paths are refused before a
   connection is opened, and so are encrypted =.org.gpg= files. A clock running
   in a file outside them is out of reach as well: neither clock tool closes it,
-  and org-mcp discloses nothing about it — not its file, not its heading, not
+  and org-records-mcp discloses nothing about it — not its file, not its heading, not
   when it started — so you clock out of it in Emacs yourself.
 - *It refuses a read that would return too much.* A read expands as many
   generations of a heading's children as you ask for, and stops at
-  =org-mcp-read-max-nodes= nodes, 500 by default. Past that the call is refused,
+  =org-records-mcp-read-max-nodes= nodes, 500 by default. Past that the call is refused,
   naming the heading it stopped at so you can read that one instead. It is never
   trimmed to fit, because a shortened answer that does not say so reads like a
   complete one.
@@ -115,19 +115,19 @@ the next call sends — the same text =org-store-link= gives you in Emacs.
 * Requirements
 
 Emacs 30.1 or later, with =mcp-server-lib= and =org-ql=. CI covers Emacs 30.2 and
-31.1 on Linux and macOS. [[file:docs/installation.org][Installing org-mcp]] carries the dependency versions.
+31.1 on Linux and macOS. [[file:docs/installation.org][Installing org-records-mcp]] carries the dependency versions.
 
 * Where to go next
 
-| Page                                                      | Answers                                                             |
-|-----------------------------------------------------------+---------------------------------------------------------------------|
-| [[file:docs/installation.org][Installing org-mcp]]        | Installing the package and the shims, registering an MCP client     |
-| [[file:docs/file-access.org][Which files a call reaches]] | The allowed files, naming a file outside them, finding an ID's file |
-| [[file:docs/links.org][Addressing headings with links]]   | The link forms a call takes, what is refused, what comes back       |
+| Page                           | Answers                                                             |
+|--------------------------------+---------------------------------------------------------------------|
+| [[file:docs/installation.org][Installing org-records-mcp]]     | Installing the package and the shims, registering an MCP client     |
+| [[file:docs/file-access.org][Which files a call reaches]]     | The allowed files, naming a file outside them, finding an ID's file |
+| [[file:docs/links.org][Addressing headings with links]] | The link forms a call takes, what is refused, what comes back       |
 | [[file:docs/reading.org][Reading Org content]]            | The =org://{link}= resource, the read tools, the discovery tools    |
 | [[file:docs/writing.org][Changing Org content]]           | What a write does to your buffers and your files, every write tool  |
 | [[file:docs/queries.org][Searching and GTD queries]]      | org-ql queries, and the views a caller runs by name                 |
-| [[file:docs/clocking.org][Clock tracking]]                | Clocking in and out, adding, deleting and repairing clock entries   |
+| [[file:docs/clocking.org][Clock tracking]]                 | Clocking in and out, adding, deleting and repairing clock entries   |
 
 Changing the code is [[file:CONTRIBUTING.org][CONTRIBUTING]]: the devshell, the checks, and what a change owes
 the documentation.

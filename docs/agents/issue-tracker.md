@@ -1,10 +1,10 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues on `stfl/org-mcp`. Use the
+Issues and specs for this repo live as GitHub issues on `stfl/org-records-mcp`. Use the
 `gh` CLI for all operations.
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run
-inside a clone. `origin` is `stfl/org-mcp`, the fork this work happens on;
+inside a clone. `origin` is `stfl/org-records-mcp`, the fork this work happens on;
 `upstream` is `laurynas-biveinis/org-mcp` and has its own tracker. A ticket
 about this fork's roadmap goes to `origin`. Only a defect that reproduces
 against upstream belongs on `upstream`, and that is a decision Stefan makes,
@@ -41,9 +41,9 @@ and naming its blockers in its body. The link takes the issue's database `id`,
 not its number, and appends to the list, so link a set in dependency order:
 
 ```sh
-id=$(gh api repos/stfl/org-mcp/issues/<n> --jq .id)
-gh api -X POST repos/stfl/org-mcp/issues/<umbrella>/sub_issues -F sub_issue_id="$id"
-gh api repos/stfl/org-mcp/issues/<umbrella>/sub_issues --paginate --jq '.[] | "#\(.number) \(.state)"'
+id=$(gh api repos/stfl/org-records-mcp/issues/<n> --jq .id)
+gh api -X POST repos/stfl/org-records-mcp/issues/<umbrella>/sub_issues -F sub_issue_id="$id"
+gh api repos/stfl/org-records-mcp/issues/<umbrella>/sub_issues --paginate --jq '.[] | "#\(.number) \(.state)"'
 ```
 
 The umbrella's body carries the spec. Its `## Tickets` section says the children
@@ -84,7 +84,7 @@ either: resolve with `gh pr view 42` and fall back to `gh issue view 42`.
 
 ## When a skill says "publish to the issue tracker"
 
-Create a GitHub issue on `stfl/org-mcp`.
+Create a GitHub issue on `stfl/org-records-mcp`.
 
 ## When a skill says "fetch the relevant ticket"
 

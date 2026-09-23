@@ -34,7 +34,7 @@ expressive at top level.
 
 **Not `org-node-set-properties`.** Key omission in a property map already
 carries a different, load-bearing meaning: *this call does not touch this
-property*. `org-mcp--asserted-property-values` holds `before` and `after` to a
+property*. `org-records-mcp--asserted-property-values` holds `before` and `after` to a
 strict bijection, refusing by name a property `after` writes that `before` omits
 and a property `before` names that `after` leaves alone, so an absent key there
 can only ever mean "not part of this call". Giving it a second meaning would
@@ -47,7 +47,7 @@ an empty DEADLINE spelled out.
 
 **Not `org-clock-in`'s `clock_out`**, which is optional at top level and whose
 blank already means no clock is running. That is a different mechanism rather
-than a variant of this one: it is checked against what `org-mcp--clock-find-active`
+than a variant of this one: it is checked against what `org-records-mcp--clock-find-active`
 observes at the moment of the call, an independently observable fact, so a
 client that forgot the parameter gets the same refusal as one that lied about
 it. Nothing there rests on the client having meant its silence.

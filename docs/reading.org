@@ -17,42 +17,42 @@ for. A key that is there has a value: nothing is ever sent as =null=. A key that
 is not there is either a field with nothing in it or a field the call never
 asked for, and the call tells the two apart, because it knows what it asked for.
 
-| Field        | Carries                                                                             |
-|--------------+-------------------------------------------------------------------------------------|
-| =title=      | the heading's title, or a file's =#+TITLE:= and its own file name when it sets none |
-| =todo=       | the TODO state                                                                      |
-| =priority=   | the priority letter                                                                 |
-| =tags=       | the tags in effect on the heading                                                   |
-| =local_tags= | the tags written on the heading itself                                              |
-| =scheduled=  | the =SCHEDULED:= timestamp                                                          |
-| =deadline=   | the =DEADLINE:= timestamp                                                           |
-| =closed=     | the =CLOSED:= timestamp                                                             |
-| =file=       | the absolute path of the file the node lives in                                     |
-| =id=         | the ID the node's =link= names                                                      |
-| =level=      | the heading level, =0= for a file                                                   |
-| =link=       | the link that names this node again                                                 |
-| =content=    | the body text, or a file's preamble before its first heading                        |
-| =content_digest= | an opaque token over the region =content= is read from                          |
-| =digest=     | an opaque token over the node's whole subtree                                        |
-| =children=   | the direct children: references, or whole nodes as far as =depth= expands them      |
+| Field            | Carries                                                                             |
+|------------------+-------------------------------------------------------------------------------------|
+| =title=          | the heading's title, or a file's =#+TITLE:= and its own file name when it sets none |
+| =todo=           | the TODO state                                                                      |
+| =priority=       | the priority letter                                                                 |
+| =tags=           | the tags in effect on the heading                                                   |
+| =local_tags=     | the tags written on the heading itself                                              |
+| =scheduled=      | the =SCHEDULED:= timestamp                                                          |
+| =deadline=       | the =DEADLINE:= timestamp                                                           |
+| =closed=         | the =CLOSED:= timestamp                                                             |
+| =file=           | the absolute path of the file the node lives in                                     |
+| =id=             | the ID the node's =link= names                                                      |
+| =level=          | the heading level, =0= for a file                                                   |
+| =link=           | the link that names this node again                                                 |
+| =content=        | the body text, or a file's preamble before its first heading                        |
+| =content_digest= | an opaque token over the region =content= is read from                              |
+| =digest=         | an opaque token over the node's whole subtree                                       |
+| =children=       | the direct children: references, or whole nodes as far as =depth= expands them      |
 
 Two things a node carries are not fields, because their names are yours rather
-than org-mcp's: a drawer holds =TITLE= as readily as =Effort=. Each is asked
+than org-records-mcp's: a drawer holds =TITLE= as readily as =Effort=. Each is asked
 for in a parameter of its own and arrives under one key, so no name of yours
 can shadow a field:
 
-| Key          | Carries                                                                |
-|--------------+------------------------------------------------------------------------|
-| =properties= | the Org drawer properties the call named (see [[*Asking for properties][Asking for properties]])       |
+| Key          | Carries                                                                 |
+|--------------+-------------------------------------------------------------------------|
+| =properties= | the Org drawer properties the call named (see [[*Asking for properties][Asking for properties]])    |
 | =computed=   | what a workflow computes for this node (see [[*Asking for computed fields][Asking for computed fields]]) |
 
 They stay apart in the answer because they answer different questions. A
 property is in the file and survives a write back. A computed field is
-org-mcp's answer at the moment you read it, belongs to no drawer, and no write
+org-records-mcp's answer at the moment you read it, belongs to no drawer, and no write
 puts it back — merged into one object you could not tell which was which
 without reading someone's Emacs configuration.
 
-Which form a node's =link= takes is [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]. A file's is the
+Which form a node's =link= takes is [[file:links.org::*Links org-records-mcp returns][Links org-records-mcp returns]]. A file's is the
 =id:= link of its own property drawer when the file has one, and
 =file:/path/to/file.org= otherwise; either names the whole file in a later
 call.
@@ -155,8 +155,8 @@ asked of the parent: to see more of that child, expand it with =depth= (see
 
 *** Naming a list of fields
 
-The named lists are =org-mcp-node-field-lists=, which is user configuration
-rather than a set org-mcp decides on. Two come configured:
+The named lists are =org-records-mcp-node-field-lists=, which is user configuration
+rather than a set org-records-mcp decides on. Two come configured:
 
 | Name        | Fields                           |
 |-------------+----------------------------------|
@@ -167,7 +167,7 @@ Setting the variable replaces them, so a workflow that wants to keep either
 lists it alongside its own:
 
 #+begin_src emacs-lisp
-(setq org-mcp-node-field-lists
+(setq org-records-mcp-node-field-lists
       '((reference link)
         (outline   title todo level link)
         (planning  title todo scheduled deadline link)))
@@ -255,11 +255,11 @@ trip rather than being written away.
 Two group names, sent as a string rather than an array, stand for the whole
 drawer and for none of it:
 
-| =properties=          | Returns                           |
-|-----------------------+-----------------------------------|
-| =["Effort", "Owner"]= | those two, if the node has them   |
-| ="all"=               | every property the drawer holds   |
-| ="none"=              | no =properties= key at all        |
+| =properties=          | Returns                         |
+|-----------------------+---------------------------------|
+| =["Effort", "Owner"]= | those two, if the node has them |
+| ="all"=               | every property the drawer holds |
+| ="none"=              | no =properties= key at all      |
 
 What each endpoint carries when the call sends no =properties= follows from
 what the call is for:
@@ -304,21 +304,21 @@ where a value is inherited is [[file:writing.org::*Inherited properties][Inherit
 
 A computed field is a value a workflow works out for a node as it is read — a
 ranking, the priority of a parent, whatever the workflow sorts and groups by.
-It is org-mcp's answer at that moment: it belongs to no drawer, and no write
+It is org-records-mcp's answer at that moment: it belongs to no drawer, and no write
 puts it back.
 
-Which ones exist is =org-mcp-computed-fields=, which is your configuration.
+Which ones exist is =org-records-mcp-computed-fields=, which is your configuration.
 Each entry pairs the name a call asks for with a function called at the node
 while the response is built:
 
 #+begin_src emacs-lisp
-(setq org-mcp-computed-fields
+(setq org-records-mcp-computed-fields
       '((rank            . my-rank-fn)
         (parent-priority . my-parent-priority-fn)))
 #+end_src
 
 Nothing is configured out of the box: what is worth computing is your
-workflow's question rather than org-mcp's. Until you set the variable, ="all"=
+workflow's question rather than org-records-mcp's. Until you set the variable, ="all"=
 is empty and every name is refused.
 
 The =computed= parameter then works as =properties= does — an array of names,
@@ -342,13 +342,13 @@ A function that answers with nothing leaves its field out, as an empty field
 is left out. A name nobody configured is refused, and the refusal names the
 ones that are.
 
-| A node from                 | Carries unasked       |
-|-----------------------------+-----------------------|
-| =org-node-read=             | no computed fields    |
-| the =org://{link}= resource | no computed fields    |
-| =org-query=                 | every computed field  |
-| a child the call expanded   | its parent's          |
-| a child it did not          | no computed fields    |
+| A node from                 | Carries unasked      |
+|-----------------------------+----------------------|
+| =org-node-read=             | no computed fields   |
+| the =org://{link}= resource | no computed fields   |
+| =org-query=                 | every computed field |
+| a child the call expanded   | its parent's         |
+| a child it did not          | no computed fields   |
 
 A query carries them all because a workflow configures them for the matches it
 ranks; a read carries none, because a client asks for what it knows what to do
@@ -400,13 +400,13 @@ so =depth= changes nothing for it.
 
 *** The ceiling on one read
 
-A read returns at most =org-mcp-read-max-nodes= nodes, 500 by default. A walk
+A read returns at most =org-records-mcp-read-max-nodes= nodes, 500 by default. A walk
 that wants more is refused, and the refusal names the node it stopped at:
 
 #+begin_example
 Too many nodes: more than 500.  The walk stops at
 file:/home/user/org/projects.org::*Collect the numbers: ask for a shallower
-depth, or read that node on its own.  org-mcp-read-max-nodes sets the ceiling
+depth, or read that node on its own.  org-records-mcp-read-max-nodes sets the ceiling
 #+end_example
 
 The named node is a link, so the two remedies are both a call you can make: ask
@@ -418,7 +418,7 @@ whose top-level headings alone pass the ceiling is refused without any =depth=
 at all. Raise the setting if that is the size of file you work with:
 
 #+begin_src emacs-lisp
-(setq org-mcp-read-max-nodes 2000)
+(setq org-records-mcp-read-max-nodes 2000)
 #+end_src
 
 Nothing is ever trimmed to fit. A shortened subtree that did not say it was
@@ -430,7 +430,7 @@ way to find out otherwise.
 =tags= is the set of tags in effect on the heading; =local_tags= is the part of
 it written on the heading itself — /local/ to the heading, not to this machine.
 Which of a parent's or a file's tags reach a heading is Org's decision, not
-org-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
+org-records-mcp's: the answer follows =org-use-tag-inheritance=, whether it is =t=,
 =nil=, a list of tags or a regexp, and =org-tags-exclude-from-inheritance=
 names the tags no heading inherits whatever the first says.
 =org-config-tags= reports both values, so a client can tell which policy
@@ -455,7 +455,7 @@ from: for a heading, the region =org-node-set-content= writes within, and for a
 file, its preamble.
 
 A token is opaque. It says which version of a region you read, and the way to
-use one is to send back the token you were given. How org-mcp builds one is
+use one is to send back the token you were given. How org-records-mcp builds one is
 written down anyway — =sha256:= followed by the first 16 hexadecimal characters
 of the SHA-256 of the region's text as UTF-8 bytes — so that the server's
 answer can be checked rather than taken on trust. That is not an invitation to
@@ -477,7 +477,7 @@ the subtree below it.
 Read a token on the read immediately before you act on it, rather than from a
 list you kept. =digest= takes in the heading's =:LOGBOOK:= drawer and its
 =CLOCK:= lines, which move as notes and clocks are written — including by
-org-mcp's own clock tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier
+org-records-mcp's own clock tools (see [[file:clocking.org][Clock tracking]]) — so a token kept from an earlier
 call can name a version that the client's own clocking has left behind. A body
 starts past those lines, so =content_digest= moves for what is written into the
 body itself, a log note Org keeps outside a drawer among it.
@@ -506,10 +506,10 @@ held (see [[file:writing.org::*A file's own property drawer][A file's own proper
   much of the node it wants, so the resource always serves the default node,
   its children as references. It carries no =properties= or =computed=
   parameter for the same reason, and serves neither.
-- *Configuration:* Files must be explicitly allowed via =org-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-mcp-file-scope-override=
+- *Configuration:* Files must be explicitly allowed via =org-records-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-records-mcp-file-scope-override=
 - *Returns:* the node the link names, with every field but the two digests, and no properties and no computed fields (see [[*The node][The node]])
 
-The link is percent-encoded like any URI path, and org-mcp decodes it exactly
+The link is percent-encoded like any URI path, and org-records-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
 =%3F=, spaces, =[= and =]=; encoding more, as =encodeURIComponent= does, works
 as well. Non-ASCII characters may be sent encoded as UTF-8 or raw. A literal
@@ -534,7 +534,7 @@ take a native Org link (see [[file:links.org::*Addressing headings with links][A
 their =link= parameter, passed as is with no percent-encoding and
 *without* the =org://= prefix; a tool refuses a string that starts with
 it. The =link= fields of tool and resource /responses/ carry native Org
-links (see [[file:links.org::*Links org-mcp returns][Links org-mcp returns]]): a tool takes one back as it is,
+links (see [[file:links.org::*Links org-records-mcp returns][Links org-records-mcp returns]]): a tool takes one back as it is,
 and the resource takes it percent-encoded, as in the table above.
 
 * Read Tools
@@ -559,7 +559,7 @@ tool-only variant with no resource counterpart.
   - =computed= (array of strings, or a string, optional): which computed fields to return; an array of names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but the two digests when it asked for none, plus what =properties= and =computed= named (see [[*The node][The node]])
-- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+- *Configuration:* File must be in =org-records-mcp-allowed-files=, or permitted by =org-records-mcp-file-scope-override=
 
 ** org-node-text
 - *Description:* Read Org file or heading as plain text
@@ -569,7 +569,7 @@ tool-only variant with no resource counterpart.
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - returns entire file
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
 - *Returns:* Plain text content of the file, or of the heading and its subtree
-- *Configuration:* File must be in =org-mcp-allowed-files=, or permitted by =org-mcp-file-scope-override=
+- *Configuration:* File must be in =org-records-mcp-allowed-files=, or permitted by =org-records-mcp-file-scope-override=
 - *Note:* Use this when you need plain text instead of structured JSON
 
 What comes back is the subtree region =digest= is taken over, with the line
@@ -776,12 +776,12 @@ Example response:
 #+end_src
 
 ** org-config-allowed-files
-- *Description:* Get the list of Org files accessible through the org-mcp
+- *Description:* Get the list of Org files accessible through the org-records-mcp
   server, and whether a call may name Org files outside them
 - *Parameters:* None
 - *Returns:* JSON object with:
   - =files=: array of absolute paths of the allowed Org files
-  - =override_allowed=: whether =org-mcp-file-scope-override= permits a call
+  - =override_allowed=: whether =org-records-mcp-file-scope-override= permits a call
     to name an Org file outside the allowed files
   - =override_roots=: absolute paths of the directories under which a named
     Org file is permitted; present only when the setting is a list of
@@ -792,7 +792,7 @@ Use cases:
 - Discovery: "What Org files can I access through MCP?"
 - Link Construction: "I need to build a =file:= link - what's the exact path?"
 - Access Troubleshooting: "Why is my file access failing?"
-- Configuration Verification: "Did my org-mcp-allowed-files setting work correctly?"
+- Configuration Verification: "Did my org-records-mcp-allowed-files setting work correctly?"
 
 Example response:
 #+begin_src json

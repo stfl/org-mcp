@@ -1,13 +1,13 @@
-# org-mcp is verified against one configuration
+# org-records-mcp is verified against one configuration
 
-org-mcp behaves as a regular Org session, and it does that by not deciding
+org-records-mcp behaves as a regular Org session, and it does that by not deciding
 anything Org already decides. A write goes through `org-todo`,
 `org-archive-subtree`, `org-clock-clock-out`, `org-schedule`, `org-deadline` and
 `org-refile`, so the settings governing logging, blocking, drawers and done
 transitions are read by Org at the moment it acts. `org-log-done`,
 `org-log-repeat`, `org-log-into-drawer`, `org-clock-out-when-done`,
 `org-enforce-todo-dependencies` and `org-archive-mark-done` appear in
-`org-mcp.el` only in docstrings: nothing reads them, because nothing has to.
+`org-records-mcp.el` only in docstrings: nothing reads them, because nothing has to.
 That is the claim, and delegation is what makes it cheap to keep.
 
 A claim nothing exercises is a wish, so this record fixes what backs it. A
@@ -18,10 +18,10 @@ regexp. A setting bound once to make a fixture parse is not verified by being
 bound: pinning `org-priority-highest` to Org's own default keeps an assertion
 deterministic and says nothing about a session that moves the range.
 `docs/verified-settings.org` carries the list, is written for the user asking
-whether org-mcp fits their Org, and is the page a parked ticket points at.
+whether org-records-mcp fits their Org, and is the page a parked ticket points at.
 
 Settings outside that list are **untested, not unsupported**. Org reads them
-itself, so its behaviour applies and most of them will simply work; what org-mcp
+itself, so its behaviour applies and most of them will simply work; what org-records-mcp
 does not have is evidence. Saying so is the honest position, and it is also the
 useful one, because it tells a reader which of their settings puts them ahead of
 the suite. We chose this over claiming support for Org's configuration surface
@@ -29,13 +29,13 @@ as a whole, which nothing could check and which the first counter-example would
 falsify. We chose it over refusing to run under a setting the suite does not
 cover, which would break sessions that work today to defend a claim nobody made.
 And we chose it over enumerating every Org variable with a verdict beside it:
-the settings org-mcp never reads have no verdict to give that is not Org's, and
-a table asserting one for each would assert exactly what this record says org-mcp
+the settings org-records-mcp never reads have no verdict to give that is not Org's, and
+a table asserting one for each would assert exactly what this record says org-records-mcp
 does not know.
 
-org-mcp answers for the Emacs it runs in, and for one Emacs. Org keeps element
+org-records-mcp answers for the Emacs it runs in, and for one Emacs. Org keeps element
 caches in a store shared by every Emacs using the same `org-persist-directory`,
-and a second Emacs exiting can delete a file the first is reading back. org-mcp
+and a second Emacs exiting can delete a file the first is reading back. org-records-mcp
 does not defend against that: the boundary is the process, and a peer editing
 Org's shared state from outside it is Org's own concern. The test suite gives
 its run a private store, which is isolation of the tests and not a claim about

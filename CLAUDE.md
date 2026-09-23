@@ -3,12 +3,12 @@
 Guidance for agents changing this repository. It builds on the user's global
 guidelines at `~/.claude/CLAUDE.md`.
 
-org-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful,
+org-records-mcp is a thin MCP adapter on top of Org-mode. Its value is a faithful,
 stable mapping between MCP primitives and Org's existing semantics, so the
 default answer to "how do I parse/navigate/clock this?" is an Org function that
 already does it. `CONTRIBUTING.org` holds that rule with the table of APIs to
 reach for, the devshell, the checks and the test conventions. Read it before
-touching `org-mcp.el` or `org-mcp-test.el`.
+touching `org-records-mcp.el` or `org-records-mcp-test.el`.
 
 ## Commands
 
@@ -32,7 +32,7 @@ A failing lint stage leaves `.lint-output.txt`; the test run always leaves
   `defcustom`s are the obvious ones; a public variable, what the `initialize`
   handshake reports, and a refusal message a client acts on count too.
   `CONTRIBUTING.org`, "What a change owes the documentation", maps each to its
-  page. The README changes only when what org-mcp *is* or what it costs to run
+  page. The README changes only when what org-records-mcp *is* or what it costs to run
   changes.
 - **A claim your change makes in a docstring, a refusal message or an ADR is
   almost always universal, and a test that exhibits one case does not check
@@ -73,7 +73,7 @@ human-facing page links to them.
 
 ### Issue tracker
 
-GitHub issues on `stfl/org-mcp`, driven through `gh`, with an umbrella issue per
+GitHub issues on `stfl/org-records-mcp`, driven through `gh`, with an umbrella issue per
 body of work and its children linked as its sub-issues in dependency order. See
 `docs/agents/issue-tracker.md`.
 

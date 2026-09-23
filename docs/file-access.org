@@ -1,6 +1,6 @@
 #+TITLE: Which files a call reaches
 
-This page answers which Org files org-mcp may read and write: the allowed
+This page answers which Org files org-records-mcp may read and write: the allowed
 files, how a single call names a file outside them, and how a call points an
 =id:= link at a file Emacs has not indexed. The [[file:../README.org][README]] introduces the
 server itself.
@@ -10,28 +10,28 @@ server itself.
 Once you read and internalized the [[file:../README.org][warning about write access]], decide which
 Org files MCP clients may touch.
 
-By default, =org-mcp-allowed-files= is nil and org-mcp falls back to
+By default, =org-records-mcp-allowed-files= is nil and org-records-mcp falls back to
 =org-agenda-files=.  If your agenda already lists the right files, no extra
-configuration is needed.  Set =org-mcp-allowed-files= explicitly to expose a
+configuration is needed.  Set =org-records-mcp-allowed-files= explicitly to expose a
 different (or narrower) set:
 
 #+begin_src emacs-lisp
-;; Default: nil — org-mcp uses `org-agenda-files'
+;; Default: nil — org-records-mcp uses `org-agenda-files'
 
 ;; Absolute paths
-(setq org-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
+(setq org-records-mcp-allowed-files '("/path/to/foo.org" "/path/to/bar.org"))
 
 ;; Relative paths (resolved against `org-directory', same convention as
 ;; `org-agenda-files'; tilde and environment variables also expand)
 (setq org-directory "~/org")
-(setq org-mcp-allowed-files '("inbox.org" "projects/work.org"))
+(setq org-records-mcp-allowed-files '("inbox.org" "projects/work.org"))
 #+end_src
 
 Absolute and relative entries allow a file alike, and either way a call
 reaches it through a =file:= link with its absolute path; a link with a
 relative path is refused.
 
-Every entry names a file.  A directory listed in =org-mcp-allowed-files= is
+Every entry names a file.  A directory listed in =org-records-mcp-allowed-files= is
 ignored and makes none of the files under it reachable.  Directories in
 =org-agenda-files= work as they do for the agenda: Org expands each one into
 the Org files directly inside it, and those files are allowed.
@@ -39,7 +39,7 @@ the Org files directly inside it, and those files are allowed.
 * Configuring the scope override
 
 A call can name an Org file outside the allowed files by passing its path.
-=org-mcp-file-scope-override= decides whether that is permitted:
+=org-records-mcp-file-scope-override= decides whether that is permitted:
 
 - =nil= (the default) :: refuse.  Only the allowed files are reachable.
 - a list of directories :: permit any Org file under one of these directories.
@@ -50,13 +50,13 @@ A call can name an Org file outside the allowed files by passing its path.
 
 #+begin_src emacs-lisp
 ;; Default: refuse files outside the allowed files
-(setq org-mcp-file-scope-override nil)
+(setq org-records-mcp-file-scope-override nil)
 
 ;; Permit Org files under these directories
-(setq org-mcp-file-scope-override '("~/decisions" "~/src"))
+(setq org-records-mcp-file-scope-override '("~/decisions" "~/src"))
 
 ;; Permit every Org file Emacs can read and write
-(setq org-mcp-file-scope-override t)
+(setq org-records-mcp-file-scope-override t)
 #+end_src
 
 The setting governs reading and writing alike.  The permission lasts for the
@@ -88,7 +88,7 @@ among the allowed files, and a remote directory in the list permits nothing.
 
 =org-node-refile= writes two files when the new parent is in another one. Both
 are checked here like any file a call names: the destination goes through the
-allowed files and =org-mcp-file-scope-override= exactly as the file the node
+allowed files and =org-records-mcp-file-scope-override= exactly as the file the node
 came from did, so filing a node into another project cannot become a way to
 write somewhere a call may not reach.
 
@@ -124,7 +124,7 @@ to an Org file or to a directory, and a relative path is refused, since it has
 no directory to resolve against but whichever buffer is current in Emacs:
 
 - a file is checked like any file a call names: one outside the allowed files
-  is accepted only as far as =org-mcp-file-scope-override= permits;
+  is accepted only as far as =org-records-mcp-file-scope-override= permits;
 - a directory the setting permits, anywhere under =t= or inside a listed
   directory, is searched recursively for the Org files Org takes from a
   directory in =org-agenda-files=: names matching =org-agenda-file-regexp=, by
@@ -157,10 +157,10 @@ parameter.
 
 * Naming the file of an ID
 
-An =id:= link names no file, so org-mcp finds the ID through Emacs's ID index
+An =id:= link names no file, so org-records-mcp finds the ID through Emacs's ID index
 and reaches it only in the allowed files.  An ID in a file Emacs has not
 indexed is not found that way, and looking up an ID the index lacks makes
-org-mcp rescan the index, as Org does, reading every file Org knows, which can
+org-records-mcp rescan the index, as Org does, reading every file Org knows, which can
 freeze Emacs for seconds.
 
 Every tool that names a heading takes a =files= parameter for this: an array
@@ -173,7 +173,7 @@ named.
 
 - Entries are checked, and directories searched, as for the query tools (see
   [[*Querying other files]]): a file outside the allowed files is reached only
-  as far as =org-mcp-file-scope-override= permits, for that call alone.
+  as far as =org-records-mcp-file-scope-override= permits, for that call alone.
 - The first file that holds the ID wins.  Files are tried in the order of the
   entries.  A searched directory's files come depth first: each
   subdirectory's files before the files beside them, and each directory's
@@ -191,7 +191,7 @@ named.
   applies to =parent= only.  It looks the sibling of =previous_sibling= up in
   the parent's file, with or without =files=, since the sibling must be a
   child of the parent, so =previous_sibling= may be any link, such as the
-  =file:= link org-mcp returns for a child without an =ID=.
+  =file:= link org-records-mcp returns for a child without an =ID=.
 - =org-clock-in= looks the =id:= link of =link= up in =files=, which applies
   to =link= only.  It looks the =id:= link of =clock_out= up in the running
   clock's file, with or without =files=, since =clock_out= must name the

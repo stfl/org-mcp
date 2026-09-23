@@ -6,7 +6,7 @@
 ;;
 ;;   emacs -Q --batch -l scripts/format-elisp.el FILE...
 ;;
-;; `just fmt' runs it on org-mcp.el.  The devshell provides Emacs 31
+;; `just fmt' runs it on org-records-mcp.el.  The devshell provides Emacs 31
 ;; with elisp-autofmt, and the Python its formatter runs on, so every
 ;; machine gets the same layout.
 ;;
@@ -18,7 +18,7 @@
 ;;   so the formatter indents cl-defun, cl-flet and cl-labels as they
 ;;   declare.
 ;; - `fill-column' is 70, the width the code is laid out for, which
-;;   org-mcp.el also carries as a file-local variable for an editing
+;;   org-records-mcp.el also carries as a file-local variable for an editing
 ;;   session.  Batch Emacs refuses .dir-locals.el as a whole, because
 ;;   it holds a variable not marked safe, so local variables are off
 ;;   here and the width is set directly.
@@ -48,7 +48,7 @@
 (setq elisp-autofmt-cache-directory
       (expand-file-name ".elisp-autofmt-cache"))
 
-(defconst org-mcp-format--passing-messages
+(defconst org-records-mcp-format--passing-messages
   '("elisp-autofmt: using an out of date cache "
     "elisp-autofmt: unable to generate "
     "elisp-autofmt: unable to find library "
@@ -64,12 +64,12 @@ earlier cache to format from.  When the definitions run out entirely,
 elisp-autofmt says \"not formatted\" instead, which is not here and so
 fails.")
 
-(defun org-mcp-format--buffer ()
+(defun org-records-mcp-format--buffer ()
   "Format the current buffer, signaling when elisp-autofmt complains.
 `elisp-autofmt-buffer' reports a failure, such as unbalanced
 parentheses or a formatter that will not run, by `message' and leaves
 the buffer as it is.  Its complaints all begin with \"elisp-autofmt:
-\", so every one that `org-mcp-format--passing-messages' does not
+\", so every one that `org-records-mcp-format--passing-messages' does not
 cover is collected here and raised, which is what makes `just fmt'
 fail on a file it did not format."
   (let ((complaints nil)
@@ -83,7 +83,7 @@ fail on a file it did not format."
                                  (seq-some
                                   (lambda (passing)
                                     (string-prefix-p passing text))
-                                  org-mcp-format--passing-messages)))
+                                  org-records-mcp-format--passing-messages)))
                        (push text complaints))))
                  (apply message-fn format-string args))))
       (elisp-autofmt-buffer))
@@ -97,7 +97,7 @@ fail on a file it did not format."
     (with-current-buffer (find-file-noselect file)
       (setq-local elisp-autofmt-load-packages-local '("cl-macs"))
       (setq-local fill-column 70)
-      (org-mcp-format--buffer)
+      (org-records-mcp-format--buffer)
       (let ((save-silently t))
         (save-buffer))
       (kill-buffer))))

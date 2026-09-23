@@ -8,4 +8,4 @@ one merged map, which is convenient and a correctness bug: a client cannot see
 which values the file holds and which are this server's answer at read time, so
 the next write puts our opinion into the user's file. The same decision rules
 out a setting that merges a workflow's answers into the node's own keys, which
-is what `org-mcp-ql-extra-properties` did on the query path alone.
+is what `org-records-mcp-ql-extra-properties` did on the query path alone.

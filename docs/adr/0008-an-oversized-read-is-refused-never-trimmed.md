@@ -1,6 +1,6 @@
 # An oversized read is refused, never trimmed
 
-A read whose walk would carry more nodes than `org-mcp-read-max-nodes` is
+A read whose walk would carry more nodes than `org-records-mcp-read-max-nodes` is
 refused, and the refusal names the node the walk stopped at and the two remedies
 — a shallower `depth`, or a read of that node on its own. The ceiling counts the
 nodes the response carries rather than the levels it descends, because a level

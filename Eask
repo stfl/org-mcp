@@ -1,10 +1,10 @@
 ;; -*- mode: eask; lexical-binding: t -*-
 
-(package "org-mcp"
+(package "org-records-mcp"
          "0.9.0"
          "MCP server for Org-mode")
 
-(website-url "https://github.com/laurynas-biveinis/org-mcp")
+(website-url "https://github.com/stfl/org-records-mcp")
 (keywords "convenience" "files" "matching" "outlines")
 
 (source "melpa")
@@ -15,12 +15,12 @@
 
 (setq network-security-level 'low)
 
-(package-file "org-mcp.el")
+(package-file "org-records-mcp.el")
 
-(files "org-mcp.el"
-       "org-mcp-stdio.sh")
+(files "org-records-mcp.el"
+       "org-records-mcp-stdio.sh")
 
-(script "test" "eask test ert org-mcp-test.el")
+(script "test" "eask test ert org-records-mcp-test.el")
 
 (script "org-lint"
         (concat "emacs -Q --batch "

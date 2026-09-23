@@ -37,6 +37,6 @@ only what it needs. `actions/checkout` runs with `persist-credentials: false`.
 `elisp-test.yml` runs the suite on `ubuntu-latest` and `macos-latest` against
 Emacs 31.1 and 30.2. `README.org` ("Requirements") and `docs/installation.org`
 state that support in words, and `Eask` and the `Package-Requires` header in
-`org-mcp.el` carry the minimum version. Changing the matrix obliges changing
+`org-records-mcp.el` carry the minimum version. Changing the matrix obliges changing
 whichever of those the change makes untrue; a support claim nobody tests is the
 badge problem in prose.
