@@ -17432,10 +17432,12 @@ drawer, matching Org's own behavior."
 
 ;; Helper functions for testing org-query MCP tool
 
-(defun org-records-mcp-test--call-ql-query (query)
+(defun org-records-mcp-test--call-ql-query (query &optional params)
   "Call org-query tool via JSON-RPC and return the parsed result.
-QUERY is the org-ql query sexp as a string."
-  (let* ((params `((query . ,query)))
+QUERY is the org-ql query sexp as a string.  PARAMS is an alist of
+further parameters sent with it, such as the `fields' a test needs
+beyond the overview a match carries unasked."
+  (let* ((params `((query . ,query) ,@params))
          (result-text
           (mcp-server-lib-ert-call-tool "org-query" params)))
     (json-read-from-string result-text)))
@@ -17539,10 +17541,14 @@ CLOSED: [2024-04-01 Mon 15:30]"
       (should (equal (alist-get 'priority match) "A")))))
 
 (ert-deftest org-records-mcp-test-ql-query-exports-closed ()
-  "Test that org-query includes CLOSED timestamp in match results."
+  "Test that org-query includes CLOSED timestamp in match results.
+`closed' is not in the overview a match carries unasked, so the call
+asks for it."
   (org-records-mcp-test--with-temp-org-files
       ((test-file org-records-mcp-test--content-ql-priority-closed))
-    (let* ((result (org-records-mcp-test--call-ql-query "(done)"))
+    (let* ((result
+            (org-records-mcp-test--call-ql-query
+             "(done)" '((fields . ["title" "closed"]))))
            (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should (stringp (alist-get 'closed match)))
@@ -17558,10 +17564,14 @@ CLOSED: [2024-04-01 Mon 15:30]"
       (should-not (assq 'priority match)))))
 
 (ert-deftest org-records-mcp-test-ql-query-no-closed-absent ()
-  "Test that closed key is absent when headline has no CLOSED timestamp."
+  "Test that closed key is absent when headline has no CLOSED timestamp.
+The call asks for `closed', so its absence is the node having none
+rather than the field left out of the overview."
   (org-records-mcp-test--with-temp-org-files
       ((test-file org-records-mcp-test--content-bare-todo))
-    (let* ((result (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
+    (let* ((result
+            (org-records-mcp-test--call-ql-query
+             "(todo \"TODO\")" '((fields . ["title" "closed"]))))
            (matches (alist-get 'children result))
            (match (aref matches 0)))
       (should-not (assq 'closed match)))))
@@ -17575,10 +17585,13 @@ CLOSED: [2024-04-01 Mon 15:30]"
   "TODO task with custom properties for ql standard-properties test.")
 
 (ert-deftest org-records-mcp-test-ql-query-exports-standard-properties ()
-  "Test that org-query includes non-filtered PROPERTIES drawer values."
+  "Test that org-query includes non-filtered PROPERTIES drawer values.
+A match carries no drawer unasked, so the call asks for all of it."
   (org-records-mcp-test--with-temp-org-files
       ((test-file org-records-mcp-test--content-ql-with-custom-prop))
-    (let* ((result (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
+    (let* ((result
+            (org-records-mcp-test--call-ql-query
+             "(todo \"TODO\")" '((properties . "all"))))
            (matches (alist-get 'children result))
            (match (aref matches 0))
            (props (alist-get 'properties match)))
@@ -17983,15 +17996,21 @@ carrying a literal query rather than a function.")
    (concat "\\`" (regexp-quote message) "\\'")))
 
 (ert-deftest org-records-mcp-test-view-runs-by-name ()
-  "A view runs by name and answers with nodes in the standard shape."
+  "A view runs by name and answers with nodes in the standard shape.
+Its matches are the overview a query's are: Gamma carries a drawer,
+and the match carries the overview fields Gamma has a value for and
+nothing else."
   (org-records-mcp-test--with-views
     (let ((matches (org-records-mcp-test--view-matches '((view . "inbox")))))
       (should (= (length matches) 1))
       (let ((match (car matches)))
-        (should (equal (alist-get 'title match) "Gamma"))
-        (should (equal (alist-get 'todo match) "TODO"))
-        (should (equal (alist-get 'level match) 1))
-        (should (stringp (alist-get 'link match)))))))
+        (should
+         (equal
+          match
+          `((title . "Gamma")
+            (todo . "TODO")
+            (tags . ["#inbox"])
+            (link . ,(org-records-mcp-test--file-link test-file "*Gamma")))))))))
 
 (ert-deftest org-records-mcp-test-view-runs-a-literal-query ()
   "A view taking no parameters may carry its query rather than a function."
@@ -18110,8 +18129,8 @@ it declares cannot reach")))
 (ert-deftest org-records-mcp-test-view-takes-fields ()
   "A view takes `fields' as the other node-returning endpoints do.
 `properties' is turned off here so that what is left is the answer
-to `fields' alone: the drawer is a namespace of its own and arrives
-unasked, which `org-records-mcp-test-view-answers-in-every-namespace' pins."
+to `fields' alone: the drawer is a namespace of its own, which
+`org-records-mcp-test-view-answers-in-every-namespace' pins."
   (org-records-mcp-test--with-views
     (should
      (equal
@@ -18129,19 +18148,26 @@ unasked, which `org-records-mcp-test-view-answers-in-every-namespace' pins."
 (ert-deftest org-records-mcp-test-view-answers-in-every-namespace ()
   "A view answers in the three namespaces org-query answers in.
 A view is a query with a name, so a client that learned to read one
-reads the other: the drawer and the computed values arrive unasked,
-under their own keys, and \"none\" turns either off for a match list
-that does not want it.  A view that answered in fewer would be a
-second vocabulary for the same question, which is the thing this
-epic removes."
+reads the other: the computed values `org-records-mcp-list-computed-fields'
+names arrive unasked and the drawer when asked for, each under its
+own key, and \"none\" turns the computed values off for a match
+list that does not want them.  A view that answered in fewer would
+be a second vocabulary for the same question, which is the thing
+this epic removes."
   (let ((org-records-mcp-computed-fields
-         (list (cons 'view-probe (lambda () "seen")))))
+         (list (cons 'view-probe (lambda () "seen"))))
+        (org-records-mcp-list-computed-fields '(view-probe)))
     (org-records-mcp-test--with-views
       (let ((match (car (org-records-mcp-test--view-matches
                          '((view . "inbox"))))))
         (should (equal (alist-get 'computed match)
                        '((view-probe . "seen"))))
-        (should (alist-get 'properties match)))
+        (should-not (assq 'properties match)))
+      (let ((match (car (org-records-mcp-test--view-matches
+                         '((view . "inbox")
+                           (properties . "all"))))))
+        (should (equal (alist-get 'properties match)
+                       '((EFFORT . "1:00")))))
       ;; And either is turned off by name, as on org-query.
       (let ((match (car (org-records-mcp-test--view-matches
                          '((view . "inbox")
@@ -18154,6 +18180,150 @@ epic removes."
        (concat
         "\\`"
         (regexp-quote "Unknown computed field: nonesuch."))))))
+
+;;; What a match list carries unasked
+
+;; `org-records-mcp-list-fields' and `org-records-mcp-list-computed-fields'
+;; are the columns of a match list, and org-query and org-view read
+;; the same two settings.  Each test here asks both endpoints over
+;; one match, so a setting one of them ignored fails here.
+
+(defconst org-records-mcp-test--list-computed-fields
+  (list (cons 'rank (lambda () 12))
+        (cons 'parent-priority (lambda () "B"))
+        (cons 'nothing (lambda () nil)))
+  "Three computed fields, two that answer and one that does not.
+Two answering fields tell a list carrying every one from a list
+carrying the first.")
+
+(defun org-records-mcp-test--list-matches (&optional params)
+  "Return the one inbox match of org-query and of org-view, as a list.
+PARAMS is sent to both calls beside what selects the match, so the
+two answers are to the same question."
+  (list
+   (aref
+    (alist-get
+     'children
+     (json-read-from-string
+      (mcp-server-lib-ert-call-tool
+       "org-query" `((query . "(tags \"#inbox\")") ,@params))))
+    0)
+   (car
+    (org-records-mcp-test--view-matches `((view . "inbox") ,@params)))))
+
+(defun org-records-mcp-test--list-computed (&optional computed)
+  "Return what the inbox match carries under `computed', on both endpoints.
+COMPUTED, when non-nil, is sent as the `computed' parameter."
+  (mapcar
+   (lambda (match) (alist-get 'computed match))
+   (org-records-mcp-test--list-matches
+    `((fields . ["title"]) ,@(when computed `((computed . ,computed)))))))
+
+(ert-deftest org-records-mcp-test-list-fields-are-the-setting ()
+  "A match list carries the fields `org-records-mcp-list-fields' names.
+Out of the box they are the overview; set to other fields, both
+endpoints carry those and no others, and a call's `fields' replaces
+the setting."
+  (org-records-mcp-test--with-views
+    (should
+     (equal
+      (org-records-mcp-test--list-matches)
+      (make-list
+       2
+       `((title . "Gamma")
+         (todo . "TODO")
+         (tags . ["#inbox"])
+         (link . ,(org-records-mcp-test--file-link test-file "*Gamma"))))))
+    (let ((org-records-mcp-list-fields '(level title)))
+      (should
+       (equal
+        (org-records-mcp-test--list-matches)
+        (make-list 2 '((level . 1) (title . "Gamma")))))
+      (should
+       (equal
+        (org-records-mcp-test--list-matches '((fields . ["todo"])))
+        (make-list 2 '((todo . "TODO"))))))))
+
+(ert-deftest org-records-mcp-test-list-fields-refuse-an-unknown-name ()
+  "A name in `org-records-mcp-list-fields' that is no node field is refused.
+It is refused at a call that takes the default, on both endpoints,
+and the refusal names the setting, since the call sent nothing, and
+the parameter that goes around it.  A call naming its own fields
+does not use the setting and is answered, which is that advice
+taken."
+  (org-records-mcp-test--with-views
+    (let ((org-records-mcp-list-fields '(title nosuch)))
+      (dolist (call '(("org-query" (query . "(tags \"#inbox\")"))
+                      ("org-view" (view . "inbox"))))
+        (org-records-mcp-test--call-tool-refused
+         (car call) (cdr call)
+         "\\`org-records-mcp-list-fields names nosuch, which is no node \
+field; send fields to override\\'"))
+      (should
+       (equal
+        (org-records-mcp-test--list-matches '((fields . ["title"])))
+        (make-list 2 '((title . "Gamma"))))))))
+
+(ert-deftest org-records-mcp-test-list-computed-fields-are-the-setting ()
+  "A match list carries the computed fields the setting names.
+Out of the box it names none.  `all' carries every configured field
+that answers, a list carries those it names, and both endpoints
+read the one setting."
+  (let ((org-records-mcp-computed-fields org-records-mcp-test--list-computed-fields))
+    (org-records-mcp-test--with-views
+      (should (equal (org-records-mcp-test--list-computed) '(nil nil)))
+      (let ((org-records-mcp-list-computed-fields 'all))
+        (should
+         (equal
+          (org-records-mcp-test--list-computed)
+          (make-list 2 '((rank . 12) (parent-priority . "B"))))))
+      (let ((org-records-mcp-list-computed-fields '(parent-priority)))
+        (should
+         (equal
+          (org-records-mcp-test--list-computed)
+          (make-list 2 '((parent-priority . "B")))))))))
+
+(ert-deftest org-records-mcp-test-list-computed-fields-yield-to-the-call ()
+  "A call's `computed' replaces the setting, on both endpoints.
+\"all\" and \"none\" mean what they mean without the setting, and
+names carry exactly those, whichever of the three the setting is."
+  (let ((org-records-mcp-computed-fields org-records-mcp-test--list-computed-fields))
+    (org-records-mcp-test--with-views
+      (dolist (listed '(nil (rank) all))
+        (let ((org-records-mcp-list-computed-fields listed))
+          (should
+           (equal
+            (org-records-mcp-test--list-computed "all")
+            (make-list 2 '((rank . 12) (parent-priority . "B")))))
+          (should
+           (equal (org-records-mcp-test--list-computed "none") '(nil nil)))
+          (should
+           (equal
+            (org-records-mcp-test--list-computed ["parent-priority"])
+            (make-list 2 '((parent-priority . "B"))))))))))
+
+(ert-deftest org-records-mcp-test-list-computed-fields-refuse-an-unknown-name ()
+  "A name in the setting nobody configured is refused, on both endpoints.
+The refusal names the setting, since the call sent nothing, and the
+parameter that goes around it; sending that parameter is answered.
+A name the call itself sends keeps the refusal naming what is
+configured."
+  (let ((org-records-mcp-computed-fields org-records-mcp-test--list-computed-fields)
+        (org-records-mcp-list-computed-fields '(rank renk)))
+    (org-records-mcp-test--with-views
+      (dolist (call '(("org-query" (query . "(tags \"#inbox\")"))
+                      ("org-view" (view . "inbox"))))
+        (org-records-mcp-test--call-tool-refused
+         (car call) (cdr call)
+         "\\`org-records-mcp-list-computed-fields names renk, which is no \
+configured computed field; send computed to override\\'")
+        (org-records-mcp-test--call-tool-refused
+         (car call) (append (cdr call) '((computed . ["renk"])))
+         "\\`Unknown computed field: renk\\.  Configured computed \
+fields: rank, parent-priority, nothing\\'"))
+      (should
+       (equal (org-records-mcp-test--list-computed ["rank"])
+              (make-list 2 '((rank . 12))))))))
 
 (ert-deftest org-records-mcp-test-view-refuses-files ()
   "A view never takes a scope override: it declares no `files'."
@@ -18446,11 +18616,14 @@ PROPERTIES is the whole drawer the match carries, or nil for none."
    (org-records-mcp-test--query-properties query "all")))
 
 (defun org-records-mcp-test--inherited-property-view (params)
-  "Return the (TITLE . PROPERTIES) of every node org-view returns for PARAMS."
+  "Return the (TITLE . PROPERTIES) of every node org-view returns for PARAMS.
+PROPERTIES is the whole drawer the match carries, asked for with
+\"all\" since a match carries none unasked, or nil for none."
   (mapcar
    (lambda (match)
      (cons (alist-get 'title match) (alist-get 'properties match)))
-   (org-records-mcp-test--view-matches params)))
+   (org-records-mcp-test--view-matches
+    (append params '((properties . "all"))))))
 
 (defun org-records-mcp-test--answered-with-drawers (titles)
   "Return TITLES as the (TITLE . PROPERTIES) a query answers them with.
@@ -18479,10 +18652,10 @@ inherit, and matches as Org does when its `:inherit' is the symbol
 selective — whether in org-query, in a view's query or in a view's
 filter.
 
-The org://{link} resource carries no drawer at all, under any
-setting, so its assertion shows only that no inherited value reaches
-it: an answer that began to inherit would fail it, and an answer
-that dropped the drawer could not."
+The org://{link} resource is a read, so it carries the whole drawer
+unasked: the parent's answers with the parent's own, and the
+grandchild's, which holds none, answers with nothing under any
+setting."
   (let ((parent (org-records-mcp-test--file-link test-file "*Holding Parent"))
         (every-inheriting (cons "Holding Parent" org-records-mcp-test--inheriting-titles)))
     ;; org-node-read of each heading, the whole drawer and every
@@ -18528,7 +18701,14 @@ that dropped the drawer could not."
       (should
        (equal (alist-get 'title walked-further) "Inheriting Grandchild"))
       (should-not (assq 'properties walked-further)))
-    ;; The resource: no drawer, and so no inherited value either.
+    ;; The resource: the node's own drawer, and no inherited value.
+    (should
+     (equal
+      (alist-get
+       'properties
+       (json-read-from-string
+        (org-records-mcp-test--read-resource (concat "org://" parent))))
+      org-records-mcp-test--inherited-properties-parent-drawer))
     (let ((resource
            (json-read-from-string
             (org-records-mcp-test--read-resource
@@ -22847,35 +23027,40 @@ Child Two has no tag of its own, so `local_tags' is left out while
        (equal (alist-get 'text (aref contents 0))
               (org-records-mcp-test--call-read link))))))
 
-(ert-deftest org-records-mcp-test-node-shape-query-match ()
-  "A query result is a node, carrying the fields a read carries.
-The Org property drawer comes with it, under its own key, with the
-values Org computes rather than stores left out."
+(ert-deftest org-records-mcp-test-node-shape-query-match-is-an-overview ()
+  "A query result is a node carrying the overview fields and no more.
+Parent holds a value for every overview field, a tag of its own, an
+ID, a level, a body, children and a drawer, so each thing a match
+leaves out unasked is there to be left out: the match carries exactly
+`org-records-mcp-list-fields', in that order, and no drawer.
+Asking for the drawer brings it, with the values Org computes rather
+than stores left out."
   (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
       (list org-records-mcp-test--node-shape-parent-id)
-    (let* ((result
-            (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
-           (matches (alist-get 'children result))
-           (node (aref matches 0)))
+    (let* ((query "(todo \"TODO\")")
+           (result (org-records-mcp-test--call-ql-query query))
+           (matches (alist-get 'children result)))
       (should (= (length matches) 1))
       (should (= (alist-get 'total result) 1))
-      (should (equal (alist-get 'title node) "Parent"))
-      (should (equal (alist-get 'todo node) "TODO"))
-      (should (equal (alist-get 'priority node) "A"))
-      (should (equal (alist-get 'tags node) ["work"]))
-      (should (equal (alist-get 'local_tags node) ["work"]))
-      (should (equal (alist-get 'scheduled node) "<2026-03-26 Thu>"))
-      (should (equal (alist-get 'deadline node) "<2026-04-01 Wed>"))
-      (should (equal (alist-get 'file node) test-file))
-      (should
-       (equal (alist-get 'id node) org-records-mcp-test--node-shape-parent-id))
-      (should (= (alist-get 'level node) 1))
-      (should
-       (equal (alist-get 'link node)
-              (concat "id:" org-records-mcp-test--node-shape-parent-id)))
       (should
        (equal
-        (alist-get 'properties node)
+        (aref matches 0)
+        `((title . "Parent")
+          (todo . "TODO")
+          (priority . "A")
+          (tags . ["work"])
+          (scheduled . "<2026-03-26 Thu>")
+          (deadline . "<2026-04-01 Wed>")
+          (link . ,(concat "id:" org-records-mcp-test--node-shape-parent-id)))))
+      (should
+       (equal
+        (mapcar #'car (aref matches 0))
+        org-records-mcp-list-fields))
+      (should
+       (equal
+        (alist-get
+         'properties
+         (aref (org-records-mcp-test--query-properties query "all") 0))
         `((EFFORT . "1:00")
           (ID . ,org-records-mcp-test--node-shape-parent-id)))))))
 
@@ -22911,6 +23096,273 @@ the file's own name as its title."
        (equal (org-records-mcp-test--node-shape-read (concat "file:" test-file))
               node)))))
 
+;;; Breadcrumbs
+
+;; A node's ancestors, outermost first, each named the way a read of
+;; it names it, so a client places a node in its outline without a
+;; read per ancestor.
+
+(defconst org-records-mcp-test--breadcrumbs-epic-id "epic-id"
+  "ID of the Epic in `org-records-mcp-test--content-breadcrumbs'.")
+
+(defconst org-records-mcp-test--content-breadcrumbs
+  (concat
+   "#+TODO: NEXT PROJ EPIC | DONE\n"
+   "* Section\n"
+   "** EPIC Epic\n"
+   ":PROPERTIES:\n"
+   ":ID:       " org-records-mcp-test--breadcrumbs-epic-id "\n"
+   ":END:\n"
+   "*** PROJ [#B] Project :tag:\n"
+   "**** NEXT Step\n")
+  "An outline four levels deep, each ancestor linked a different way.
+Section has no TODO keyword and is linked by its title, Epic by its
+ID, and Project carries a priority and a tag its link and title
+leave out.")
+
+(defun org-records-mcp-test--breadcrumbs-of-step (test-file)
+  "Return the breadcrumbs Step carries in TEST-FILE, as a read parses them."
+  (vector
+   `((title . "Section")
+     (link . ,(org-records-mcp-test--file-link test-file "*Section"))
+     (level . 1))
+   `((title . "Epic")
+     (link . ,(concat "id:" org-records-mcp-test--breadcrumbs-epic-id))
+     (level . 2))
+   `((title . "Project")
+     (link . ,(org-records-mcp-test--file-link test-file "*Project"))
+     (level . 3))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-outermost-first ()
+  "A node's breadcrumbs are its ancestors, outermost first.
+Each carries the title, link and level a read of that ancestor
+answers with.  A heading without a TODO keyword is an ancestor like
+any other, and the file is not one.  A read carries the field
+unasked."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let ((step (org-records-mcp-test--file-link test-file "*Step")))
+      (should
+       (equal
+        (org-records-mcp-test--read-fields step ["breadcrumbs"])
+        `((breadcrumbs
+           . ,(org-records-mcp-test--breadcrumbs-of-step test-file)))))
+      (should
+       (equal
+        (alist-get 'breadcrumbs (org-records-mcp-test--node-shape-read step))
+        (org-records-mcp-test--breadcrumbs-of-step test-file))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-each-reads-back-to-its-ancestor ()
+  "Every crumb is the node a read of its link answers with.
+Each of Step's three ancestors is linked a different way, so a crumb
+that named its ancestor other than a read does fails here for the
+form it got wrong."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (seq-doseq (crumb (org-records-mcp-test--breadcrumbs-of-step test-file))
+      (should
+       (equal
+        (org-records-mcp-test--read-fields
+         (alist-get 'link crumb) ["title" "link" "level"])
+        crumb)))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-on-an-expanded-child ()
+  "A child a read expands carries the crumbs a read of it answers with.
+An expanded child is the node its own read returns, so its crumbs
+run from the outermost ancestor down to the node the call read, not
+from that node alone."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let* ((project (org-records-mcp-test--file-link test-file "*Project"))
+           (node
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-read"
+              `((link . ,project)
+                (depth . 1)
+                (fields . ["title" "breadcrumbs" "children"])
+                (properties . "none")
+                (computed . "none")))))
+           (step (aref (alist-get 'children node) 0)))
+      (should (equal (alist-get 'title step) "Step"))
+      (should
+       (equal (alist-get 'breadcrumbs step)
+              (org-records-mcp-test--breadcrumbs-of-step test-file))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-see-past-a-narrowing ()
+  "A buffer narrowed to the heading still yields every crumb.
+The narrowing is the user's, so the read neither loses the
+ancestors it hides nor leaves the buffer widened or point moved."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let ((buffer (find-file-noselect test-file))
+          narrowed point)
+      (with-current-buffer buffer
+        (goto-char (point-min))
+        (re-search-forward "^\\*\\*\\*\\* NEXT Step")
+        (org-narrow-to-subtree)
+        (goto-char (point-max))
+        (setq narrowed (cons (point-min) (point-max))
+              point (point)))
+      (should
+       (equal
+        (org-records-mcp-test--read-fields
+         (org-records-mcp-test--file-link test-file "*Step") ["breadcrumbs"])
+        `((breadcrumbs
+           . ,(org-records-mcp-test--breadcrumbs-of-step test-file)))))
+      (with-current-buffer buffer
+        (should (equal (cons (point-min) (point-max)) narrowed))
+        (should (= (point) point))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-left-out-without-ancestors ()
+  "A top-level heading and a file carry no breadcrumbs.
+Neither has a heading above it, and a node leaves out a field it has
+no value for rather than sending an empty one."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (should
+     (equal
+      (org-records-mcp-test--read-fields
+       (org-records-mcp-test--file-link test-file "*Section")
+       ["title" "breadcrumbs"])
+      '((title . "Section"))))
+    (should
+     (equal
+      (org-records-mcp-test--read-fields
+       (concat "file:" test-file) ["level" "breadcrumbs"])
+      '((level . 0))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-on-a-list-when-asked ()
+  "A match list carries breadcrumbs when the call or the setting asks.
+They are not in the overview a match carries out of the box, and a
+call naming them, or an `org-records-mcp-list-fields' holding them,
+gets the crumbs a read of the match answers with."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let ((query "(todo \"NEXT\")")
+          (crumbs (org-records-mcp-test--breadcrumbs-of-step test-file)))
+      (should-not
+       (assq
+        'breadcrumbs
+        (aref
+         (alist-get 'children (org-records-mcp-test--call-ql-query query))
+         0)))
+      (should
+       (equal
+        (org-records-mcp-test--query-fields query ["title" "breadcrumbs"])
+        `[((title . "Step") (breadcrumbs . ,crumbs))]))
+      (let ((org-records-mcp-list-fields '(title breadcrumbs)))
+        (should
+         (equal
+          (alist-get 'children (org-records-mcp-test--call-ql-query query))
+          `[((title . "Step") (breadcrumbs . ,crumbs))]))))))
+
+;;; Blocked
+
+;; Whether a heading's change to done is blocked, as Org's own
+;; `org-entry-blocked-p' answers it through `org-blocker-hook'.
+
+(defconst org-records-mcp-test--content-blocked
+  (concat
+   "* TODO Free\n"
+   "* TODO Waiting on a child\n"
+   "** TODO Open child\n"
+   "* DONE Finished\n"
+   "* Plain\n")
+  "Headings in every state `blocked' answers or leaves out.
+Waiting on a child is the one Org's own dependencies block, Free
+the one only a blocker function can, and Finished and Plain have no
+change to done to block.")
+
+(defun org-records-mcp-test--blocked-of (test-file title)
+  "Return what a read of the heading TITLE in TEST-FILE says it is.
+The answer is the node cut down to its title and `blocked'."
+  (org-records-mcp-test--read-fields
+   (org-records-mcp-test--file-link test-file (concat "*" title))
+   ["title" "blocked"]))
+
+(ert-deftest org-records-mcp-test-blocked-answers-org-blocker-hook ()
+  "An open heading is blocked exactly when `org-blocker-hook' says so.
+With nothing on the hook no heading is blocked.  A blocker function
+the user adds blocks every open heading, which is how org-edna's
+blockers count.  Org's own dependencies block the parent of an open
+child and nothing else."
+  (org-records-mcp-test--with-temp-org-files
+      ((test-file org-records-mcp-test--content-blocked))
+    (let ((org-blocker-hook nil)
+          (org-enforce-todo-dependencies nil))
+      (dolist (title '("Free" "Waiting on a child" "Open child"))
+        (should
+         (equal (org-records-mcp-test--blocked-of test-file title)
+                `((title . ,title) (blocked . :json-false)))))
+      (let ((org-blocker-hook (list (lambda (_change) nil))))
+        (dolist (title '("Free" "Waiting on a child" "Open child"))
+          (should
+           (equal (org-records-mcp-test--blocked-of test-file title)
+                  `((title . ,title) (blocked . t))))))
+      (let ((org-enforce-todo-dependencies t)
+            (org-blocker-hook
+             (list #'org-block-todo-from-children-or-siblings-or-parent)))
+        (should
+         (equal
+          (mapcar
+           (lambda (title)
+             (alist-get 'blocked
+                        (org-records-mcp-test--blocked-of test-file title)))
+           '("Free" "Waiting on a child" "Open child"))
+          '(:json-false t :json-false)))))))
+
+(ert-deftest org-records-mcp-test-blocked-left-out-without-an-open-state ()
+  "A heading with a done keyword or none, and a file, carry no `blocked'.
+Neither has a change to done for a blocker to stop, so the field is
+left out rather than answered false, even with a blocker on the hook
+that would block anything."
+  (org-records-mcp-test--with-temp-org-files
+      ((test-file org-records-mcp-test--content-blocked))
+    (let ((org-blocker-hook (list (lambda (_change) nil))))
+      (dolist (title '("Finished" "Plain"))
+        (should
+         (equal (org-records-mcp-test--blocked-of test-file title)
+                `((title . ,title)))))
+      (should
+       (equal
+        (org-records-mcp-test--read-fields
+         (concat "file:" test-file) ["level" "blocked"])
+        '((level . 0)))))))
+
+(ert-deftest org-records-mcp-test-blocked-on-a-read-unasked-on-a-list-asked ()
+  "A read carries `blocked' unasked; a match list carries it when asked.
+It is not in `org-records-mcp-list-fields' out of the box, so a list
+names it in `fields', or a workflow adds it to that setting."
+  (org-records-mcp-test--with-temp-org-files
+      ((test-file org-records-mcp-test--content-blocked))
+    (let ((org-blocker-hook
+           (list #'org-block-todo-from-children-or-siblings-or-parent))
+          (org-enforce-todo-dependencies t)
+          (answers
+           '(("Free" . :json-false)
+             ("Waiting on a child" . t)
+             ("Open child" . :json-false))))
+      (should-not
+       (seq-some
+        (lambda (match) (assq 'blocked match))
+        (alist-get
+         'children (org-records-mcp-test--call-ql-query "(todo)"))))
+      (should
+       (equal
+        (mapcar
+         (lambda (match)
+           (cons (alist-get 'title match) (alist-get 'blocked match)))
+         (org-records-mcp-test--query-fields "(todo)" ["title" "blocked"]))
+        answers))
+      (should
+       (eq
+        (alist-get
+         'blocked
+         (org-records-mcp-test--node-shape-read
+          (org-records-mcp-test--file-link test-file "*Waiting on a child")))
+        t)))))
+
 ;;; Asking for the fields you want
 
 ;; A call says how much of a node it wants and gets exactly that.
@@ -22919,15 +23371,21 @@ the file's own name as its title."
 
 (defun org-records-mcp-test--read-fields (link fields)
   "Return the node `org-node-read' serves for LINK asking for FIELDS.
-FIELDS is sent as the `fields' parameter, as a client sends it."
+FIELDS is sent as the `fields' parameter, as a client sends it.  The
+drawer and the computed fields a read carries unasked are turned
+off, so what comes back is the fields and nothing else."
   (json-read-from-string
    (mcp-server-lib-ert-call-tool
-    "org-node-read" `((link . ,link) (fields . ,fields)))))
+    "org-node-read"
+    `((link . ,link)
+      (fields . ,fields)
+      (properties . "none")
+      (computed . "none")))))
 
 (defun org-records-mcp-test--query-fields (query fields)
   "Return the nodes `org-query' matches QUERY with, asking for FIELDS.
-The drawer a query carries unasked is turned off, so what comes back
-is the fields and nothing else."
+The drawer and the computed fields are turned off, so what comes
+back is the fields and nothing else."
   (alist-get
    'children
    (json-read-from-string
@@ -22935,7 +23393,8 @@ is the fields and nothing else."
      "org-query"
      `((query . ,query)
        (fields . ,fields)
-       (properties . "none"))))))
+       (properties . "none")
+       (computed . "none"))))))
 
 (ert-deftest org-records-mcp-test-fields-named-explicitly ()
   "A call naming the fields it wants receives those and no others.
@@ -22973,8 +23432,9 @@ The request is built from the list a call is checked against, so a
 field named there that the builder does not build fails here rather
 than reaching a client as a refusal.
 
-A heading carries every field but `closed' here, which stands for
-the fields left out when empty.  A file carries the ones a file has.
+A heading carries every field but `closed' and `breadcrumbs' here,
+which stand for the fields left out when empty: Parent is open and
+at the top level.  A file carries the ones a file has.
 No field of either is the Org drawer: that is a namespace of the
 user's, asked for in its own parameter.  Both digests are there for
 either: a region always has one, even when it is empty."
@@ -22987,7 +23447,7 @@ either: a region always has one, even when it is empty."
          #'car
          (org-records-mcp-test--read-fields
           (concat "id:" org-records-mcp-test--node-shape-parent-id) every))
-        (remq 'closed org-records-mcp--node-fields)))
+        (seq-difference org-records-mcp--node-fields '(closed breadcrumbs))))
       (should
        (equal
         (mapcar
@@ -23072,29 +23532,59 @@ surface."
   (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
       (list org-records-mcp-test--node-shape-parent-id)
     (let* ((link (concat "id:" org-records-mcp-test--node-shape-parent-id))
-           (default (org-records-mcp-test--node-shape-read link)))
+           (default
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-read"
+              `((link . ,link)
+                (properties . "none")
+                (computed . "none"))))))
       (should (equal (org-records-mcp-test--read-fields link []) default))
       (should (equal (org-records-mcp-test--read-fields link "") default)))))
 
-(ert-deftest org-records-mcp-test-fields-default-says-the-digests-are-out ()
-  "A tool's description says the digests are not in its default.
+(ert-deftest org-records-mcp-test-fields-default-says-what-it-carries ()
+  "Each tool's description names the default it carries, digests aside.
 It is the text a model reads before deciding whether it must ask for
-a digest, so a description promising every field is the one that
-sends a client into a write with no token to assert with.  The node a
-default read returns is checked against the same claim, so the
-sentence and the list cannot drift apart."
-  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
-      (list org-records-mcp-test--node-shape-parent-id)
-    (dolist (tool '("org-node-read" "org-query"))
+a field, so a description promising every field is the one that
+sends a client into a write with no token to assert with.  A read
+says the digests are out of its default; a match list names the
+setting its default is and each field that setting holds out of the
+box, built here from the setting's standard value so the sentence
+and the list cannot drift apart.  The node a default read returns
+is checked against the same claim."
+  (let* ((names
+          (mapcar
+           #'symbol-name
+           (eval (car (get 'org-records-mcp-list-fields 'standard-value)) t)))
+         (overview
+          (concat
+           "Defaults to the fields org-records-mcp-list-fields[[:space:]]+"
+           "names, out of the box[[:space:]]+"
+           (mapconcat #'regexp-quote (butlast names) ",[[:space:]]+")
+           "[[:space:]]+and[[:space:]]+"
+           (regexp-quote (car (last names)))
+           ":")))
+    (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
+        (list org-records-mcp-test--node-shape-parent-id)
       (should
        (string-match-p
         "Defaults to every field below[^.]*digests"
-        (org-records-mcp-test--registered-tool-description tool))))
-    (let ((node
-           (org-records-mcp-test--read-fields
-            (concat "id:" org-records-mcp-test--node-shape-parent-id) nil)))
-      (should-not (assq 'digest node))
-      (should-not (assq 'content_digest node)))))
+        (org-records-mcp-test--registered-tool-description "org-node-read")))
+      (should
+       (string-match-p
+        overview
+        (org-records-mcp-test--registered-tool-description "org-query")))
+      (let ((node
+             (org-records-mcp-test--read-fields
+              (concat "id:" org-records-mcp-test--node-shape-parent-id) nil)))
+        (should-not (assq 'digest node))
+        (should-not (assq 'content_digest node))))
+    ;; org-view is registered only while a view is configured.
+    (org-records-mcp-test--with-views
+      (should
+       (string-match-p
+        overview
+        (org-records-mcp-test--registered-tool-description "org-view"))))))
 
 (ert-deftest org-records-mcp-test-fields-unknown-name-refused ()
   "A field that does not exist is refused, naming the ones that do.
@@ -23379,16 +23869,19 @@ region."
 PROPERTIES is sent as the `properties' parameter, as a client sends
 it, and the node is cut down to the one field the drawer could
 collide with, so what the test reads is the two namespaces side by
-side."
+side.  The computed fields a read carries unasked are turned off."
   (json-read-from-string
    (mcp-server-lib-ert-call-tool
     "org-node-read"
     `((link . ,link)
       (fields . ["title"])
-      (properties . ,properties)))))
+      (properties . ,properties)
+      (computed . "none")))))
 
 (defun org-records-mcp-test--query-properties (query properties)
-  "Return the nodes `org-query' matches QUERY with, asking for PROPERTIES."
+  "Return the nodes `org-query' matches QUERY with, asking for PROPERTIES.
+The computed fields a query carries unasked are turned off, as
+`org-records-mcp-test--read-properties' turns them off for a read."
   (alist-get
    'children
    (json-read-from-string
@@ -23396,7 +23889,8 @@ side."
      "org-query"
      `((query . ,query)
        (fields . ["title"])
-       (properties . ,properties))))))
+       (properties . ,properties)
+       (computed . "none"))))))
 
 (ert-deftest org-records-mcp-test-properties-named-explicitly ()
   "A call naming the properties it wants receives those and no others.
@@ -23506,38 +24000,36 @@ would act on that heading."
 
 (ert-deftest org-records-mcp-test-properties-default-is-the-endpoint-s ()
   "What a call carries unasked is what that endpoint is for.
-A read carries the whole node and no drawer: a drawer holds what the
-user put there, and a client asks for the properties it knows what
-to do with.  A query is the call that asks about properties, so it
-hands the drawer back with every match."
+A read is the whole node, so it carries the whole drawer.  A match
+list is an overview, and a read of a match's link is where its
+drawer is, so a query carries none unasked.  Sending no parameter
+and sending a blank one are the same call on both."
   (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
       (list org-records-mcp-test--node-shape-parent-id)
     (let ((link (concat "id:" org-records-mcp-test--node-shape-parent-id))
           (drawer
            `((EFFORT . "1:00")
              (ID . ,org-records-mcp-test--node-shape-parent-id))))
-      (should-not
-       (alist-get 'properties (org-records-mcp-test--node-shape-read link)))
       (should
        (equal
-        (alist-get
-         'properties
-         (aref
-          (alist-get
-           'children
-           (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
-          0))
+        (alist-get 'properties (org-records-mcp-test--node-shape-read link))
         drawer))
+      (should-not
+       (assq
+        'properties
+        (aref
+         (alist-get
+          'children
+          (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
+         0)))
       (should
        (equal
         (org-records-mcp-test--read-properties link [])
-        '((title . "Parent"))))
+        `((title . "Parent") (properties . ,drawer))))
       (should
        (equal
-        (alist-get
-         'properties
-         (aref (org-records-mcp-test--query-properties "(todo \"TODO\")" []) 0))
-        drawer)))))
+        (aref (org-records-mcp-test--query-properties "(todo \"TODO\")" []) 0)
+        '((title . "Parent")))))))
 
 (ert-deftest org-records-mcp-test-properties-mean-the-same-on-both-endpoints ()
   "The same `properties' asks the same thing of a read and of a query.
@@ -23618,13 +24110,15 @@ can tell a field with a value from a field without one."
 (defun org-records-mcp-test--read-computed (link computed)
   "Return the node `org-node-read' serves for LINK asking for COMPUTED.
 COMPUTED is sent as the `computed' parameter, as a client sends it,
-and the node is cut down to its title so that what the test reads is
-the computed fields beside one field of the node's own."
+and the node is cut down to its title, with the drawer a read
+carries unasked turned off, so that what the test reads is the
+computed fields beside one field of the node's own."
   (json-read-from-string
    (mcp-server-lib-ert-call-tool
     "org-node-read"
     `((link . ,link)
       (fields . ["title"])
+      (properties . "none")
       (computed . ,computed)))))
 
 (defun org-records-mcp-test--query-computed (query computed)
@@ -23713,36 +24207,68 @@ file said rather than what this server worked out."
           (computed . ((rank . 12)))))))))
 
 (ert-deftest org-records-mcp-test-computed-default-is-the-endpoint-s ()
-  "A query carries the computed fields unasked; a read carries none.
-A workflow configures them for the matches it ranks and groups, so
-they come with a match list without being asked for, and a read that
-wants one says so."
+  "A read carries every computed field unasked; a query, none out of the box.
+A read is the whole node, so it carries every configured field.  A
+query carries the ones `org-records-mcp-list-computed-fields' names,
+and out of the box it names none."
   (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
       (list org-records-mcp-test--node-shape-parent-id)
     (org-records-mcp-test--with-computed-fields
       (let ((link (concat "id:" org-records-mcp-test--node-shape-parent-id)))
-        (should-not
-         (alist-get 'computed (org-records-mcp-test--node-shape-read link)))
         (should
          (equal
-          (alist-get
-           'computed
-           (aref
-            (alist-get
-             'children
-             (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
-            0))
+          (alist-get 'computed (org-records-mcp-test--node-shape-read link))
           '((rank . 12))))
         (should
          (equal
-          (aref (org-records-mcp-test--query-computed "(todo \"TODO\")" []) 0)
+          (org-records-mcp-test--read-computed link [])
           '((title . "Parent") (computed . ((rank . 12))))))
+        (should-not
+         (assq
+          'computed
+          (aref
+           (alist-get
+            'children
+            (org-records-mcp-test--call-ql-query "(todo \"TODO\")"))
+           0)))
+        (should
+         (equal
+          (aref (org-records-mcp-test--query-computed "(todo \"TODO\")" []) 0)
+          '((title . "Parent"))))
         (should
          (equal
           (aref
-           (org-records-mcp-test--query-computed "(todo \"TODO\")" "none")
+           (org-records-mcp-test--query-computed "(todo \"TODO\")" "all")
            0)
-          '((title . "Parent"))))))))
+          '((title . "Parent") (computed . ((rank . 12))))))))))
+
+(ert-deftest org-records-mcp-test-read-carries-the-whole-node-unasked ()
+  "A read carries its whole drawer and every computed field unasked.
+A read is the call that returns the whole node, so what a match list
+leaves out is here without being asked for: every drawer line, and
+every configured computed field that answers, whatever
+`org-records-mcp-list-computed-fields' says a list carries.  The
+org://{link} resource is the same read."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-node-shape
+      (list org-records-mcp-test--node-shape-parent-id)
+    (let* ((org-records-mcp-computed-fields
+            (list (cons 'rank (lambda () 12))
+                  (cons 'parent-priority (lambda () "B"))
+                  (cons 'nothing (lambda () nil))))
+           (link (concat "id:" org-records-mcp-test--node-shape-parent-id))
+           (drawer
+            `((EFFORT . "1:00")
+              (ID . ,org-records-mcp-test--node-shape-parent-id)))
+           (computed '((rank . 12) (parent-priority . "B"))))
+      (dolist (listed '(nil (rank) all))
+        (let* ((org-records-mcp-list-computed-fields listed)
+               (node (org-records-mcp-test--node-shape-read link))
+               (resource
+                (json-read-from-string
+                 (org-records-mcp-test--read-resource (concat "org://" link)))))
+          (should (equal (alist-get 'properties node) drawer))
+          (should (equal (alist-get 'computed node) computed))
+          (should (equal resource node)))))))
 
 (ert-deftest org-records-mcp-test-computed-means-the-same-on-both-endpoints ()
   "The same `computed' asks the same thing of a read and of a query."
@@ -23792,7 +24318,12 @@ still ask for what they asked for."
       (should
        (equal
         (org-records-mcp-test--read-fields link "")
-        (org-records-mcp-test--node-shape-read link)))
+        (json-read-from-string
+         (mcp-server-lib-ert-call-tool
+          "org-node-read"
+          `((link . ,link)
+            (properties . "none")
+            (computed . "none"))))))
       (should
        (equal
         (aref
@@ -24715,13 +25246,18 @@ without, and the references that end the walk.")
 (defun org-records-mcp-test--read-depth (link depth &optional fields)
   "Return the node `org-node-read' serves for LINK, DEPTH deep.
 DEPTH is sent as the `depth' parameter and FIELDS, when non-nil, as
-the `fields' parameter, the way a client sends them."
+the `fields' parameter, the way a client sends them.  With FIELDS the
+drawer and the computed fields a read carries unasked are turned
+off, so each node carries the fields asked for and nothing else."
   (json-read-from-string
    (mcp-server-lib-ert-call-tool
     "org-node-read"
     `((link . ,link)
       (depth . ,depth)
-      ,@(when fields `((fields . ,fields)))))))
+      ,@(when fields
+          `((fields . ,fields)
+            (properties . "none")
+            (computed . "none")))))))
 
 (ert-deftest org-records-mcp-test-depth-none-returns-references ()
   "A read asking for no depth carries its children as references.
@@ -29224,28 +29760,38 @@ rather than to the field."
     values))
 
 (defconst org-records-mcp-test--content-advertised-fields
-  "* DONE [#A] Rich Task :work:
+  "* Area
+** TODO [#A] Rich Task :work:
 CLOSED: [2026-03-01 Sun 10:00] DEADLINE: <2026-04-01 Wed> SCHEDULED: <2026-03-27 Fri>
 :PROPERTIES:
 :ID:       advertised-fields-id-001
 :Effort:   1:00
 :END:
 Body text.
-** Child
+*** Child
 "
   "A heading carrying a value for every field a node can hold.
 A field a node has no value for is left out of the answer, so a
 guard asking whether every advertised field is built needs a node
-that has something to say in each of them.")
+that has something to say in each of them.  Rich Task sits under
+Area so that it has an ancestor to carry as a breadcrumb, and is
+open so that whether it is blocked has an answer; the CLOSED line
+is read whatever the state.")
 
 (defun org-records-mcp-test--advertised-fields-answered (link fields)
-  "Return the field names a read of LINK asking for FIELDS answers with."
+  "Return the field names a read of LINK asking for FIELDS answers with.
+The drawer and the computed fields a read carries unasked are turned
+off, so the names are the node fields and nothing else."
   (sort
    (mapcar
     (lambda (field) (symbol-name (car field)))
     (json-read-from-string
      (mcp-server-lib-ert-call-tool
-      "org-node-read" `((link . ,link) (fields . ,fields)))))
+      "org-node-read"
+      `((link . ,link)
+        (fields . ,fields)
+        (properties . "none")
+        (computed . "none")))))
    #'string<))
 
 (defun org-records-mcp-test--advertisement-node-fields ()
@@ -30152,6 +30698,7 @@ org-store-link changes the link"
     "Not a property name: %s.  A trailing `+' makes a drawer line add to the property named \
 without it, so it names none of its own"
     "A property name is a string, not: %s"
+    "%s names %s, which is no %s; send %s to override"
     "Invalid property name: '%s'"
     "Not a drawer property: %s.  Org computes it rather than storing it; the node's own fields \
 carry what it says.  Special properties: %s"

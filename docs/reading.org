@@ -31,6 +31,8 @@ asked for, and the call tells the two apart, because it knows what it asked for.
 | =id=             | the ID the node's =link= names                                                      |
 | =level=          | the heading level, =0= for a file                                                   |
 | =link=           | the link that names this node again                                                 |
+| =breadcrumbs=    | the headings above this one, outermost first                                        |
+| =blocked=        | whether marking the heading done is blocked                                         |
 | =content=        | the body text, or a file's preamble before its first heading                        |
 | =content_digest= | an opaque token over the region =content= is read from                              |
 | =digest=         | an opaque token over the node's whole subtree                                       |
@@ -65,7 +67,29 @@ read here is a title that resolves, and one a write takes as =before= (see
 difference to either comparison: =* TODO Ship v2 [1/3]= reads as =Ship v2=, and
 =file:/path/to/file.org::*ship v2= reaches it.
 
-Example, a heading:
+A heading's =breadcrumbs= are its ancestors, outermost first, each carrying the
+=title=, =link= and =level= a read of that ancestor answers with, so a client
+places a node in its outline without a read per ancestor. A heading without a
+TODO keyword is an ancestor like any other. The file is not one — =file= and
+=link= already name it — so a top-level heading and a file carry none:
+
+#+begin_src json
+"breadcrumbs": [
+  {"title": "Work", "link": "file:~/org/projects.org::*Work", "level": 1},
+  {"title": "Project Alpha",
+   "link": "id:550e8400-e29b-41d4-a716-446655440000", "level": 2}
+]
+#+end_src
+
+=blocked= is Org's own answer, from =org-entry-blocked-p=: it runs
+=org-blocker-hook= as a change to done would, so it counts
+=org-enforce-todo-dependencies= and any blocker your Emacs adds to the hook —
+org-edna's among them when =org-edna-mode= is on. It is =true= or =false= on a
+heading with a not-done TODO keyword, and left out of a heading with a done
+keyword or none, and of a file, since none of them has a change to done to
+block.
+
+Example, a heading, as a read that asks for nothing in particular returns it:
 #+begin_src json
 {
   "title": "Project Alpha",
@@ -79,11 +103,13 @@ Example, a heading:
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "level": 1,
   "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "blocked": false,
   "content": "Body text here...",
   "children": [
     {"title": "Subtask", "todo": "NEXT", "level": 2,
      "link": "file:~/org/projects.org::*Subtask"}
-  ]
+  ],
+  "properties": {"ID": "550e8400-e29b-41d4-a716-446655440000"}
 }
 #+end_src
 
@@ -105,8 +131,8 @@ Example, a file:
 ** Asking for fields
 
 A call says how much of a node it wants in its =fields= parameter and gets
-exactly that. =org-node-read= and =org-query= both take it, and it means the
-same thing on each. Every representation is the same node: a reference — a node
+exactly that. =org-node-read=, =org-query= and =org-view= all take it, and it
+means the same thing on each. Every representation is the same node: a reference — a node
 carrying its =link= alone — is a whole node asked for with less, and grows into
 one by asking for more.
 
@@ -137,18 +163,22 @@ A call that sends no =fields= — or sends =null=, =false=, an empty string or a
 empty array, which mean the same as sending none — gets what that node carries
 unasked:
 
-| A node from                 | Carries unasked                                       |
-|-----------------------------+-------------------------------------------------------|
-| =org-node-read=             | every field but the two digests                       |
-| the =org://{link}= resource | every field but the two digests                       |
-| =org-query=                 | every field but =content=, =children= and the digests |
-| a child the call expanded   | the same fields as its parent                         |
-| a child it did not          | =title=, =todo=, =level= and =link=                   |
+| A node from                 | Carries unasked                                     |
+|-----------------------------+-----------------------------------------------------|
+| =org-node-read=             | every field but the two digests                     |
+| the =org://{link}= resource | every field but the two digests                     |
+| =org-query= and =org-view=  | the fields =org-records-mcp-list-fields= names      |
+| a child the call expanded   | the same fields as its parent                       |
+| a child it did not          | =title=, =todo=, =level= and =link=                 |
 
-A query leaves =content= and =children= out because filling them means reading
-every matched subtree; naming either in =fields= asks for exactly that, at that
-cost. Neither endpoint hashes a node it was not asked to: a digest is for a
-client about to change something, and a query asked for one hashes every match.
+A read is the whole node. A match list is an overview: out of the box each
+match carries =title=, =todo=, =priority=, =tags=, =scheduled=, =deadline= and
+=link=, and the rest of it is a read of that link away. Naming =content= or
+=children= in =fields= fills them for every match, at the cost of reading every
+matched subtree. Widening what every list carries, and asking a single call for
+more, is [[file:queries.org::*What a match list carries][What a match list carries]]. Neither endpoint hashes a node it was not
+asked to: a digest is for a client about to change something, and a query asked
+for one hashes every match.
 A child the call did not expand carries the four fields above, whatever it
 asked of the parent: to see more of that child, expand it with =depth= (see
 [[*Reading a subtree][Reading a subtree]]) or read it by its =link=.
@@ -183,7 +213,8 @@ nothing to say why.
 ** Asking for properties
 
 A node's Org property drawer is asked for in the =properties= parameter, which
-=org-node-read= and =org-query= both take. Name the properties you want:
+=org-node-read=, =org-query= and =org-view= all take. Name the properties you
+want:
 
 #+begin_src json
 {
@@ -266,16 +297,15 @@ what the call is for:
 
 | A node from                 | Carries unasked |
 |-----------------------------+-----------------|
-| =org-node-read=             | no properties   |
-| the =org://{link}= resource | no properties   |
-| =org-query=                 | every property  |
+| =org-node-read=             | every property  |
+| the =org://{link}= resource | every property  |
+| =org-query= and =org-view=  | no properties   |
 | a child the call expanded   | its parent's    |
 | a child it did not          | no properties   |
 
-A query is the call that asks /about/ properties, so it hands the drawer back
-with each match; ="none"= turns that off when a match list does not need it. A
-read hands back none unasked, because a drawer holds what you put there and a
-client asks for the properties it knows what to do with.
+A read is the whole node, so it hands the drawer back; ="none"= turns that off.
+A match list is an overview and carries no drawer unasked: name the properties
+the list is about, or ="all"=, and a read of a match's =link= returns the rest.
 
 The special properties — =TODO=, =TAGS=, =PRIORITY=, =SCHEDULED=, =DEADLINE=,
 =CLOSED=, =CATEGORY=, =ITEM=, =FILE=, =ALLTAGS=, =BLOCKED=, =CLOCKSUM=,
@@ -293,8 +323,8 @@ It is the node's own drawer under every value of the setting: a heading whose
 parent or grandparent holds =AREA= comes back without =AREA= from
 =org-node-read=, walked into with =depth=, or as an =org-query= or =org-view=
 match, and a file node's =properties= never carry a =#+PROPERTY:= value. The
-=org://{link}= resource carries no properties at all, so nothing inherited
-reaches it either.
+=org://{link}= resource answers with the same drawer =org-node-read= does, so
+nothing inherited reaches it either.
 
 A query can ask for inherited values, and then matches a node on a value its
 =properties= do not carry (see [[file:queries.org::*Inherited properties in a query][Inherited properties in a query]]). What a write does
@@ -307,22 +337,15 @@ ranking, the priority of a parent, whatever the workflow sorts and groups by.
 It is org-records-mcp's answer at that moment: it belongs to no drawer, and no write
 puts it back.
 
-Which ones exist is =org-records-mcp-computed-fields=, which is your configuration.
-Each entry pairs the name a call asks for with a function called at the node
-while the response is built:
+Which ones exist is =org-records-mcp-computed-fields=, which is your
+configuration; [[file:queries.org::*Defining a computed field][Defining a computed field]] shows an entry. Nothing is
+configured out of the box: what is worth computing is your workflow's question
+rather than org-records-mcp's. Until you set the variable, ="all"= is empty and
+every name is refused.
 
-#+begin_src emacs-lisp
-(setq org-records-mcp-computed-fields
-      '((rank            . my-rank-fn)
-        (parent-priority . my-parent-priority-fn)))
-#+end_src
-
-Nothing is configured out of the box: what is worth computing is your
-workflow's question rather than org-records-mcp's. Until you set the variable, ="all"=
-is empty and every name is refused.
-
-The =computed= parameter then works as =properties= does — an array of names,
-or ="all"= or ="none"= — and =org-node-read= and =org-query= both take it:
+The =computed= parameter works as =properties= does — an array of names, or
+="all"= or ="none"= — and =org-node-read=, =org-query= and =org-view= all take
+it:
 
 #+begin_src json
 {
@@ -342,17 +365,18 @@ A function that answers with nothing leaves its field out, as an empty field
 is left out. A name nobody configured is refused, and the refusal names the
 ones that are.
 
-| A node from                 | Carries unasked      |
-|-----------------------------+----------------------|
-| =org-node-read=             | no computed fields   |
-| the =org://{link}= resource | no computed fields   |
-| =org-query=                 | every computed field |
-| a child the call expanded   | its parent's         |
-| a child it did not          | no computed fields   |
+| A node from                 | Carries unasked                                        |
+|-----------------------------+--------------------------------------------------------|
+| =org-node-read=             | every computed field                                   |
+| the =org://{link}= resource | every computed field                                   |
+| =org-query= and =org-view=  | the ones =org-records-mcp-list-computed-fields= names  |
+| a child the call expanded   | its parent's                                           |
+| a child it did not          | no computed fields                                     |
 
-A query carries them all because a workflow configures them for the matches it
-ranks; a read carries none, because a client asks for what it knows what to do
-with.
+A read is the whole node, so it carries every one. A match list carries the
+ones its workflow sorts or groups by, which is none out of the box; see
+[[file:queries.org::*What a match list carries][What a match list carries]].
+
 ** Reading a subtree
 
 =depth= expands that many generations of children in place, so a project and
@@ -505,9 +529,10 @@ held (see [[file:writing.org::*A file's own property drawer][A file's own proper
   either: a resource is picked from a client's UI, which has nowhere to say how
   much of the node it wants, so the resource always serves the default node,
   its children as references. It carries no =properties= or =computed=
-  parameter for the same reason, and serves neither.
+  parameter for the same reason, and serves the whole drawer and every
+  computed field, as =org-node-read= does unasked.
 - *Configuration:* Files must be explicitly allowed via =org-records-mcp-allowed-files= (absolute or relative paths; relative paths resolve against =org-directory=), or a file path must be permitted by =org-records-mcp-file-scope-override=
-- *Returns:* the node the link names, with every field but the two digests, and no properties and no computed fields (see [[*The node][The node]])
+- *Returns:* the node the link names, with every field but the two digests, its whole drawer and every computed field (see [[*The node][The node]])
 
 The link is percent-encoded like any URI path, and org-records-mcp decodes it exactly
 once before resolving it. Encode at least =%= as =%25=, =#= as =%23=, =?= as
@@ -555,10 +580,10 @@ tool-only variant with no resource counterpart.
     - =file:/path/to/file.org=, or =id:<id>= of its file-level property drawer - file (returns file with children)
   - =fields= (array of strings, or a string, optional): how much of the node to return; an array of field names, or the name of a configured list. See [[*Asking for fields][Asking for fields]]
   - =depth= (number, optional): how many generations of children to expand in place; none by default. See [[*Reading a subtree][Reading a subtree]]
-  - =properties= (array of strings, or a string, optional): which Org drawer properties to return; an array of property names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for properties][Asking for properties]]
-  - =computed= (array of strings, or a string, optional): which computed fields to return; an array of names, or ="all"= or ="none"=. Defaults to none. See [[*Asking for computed fields][Asking for computed fields]]
+  - =properties= (array of strings, or a string, optional): which Org drawer properties to return; an array of property names, or ="all"= or ="none"=. Defaults to all. See [[*Asking for properties][Asking for properties]]
+  - =computed= (array of strings, or a string, optional): which computed fields to return; an array of names, or ="all"= or ="none"=. Defaults to all. See [[*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to look up an =id:= link in, instead of the ID index; see [[file:file-access.org::*Naming the file of an ID][Naming the file of an ID]]
-- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but the two digests when it asked for none, plus what =properties= and =computed= named (see [[*The node][The node]])
+- *Returns:* the node the link names, carrying the fields =fields= asked for, or every field but the two digests when it asked for none, plus what =properties= and =computed= named, or the whole drawer and every computed field when they named nothing (see [[*The node][The node]])
 - *Configuration:* File must be in =org-records-mcp-allowed-files=, or permitted by =org-records-mcp-file-scope-override=
 
 ** org-node-text

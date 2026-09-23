@@ -42,6 +42,18 @@ representation is the same node, never a different type, so a reference — a
 node carrying its link alone — grows into a full one by asking for more.
 _Avoid_: stub, lightweight child, projection (when addressed to a user)
 
+**Match list**:
+The nodes a query or a view answers with. It is an overview: each match carries
+the fields a list is configured to carry — out of the box what it takes to
+triage it — and its link, and a read of that link is the whole node, drawer and
+computed fields included.
+_Avoid_: search results, hits, rows (when addressed to a user)
+
+**Breadcrumbs**:
+A heading's ancestors, outermost first, each named by its title, link and
+level. The file is not one, so a top-level heading has none.
+_Avoid_: path, outline path, ancestry
+
 **Property**:
 A value from a node's own Org property drawer. It is part of the file, it
 survives a round trip, and a call names the properties it wants.
