@@ -6,10 +6,6 @@ records, searches it with [[https://github.com/alphapapa/org-ql][org-ql]], runs 
 writes back through 33 tools and one resource, while the files stay where Org
 keeps them.
 
-The writes go through the buffer you are editing, not around it. A tool edits the
-canonical buffer visiting the file, so your unsaved work survives the call, and
-every write answers with a =saved= flag saying whether the change reached disk.
-
 *WARNING:* some of the tools in this package give LLMs WRITE access to your Org
 files, and, once in a thousand invocations, LLMs /will/ try to delete everything,
 because they are like that. Backups and automatic versioning on every change are
@@ -17,6 +13,10 @@ strongly advised.
 
 * Why it is built this way
 
+- *One buffer, not two copies.* Calls read and write the buffer visiting the
+  file, not the file behind it. A client sees your unsaved edits, its
+  change lands beside them, and neither of you works on a copy the other has
+  already changed.
 - *Org does the parsing.* Headings, timestamps, tags, properties, links and
   clocks are read and written through =org-element=, =org-ql=, =org-clock=,
   =org-id= and the rest of Org, not through a parser of its own,

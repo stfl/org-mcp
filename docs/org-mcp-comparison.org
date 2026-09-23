@@ -97,7 +97,9 @@ buffer visiting it; when such a buffer holds edits you have not saved, it
 refuses the write and asks you to save first. org-records-mcp makes the change
 in the buffer Emacs has open and saves it when it was clean. When it held your
 unsaved edits, the change joins them, nothing is saved, and the response says
-so with =saved: false=; your next save writes both. [[file:writing.org::*How a write reaches disk][How a write reaches disk]] has the rule.
+so with =saved: false=; your next save writes both. You and a client editing
+the same file work on one buffer, so neither side ever holds a copy the other
+has moved past. [[file:writing.org::*How a write reaches disk][How a write reaches disk]] has the rule.
 
 org-mcp gives every heading it writes to an =ID= property, so the URI it
 returns stays valid when the heading is renamed or moved. org-records-mcp
