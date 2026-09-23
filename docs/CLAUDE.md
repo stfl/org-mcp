@@ -18,7 +18,7 @@ owns the question, never to a second page that repeats it:
 |---|---|
 | `installation.org` | installing the package and the shims, registering a client, the dependency versions, what the `initialize` handshake reports, how a client that cannot send an array or an object sends one |
 | `file-access.org` | the allowed files, `org-records-mcp-file-scope-override`, the `files` parameter, directory searches, finding an ID's file |
-| `links.org` | the link forms a call takes, what is refused, the link every response carries |
+| `links.org` | the link forms a call takes, how they resolve, the link every response carries |
 | `reading.org` | the `org://{link}` resource, `org-node-read`, `org-node-text`, and the six configuration and discovery tools |
 | `writing.org` | what a write does to buffers and files, and the sixteen write tools |
 | `queries.org` | `org-query`, `org-view`, and the views, filters and settings that define them |
@@ -31,6 +31,11 @@ there only by changing what org-records-mcp is or what it costs to run — the t
 the quickstart, a limit. `CONTRIBUTING.org` states the same admission test for
 contributors, and `CONTRIBUTING.org` itself owns everything about changing the
 code.
+
+A page says what org-records-mcp supports, not what it does not: `links.org`
+names the two link forms a call takes and never lists the link types, relative
+forms or searches it refuses. The refusal message is where a client learns the
+rest.
 
 ## Links run outward
 
