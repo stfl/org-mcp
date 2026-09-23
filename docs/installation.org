@@ -36,8 +36,8 @@ The Doom recipe below carries the same =:files= line, for the same reason.
 
 The package MELPA carries under the name =org-mcp= is a different server,
 [[https://github.com/laurynas-biveinis/org-mcp][laurynas-biveinis/org-mcp]], which org-records-mcp grew out of. It has neither the
-clock tools nor the views these pages document, and its symbols share the
-=org-mcp-= prefix org-records-mcp does not use; [[file:org-mcp-comparison.org][org-records-mcp and org-mcp]] sets
+clock tools nor the views these pages document, and its symbols carry the
+=org-mcp-= prefix, which org-records-mcp does not use; [[file:org-mcp-comparison.org][org-records-mcp and org-mcp]] sets
 the two side by side.
 
 * Doom Emacs

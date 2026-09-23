@@ -2,8 +2,8 @@
 
 org-records-mcp gives MCP clients access to Emacs Org-mode: reading, querying and
 editing Org files through the running Emacs session, and answering in typed
-records rather than Org text. It stays workflow-neutral: a workflow package such
-as agile-gtd supplies the views, filters and computed fields that make it one.
+records rather than Org text. It stays workflow-neutral: the views, filters and
+computed fields that give it a workflow come from a package such as agile-gtd.
 
 ## Scope
 

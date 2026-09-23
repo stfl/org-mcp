@@ -19,23 +19,23 @@ strongly advised.
 
 - *Org does the parsing.* Headings, timestamps, tags, properties, links and
   clocks are read and written through =org-element=, =org-ql=, =org-clock=,
-  =org-refile=, =org-id= and the rest of Org, not through a parser of its own,
+  =org-id= and the rest of Org, not through a parser of its own,
   so what a call sees is what Org sees under your configuration. The handful of
   patterns org-records-mcp keeps of its own mostly check text a client sends
   before Org is handed it.
 - *Records, not text.* A heading comes back as typed fields — =todo=,
   =priority=, =tags=, =scheduled=, the link that addresses it — and a query
-  returns no bodies unless it asks for them. A client reasons over data and
+  or a view returns no bodies unless it asks for them. A client reasons over data and
   spends its context on the headings that matter.
 - *org-ql is the query language.* =org-query= takes any org-ql expression, so a
   client asks the questions your agenda asks, with the same predicates.
 - *Your agenda, by name.* =org-view= runs views you define from the same org-ql
   queries your agenda commands use, so the agenda in Emacs and the answer a
-  client gets cannot drift apart.
+  client gets do not drift apart.
 - *A foundation, not a workflow.* Views, filters, a sort order, computed fields
   and named field lists are settings a workflow package fills in.
   [[https://github.com/stfl/agile-gtd.el][agile-gtd]] is one: an Agile GTD system — epics, projects, next actions, a
-  prioritized backlog — whose agenda queries org-records-mcp serves as views.
+  prioritized backlog — whose public query functions a view can name.
 
 * Quickstart
 
