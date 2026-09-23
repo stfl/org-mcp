@@ -89,7 +89,7 @@ heading with a not-done TODO keyword, and left out of a heading with a done
 keyword or none, and of a file, since none of them has a change to done to
 block.
 
-Example, a heading:
+Example, a heading, as a read that asks for nothing in particular returns it:
 #+begin_src json
 {
   "title": "Project Alpha",
@@ -103,11 +103,13 @@ Example, a heading:
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "level": 1,
   "link": "id:550e8400-e29b-41d4-a716-446655440000",
+  "blocked": false,
   "content": "Body text here...",
   "children": [
     {"title": "Subtask", "todo": "NEXT", "level": 2,
      "link": "file:~/org/projects.org::*Subtask"}
-  ]
+  ],
+  "properties": {"ID": "550e8400-e29b-41d4-a716-446655440000"}
 }
 #+end_src
 
@@ -129,8 +131,8 @@ Example, a file:
 ** Asking for fields
 
 A call says how much of a node it wants in its =fields= parameter and gets
-exactly that. =org-node-read= and =org-query= both take it, and it means the
-same thing on each. Every representation is the same node: a reference — a node
+exactly that. =org-node-read=, =org-query= and =org-view= all take it, and it
+means the same thing on each. Every representation is the same node: a reference — a node
 carrying its =link= alone — is a whole node asked for with less, and grows into
 one by asking for more.
 

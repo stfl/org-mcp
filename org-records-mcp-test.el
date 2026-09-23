@@ -18246,17 +18246,19 @@ the setting."
 
 (ert-deftest org-records-mcp-test-list-fields-refuse-an-unknown-name ()
   "A name in `org-records-mcp-list-fields' that is no node field is refused.
-It is refused at the call that would use it, the way a name the call
-sent is, on both endpoints; a call naming its own fields does not
-use the setting and is answered."
+It is refused at a call that takes the default, on both endpoints,
+and the refusal names the setting, since the call sent nothing, and
+the parameter that goes around it.  A call naming its own fields
+does not use the setting and is answered, which is that advice
+taken."
   (org-records-mcp-test--with-views
     (let ((org-records-mcp-list-fields '(title nosuch)))
-      (org-records-mcp-test--call-tool-refused
-       "org-query" '((query . "(tags \"#inbox\")"))
-       "\\`Unknown node field: nosuch\\.  Valid fields: title, ")
-      (org-records-mcp-test--call-tool-refused
-       "org-view" '((view . "inbox"))
-       "\\`Unknown node field: nosuch\\.  Valid fields: title, ")
+      (dolist (call '(("org-query" (query . "(tags \"#inbox\")"))
+                      ("org-view" (view . "inbox"))))
+        (org-records-mcp-test--call-tool-refused
+         (car call) (cdr call)
+         "\\`org-records-mcp-list-fields names nosuch, which is no node \
+field; send fields to override\\'"))
       (should
        (equal
         (org-records-mcp-test--list-matches '((fields . ["title"])))
@@ -18302,19 +18304,26 @@ names carry exactly those, whichever of the three the setting is."
 
 (ert-deftest org-records-mcp-test-list-computed-fields-refuse-an-unknown-name ()
   "A name in the setting nobody configured is refused, on both endpoints.
-The refusal is the one a call naming it gets, and names what is
+The refusal names the setting, since the call sent nothing, and the
+parameter that goes around it; sending that parameter is answered.
+A name the call itself sends keeps the refusal naming what is
 configured."
   (let ((org-records-mcp-computed-fields org-records-mcp-test--list-computed-fields)
         (org-records-mcp-list-computed-fields '(rank renk)))
     (org-records-mcp-test--with-views
-      (org-records-mcp-test--call-tool-refused
-       "org-query" '((query . "(tags \"#inbox\")"))
-       "\\`Unknown computed field: renk\\.  Configured computed \
-fields: rank, parent-priority, nothing\\'")
-      (org-records-mcp-test--call-tool-refused
-       "org-view" '((view . "inbox"))
-       "\\`Unknown computed field: renk\\.  Configured computed \
-fields: rank, parent-priority, nothing\\'"))))
+      (dolist (call '(("org-query" (query . "(tags \"#inbox\")"))
+                      ("org-view" (view . "inbox"))))
+        (org-records-mcp-test--call-tool-refused
+         (car call) (cdr call)
+         "\\`org-records-mcp-list-computed-fields names renk, which is no \
+configured computed field; send computed to override\\'")
+        (org-records-mcp-test--call-tool-refused
+         (car call) (append (cdr call) '((computed . ["renk"])))
+         "\\`Unknown computed field: renk\\.  Configured computed \
+fields: rank, parent-priority, nothing\\'"))
+      (should
+       (equal (org-records-mcp-test--list-computed ["rank"])
+              (make-list 2 '((rank . 12))))))))
 
 (ert-deftest org-records-mcp-test-view-refuses-files ()
   "A view never takes a scope override: it declares no `files'."
@@ -23156,6 +23165,54 @@ form it got wrong."
         (org-records-mcp-test--read-fields
          (alist-get 'link crumb) ["title" "link" "level"])
         crumb)))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-on-an-expanded-child ()
+  "A child a read expands carries the crumbs a read of it answers with.
+An expanded child is the node its own read returns, so its crumbs
+run from the outermost ancestor down to the node the call read, not
+from that node alone."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let* ((project (org-records-mcp-test--file-link test-file "*Project"))
+           (node
+            (json-read-from-string
+             (mcp-server-lib-ert-call-tool
+              "org-node-read"
+              `((link . ,project)
+                (depth . 1)
+                (fields . ["title" "breadcrumbs" "children"])
+                (properties . "none")
+                (computed . "none")))))
+           (step (aref (alist-get 'children node) 0)))
+      (should (equal (alist-get 'title step) "Step"))
+      (should
+       (equal (alist-get 'breadcrumbs step)
+              (org-records-mcp-test--breadcrumbs-of-step test-file))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-see-past-a-narrowing ()
+  "A buffer narrowed to the heading still yields every crumb.
+The narrowing is the user's, so the read neither loses the
+ancestors it hides nor leaves the buffer widened or point moved."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let ((buffer (find-file-noselect test-file))
+          narrowed point)
+      (with-current-buffer buffer
+        (goto-char (point-min))
+        (re-search-forward "^\\*\\*\\*\\* NEXT Step")
+        (org-narrow-to-subtree)
+        (goto-char (point-max))
+        (setq narrowed (cons (point-min) (point-max))
+              point (point)))
+      (should
+       (equal
+        (org-records-mcp-test--read-fields
+         (org-records-mcp-test--file-link test-file "*Step") ["breadcrumbs"])
+        `((breadcrumbs
+           . ,(org-records-mcp-test--breadcrumbs-of-step test-file)))))
+      (with-current-buffer buffer
+        (should (equal (cons (point-min) (point-max)) narrowed))
+        (should (= (point) point))))))
 
 (ert-deftest org-records-mcp-test-breadcrumbs-left-out-without-ancestors ()
   "A top-level heading and a file carry no breadcrumbs.
@@ -30641,6 +30698,7 @@ org-store-link changes the link"
     "Not a property name: %s.  A trailing `+' makes a drawer line add to the property named \
 without it, so it names none of its own"
     "A property name is a string, not: %s"
+    "%s names %s, which is no %s; send %s to override"
     "Invalid property name: '%s'"
     "Not a drawer property: %s.  Org computes it rather than storing it; the node's own fields \
 carry what it says.  Special properties: %s"

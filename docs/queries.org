@@ -247,9 +247,16 @@ names nothing is two settings:
 | =org-records-mcp-list-computed-fields= | none                                                                      |
 
 A match carries no Org drawer unasked. A name in either setting that is not a
-node field or not a configured computed field is refused at the call, with the
-refusal a call naming it gets. =org-records-mcp-list-computed-fields= also
-takes =all=, every configured computed field.
+node field or not a configured computed field is refused at a call that takes
+the default, and the refusal names the setting and the parameter that goes
+around it:
+
+#+begin_example
+org-records-mcp-list-fields names nosuch, which is no node field; send fields to override
+#+end_example
+
+=org-records-mcp-list-computed-fields= also takes =all=, every configured
+computed field.
 
 ** Widening every list
 

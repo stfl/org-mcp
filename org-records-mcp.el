@@ -151,11 +151,12 @@ state, priority, tags and dates -- and that link.  The body and the
 children are left to the read, since filling them would read every
 matched subtree.
 
-The value is a list of names from `org-records-mcp--node-fields'.  A
+The value is a list of node field names, the ones a call's `fields'
+parameter takes and docs/reading.org lists under \"The node\".  A
 workflow whose lists answer another question adds the fields that
 answer it.  A call's `fields' parameter replaces the list, so a
 client asks for the rest by name.  A name here that is no node field
-is refused at the call, the way a name the call sent would be."
+is refused at a call that takes the default, naming this setting."
   :type '(repeat symbol)
   :group 'org-records-mcp)
 
@@ -163,8 +164,8 @@ is refused at the call, the way a name the call sent would be."
   "The computed fields a match list carries unasked.
 org-query and org-view return each match as a line of an overview.
 A computed field that answers a question of the list -- a rank the
-matches are sorted by, whether one is blocked -- belongs on the
-line; one that describes the node on its own belongs to the read,
+matches are sorted by, the priority of a match's parent -- belongs
+on the line; one that describes the node on its own belongs to the read,
 which carries every one.
 
 The value is a list of names from `org-records-mcp-computed-fields',
@@ -174,7 +175,7 @@ question, and the package that configures a computed field adds the
 ones its lists sort or group by here.  A call's `computed' parameter
 replaces it, so a client asks for the rest by name.  A name here
 that `org-records-mcp-computed-fields' does not configure is refused
-at the call, the way a name the call sent would be."
+at a call that takes the default, naming this setting."
   :type
   '(choice
     (repeat :tag "These fields" symbol)
@@ -1821,7 +1822,19 @@ spelled out is."
 configured list as a string, not: %s"
      (org-records-mcp--json-name fields)))))
 
-(defun org-records-mcp--node-fields-given (fields default)
+(defun org-records-mcp--refuse-setting-name
+    (setting name what parameter)
+  "Refuse NAME, which SETTING holds and which is no WHAT.
+SETTING is the variable a call's default came from, and PARAMETER
+the call parameter that overrides it.  The refusal names the
+setting rather than the call, which sent nothing, so a client
+learns the fault is the configuration's and how to go around it."
+  (org-records-mcp--tool-validation-error
+   "%s names %s, which is no %s; send %s to override"
+   setting name what parameter))
+
+(defun org-records-mcp--node-fields-given
+    (fields default &optional setting)
   "Return the node fields a call asking for FIELDS wants.
 FIELDS is the `fields' parameter of a call, see
 `org-records-mcp--node-field-names'.  A blank FIELDS, see
@@ -1832,18 +1845,32 @@ it is not asked.
 Every name is resolved here, at the parameter, rather than in
 `org-records-mcp--node-at-point': a node is then built from fields that are
 known to exist, and a call that misspells one is refused before a
-file is opened.  DEFAULT is resolved the same way, since it may be
-the user's `org-records-mcp-list-fields'.  A field named twice is
+file is opened.  DEFAULT is resolved the same way.  SETTING, when
+non-nil, is the variable DEFAULT is the value of, and a name in it
+that is no field is refused naming SETTING, see
+`org-records-mcp--refuse-setting-name'.  A field named twice is
 dropped to once, since it would otherwise be a key sent twice.
 
 A FIELDS sent as the text of a JSON array is read back as that array
 first, see `org-records-mcp--array-param'."
   (let ((fields (org-records-mcp--array-param fields "fields")))
     (delete-dups
-     (mapcar
-      #'org-records-mcp--node-field
-      (if (org-records-mcp--blank-param-p fields)
-          default
+     (if (org-records-mcp--blank-param-p fields)
+         (mapcar
+          (lambda (name)
+            (if (and setting
+                     (not
+                      (cl-find
+                       (format "%s" name)
+                       org-records-mcp--node-fields
+                       :key #'symbol-name
+                       :test #'string=)))
+                (org-records-mcp--refuse-setting-name
+                 setting name "node field" "fields")
+              (org-records-mcp--node-field name)))
+          default)
+       (mapcar
+        #'org-records-mcp--node-field
         (org-records-mcp--node-field-names fields))))))
 
 (defun org-records-mcp--group-given (value default what)
@@ -1962,7 +1989,8 @@ a call sends becomes a symbol."
                         ", ")
            "none")))))
 
-(defun org-records-mcp--node-computed-given (computed default)
+(defun org-records-mcp--node-computed-given
+    (computed default &optional setting)
   "Return the computed fields a call asking for COMPUTED wants.
 COMPUTED is the `computed' parameter of a call: an array of names,
 or one of the group names `org-records-mcp--group-given' takes, or blank for
@@ -1970,7 +1998,21 @@ DEFAULT, what that endpoint carries unasked.
 
 Every name is resolved here, at the parameter, as a field name is,
 so a call naming a field nobody configured is refused before a file
-is opened."
+is opened.  SETTING, when non-nil, is the variable DEFAULT is the
+value of, and a name in it nobody configured is refused naming
+SETTING, see `org-records-mcp--refuse-setting-name'."
+  (when (and setting
+             (listp default)
+             (org-records-mcp--blank-param-p
+              (org-records-mcp--array-param computed "computed")))
+    (dolist (name default)
+      (unless (cl-find
+               (format "%s" name)
+               org-records-mcp-computed-fields
+               :key (lambda (entry) (format "%s" (car entry)))
+               :test #'string=)
+        (org-records-mcp--refuse-setting-name
+         setting name "configured computed field" "computed"))))
   (let ((asked
          (org-records-mcp--group-given computed default "computed")))
     (if (eq asked 'all)
@@ -2392,13 +2434,14 @@ adds there, org-edna's among them when `org-edna-mode' is on.
 It is t or `:json-false' for a heading whose TODO is a not-done
 keyword, and nil otherwise, so the field is left out of a heading
 without a keyword or with a done one: no change to done is there to
-block."
+block.  The buffer is read widened, since a blocker may look at
+siblings and children a narrowing hides, and point is not moved."
   (when (member todo org-not-done-keywords)
-    (save-excursion
-      (org-back-to-heading t)
-      (if (org-entry-blocked-p)
-          t
-        :json-false))))
+    (org-with-wide-buffer
+     (org-back-to-heading t)
+     (if (org-entry-blocked-p)
+         t
+       :json-false))))
 
 (defun org-records-mcp--child-projection
     (fields properties computed depth)
@@ -7868,10 +7911,12 @@ MCP Parameters:
       (org-records-mcp--run-query
        query-sexp
        (org-records-mcp--node-fields-given
-        fields org-records-mcp-list-fields)
+        fields org-records-mcp-list-fields
+        'org-records-mcp-list-fields)
        (org-records-mcp--node-properties-given properties nil)
        (org-records-mcp--node-computed-given
-        computed org-records-mcp-list-computed-fields)
+        computed org-records-mcp-list-computed-fields
+        'org-records-mcp-list-computed-fields)
        nil))))
 
 ;; Views
@@ -8065,12 +8110,14 @@ MCP Parameters:
          ;; match.
          (node-fields
           (org-records-mcp--node-fields-given
-           fields org-records-mcp-list-fields))
+           fields org-records-mcp-list-fields
+           'org-records-mcp-list-fields))
          (properties
           (org-records-mcp--node-properties-given properties nil))
          (computed
           (org-records-mcp--node-computed-given
-           computed org-records-mcp-list-computed-fields)))
+           computed org-records-mcp-list-computed-fields
+           'org-records-mcp-list-computed-fields)))
     ;; A view always runs over the allowed files: org-view takes no
     ;; `files' parameter, and mcp-server-lib refuses a call passing
     ;; one with an "Unexpected parameter" error before this runs.
