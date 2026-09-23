@@ -249,19 +249,19 @@ When nil, no sorting is applied."
 
 (defconst org-records-mcp-version
   (eval-when-compile
-    (require 'lisp-mnt)
-    ;; `byte-compile-current-file' names the file while the compiler
-    ;; runs.  Loading from source binds it only when some dependency has
-    ;; already pulled in bytecomp, which is not ours to rely on, so read
-    ;; it defensively.
-    (lm-version
-     (or (bound-and-true-p byte-compile-current-file)
-         load-file-name
-         buffer-file-name)))
+    (require 'package)
+    ;; `package-get-version' finds this file whether it is byte-compiled
+    ;; from the repository checkout or from an installed package: it
+    ;; reads the version from the `<name>-<version>' directory an ELPA
+    ;; install unpacks into, and only falls back to this file's header
+    ;; (`Version:' or `Package-Version:', an install can carry either)
+    ;; when the directory name does not carry one, e.g. a checkout run
+    ;; straight from source.
+    (package-get-version))
   "Version org-records-mcp reports as `serverInfo.version' in the handshake.
-Read from this file's `Version:' header, at compile time when the
-package is byte-compiled, so it cannot drift from the package
-metadata the way a second copy of the string would.")
+Computed once, at compile time, by `package-get-version', so it cannot
+drift from the package metadata the way a second copy of the string
+would.")
 
 ;; Error handling helpers
 ;;
