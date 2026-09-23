@@ -1,6 +1,6 @@
 #+TITLE: Addressing headings with links
 
-This page answers how a call names a heading, which links org-records-mcp refuses,
+This page answers how a call names a heading, which links org-records-mcp takes,
 and which link it gives back. The [[file:../README.org][README]] introduces the server itself.
 
 * Addressing headings with links
@@ -69,21 +69,12 @@ link a client finds in a body is the next call's =link=:
   other write tool needs a heading and refuses it
   (see [[file:writing.org::*Which tools a file's link reaches][Which tools a file's link reaches]]).
 
-org-records-mcp refuses:
+Two link forms are taken: =id:=, and =file:= with a full local path, with or
+without a =::*Title=, =::#custom-id= or =::<n>= search. A link is resolved,
+never run or opened, and anything else is refused before any file is opened.
 
-- every other link type, such as =shell:=, =elisp:=, =https:=, =help:= and
-  =file+sys:=, before any file is opened. org-records-mcp never runs or opens a link.
-- a link that names no local file by its full path: a relative path
-  (=file:notes.org::*Task=), a link with no file (=[[#slug]]=, =[[*Title]]=,
-  =[[Title]]=) and a remote TRAMP path, including one that becomes remote only
-  once =.=, =..= or =~= is expanded. Send the full local path instead. No
-  connection is opened for a remote path. A relative link found in a body
-  is relative to the file that holds it, and that file is the =file= of the
-  node the body came from, always a full path: =[[*Title]]= becomes
-  =file:<that file>::*Title=, =[[#slug]]= becomes =file:<that file>::#slug=, and
-  a relative =file:= path is joined to that file's directory.
-- a regexp search (=::/regexp/=), which Org answers by building a sparse tree
-  in your buffer.
+org-records-mcp also refuses:
+
 - a value that is not text: a number, =true=, or a non-empty array or object. The
   refusal names the parameter and what arrived, in JSON's words, before any
   parsing:

@@ -125,9 +125,9 @@ the next call sends — the same text =org-store-link= gives you in Emacs.
   respond meanwhile. Point it at narrow directories.
 - *It ships no views.* =org-view= stays unregistered until you configure views;
   org-records-mcp has no opinion on what your next actions are.
-- *It resolves links, it does not follow them.* Link types other than =id:= and
-  =file:= are refused before any file is opened, as are regexp searches, and a
-  search that matches nothing is an error rather than a new heading.
+- *It resolves links, it does not follow them.* It takes =id:= and =file:=
+  links and never runs or opens one, and a search that matches nothing is an
+  error rather than a new heading.
 
 * Requirements
 
