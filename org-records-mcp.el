@@ -135,8 +135,50 @@ there.
 
 Nothing is configured out of the box: what is worth computing is the
 workflow's question rather than this server's, and an external
-package populates this as it populates `org-records-mcp-node-field-lists'."
+package populates this as it populates `org-records-mcp-node-field-lists'.
+A read carries every field configured here; a match list carries
+the ones `org-records-mcp-list-computed-fields' names."
   :type '(alist :key-type symbol :value-type function)
+  :group 'org-records-mcp)
+
+(defcustom org-records-mcp-list-fields
+  '(title todo priority tags scheduled deadline link)
+  "The node fields a match list carries unasked.
+org-query and org-view return each match as a line of an overview,
+and a client reads the node behind a line by its link.  Out of the
+box a line carries what it takes to triage the match -- its title,
+state, priority, tags and dates -- and that link.  The body and the
+children are left to the read, since filling them would read every
+matched subtree.
+
+The value is a list of names from `org-records-mcp--node-fields'.  A
+workflow whose lists answer another question adds the fields that
+answer it.  A call's `fields' parameter replaces the list, so a
+client asks for the rest by name.  A name here that is no node field
+is refused at the call, the way a name the call sent would be."
+  :type '(repeat symbol)
+  :group 'org-records-mcp)
+
+(defcustom org-records-mcp-list-computed-fields nil
+  "The computed fields a match list carries unasked.
+org-query and org-view return each match as a line of an overview.
+A computed field that answers a question of the list -- a rank the
+matches are sorted by, whether one is blocked -- belongs on the
+line; one that describes the node on its own belongs to the read,
+which carries every one.
+
+The value is a list of names from `org-records-mcp-computed-fields',
+or `all' for every field it configures.  Out of the box it is empty,
+as that setting is: what is worth computing is the workflow's
+question, and the package that configures a computed field adds the
+ones its lists sort or group by here.  A call's `computed' parameter
+replaces it, so a client asks for the rest by name.  A name here
+that `org-records-mcp-computed-fields' does not configure is refused
+at the call, the way a name the call sent would be."
+  :type
+  '(choice
+    (repeat :tag "These fields" symbol)
+    (const :tag "Every configured field" all))
   :group 'org-records-mcp)
 
 (defcustom org-records-mcp-read-max-nodes 500
@@ -1673,6 +1715,8 @@ it unless TEXT ends in one or a line break follows point."
     id
     level
     link
+    breadcrumbs
+    blocked
     content
     content_digest
     digest
@@ -1709,29 +1753,14 @@ the call that reads it in full.")
     id
     level
     link
+    breadcrumbs
+    blocked
     content
     children)
-  "The fields the org-node-read tool and the org://{link} resource carry.")
-
-(defconst org-records-mcp--node-query-fields
-  '(title
-    todo
-    priority
-    tags
-    local_tags
-    scheduled
-    deadline
-    closed
-    file
-    id
-    level
-    link)
-  "The fields a query result carries.
-The same node a read returns, without the body and the children a
-match list would read every matched subtree to fill.  A query also
-carries the whole Org drawer and every computed field unasked, which
-is not a field list: it is the default each of `org-records-mcp--tool-query'
-and `org-records-mcp--tool-view' passes for those two parameters.")
+  "The fields the org-node-read tool and the org://{link} resource carry.
+Every field but the two digests: a read is the whole node, and a
+digest is for a call about to change something.  A match list
+carries `org-records-mcp-list-fields' instead.")
 
 (defun org-records-mcp--node-field (name)
   "Return the node field NAME names, or refuse NAME as not one.
@@ -1803,17 +1832,18 @@ it is not asked.
 Every name is resolved here, at the parameter, rather than in
 `org-records-mcp--node-at-point': a node is then built from fields that are
 known to exist, and a call that misspells one is refused before a
-file is opened.  A field named twice is dropped to once, since it
-would otherwise be a key sent twice.
+file is opened.  DEFAULT is resolved the same way, since it may be
+the user's `org-records-mcp-list-fields'.  A field named twice is
+dropped to once, since it would otherwise be a key sent twice.
 
 A FIELDS sent as the text of a JSON array is read back as that array
 first, see `org-records-mcp--array-param'."
   (let ((fields (org-records-mcp--array-param fields "fields")))
-    (if (org-records-mcp--blank-param-p fields)
-        default
-      (delete-dups
-       (mapcar
-        #'org-records-mcp--node-field
+    (delete-dups
+     (mapcar
+      #'org-records-mcp--node-field
+      (if (org-records-mcp--blank-param-p fields)
+          default
         (org-records-mcp--node-field-names fields))))))
 
 (defun org-records-mcp--group-given (value default what)
@@ -2328,6 +2358,48 @@ point, which `org-records-mcp--link-at-point' names."
       (org-records-mcp--file-link)
     (org-records-mcp--link-at-point)))
 
+(defun org-records-mcp--breadcrumbs-at-point ()
+  "Return the ancestors of the heading at point, outermost first.
+Each is an alist of its `title', `link' and `level', the title and
+link taken from `org-records-mcp--title-at-point' and
+`org-records-mcp--link-at-point' at that ancestor, so a crumb names
+it as a read of it does.  A heading with no TODO keyword is an
+ancestor like any other; the file is not one, since `file' and
+`link' already name it.
+
+The answer is nil for a top-level heading and before the first
+heading, so the field is left out of a node without ancestors.  The
+buffer is read widened, since a narrowing hides ancestors rather
+than removing them, and point is not moved."
+  (let (crumbs)
+    (org-with-wide-buffer
+     (unless (org-before-first-heading-p)
+       (org-back-to-heading t)
+       (while (org-up-heading-safe)
+         (push `((title . ,(org-records-mcp--title-at-point))
+                 (link . ,(org-records-mcp--link-at-point))
+                 (level . ,(org-outline-level)))
+               crumbs))))
+    (and crumbs (vconcat crumbs))))
+
+(defun org-records-mcp--blocked-at-point (todo)
+  "Return whether the heading at point, in state TODO, is blocked.
+The answer is Org's own, `org-entry-blocked-p', which runs
+`org-blocker-hook' as a change to done would: it counts Org's
+`org-enforce-todo-dependencies' and any blocker the user's Emacs
+adds there, org-edna's among them when `org-edna-mode' is on.
+
+It is t or `:json-false' for a heading whose TODO is a not-done
+keyword, and nil otherwise, so the field is left out of a heading
+without a keyword or with a done one: no change to done is there to
+block."
+  (when (member todo org-not-done-keywords)
+    (save-excursion
+      (org-back-to-heading t)
+      (if (org-entry-blocked-p)
+          t
+        :json-false))))
+
 (defun org-records-mcp--child-projection
     (fields properties computed depth)
   "Return what the children of a node asked for DEPTH carry.
@@ -2438,6 +2510,13 @@ bounded one match at a time."
                    0
                  (plist-get meta :level)))
               ('link link)
+              ('breadcrumbs
+               (unless file-node
+                 (org-records-mcp--breadcrumbs-at-point)))
+              ('blocked
+               (unless file-node
+                 (org-records-mcp--blocked-at-point
+                  (plist-get meta :todo))))
               ('content
                (let* ((bounds
                        (org-records-mcp--node-content-bounds
@@ -5450,9 +5529,9 @@ file is the one at level 0.
 
 FIELDS is the org-node-read tool's `fields' parameter, defaulting to
 `org-records-mcp--node-read-fields'.  PROPERTIES is its `properties'
-parameter and COMPUTED its `computed' one, both defaulting to
-nothing: a read carries the whole node, and these two are the parts
-of it whose names a client has to know to use.  All three are
+parameter and COMPUTED its `computed' one, both defaulting to `all':
+a read is the call that returns the whole node, drawer and computed
+fields included, where a match list returns an overview.  All three are
 resolved before the link is, so a misspelled name is refused without
 opening a file.  The resource passes none of them and takes every
 default: a resource is picked from a client's UI, which has nowhere
@@ -5471,9 +5550,9 @@ FILES is the org-node-read tool's `files' parameter; see
           fields org-records-mcp--node-read-fields))
         (depth (org-records-mcp--depth-given depth))
         (properties
-         (org-records-mcp--node-properties-given properties nil))
+         (org-records-mcp--node-properties-given properties 'all))
         (computed
-         (org-records-mcp--node-computed-given computed nil)))
+         (org-records-mcp--node-computed-given computed 'all)))
     (org-records-mcp--read-link
      link "link"
      (lambda ()
@@ -7760,13 +7839,13 @@ MCP Parameters:
   query - org-ql query sexp as string (e.g. \"(todo \\\"TODO\\\")\")
   fields - How much of each matching node to return (array of
           strings, or a string naming a configured list, optional);
-          defaults to every field but content, children and the two
-          digests
+          defaults to those org-records-mcp-list-fields names
   properties - Which Org drawer properties to return (array of
           property names, or \"all\" or \"none\", optional);
-          defaults to all
+          defaults to none
   computed - Which computed fields to return (array of names, or
-          \"all\" or \"none\", optional); defaults to all
+          \"all\" or \"none\", optional); defaults to those
+          org-records-mcp-list-computed-fields names
   files - Files and directories to search, replacing the allowed
           files (array of strings, optional)"
   (when (or (not (stringp query)) (string-empty-p query))
@@ -7789,9 +7868,10 @@ MCP Parameters:
       (org-records-mcp--run-query
        query-sexp
        (org-records-mcp--node-fields-given
-        fields org-records-mcp--node-query-fields)
-       (org-records-mcp--node-properties-given properties 'all)
-       (org-records-mcp--node-computed-given computed 'all)
+        fields org-records-mcp-list-fields)
+       (org-records-mcp--node-properties-given properties nil)
+       (org-records-mcp--node-computed-given
+        computed org-records-mcp-list-computed-fields)
        nil))))
 
 ;; Views
@@ -7966,13 +8046,13 @@ MCP Parameters:
           defaults to the range the view declares first
   fields - How much of each matching node to return (array of
           strings, or a string naming a configured list, optional);
-          defaults to every field but content, children and the two
-          digests
+          defaults to those org-records-mcp-list-fields names
   properties - Which Org drawer properties to return (array of
           property names, or \"all\" or \"none\", optional);
-          defaults to all
+          defaults to none
   computed - Which computed fields to return (array of names, or
-          \"all\" or \"none\", optional); defaults to all"
+          \"all\" or \"none\", optional); defaults to those
+          org-records-mcp-list-computed-fields names"
   (when (or (not (stringp view)) (string-empty-p view))
     (org-records-mcp--tool-validation-error
      "View must be a non-empty string"))
@@ -7985,11 +8065,12 @@ MCP Parameters:
          ;; match.
          (node-fields
           (org-records-mcp--node-fields-given
-           fields org-records-mcp--node-query-fields))
+           fields org-records-mcp-list-fields))
          (properties
-          (org-records-mcp--node-properties-given properties 'all))
+          (org-records-mcp--node-properties-given properties nil))
          (computed
-          (org-records-mcp--node-computed-given computed 'all)))
+          (org-records-mcp--node-computed-given
+           computed org-records-mcp-list-computed-fields)))
     ;; A view always runs over the allowed files: org-view takes no
     ;; `files' parameter, and mcp-server-lib refuses a call passing
     ;; one with an "Unexpected parameter" error before this runs.
@@ -8036,9 +8117,9 @@ MCP Parameters:
           (number, optional); defaults to none
   properties - Which Org drawer properties to return (array of
           property names, or \"all\" or \"none\", optional);
-          defaults to none
+          defaults to all
   computed - Which computed fields to return (array of names, or
-          \"all\" or \"none\", optional); defaults to none
+          \"all\" or \"none\", optional); defaults to all
   files - Files and directories to look up an id: link in, in order,
           instead of Emacs's ID index (array of strings, optional);
           refused with any other link"
@@ -8646,6 +8727,13 @@ itself says which.  Nothing is ever sent as null.
   link - Link naming this node again: id:{id} when it has an ID, else
          file:{path}::#{custom-id} when it has a CUSTOM_ID, else
          file:{path}::*{title}; a file without an ID is file:{path}
+  breadcrumbs - The headings above this one, outermost first, each
+         an object of its title, link and level as a read of it
+         answers them.  The file is not one, so a top-level heading
+         and a file have none
+  blocked - Whether marking the heading done is blocked, as Org's
+         org-blocker-hook answers: true or false on a heading with a
+         not-done TODO keyword, and left out otherwise
   content - Body text, or a file's preamble before its first heading
   content_digest - Opaque token over the region content is read from
          and org-node-set-content writes within.  Send back the token
@@ -9850,16 +9938,16 @@ Parameters:
           null, false, \"\" and [] ask for none.
   properties - Which Org drawer properties to return (array of
           strings, or a string, optional)
-          Defaults to none: a drawer holds what the user put in it,
-          so a call asks for the properties it knows what to do
-          with.
+          Defaults to all: a read is the call that returns the
+          whole node, so it carries the drawer unasked.  \"none\"
+          turns it off.
 "
      org-records-mcp--properties-description
      "  computed - Which computed fields to return (array of strings,
           or a string, optional)
-          Defaults to none.  What is worth computing is the
+          Defaults to all.  What is worth computing is the
           workflow's question, so nothing is configured out of the
-          box and \"all\" is then empty.
+          box and \"all\" is then empty.  \"none\" turns them off.
 "
      org-records-mcp--computed-description
      "  files - Files and directories to look up an id: link in (array of
@@ -9928,22 +10016,26 @@ Parameters:
             (deadline :to today)
   fields - How much of each matching node to return (array of
           strings, or a string, optional)
-          Defaults to every field below but content, children and
-          the two digests, which a match list would read every
-          matched subtree to fill; naming one asks for exactly that.
+          Defaults to the fields org-records-mcp-list-fields
+          names, out of the box title, todo, priority, tags,
+          scheduled, deadline and link: a match list is an
+          overview, and the rest of a node is a read of its link
+          away.  Naming fields asks for exactly those.
 "
      org-records-mcp--fields-description
      "  properties - Which Org drawer properties to return (array of
           strings, or a string, optional)
-          Defaults to all: a query is the call that asks about
-          properties, so it carries the drawer unasked.  \"none\"
-          turns it off.
+          Defaults to none: a match list is an overview, and a read
+          of a match's link returns its drawer.  Name the properties
+          a list is about, or \"all\".
 "
      org-records-mcp--properties-description
      "  computed - Which computed fields to return (array of strings,
           or a string, optional)
-          Defaults to all: a workflow configures these for the
-          matches it ranks and groups.  \"none\" turns them off.
+          Defaults to the ones org-records-mcp-list-computed-fields
+          names, none out of the box: a workflow names there the
+          ones its lists sort or group by.  \"all\" and \"none\"
+          override it.
 "
      org-records-mcp--computed-description
      "  files - Files and directories to search (array of strings, optional)
@@ -10053,22 +10145,26 @@ Parameters:
      "
   fields - How much of each matching node to return (array of
           strings, or a string, optional)
-          Defaults to every field below but content, children and
-          the two digests, which a match list would read every
-          matched subtree to fill; naming one asks for exactly that.
+          Defaults to the fields org-records-mcp-list-fields
+          names, out of the box title, todo, priority, tags,
+          scheduled, deadline and link: a match list is an
+          overview, and the rest of a node is a read of its link
+          away.  Naming fields asks for exactly those.
 "
      org-records-mcp--fields-description
      "  properties - Which Org drawer properties to return (array of
           strings, or a string, optional)
-          Defaults to all: a view is a query with a name, and a
-          query is the call that asks about properties.  \"none\"
-          turns it off.
+          Defaults to none: a view is a query with a name, and a
+          read of a match's link returns its drawer.  Name the
+          properties a list is about, or \"all\".
 "
      org-records-mcp--properties-description
      "  computed - Which computed fields to return (array of strings,
           or a string, optional)
-          Defaults to all: a workflow configures these for the
-          matches it ranks and groups.  \"none\" turns them off.
+          Defaults to the ones org-records-mcp-list-computed-fields
+          names, none out of the box: a workflow names there the
+          ones its lists sort or group by.  \"all\" and \"none\"
+          override it.
 "
      org-records-mcp--computed-description "
 Returns JSON object:

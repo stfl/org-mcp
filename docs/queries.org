@@ -12,9 +12,9 @@ server itself.
 - *Description:* Search Org files using org-ql query expressions. Supports querying by TODO state, tags, priority, deadlines, properties, and more
 - *Parameters:*
   - =query= (string, required): org-ql query sexp as a string
-  - =fields= (array of strings, or a string, optional): how much of each matching node to return; an array of field names, or the name of a configured list. It means here exactly what it means on =org-node-read=. See [[file:reading.org::*Asking for fields][Asking for fields]]
-  - =properties= (array of strings, or a string, optional): which Org drawer properties each matching node returns; an array of property names, or ="all"= or ="none"=. Defaults to all. See [[file:reading.org::*Asking for properties][Asking for properties]]
-  - =computed= (array of strings, or a string, optional): which computed fields each matching node returns; an array of names, or ="all"= or ="none"=. Defaults to all. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
+  - =fields= (array of strings, or a string, optional): how much of each matching node to return; an array of field names, or the name of a configured list. It means here exactly what it means on =org-node-read=. Defaults to the fields =org-records-mcp-list-fields= names. See [[*What a match list carries][What a match list carries]]
+  - =properties= (array of strings, or a string, optional): which Org drawer properties each matching node returns; an array of property names, or ="all"= or ="none"=. Defaults to none. See [[file:reading.org::*Asking for properties][Asking for properties]]
+  - =computed= (array of strings, or a string, optional): which computed fields each matching node returns; an array of names, or ="all"= or ="none"=. Defaults to the ones =org-records-mcp-list-computed-fields= names. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
   - =files= (array of strings, optional): Files and directories to search, replacing the allowed files for this call. Directories are searched recursively. Defaults to all allowed files. See [[file:file-access.org::*Querying other files][Querying other files]]
 - *Returns:* JSON object with a =children= array of the matching nodes (see [[file:reading.org::*The node][The node]]), the =total= count, and the =files_searched= count
 
@@ -32,11 +32,9 @@ Example:
       "title": "Urgent task",
       "todo": "TODO",
       "priority": "A",
-      "file": "/home/user/org/tasks.org",
-      "level": 2,
-      "link": "file:~/org/tasks.org::*Urgent task",
-      "properties": {"EFFORT": "2:00"},
-      "computed": {"parent-priority": "A"}
+      "tags": ["work"],
+      "deadline": "<2026-04-01 Wed>",
+      "link": "file:~/org/tasks.org::*Urgent task"
     }
   ],
   "total": 1,
@@ -44,20 +42,15 @@ Example:
 }
 #+end_src
 
-A result is the node =org-node-read= returns for the same heading. Asked
-nothing, a query leaves out =content= and =children= — a match list would read
-every matched subtree to fill those — and carries the heading's whole Org
-property drawer, because a query is the call that asks about properties. It
-carries every computed field the workflow configures for the same reason. It
-leaves out the two digests, and a query that names one hashes the region of
-every match (see [[file:reading.org::*The two digests][The two digests]]). =fields=, =properties= and =computed= are how
-a call chooses otherwise, each in either direction: naming =content= in
-=fields= returns the bodies, at that cost, and ="none"= leaves the drawer or the
-computed fields out of a match list that does not need them.
+A result is the node =org-node-read= returns for the same heading, asked for
+less: a match list is an overview, and a read of a match's =link= is the whole
+node. What a match carries unasked, and how to ask for more, is [[*What a match list carries][What a match
+list carries]]. A query that names a digest hashes the region of every match
+(see [[file:reading.org::*The two digests][The two digests]]).
 
-Both tag fields come with a result asked nothing, so a client about to replace a
-heading's tags has the =local_tags= that =org-node-set-tags= asserts without
-reading the heading again (see [[file:reading.org::*The two tag fields][The two tag fields]]).
+A client about to replace a heading's tags asks for =local_tags= in =fields=,
+and has the set =org-node-set-tags= asserts without reading the heading again
+(see [[file:reading.org::*The two tag fields][The two tag fields]]).
 
 *** Inherited properties in a query
 
@@ -90,9 +83,9 @@ date.
   - =view= (string, required): the name of a view in =org-records-mcp-views=. An unknown name is refused, and the refusal lists the configured views
   - =filter= (string, optional): the name of a filter in =org-records-mcp-filters= to restrict the view by. An unknown name is refused, and the refusal lists the configured filters
   - =range= (string, optional): one of the range names that view declares. A view that takes a range runs at the one it declares first when the call names none
-  - =fields= (array of strings, or a string, optional): how much of each matching node to return; it means here exactly what it means on =org-query=. See [[file:reading.org::*Asking for fields][Asking for fields]]
-  - =properties= (array of strings, or a string, optional): which Org drawer properties to return; ="all"= by default, as on =org-query=. See [[file:reading.org::*Asking for properties][Asking for properties]]
-  - =computed= (array of strings, or a string, optional): which computed fields to return; ="all"= by default, as on =org-query=. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
+  - =fields= (array of strings, or a string, optional): how much of each matching node to return; it means here exactly what it means on =org-query=, and defaults to the same =org-records-mcp-list-fields=. See [[*What a match list carries][What a match list carries]]
+  - =properties= (array of strings, or a string, optional): which Org drawer properties to return; none by default, as on =org-query=. See [[file:reading.org::*Asking for properties][Asking for properties]]
+  - =computed= (array of strings, or a string, optional): which computed fields to return; the ones =org-records-mcp-list-computed-fields= names by default, as on =org-query=. See [[file:reading.org::*Asking for computed fields][Asking for computed fields]]
 - *Returns:* the JSON object =org-query= returns, sorted by =org-records-mcp-query-sort-fn= when one is configured
 - *Configuration:* requires =org-records-mcp-views=, read when =org-records-mcp-enable= registers the tools; the tool is not registered while it is =nil= (see [[*Configuring views and filters][Configuring views and filters]]). =org-records-mcp-view-catalogue-function= writes the views part of the description in place of the per-view lines when it is set (see [[*Describing the views by a rule][Describing the views by a rule]])
 - *Scope:* always runs over the allowed files; a =files= parameter is refused
@@ -113,8 +106,7 @@ Example:
       "title": "Draft the migration plan",
       "todo": "NEXT",
       "priority": "A",
-      "file": "/home/user/org/work.org",
-      "level": 2,
+      "tags": ["work"],
       "link": "id:550e8400-e29b-41d4-a716-446655440000"
     }
   ],
@@ -243,10 +235,79 @@ It changes what a client reads, never what a call does: a view runs by the name
 take is refused, whatever the description says. The refusal of an unknown name
 still lists the configured views.
 
-* Computed fields on a match
+* What a match list carries
 
-A workflow's own values — the rank it sorts by, the priority of a match's
-parent — are =org-records-mcp-computed-fields=, and every match carries them under
-=computed=, apart from the Org drawer under =properties=. They are configured
-rather than built in, and the setting is the same one =org-node-read= reads
-them through: [[file:reading.org::*Asking for computed fields][Asking for computed fields]] has the variable and the parameter.
+A match list is an overview: each match is a line to triage, and a read of its
+=link= returns the whole node. What =org-query= and =org-view= carry when a call
+names nothing is two settings:
+
+| Setting                                | Out of the box                                                            |
+|----------------------------------------+---------------------------------------------------------------------------|
+| =org-records-mcp-list-fields=          | =title=, =todo=, =priority=, =tags=, =scheduled=, =deadline= and =link=   |
+| =org-records-mcp-list-computed-fields= | none                                                                      |
+
+A match carries no Org drawer unasked. A name in either setting that is not a
+node field or not a configured computed field is refused at the call, with the
+refusal a call naming it gets. =org-records-mcp-list-computed-fields= also
+takes =all=, every configured computed field.
+
+** Widening every list
+
+Add to the two settings in your Emacs configuration:
+
+#+begin_src emacs-lisp
+(add-to-list 'org-records-mcp-list-fields 'breadcrumbs t)
+;; a name configured in `org-records-mcp-computed-fields'
+(add-to-list 'org-records-mcp-list-computed-fields 'parent-priority t)
+#+end_src
+
+A workflow package adds the names its own lists sort or group by to the same
+two settings, so add to them rather than =setq= over them: a =setq= that runs
+after the package loads drops what it added. =add-to-list= needs a list, so it
+does not apply while =org-records-mcp-list-computed-fields= is =all=.
+
+** Asking one call for more
+
+A call names =fields=, =properties= or =computed=, and each one it names
+replaces that default for the call:
+
+#+begin_src json
+{
+  "view": "next",
+  "fields": ["title", "todo", "link", "breadcrumbs", "blocked"],
+  "properties": ["Effort"],
+  "computed": ["rank", "parent-priority"]
+}
+#+end_src
+
+Naming =fields= replaces the whole list, so list the default fields you still
+want beside the new one. =properties= and =computed= also take ="all"= and
+="none"=. =org-query= takes the same three parameters; what each accepts is
+[[file:reading.org::*Asking for fields][Asking for fields]], [[file:reading.org::*Asking for properties][Asking for properties]] and
+[[file:reading.org::*Asking for computed fields][Asking for computed fields]]. For everything about one match, read its =link=
+with =org-node-read=, which carries every field but the digests, the whole
+drawer and every computed field.
+
+** Defining a computed field
+
+A computed field is an entry =(NAME . FUNCTION)= in
+=org-records-mcp-computed-fields=. FUNCTION is called with no arguments, with
+point on the node, while the response is built. Its answer is sent under
+=computed= as NAME, so it has to be a value =json-encode= writes: a string, a
+number, =t=, a vector, an alist. An answer of =nil= leaves the field out, as a
+node leaves out a field it has no value for, so a field whose "no" or "empty"
+has to show answers =:json-false= or =[]= instead.
+
+#+begin_src emacs-lisp
+(defun my-effort-minutes ()
+  "The node's Effort in minutes, or nil when it sets none."
+  (when-let* ((effort (org-entry-get nil "Effort")))
+    (org-duration-to-minutes effort)))
+
+(add-to-list 'org-records-mcp-computed-fields
+             '(effort-minutes . my-effort-minutes) t)
+#+end_src
+
+A read carries the field unasked from then on. To carry it on every match list
+too, add its name to =org-records-mcp-list-computed-fields= (see [[*Widening every list][Widening
+every list]]); otherwise a call asks for it in =computed=.
