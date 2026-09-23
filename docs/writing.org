@@ -544,11 +544,8 @@ them:
 | every own tag   | =org-node-set-tags=       | =after: []=               |
 | a whole setting | =org-file-set-setting=    | =after: []=               |
 
-*The text =null= is =null= in the first four rows.* A client that checks its
-arguments against the tool schema cannot send =null=, so it sends the text, and
-those four =after= parameters read it as the ask for nothing — a TODO keyword
-only while the file names no keyword =null=. Everywhere else the text is the
-four letters it is (see [[file:installation.org::*When your client cannot send an array, an object or null][When your client cannot send an array, an object or null]]).
+*The text =null= is =null= in the first four rows*, for a client that cannot
+send =null= (see [[file:installation.org::*When your client cannot send an array, an object or null][When your client cannot send an array, an object or null]]).
 
 *={}= is =null= written another way.* The JSON decoder reads an empty object
 as nothing at all, which is what it reads =null= as, so nothing past it can

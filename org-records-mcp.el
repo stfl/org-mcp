@@ -419,6 +419,17 @@ down with it."
      "%s must be a string, not %s"
      name (org-records-mcp--json-name value)))))
 
+(defun org-records-mcp--null-text-p (value)
+  "Return non-nil when VALUE is the text a client sends for JSON null.
+The tool schema types every parameter as a string, so a client that
+validates its arguments against the schema cannot send null and
+sends the text null instead.  That text is exactly the four
+lower-case letters JSON spells null in: padded or capitalised, it is
+a string like any other.  Only an `after' that takes null to take a
+value away asks this, see `org-records-mcp--value-to-write'; every other
+parameter reads the text as the four letters it is."
+  (equal value "null"))
+
 (defun org-records-mcp--value-to-write (value name)
   "Return VALUE, the required parameter NAME naming what to write.
 A string is the value to write.  JSON null is nil here, and asks for
@@ -432,9 +443,8 @@ The text null is nil too.  The tool schema types every parameter as a
 string, so a client that validates its arguments against the schema
 cannot send JSON null at all: it sends the text null instead, and
 without this would be refused by a message naming the one value it
-cannot produce.  The text is exactly the four lower-case letters JSON
-spells null in; anything else, padded or capitalised, is a string
-like any other.  It is no timestamp and no priority character, so it
+cannot produce.  `org-records-mcp--null-text-p' says what that text is.
+It is no timestamp and no priority character, so it
 takes away nothing a caller could have meant there.  A TODO keyword
 is the one field a file may spell null, so `org-node-set-todo' reads
 the text itself, once the file is known; see
@@ -451,7 +461,7 @@ field was in, and its states are the values plus the empty one, which
 field with no empty value has no such value to name — so the two stop
 being spelled alike exactly where the field stops having one."
   (cond
-   ((member value '(nil "null"))
+   ((or (null value) (org-records-mcp--null-text-p value))
     nil)
    ((stringp value)
     value)
@@ -3789,7 +3799,7 @@ keyword.  Any other STATE is returned as it came.
 This is `org-records-mcp--value-to-write' reading the text, deferred to
 where the file is known, and it runs in the target buffer for the
 reason `org-records-mcp--validate-todo-state' does."
-  (if (and (equal state "null")
+  (if (and (org-records-mcp--null-text-p state)
            (not (member state org-todo-keywords-1)))
       nil
     state))
@@ -5141,7 +5151,7 @@ MCP Parameters:
   (org-records-mcp--assert-field-value before "State")
   ;; The text null is left for the file to read, which may name a
   ;; keyword null; see `org-records-mcp--todo-null-text'.
-  (unless (equal after "null")
+  (unless (org-records-mcp--null-text-p after)
     (setq after (org-records-mcp--value-to-write after "after")))
   ;; Before the link is resolved and before the change group opens:
   ;; the note is written inside the change the state change is made
