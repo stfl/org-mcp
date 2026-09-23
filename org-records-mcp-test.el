@@ -20910,8 +20910,18 @@ ID index is never consulted."
                      (seq-find
                       (lambda (child) (equal (alist-get 'title child) title))
                       (alist-get 'children parent)))))
+              ;; `file-truename' here, not the raw path `write-file'
+              ;; returned: the buffer org-records-mcp visits is opened
+              ;; through the scope check's own truename resolution
+              ;; (guarding against a symlink escaping the allowed
+              ;; directories), so on a platform where the temp
+              ;; directory is itself a symlink, such as macOS's
+              ;; /var -> /private/var, only the resolved path matches
+              ;; the link the server returns.
               (should
-               (equal after-link (org-records-mcp-test--file-link file search)))
+               (equal after-link
+                      (org-records-mcp-test--file-link
+                       (file-truename file) search)))
               (mcp-server-lib-ert-call-tool
                "org-node-create"
                `((title . "New Task")
@@ -22624,7 +22634,8 @@ Child Two has no tag of its own, so `local_tags' is left out while
       (should (equal (alist-get 'file node) test-file))
       (should (= (alist-get 'level node) 0))
       (should
-       (equal (alist-get 'link node) (concat "file:" test-file)))
+       (equal (alist-get 'link node)
+              (concat "file:" (abbreviate-file-name test-file))))
       (should
        (equal (alist-get 'content node)
               "#+TITLE: Node Shapes\nPreamble text."))
