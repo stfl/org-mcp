@@ -23189,6 +23189,56 @@ from that node alone."
        (equal (alist-get 'breadcrumbs step)
               (org-records-mcp-test--breadcrumbs-of-step test-file))))))
 
+;; A read of a node's link climbs to its ancestors on its own, so it is
+;; the independent answer each expanded child's crumbs are held to.
+(ert-deftest org-records-mcp-test-breadcrumbs-a-walk-climbs-once ()
+  "A walk finds its ancestors once, and hands each generation its own.
+Every node of a depth-3 read of Section carries the crumbs a read of
+its own link answers with, while the outline is climbed only at the
+node the walk starts from."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (let* ((climbs 0)
+           (count (lambda (&rest _) (cl-incf climbs)))
+           (section (org-records-mcp-test--file-link test-file "*Section"))
+           (root
+            (unwind-protect
+                (progn
+                  (advice-add 'org-records-mcp--breadcrumbs-at-point
+                              :before count)
+                  (json-read-from-string
+                   (mcp-server-lib-ert-call-tool
+                    "org-node-read"
+                    `((link . ,section)
+                      (depth . 3)
+                      (fields . ["title" "link" "breadcrumbs" "children"])
+                      (properties . "none")
+                      (computed . "none")))))
+              (advice-remove 'org-records-mcp--breadcrumbs-at-point
+                             count)))
+           (nodes '()))
+      (should (= climbs 1))
+      (named-let walk ((node root))
+        (push node nodes)
+        (mapc #'walk (alist-get 'children node)))
+      (should
+       (equal (mapcar (lambda (node) (alist-get 'title node)) nodes)
+              '("Step" "Project" "Epic" "Section")))
+      (dolist (node nodes)
+        (ert-info ((alist-get 'title node))
+          (should
+           (equal
+            (alist-get 'breadcrumbs node)
+            (alist-get
+             'breadcrumbs
+             (json-read-from-string
+              (mcp-server-lib-ert-call-tool
+               "org-node-read"
+               `((link . ,(alist-get 'link node))
+                 (fields . ["breadcrumbs"])
+                 (properties . "none")
+                 (computed . "none"))))))))))))
+
 (ert-deftest org-records-mcp-test-breadcrumbs-see-past-a-narrowing ()
   "A buffer narrowed to the heading still yields every crumb.
 The narrowing is the user's, so the read neither loses the
