@@ -2400,29 +2400,39 @@ point, which `org-records-mcp--link-at-point' names."
       (org-records-mcp--file-link)
     (org-records-mcp--link-at-point)))
 
+(defun org-records-mcp--crumb-at-point (&optional link)
+  "Return the crumb naming the heading at point.
+The crumb is an alist of its `title', `link' and `level', the title
+and link taken from `org-records-mcp--title-at-point' and
+`org-records-mcp--link-at-point', so a crumb names its heading as a
+read of it does.  LINK, when non-nil, is that link already made for
+the heading: making one is the costly part, since
+`org-store-link' makes it."
+  `((title . ,(org-records-mcp--title-at-point))
+    (link . ,(or link (org-records-mcp--link-at-point)))
+    (level . ,(org-outline-level))))
+
 (defun org-records-mcp--breadcrumbs-at-point ()
   "Return the ancestors of the heading at point, outermost first.
-Each is an alist of its `title', `link' and `level', the title and
-link taken from `org-records-mcp--title-at-point' and
-`org-records-mcp--link-at-point' at that ancestor, so a crumb names
-it as a read of it does.  A heading with no TODO keyword is an
-ancestor like any other; the file is not one, since `file' and
-`link' already name it.
+Each is the crumb `org-records-mcp--crumb-at-point' makes at that
+ancestor.  A heading with no TODO keyword is an ancestor like any
+other; the file is not one, since `file' and `link' already name it.
 
-The answer is nil for a top-level heading and before the first
-heading, so the field is left out of a node without ancestors.  The
-buffer is read widened, since a narrowing hides ancestors rather
-than removing them, and point is not moved."
+The answer is a list, nil for a top-level heading and before the
+first heading, so the field is left out of a node without ancestors.
+The buffer is read widened, since a narrowing hides ancestors rather
+than removing them, and point is not moved.
+
+A walk makes this once, at the node it starts from; each generation
+it expands below is handed its ancestors by its parent, see
+`org-records-mcp--node-at-point'."
   (let (crumbs)
     (org-with-wide-buffer
      (unless (org-before-first-heading-p)
        (org-back-to-heading t)
        (while (org-up-heading-safe)
-         (push `((title . ,(org-records-mcp--title-at-point))
-                 (link . ,(org-records-mcp--link-at-point))
-                 (level . ,(org-outline-level)))
-               crumbs))))
-    (and crumbs (vconcat crumbs))))
+         (push (org-records-mcp--crumb-at-point) crumbs))))
+    crumbs))
 
 (defun org-records-mcp--blocked-at-point (todo)
   "Return whether the heading at point, in state TODO, is blocked.
@@ -2484,7 +2494,8 @@ org-records-mcp-read-max-nodes sets the ceiling"
      (org-records-mcp--node-link-at-point file-node))))
 
 (defun org-records-mcp--node-at-point
-    (fields properties computed depth file-node budget)
+    (fields
+     properties computed depth file-node budget &optional ancestors)
   "Return the node at point as an alist carrying FIELDS, within BUDGET.
 One node shape serves a file, a heading, a child and a query result,
 so a client learns one vocabulary to walk an outline.
@@ -2509,7 +2520,14 @@ no position before that heading.
 BUDGET is the walk\\='s, which `org-records-mcp--spend-node' spends one node
 of per node built, this one included.  Every caller is given its own,
 `org-records-mcp-read-max-nodes' nodes to spend, so a list of matches is
-bounded one match at a time."
+bounded one match at a time.
+
+ANCESTORS, when non-nil, is a one-element list holding the node\\='s
+ancestors as `org-records-mcp--breadcrumbs-at-point' would answer them.
+A parent hands its expanded children their ancestors -- its own and
+itself -- so a walk climbs the outline once, at the node it starts
+from, rather than once per node it returns.  Nil means they are not
+known and the node finds them itself."
   (org-records-mcp--spend-node budget file-node)
   (let* ((meta
           (unless file-node
@@ -2521,6 +2539,11 @@ bounded one match at a time."
          (link
           (when (or (memq 'link fields) (memq 'id fields))
             (org-records-mcp--node-link-at-point file-node)))
+         (crumbs
+          (when (and (memq 'breadcrumbs fields) (not file-node))
+            (if ancestors
+                (car ancestors)
+              (org-records-mcp--breadcrumbs-at-point))))
          (node '()))
     (dolist (field fields)
       (let
@@ -2553,9 +2576,7 @@ bounded one match at a time."
                    0
                  (plist-get meta :level)))
               ('link link)
-              ('breadcrumbs
-               (unless file-node
-                 (org-records-mcp--breadcrumbs-at-point)))
+              ('breadcrumbs (and crumbs (vconcat crumbs)))
               ('blocked
                (unless file-node
                  (org-records-mcp--blocked-at-point
@@ -2577,10 +2598,21 @@ bounded one match at a time."
                (org-records-mcp--digest
                 (org-records-mcp--node-subtree-bounds file-node)))
               ('children
-               (pcase-let ((`(,child-fields
-                              ,child-properties ,child-computed)
-                            (org-records-mcp--child-projection
-                             fields properties computed depth)))
+               (pcase-let* ((`(,child-fields
+                               ,child-properties ,child-computed)
+                             (org-records-mcp--child-projection
+                              fields properties computed depth))
+                            (child-ancestors
+                             (when (memq 'breadcrumbs child-fields)
+                               (list
+                                (unless file-node
+                                  (append
+                                   crumbs
+                                   (list
+                                    (save-excursion
+                                      (org-back-to-heading t)
+                                      (org-records-mcp--crumb-at-point
+                                       link)))))))))
                  (vconcat
                   (mapcar
                    (lambda (position)
@@ -2592,7 +2624,8 @@ bounded one match at a time."
                         child-computed
                         (1- depth)
                         nil
-                        budget)))
+                        budget
+                        child-ancestors)))
                    children))))
               ;; A call's fields are resolved against
               ;; `org-records-mcp--node-fields' before they reach here, so
