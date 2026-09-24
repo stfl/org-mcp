@@ -23191,6 +23191,46 @@ from that node alone."
 
 ;; A read of a node's link climbs to its ancestors on its own, so it is
 ;; the independent answer each expanded child's crumbs are held to.
+(defun org-records-mcp-test--breadcrumbs-handed-down (link depth)
+  "Read LINK to DEPTH and check each node's crumbs against its own read.
+Return how often the walk climbed the outline, and the nodes it
+returned, outermost last, as (CLIMBS . NODES)."
+  (let* ((climbs 0)
+         (count (lambda (&rest _) (cl-incf climbs)))
+         (root
+          (unwind-protect
+              (progn
+                (advice-add 'org-records-mcp--breadcrumbs-at-point
+                            :before count)
+                (json-read-from-string
+                 (mcp-server-lib-ert-call-tool
+                  "org-node-read"
+                  `((link . ,link)
+                    (depth . ,depth)
+                    (fields . ["title" "link" "breadcrumbs" "children"])
+                    (properties . "none")
+                    (computed . "none")))))
+            (advice-remove 'org-records-mcp--breadcrumbs-at-point count)))
+         (nodes '()))
+    (named-let walk ((node root))
+      (push node nodes)
+      (mapc #'walk (alist-get 'children node)))
+    (dolist (node nodes)
+      (ert-info ((alist-get 'title node))
+        (should
+         (equal
+          (alist-get 'breadcrumbs node)
+          (alist-get
+           'breadcrumbs
+           (json-read-from-string
+            (mcp-server-lib-ert-call-tool
+             "org-node-read"
+             `((link . ,(alist-get 'link node))
+               (fields . ["breadcrumbs"])
+               (properties . "none")
+               (computed . "none")))))))))
+    (cons climbs nodes)))
+
 (ert-deftest org-records-mcp-test-breadcrumbs-a-walk-climbs-once ()
   "A walk finds its ancestors once, and hands each generation its own.
 Every node of a depth-3 read of Section carries the crumbs a read of
@@ -23198,46 +23238,47 @@ its own link answers with, while the outline is climbed only at the
 node the walk starts from."
   (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
       (list org-records-mcp-test--breadcrumbs-epic-id)
-    (let* ((climbs 0)
-           (count (lambda (&rest _) (cl-incf climbs)))
-           (section (org-records-mcp-test--file-link test-file "*Section"))
-           (root
-            (unwind-protect
-                (progn
-                  (advice-add 'org-records-mcp--breadcrumbs-at-point
-                              :before count)
-                  (json-read-from-string
-                   (mcp-server-lib-ert-call-tool
-                    "org-node-read"
-                    `((link . ,section)
-                      (depth . 3)
-                      (fields . ["title" "link" "breadcrumbs" "children"])
-                      (properties . "none")
-                      (computed . "none")))))
-              (advice-remove 'org-records-mcp--breadcrumbs-at-point
-                             count)))
-           (nodes '()))
+    (pcase-let ((`(,climbs . ,nodes)
+                 (org-records-mcp-test--breadcrumbs-handed-down
+                  (org-records-mcp-test--file-link test-file "*Section") 3)))
       (should (= climbs 1))
-      (named-let walk ((node root))
-        (push node nodes)
-        (mapc #'walk (alist-get 'children node)))
       (should
        (equal (mapcar (lambda (node) (alist-get 'title node)) nodes)
-              '("Step" "Project" "Epic" "Section")))
-      (dolist (node nodes)
-        (ert-info ((alist-get 'title node))
-          (should
-           (equal
-            (alist-get 'breadcrumbs node)
-            (alist-get
-             'breadcrumbs
-             (json-read-from-string
-              (mcp-server-lib-ert-call-tool
-               "org-node-read"
-               `((link . ,(alist-get 'link node))
-                 (fields . ["breadcrumbs"])
-                 (properties . "none")
-                 (computed . "none"))))))))))))
+              '("Step" "Project" "Epic" "Section"))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-a-walk-from-the-file-climbs-never ()
+  "A walk from the file hands the top-level headings no ancestors.
+The file has none to climb to, so the outline is never climbed, and
+every heading below still carries the crumbs its own read answers
+with."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (pcase-let ((`(,climbs . ,nodes)
+                 (org-records-mcp-test--breadcrumbs-handed-down
+                  (concat "file:" test-file) 4)))
+      (should (= climbs 0))
+      (should
+       (equal (mapcar (lambda (node) (alist-get 'title node)) nodes)
+              (list "Step" "Project" "Epic" "Section"
+                    (file-name-nondirectory test-file)))))))
+
+(ert-deftest org-records-mcp-test-breadcrumbs-a-narrowed-walk-climbs-once ()
+  "A walk from a heading the user narrowed to climbs past the narrowing once.
+The start node finds the ancestors the narrowing hides; the nodes
+below it are handed theirs and match their own reads."
+  (org-records-mcp-test--with-id-setup test-file org-records-mcp-test--content-breadcrumbs
+      (list org-records-mcp-test--breadcrumbs-epic-id)
+    (with-current-buffer (find-file-noselect test-file)
+      (goto-char (point-min))
+      (re-search-forward "^\\*\\* EPIC Epic")
+      (org-narrow-to-subtree))
+    (pcase-let ((`(,climbs . ,nodes)
+                 (org-records-mcp-test--breadcrumbs-handed-down
+                  (concat "id:" org-records-mcp-test--breadcrumbs-epic-id) 2)))
+      (should (= climbs 1))
+      (should
+       (equal (mapcar (lambda (node) (alist-get 'title node)) nodes)
+              '("Step" "Project" "Epic"))))))
 
 (ert-deftest org-records-mcp-test-breadcrumbs-see-past-a-narrowing ()
   "A buffer narrowed to the heading still yields every crumb.
